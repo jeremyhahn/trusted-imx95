@@ -1,4 +1,5 @@
 - trusted-imx95 is the device repository for the NXP FRDM-IMX95-PRO: its firmware, secure world and secure key handling live here.
+- The FRDM-IMX95-PRO Linux image belongs to this repository; go-trusted-platform provisions and attests it.
 - go-xkms defines the device's wire protocol and runs xkmsd on its Linux side.
 - go-trusted-platform provisions, enrolls and attests the device and runs its zero-trust operations.
 - Other HSM devices live in trusted-firmware or a trusted-firmware-xxx variant.
