@@ -3,3 +3,4 @@
 - go-xkms defines the device's wire protocol and runs xkmsd on its Linux side.
 - go-trusted-platform provisions, enrolls and attests the device and runs its zero-trust operations.
 - Other HSM devices live in trusted-firmware or a trusted-firmware-xxx variant.
+- Vendor documents for the board are in [docs/references/](docs/references/README.md); every design and change about the hardware cites them.
