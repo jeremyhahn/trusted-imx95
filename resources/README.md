@@ -1,7 +1,8 @@
 # Resources
 
-Vendor artifacts for the CompuLab UCM-iMX95 and its SB-UCMIMX95 carrier. Small design files are in this directory;
-the Linux image is too large for the repository and is kept outside it, with its checksum recorded here.
+CompuLab UCM-iMX95 and SB-UCMIMX95 carrier artifacts, kept as reference for another i.MX 95 board; our device is the
+NXP FRDM-IMX95-PRO (see docs/references/). Small design files are in this directory; the Linux image is too large for
+the repository and is kept outside it, with its checksum recorded here.
 
 | File | What |
 |---|---|

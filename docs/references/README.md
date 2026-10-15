@@ -6,18 +6,18 @@ documents do not give is reported as missing, never guessed.
 
 ## The device
 
-The device is the CompuLab UCM-iMX95 system-on-module on its SB-UCMIMX95 carrier board, built on the NXP i.MX 95
-(six Cortex-A55, one Cortex-M33, one Cortex-M7, the EdgeLock secure enclave, the NPU). The NXP FRDM-IMX95-PRO manual
-is kept for the reference design of the same processor.
+The device is the NXP FRDM-IMX95-PRO board (UM12527), built on the i.MX 95 (six Cortex-A55, one Cortex-M33, one
+Cortex-M7, the EdgeLock secure enclave, the NPU). The CompuLab UCM-iMX95 documents and design files are kept as
+reference material for another i.MX 95 board; they are not our device.
 
 ## Documents
 
 | File | Document | Read it for |
 |---|---|---|
-| [imx95/ucm-imx95_reference-guide_2026-08-13.pdf](imx95/ucm-imx95_reference-guide_2026-08-13.pdf) | CompuLab UCM-iMX95 Reference Guide | The module: pinout, interfaces, boot, power, the carrier connectors |
+| [imx95/ucm-imx95_reference-guide_2026-08-13.pdf](imx95/ucm-imx95_reference-guide_2026-08-13.pdf) | CompuLab UCM-iMX95 Reference Guide | Reference only (another i.MX 95 board): how a module vendor exposes the same processor |
 | [imx95/IMX95CEC.pdf](imx95/IMX95CEC.pdf) | NXP IMX95CEC, i.MX 95 Applications Processors Data Sheet for Commercial Products, Rev. 8 | Electrical, pin and package facts of the processor; it refers to IMX95RM for the programming model |
-| [imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf](imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf) | NXP UM12527, FRDM-IMX95-PRO Board User Manual, Rev. 1.0 | NXP's reference board for the same processor: block diagram, boot modes, per-core debug ports |
-| [imx95/EB-EVCAMRPI-datasheet.pdf](imx95/EB-EVCAMRPI-datasheet.pdf) | CompuLab EB-EVCAMRPI camera evaluation board datasheet | The camera board's interface when it is attached |
+| [imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf](imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf) | NXP UM12527, FRDM-IMX95-PRO Board User Manual, Rev. 1.0 | Our board: block diagram, features, memories, boot modes (eMMC, SD, FlexSPI NOR), the per-core debug ports, connectors, power, jumpers; the first document for any hardware, boot or debug work |
+| [imx95/EB-EVCAMRPI-datasheet.pdf](imx95/EB-EVCAMRPI-datasheet.pdf) | CompuLab EB-EVCAMRPI camera evaluation board datasheet | Reference only |
 | [edgelock/RM00284.pdf](edgelock/RM00284.pdf) | NXP RM00284, EdgeLock Enclave Hardware Security Module API, Rev. 4.5 | The enclave's HSM API on the i.MX 95: key store, signing, secure storage, counters, attestation; the source for every secure-element seam and for the anti-rollback floor |
 | [edgelock/AN14861.pdf](edgelock/AN14861.pdf) | NXP AN14861, Secure OEM Key Provisioning with EdgeLock Secure Enclave, Rev. 1.0 | The vendor's OEM key-provisioning flow (written for the RT1180; the enclave flow is the same family) |
 | [code-signing/AN14471.pdf](code-signing/AN14471.pdf) | NXP AN14471, Using Hardware Security Module for Code Signing, Rev. 1.0 | Signing AHAB containers with keys held in an HSM; the model for go-xkms custody |
