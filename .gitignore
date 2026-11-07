@@ -1,2 +1,5 @@
 resources/*yocto*.zip
 resources/ucm-imx95:yocto-linux/
+# NXP Code Signing Tool: never in the tree; the build reads CST_PATH (docs/references/README.md)
+cst-*.tgz
+cst-*/
