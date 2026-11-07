@@ -37,12 +37,17 @@ points at one of two places:
 A build that needs the tool and finds `CST_PATH` unset stops and names the variable. `.gitignore` keeps a CST
 archive or extracted tree out of the repository.
 
-## CompuLab reference material (in this repository)
+## CompuLab reference material (private context repository)
 
-| File | Document | Read it for |
+The company has no recorded permission to redistribute CompuLab's documents and design files, so they live in the
+private context repository `jeremyhahn/vendor-compulab`. They are reference material only: they describe another
+i.MX 95 board, not our device.
+
+| Path in `jeremyhahn/vendor-compulab` | Document | Read it for |
 |---|---|---|
-| [imx95/ucm-imx95_reference-guide_2026-08-13.pdf](imx95/ucm-imx95_reference-guide_2026-08-13.pdf) | CompuLab UCM-iMX95 Reference Guide | Reference only (another i.MX 95 board): how a module vendor exposes the same processor |
-| [imx95/EB-EVCAMRPI-datasheet.pdf](imx95/EB-EVCAMRPI-datasheet.pdf) | CompuLab EB-EVCAMRPI camera evaluation board datasheet | Reference only |
+| `docs/ucm-imx95/ucm-imx95_reference-guide_2026-08-13.pdf` | CompuLab UCM-iMX95 Reference Guide | How a module vendor exposes the same processor |
+| `docs/ucm-imx95/EB-EVCAMRPI-datasheet.pdf` | CompuLab EB-EVCAMRPI camera evaluation board datasheet | Reference only |
+| `design/ucm-imx95/` | SB-UCMIMX95 carrier design files, UCM-iMX95 mechanical drawings and 3D model | Reference only (see [resources/README.md](../../resources/README.md)) |
 
 ## Vendor SDKs and documentation online
 
