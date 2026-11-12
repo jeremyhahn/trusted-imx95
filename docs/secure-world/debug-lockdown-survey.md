@@ -36,6 +36,13 @@ Each source is public. "Reached" means this lane read it; the version is the one
 | S6 | SPSDK, i.MX 95 DAT example configuration (`examples/dat/imx9/inputs/dat_config_95.yaml`) | tag `v3.13.0` | same directory as S5 | yes |
 | S7 | NXP imx-sm, *Monitor* (`sm/doc/monitor.md`) | tag `rel_imx_sm_2026q3` (also `lf-6.18.37-2.1.0`), commit `eec2328` (2026-09-03) | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/monitor.md> | yes |
 | S8 | NXP imx-sm, *Debug* (`sm/doc/debug.md`) | same as S7 | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md> | yes |
+| S9 | SPSDK, *User Guide - nxpele* (the source page `docs/apps/nxpele.rst` and its rendered command reference) | tag `v3.13.0` | <https://spsdk.readthedocs.io/en/v3.13.0/apps/nxpele.html> | yes |
+| S10 | SPSDK, *i.MX93 Field Return Lifecycle Update* (Jupyter example `examples/signed_message/imx93_field_return_LC/`, with its input comments) | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/tree/v3.13.0/examples/signed_message/imx93_field_return_LC> | yes |
+| S11 | SPSDK, *User Guide - nxpdebugmbox* (`docs/apps/nxpdebugmbox.rst`). It holds only the generated command reference, which the lane used S2 for. | tag `v3.13.0` | <https://spsdk.readthedocs.io/en/v3.13.0/apps/nxpdebugmbox.html> | yes |
+
+The project's threat model (issue #48) asks how debug access is handled on a production
+board. §5.3 and §6 answer that question. The threat model is not on main yet, so this
+file cites it by issue number and does not link to it.
 
 ## 3. Debug paths on the i.MX 95
 
@@ -62,11 +69,32 @@ Each source is public. "Reached" means this lane read it; the version is the one
   disable is per core or global, is unconfirmed.
 - In OEM Open the debug port is, by implication of S2, open without authentication. The
   lane found no public source that states this outright for the i.MX 95: unconfirmed.
-- Life cycles past OEM Closed (for example a locked or field-return state) are named in
-  NXP's ELE documents for other parts, but the lane found no public i.MX 95 source that
-  defines them: unconfirmed.
+- **Past OEM Closed.** SPSDK's `nxpele forward-lifecycle-update` command moves an ELE
+  part forward to **OEM Closed** or **OEM Locked** (S9). Its page describes ELE parts in
+  general and gives the i.MX 93 and the i.MX RT1180 as examples. It does not say what
+  OEM Locked does to debug. The lane found no public i.MX 95 source on that:
+  unconfirmed.
+- **Field return.** For the i.MX 93, SPSDK shows a part going from OEM Closed to an
+  **OEM field-return** life cycle (`FR_OEM`) (S10):
+  - The request is a signed message signed with an OEM SRK private key, and it can name
+    one part's UUID.
+  - SPSDK's `nxpele` sends it to the ELE.
+  - S10 says this is a one-time step: once in field return, the part cannot go back to
+    OEM Closed.
 
-## 5. Authenticated debug in a closed part
+  S10 does not say what field return opens. Whether the i.MX 95 has the same request,
+  and what debug or key access field return gives, is unconfirmed (§7).
+
+| Life cycle (as the sources name it) | Signatures enforced | Debug port | Source | Confirmed for the i.MX 95 |
+|---|---|---|---|---|
+| OEM Open | no (events only) | open (implied) | S1, S2 | events: yes (S1 names the i.MX 95); debug: no |
+| OEM Closed | yes | authenticated debug only, or off by fuse | S1, S2 | yes (S2 was tested on an i.MX 95 EVK) |
+| OEM Locked | not stated | not stated | S9 | no |
+| OEM field return (`FR_OEM`) | not stated | not stated | S10 (i.MX 93) | no |
+
+## 5. Authenticated debug: NXP's public software and the keys it needs
+
+### 5.1 The flow on a closed part
 
 The SPSDK example (S2), tested by NXP on an i.MX 95 EVK over the 4-pin JTAG connector,
 shows the flow for a part in OEM Closed:
@@ -99,6 +127,49 @@ What follows from this for a lockdown policy:
   which the lane could not read: unconfirmed.
 - How long an authenticated session lasts (until reset, until power-off) is not stated in
   the sources the lane read: unconfirmed.
+
+### 5.2 Tools and keys
+
+The public NXP software for authenticated debug on the i.MX 95 is SPSDK. The lane found
+no other public NXP tool for it. A probe vendor's own tooling (S2 uses a Lauterbach probe
+through an SPSDK plugin) was not surveyed.
+
+| Tool (SPSDK v3.13.0) | Role in authenticated debug | Source |
+|---|---|---|
+| `nxpcrypto key generate` | makes the DCK pair (ECC P-384 in the example; ML-DSA-65 as well for double signing) | S2 §2.3 |
+| `nxpdebugmbox tool get-uuid` | reads the part's UUID over the debug port | S2 §2.4 |
+| `nxpdebugmbox dat dc get-template` / `dat dc export` | writes and signs the debug credential | S2 §2.5–2.6, S5 |
+| `nxpdebugmbox dat get-template` / `dat auth` | runs the authentication with the ELE through the probe | S2 §2.7–2.8, S6 |
+| `nxpdebugmbox mem-tool` | reads and writes memory once debug is open | S2 §2.9 |
+| `nxpele` | sends ELE messages (life-cycle forward, signed messages such as a field-return request). It reaches the ELE through U-Boot's `ele_message` console command or fastboot; on other parts it uses a flashloader | S9, S10 |
+| `spsdk-lauterbach`, `spsdk-pqc` plugins | probe support, and the post-quantum keys for double signing | S2 §1 |
+
+| Key | Who holds it | What it does | Source |
+|---|---|---|---|
+| OEM SRK private key (classic) | the SRK custodian | signs every DC; signs life-cycle and field-return signed messages | S5, S10 |
+| OEM SRK private key (post-quantum), if double signing is on | the SRK custodian | second signature on the DC | S5 |
+| DCK private key (and a post-quantum DCK for double signing) | the person debugging | answers the ELE's challenge during `dat auth`; its public half is inside the DC | S2 §2.3, S5 |
+| SRK hash in fuses | the part | the anchor that the ELE checks DC and message signatures against (inference from S1 §1.6 and S5; the DC-check detail is unconfirmed) | S1, S5 |
+
+S2 says a technician who does not use the SRKs can make a separate DCK pair. The DC
+itself is still signed by an SRK key (S5). So any authenticated-debug policy depends on
+the SRK custody that issue #9 and the `oem-key-provisioning` row decide.
+
+### 5.3 Options for a production board, and what each costs at field return
+
+This answers the threat model's (#48) debug-access question with the options the sources
+support. All of them assume OEM Closed: in OEM Open, signatures are not enforced (S1), so
+the debug question does not arise.
+
+| Option | What an attacker with the board gets at the debug port | What NXP's public flow gives for a field return | Cost and risk | Sources |
+|---|---|---|---|---|
+| A. OEM Closed, authenticated debug only, single-UUID DCs | nothing without a DC signed by our SRK and the matching DCK | the OEM issues a DC for that one returned part's UUID, opens only the domains needed (`cc_socu`), and debugs it. No life-cycle change. | SRK signing is needed for every DC. A DCK leak opens only the parts named in DCs made for that DCK. A zero-UUID DC must never be issued. | S2, S5 |
+| B. OEM Closed plus the debug-disable fuses | nothing at the port | the port cannot help. Diagnosis is only through what the signed software reports (consoles, logs, SM reset records, S8). Whether field return (`FR_OEM`) re-opens debug on a fused part is unconfirmed. | Irreversible. Returned parts may be undiagnosable, so in practice a returned board is replaced, not analysed. | S2 §2, S10 |
+| C. A, then move a returned part to field return (`FR_OEM`) | same as A while in the field | a signed, UUID-bound request moves that part to field return, one way (shown for the i.MX 93) | The part never returns to OEM Closed, so it is scrapped or kept as a lab part after analysis. What field return unlocks (debug, keys) is unconfirmed for the i.MX 95. | S10, S9 |
+| D. OEM Locked | not stated in public sources | not stated | Unknown until the Security Reference Manual is read | S9 |
+
+Whichever option is chosen, the signed software must not reopen debug itself. The SM debug
+monitor and any U-Boot shell are reachable in every life cycle (§6).
 
 ## 6. Software-side controls (System Manager, TF-A, OP-TEE, U-Boot, Linux)
 
@@ -144,6 +215,12 @@ does not say how to turn the shell off for production. U-Boot's own options for 
 commands out of the build) are listed in §8 as options but were not surveyed here in
 detail.
 
+SPSDK's `nxpele` can also talk to the ELE through U-Boot's `ele_message` console command,
+or through fastboot, when U-Boot is built with AHAB support (S9). So a production U-Boot
+with an interactive console, or with fastboot, is also a path to the ELE's message
+interface. Life-cycle and field-return messages are signed (S9, S10). Which other ELE
+messages work without a signature on a closed part is unconfirmed.
+
 ### 6.3 TF-A, OP-TEE and Linux
 
 The lane did not survey TF-A, OP-TEE or the Linux console for i.MX 95 debug controls
@@ -159,7 +236,11 @@ consoles covers them as a class.
    are not public (S2 and S5 refer to them). Not confirmed without them:
    - which fuses disable debug, and whether per domain or for the whole SoC;
    - the bit layout of `cc_socu` (which debug domains and enables exist);
-   - the life cycles past OEM Closed on the i.MX 95, and what each does to debug;
+   - what OEM Locked (S9) and OEM field return (S10, shown for the i.MX 93) do to
+     debug and keys on the i.MX 95, and whether the i.MX 95 accepts the field-return
+     request at all. The lane tried to confirm the last point by asking SPSDK for an
+     i.MX 95 template, but could not install SPSDK in this container;
+   - whether field return reopens debug on a part whose debug-disable fuses are burnt;
    - whether OEM Open allows debug without authentication (S2 implies it, but does not say so).
 3. How long an authenticated debug session lasts (S2 does not say).
 4. Whether NXP's released SM binaries (BSP or Yocto builds) are built with `M=0`. S7 gives
@@ -172,7 +253,9 @@ consoles covers them as a class.
    these are in UM12527, which is in the private reference set, not a public source.
    SPEC.md says the port mapping is not fixed.
 8. Issue #61's own text: the lane could not read it from the forge. This file works
-   from the brief and the `secure-world` row in SPEC.md.
+   from the scope the coordinator relayed and from the `secure-world` row in SPEC.md.
+9. Public NXP tools for authenticated debug other than SPSDK, and probe vendors' own
+   flows: not found in public sources the lane searched.
 
 ## 8. Questions for the owner
 
@@ -180,10 +263,11 @@ consoles covers them as a class.
    - (a) OEM Open: the debug port is open and signatures are not enforced (S1 §1.7).
    - (b) OEM Closed: signatures are enforced; debug only with a valid DC (S1 §1.8, S2 §2).
    - (c) OEM Closed plus the debug-disable fuses: no debug at all, even for the OEM (S2 §2).
-   - (d) A later life cycle: not confirmed for the i.MX 95 (§7 item 2).
+   - (d) OEM Locked (S9): its effect on debug is not confirmed for the i.MX 95 (§7 item 2).
 
-   Recommendation: (b) for the product, with (c) left open until AN14579 and the Security
-   Reference Manual say what the fuses cover and whether field return is still possible.
+   The field-return cost of each is set out in §5.3. Recommendation: (b) for the product,
+   with (c) left open until AN14579 and the Security Reference Manual say what the fuses
+   cover and whether field return is still possible.
    Development boards stay in (a). This is irreversible, so it waits for #9 (signing
    tool) and the SRK custody decision. The lane recommends no step and runs none.
 
@@ -231,6 +315,17 @@ consoles covers them as a class.
 
    No recommendation: S8 does not say what produces those resets (§7 item 5).
 
-7. **Should someone with portal access fetch AN14579 and the i.MX 95 Security Reference
+7. **How is a returned board handled?** (§5.3)
+   - (a) Debug it in OEM Closed with a single-UUID DC (option A), with no life-cycle
+     change.
+   - (b) Move it to OEM field return with a signed, UUID-bound request (option C). This
+     is one-way, so the board does not go back into service.
+   - (c) Do not analyse it: replace the board (the only choice under option B).
+
+   Recommendation: (a), keeping (b) for failures that (a) cannot diagnose once the
+   i.MX 95 field-return behaviour is confirmed (§7 item 2). A returned board's DC is
+   issued under question 2's custody rule.
+
+8. **Should someone with portal access fetch AN14579 and the i.MX 95 Security Reference
    Manual into the private reference set?** Questions 1, 3 and 6 depend on them.
    Recommendation: yes, before any decision on question 1.
