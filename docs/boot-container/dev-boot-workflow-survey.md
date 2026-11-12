@@ -219,14 +219,27 @@ anchor or policy record applies to all of them. The expected roles are:
 | Role | Contents | Signer | Trust anchor (2.2) | Revocation and version record (2.3) |
 |---|---|---|---|---|
 | V1, vendor | the EdgeLock enclave firmware, first in the image ([ele-firmware-survey.md](ele-firmware-survey.md) §1, §7) | NXP, with NXP's keys; this project cannot re-sign or change it | the **pinned vendor record**: the digest of the whole container as it appears in the firmware package this project pinned, recorded outside the build when the package was pinned and tested. The digest is required: an independently approved hash of NXP's SRK table (owner question 7) may be checked in addition, but alone it would accept any NXP-signed firmware, including an older one with the same `fuse_version` (N10) | the vendor record also lists the container's `used_srk_id`, `srk_revoke_mask` and `fuse_version` as read from the pinned package; any difference rejects it. NXP's floor is NXP's number, separate from this project's (ele-firmware-survey.md §7) |
-| O1, OEM boot | OEI, System Manager, Cortex-M7 image | the owner's HSM root | the approved SRK hash of step 2.2 | the OEM policy record of step 2.3 |
-| O2, OEM application processor | the A55 boot chain (TF-A, OP-TEE, U-Boot) | the owner's HSM root | the approved SRK hash | the OEM policy record |
+| O1, OEM boot | OEI, System Manager, Cortex-M7 image, A55 SPL (all required; see the required image entries below) | the owner's HSM root | the approved SRK hash of step 2.2 | the OEM policy record of step 2.3 |
+| O2, OEM application processor | the rest of the A55 boot chain (TF-A, U-Boot, OP-TEE if used) | the owner's HSM root | the approved SRK hash | the OEM policy record |
 
 The number, order and contents of the containers in the PRO's `flash.bin` are **unverified** until the `nxpimage
 ahab parse` output of a real build is recorded; the table is the expected layout. The **container manifest**, recorded
-outside the build next to the two policy records, names each container position's role. Every container is checked
-against the anchor and record of its role, and only those. A container whose position has no role in the manifest,
-or an image with more or fewer containers than the manifest names, is rejected. The OEM SRK hash is never compared with
+outside the build next to the two policy records, names each container position's role and, for each role, the
+**required image entries**: for every image the container must carry, its type and target core (for O1 the OEI, the
+System Manager on the Cortex-M33, the Cortex-M7 image and the A55 SPL; for O2 TF-A, U-Boot and OP-TEE if used), its
+load address, and the digest of the approved build of that image. imx-mkimage's i.MX 95 `flash_all` puts OEI, SM,
+M7 and SPL in one OEM container ([encrypted-boot-survey.md](encrypted-boot-survey.md), the bullet on the i.MX 95 OEM boot container
+layout; the table above follows that), and its `flash_a55` target builds the same container without the M7 image; such an
+image is correctly signed by the approved root but leaves the A55 running with no tamper responder (docs/SPEC.md,
+`hsm-self-defence`), so signer checks alone cannot catch it. Every container is checked against the anchor and record
+of its role, and only those. A container whose position has no role in the manifest, or an image with more or fewer
+containers than the manifest names, is rejected. **Stage 2.2 also checks the contents of each OEM container**
+against the required entries of the role its position names: a missing entry (above all the M7 image), an extra
+entry, an entry of the wrong type or core, or an image digest that differs from the approved build rejects the
+container. Because O1 and O2 share the OEM root and policy, these entries are what tells the two roles apart; the
+signer checks cannot. Which image-type and core fields `nxpimage ahab parse` reports per entry is **unverified** at
+3.13.0 (needs the AHAB chapter of IMX95RM or the Security Reference Manual, or SPSDK's source); until it is, the
+entries are read by the independent parser of step 2.3. The OEM SRK hash is never compared with
 the vendor container, and the vendor record never accepts an OEM container. Each record is reviewed apart from the
 others, and a missing record rejects every container of its role.
 
@@ -237,7 +250,8 @@ Step 2 has three separate stages, and each fixture names the one that must rejec
   owner question 7 (b). It is given no approved-root input, so it cannot tell an approved key from any other key.
 - **2.2, trust-anchor check:** compares each container with the independently approved anchor of its role: the OEM
   containers' SRK table hash with the approved OEM SRK hash, the vendor container with the pinned vendor record (step
-  2.2 below). It looks at no signature and no payload.
+  2.2 below), and each OEM container's image entries with the required entries of its role (type, core, load address
+  and approved image digest; a missing M7 image rejects O1). It checks no signature.
 - **2.3, revocation and rollback policy check:** compares each container's `used_srk_id`, `srk_revoke_mask` and
   `fuse_version` with the independently approved record of its role (step 2.3 below; for the OEM containers): the list of revoked SRK indexes and
   the version floor. It is the host-side form of the policy checks C2, C3 and C4 of the test plan
@@ -264,6 +278,8 @@ fixture alone, or the fixture rebuilt.
 | P1 | a complete `flash.bin` as the release would ship it: the vendor container byte-identical to the pinned firmware package, then the OEM containers (O1, O2) signed with an approved, unrevoked HSM key at or above the OEM floor (control) | none | that per-role checking accepts a legitimate mixed-signer image: the vendor container passes against the vendor record and the OEM containers against the OEM hash and record. An implementation that applies the OEM hash to every container fails here | accepted at 2.1, 2.2 and 2.3 for every container |
 | N10 | as P1, but the vendor container replaced by a different, genuinely NXP-signed enclave firmware that is not the pinned package (for example an older release) | 2.2 | that the vendor container is pinned by digest, not merely NXP-signed. 2.1 is expected to accept it | **rejected** at 2.2 |
 | N11 | as P1, but with an OEM container added, removed or moved so that the image no longer matches the container manifest | 2.2 | that roles come from the manifest, not from the image | **rejected** at 2.2 |
+| N12 | as P1, but built with `flash_a55`: the O1 container carries OEI, SM and SPL and no Cortex-M7 image, correctly signed with an approved, unrevoked HSM key; container count unchanged | 2.2, as a *contents* failure | that a required image entry, the M7 image, is checked for presence. 2.1 and 2.3 are expected to *accept* it | **rejected** at 2.2, reported as a missing M7 entry |
+| N13 | as P1, but the two OEM containers swapped, so that the O2 container sits at the O1 position and the O1 container at the O2 position; both correctly signed with the approved key; container count unchanged | 2.2, as a *contents* failure | that O1 and O2, which share an anchor and a policy, are told apart by their required entries. 2.1 and 2.3 are expected to *accept* both | **rejected** at 2.2, reported as entries not matching the role |
 
 Each run records the tool version, the exact command, the stage that rejected, and the output that shows that stage's
 rejection. N4 and N5 are the only fixtures that isolate cryptographic verification. If `nxpimage ahab verify` does not
@@ -278,7 +294,7 @@ test plan itself belongs to #118.
 
 1. #9 builds `flash.bin` and signs its containers with the tool #30 chooses (CST 3.1.0 or SPSDK, keys in an HSM after
    AN14471, per S2). Output: the signed `flash.bin`, with fuse scripts suppressed.
-2. **Acceptance, on the host, before any load or write** (tool behaviour **unverified** until N1 to N11 and P1 each give
+2. **Acceptance, on the host, before any load or write** (tool behaviour **unverified** until N1 to N13 and P1 each give
    the expected result at the named stage):
    1. *Signature verifier (stage 2.1):* `nxpimage ahab verify -f <family> -r <revision> -b flash.bin` (SPSDK 3.13.0,
       S8) must report no problems. Its help says only "Verify AHAB Image". Whether it checks each container's
@@ -389,10 +405,10 @@ and an approved revocation and version policy, both recorded outside the build (
    container manifest and the pinned vendor record for the NXP enclave firmware container (its digest from the pinned
    package and its `used_srk_id`, `srk_revoke_mask` and `fuse_version`), and optionally an NXP SRK hash obtained from
    a source other than the image (§8, "Container roles"). The pipeline runs `nxpimage ahab verify` (stage 2.1),
-   checks each container against the anchor of its role (stage 2.2), and checks `used_srk_id`, `srk_revoke_mask`
-   and `fuse_version` against the record of its role (stage 2.3). This holds only once the §8 fixtures N1 to N11
-   and P1 have each given the expected result at their named stage at the pinned version: N2, N10 and N11 rejected
-   at 2.2, N4 and N5 rejected at 2.1 as signature failures, N7, N8 and N9 rejected at 2.3, and P1 accepted. (b) as (a), with a second,
+   checks each container against the anchor and the required image entries of its role (stage 2.2), and checks
+   `used_srk_id`, `srk_revoke_mask` and `fuse_version` against the record of its role (stage 2.3). This holds only
+   once the §8 fixtures N1 to N13 and P1 have each given the expected result at their named stage at the pinned
+   version: N2, N10 and N11 rejected at 2.2, N12 and N13 rejected at 2.2 as contents failures, N4 and N5 rejected at 2.1 as signature failures, N7, N8 and N9 rejected at 2.3, and P1 accepted. (b) as (a), with a second,
    independent signature check at 2.1, whether or not `verify` passes those tests. An example is CST's or OpenSSL's
    verification of each signature block against the SRK public key. Neither tool has been tried for this, so (b) is
    **unverified** too. (c) rely on the board run in OEM open. Recommendation: **(a)**, moving to **(b)** if `verify`

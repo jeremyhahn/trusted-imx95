@@ -179,8 +179,12 @@ Proposed, in order:
    released, check each container's SRK table hash, `used_srk_id`,
    `srk_revoke_mask` and `fuse_version` against the recorded values of its
    signer's role (OEM records for OEM containers, the pinned vendor record for
-   the NXP enclave firmware container), and include a complete mixed-signer
-   image that must be accepted. These catch the
+   the NXP enclave firmware container), check that each OEM container carries
+   exactly the required image entries of its role (the OEM boot container must
+   carry the Cortex-M7 image), and include a complete mixed-signer image that
+   must be accepted, an image without the M7 and one with the OEM containers
+   swapped that must both be rejected
+   ([dev-boot-workflow-survey.md](dev-boot-workflow-survey.md), N12, N13). These catch the
    mistake on the host; they cannot show that the enclave rejects the image.
 3. **On-board tests in OEM open, manual, outside CI (C1, C2b, C5a, C5b, C6).**
    Boot each tampered image on an OEM open board and record the event log. Only

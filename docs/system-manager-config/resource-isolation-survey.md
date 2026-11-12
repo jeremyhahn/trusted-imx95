@@ -224,8 +224,26 @@ port [SM-PRO], so it reads as an EVK configuration adapted for the FRDM PRO.
     `hsm-self-defence`.
 25. ELE messaging units 1 and 2 go to the A55 (secure agent) and ELE
     messaging unit 5 to the M7 [SM-PRO]. Which side calls the EdgeLock HSM
-    API is an open SPEC question (`secure-key-handling`); the TRDC layout
-    must give that side its MU and deny it to the other.
+    API is an open SPEC question (`secure-key-handling`). Two uses of these
+    MUs must be kept apart:
+    - **Boot authentication.** The SM programs the TRDC before the A55 SPL
+      runs, and SPL then asks the ELE to authenticate the next container
+      (TF-A, U-Boot; [uboot-auth-survey.md](../boot-container/uboot-auth-survey.md)
+      chain-of-trust table, link 2), as U-Boot does for the kernel container. The
+      A55 secure agent's ELE MUs (MU 1 and 2) are therefore kept whichever
+      core is the HSM caller, as
+      [scmi-permissions-survey.md](scmi-permissions-survey.md) §3.3 already
+      proposes. Which MU SPL and U-Boot proper use is **unconfirmed**;
+      until it is, no MU an A55 boot stage may use is removed. The SM's own
+      ELE MU 0 stays with LM0.
+    - **HSM and key-store API.** Only the side `secure-key-handling`
+      chooses may hold key-store sessions. Where that side's MU is not
+      needed for boot (for example MU 5 if the A55 is chosen), the TRDC may
+      deny it to the other side. Where the MU is a boot channel, the TRDC
+      cannot split services on one MU, so the restriction has to come from
+      the ELE (key-store ownership or a post-boot lock); whether the
+      i.MX 95 enclave offers either is **unconfirmed** and is a gap for
+      `secure-key-handling`, not a reason to remove the boot channel.
 26. The debug DID is given access to everything unless a rule says `nodbg`
     [SM-CFGDOC]. Whether the FRDM PRO file sets `DEBUG` was not confirmed
     (the part that would hold it was not read). Debug access is otherwise
@@ -315,10 +333,16 @@ port [SM-PRO], so it reads as an EVK configuration adapted for the FRDM PRO.
 5. **Which side owns the EdgeLock enclave's messaging units?** NXP gives
    MU 1 and 2 to the A55 secure agent and MU 5 to the M7 [SM-PRO].
    - (a) Leave both sides with an ELE MU.
-   - (b) Give the HSM API MU to one side only and remove the other.
+   - (b) Give the HSM API MU to one side only and remove the other side's
+     MUs that no boot stage needs.
+   - (c) Remove every ELE MU of the side that is not the HSM caller.
 
    Recommendation: (b), following whatever the `secure-key-handling`
-   question decides; this survey cannot choose the side.
+   question decides; this survey cannot choose the side. The A55 secure
+   MUs (1 and 2) stay in every case, because SPL needs the ELE to
+   authenticate TF-A and U-Boot after the SM has programmed the TRDC
+   (item 25). (c) is rejected: with the M7 as HSM caller it stops the A55
+   boot chain.
 6. **Do we keep NXP's V2X and ISP domains as they are?** The V2X domain can
    write a window inside the A55 secure range [SM-PRO].
    - (a) Keep NXP's rules.

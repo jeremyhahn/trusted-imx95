@@ -157,7 +157,13 @@ Sources: S1, S3, S4, S8 (`recipes-bsp/imx-mkimage/imx-boot_1.0.bb`).
    - appends the `u-boot-atf-container.img` container (TF-A, U-Boot, and OP-TEE if present) on the
      next 1 KiB boundary.
    Other targets differ in what they put beside the SM: `flash_lpboot` only the M33 image;
-   `flash_m7` adds the Cortex-M7 image from TCM (S3).
+   `flash_m7` adds the Cortex-M7 image from TCM (S3). `flash_a55` and `flash_a55_flexspi` carry
+   **no** Cortex-M7 image, so an image built with them boots the A55 without the M7 tamper
+   responder (docs/SPEC.md, `hsm-self-defence`) while still passing any signature check. This
+   project's release image must use a target that includes the M7 image (for SD/eMMC, `flash_all`),
+   and host acceptance rejects an OEM boot container without it
+   ([dev-boot-workflow-survey.md](../boot-container/dev-boot-workflow-survey.md), "Container
+   roles", fixture N12).
 5. So a changed SM configuration goes into flash only by rebuilding `m33_image.bin` and then
    rebuilding the whole boot container. There is no separate SM configuration blob: the
    configuration is compiled into the SM (S1: the `.cfg` becomes C headers).
@@ -258,9 +264,13 @@ Proposal for #31 and #33, from sections 2 to 7. Each point is a recommendation, 
    Recommendation: (b) for release images, once a non-debug OEI is shown to train the DDR.
 6. **Signing tool?** (a) SPSDK; (b) CST 4.0.1.
    Recommendation: (a), NXP's recommended tool for i.MX9x and AHAB 2.0 (S9).
-7. **Boot device?** (a) SD/eMMC (`flash_a55`); (b) FlexSPI NOR (`flash_a55_flexspi`, W25Q512NWEIQ
-   header). The SM and its signature are the same in both; only the container placement differs
-   (S3, S8). No recommendation from the sources; it is a product decision for #31.
+7. **Boot device?** (a) SD/eMMC; (b) FlexSPI NOR (W25Q512NWEIQ header). NXP's PRO machine
+   builds `flash_a55` and `flash_a55_flexspi` for these, but both leave out the Cortex-M7 image
+   (§6 step 4), so neither is acceptable as the release target: (a) uses `flash_all`, and for (b)
+   a FlexSPI target that includes the M7 image is **unconfirmed** (S3 not read for one) and must be
+   found or added before (b) can be chosen. The SM and its signature are the same in both; only
+   the container placement differs (S3, S8). No recommendation from the sources; it is a product
+   decision for #31.
 8. **Is the Cortex-M7 image in the boot container (`flash_m7`-style) or loaded later?** It decides
    which container the M7 firmware of trusted-firmware's `imx95` row is signed in. No recommendation
    from the sources.

@@ -260,7 +260,7 @@ The M7 is the board's tamper responder (docs/SPEC.md,
 | `SENSOR_TEMP_A55` all | keep | Linux's own thermal zone |
 | PLLs (`AUDIO_PLL1/2`, `HSIO_PLL`, `LDB_PLL`, `VIDEO_PLL1`) and `CLOCK_*` all | keep only those used by peripherals this product enables (question 2) | rate and parent set need exclusive (S4) |
 | `BRD_SM_CTRL_TEST_A`, `BUTTON ... test`, `RTC ... test` | drop the test items | test only |
-| Owned peripherals | keep only those this product enables; remove the rest from AP-NS (question 2) | each owned peripheral carries api=all on its power domain, clocks, pins and daisy (S2) |
+| Owned peripherals | keep only those this product enables or a boot stage needs; remove the rest from AP-NS (question 2) | each owned peripheral carries api=all on its power domain, clocks, pins and daisy (S2) |
 | `PIN_DAP_*` owned | move to LM0, or leave unowned, if JTAG is not used in the field (question 6) | Linux can remux the debug pins |
 | `V2X_*`, `MU_ELE3/4` owned | decided with `secure-key-handling` (question 7) | Linux's path to the EdgeLock enclave and V2X HSM |
 | `GPR4`-`GPR7` owned | keep pending confirmation | what these GPRs hold is not confirmed |
@@ -405,7 +405,14 @@ states it.
    Options: (a) keep S1's list; (b) keep only what the product
    enables (list to come from the owner).
    Recommendation: (b), since each unused peripheral is a power,
-   clock and pin surface Linux does not need.
+   clock and pin surface Linux does not need. The list must also keep
+   every resource an A55 boot stage uses after the SM has applied this
+   configuration: the boot device's controller (uSDHC or FlexSPI, per
+   `sm-build-survey.md` question 7), the boot console, and the ELE
+   messaging units SPL and U-Boot use for authentication
+   (`resource-isolation-survey.md` item 25). Which of these SPL and
+   U-Boot reach through the AP-NS grants is **unconfirmed**; until it is,
+   none of them is removed.
 3. **Who sets the time.** S1 lets only Linux set the SoC RTC; the M7
    holds the board RTC (PCA2131) at all.
    Options: (a) Linux keeps all on the RTC; (b) Linux gets get and
@@ -436,7 +443,13 @@ states it.
    Options: (a) keep; (b) remove from AP-NS and give to the M7 or the
    secure world.
    Recommendation: decide together with `secure-key-handling`'s open
-   question on which side calls the HSM API (docs/SPEC.md).
+   question on which side calls the HSM API (docs/SPEC.md). Before (b),
+   confirm that no non-secure boot stage uses `MU_ELE3/4`: U-Boot proper
+   asks the ELE to authenticate the kernel container
+   ([uboot-auth-survey.md](../boot-container/uboot-auth-survey.md)), and
+   which MU it uses is **unconfirmed**. A MU a boot stage needs is kept
+   whichever side calls the HSM API (resource-isolation-survey.md
+   item 25).
 8. **`PERF_A55` level.**
    Options: (a) keep all for both AP agents; (b) priv for AP-NS, and
    priv or none for AP-S.
