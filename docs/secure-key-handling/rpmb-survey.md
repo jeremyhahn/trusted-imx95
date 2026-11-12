@@ -438,8 +438,13 @@ answered, no RPMB key is written on the project's board.
 7. **Board port.** Neither OP-TEE tree has an FRDM-IMX95-PRO flavour (§6).
    - (a) Use the `mx95evk` flavour with board changes. (b) Add an FRDM
      flavour.
-   - Recommendation: none; this belongs to the trusted-firmware row and is
-     noted here because RPMB storage depends on it.
+   - Recommendation: none here. OP-TEE runs on the Cortex-A55, so its board
+     port belongs to this repository's secure-world work
+     ([secure-world/](../secure-world/architecture.md)), not to
+     trusted-firmware's `imx95` row, which holds the Cortex-M7 firmware. It is
+     noted here because RPMB storage depends on it. The owner's firmware
+     split ([SPEC.md](../SPEC.md) Release criteria) and the secure world's
+     scope are still open.
 8. **Who owns the RPMB partition?** (§7)
    - (a) OP-TEE alone. U-Boot's AVB rollback indexes and any other
      rollback state go through OP-TEE trusted applications; no raw RPMB
