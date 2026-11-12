@@ -114,6 +114,10 @@ not sought. Where SPEC.md relies on them, this file says so and does not restate
 - So the evidence binds the device's identity, its life cycle and the OEM's boot root of trust (the
   SRKH fused for AHAB) in one signed statement. Which key signs it, and the certificate chain a
   verifier checks it against, are not in the sources surveyed (§6).
+- The signature shows who made the evidence, not when. A verifier treats it as current only if it
+  carries a nonce the verifier itself generated for that request, and arrives within a response
+  time the verifier bounds. Evidence fetched earlier, or bearing a nonce chosen by the station or
+  Linux, can be replayed after the device's state has changed.
 
 ### 3.7 Root and derived keys
 

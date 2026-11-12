@@ -298,6 +298,13 @@ sources support this: U-Boot's AVB guide describes RPMB as managed by OP-TEE
 [S16], and OP-TEE's guidance keeps the key inside OP-TEE [S1]. This is
 question 8 in §10.
 
+One owner also means one write counter shared by every RPMB user: AVB
+indexes, the TA version floor, a time floor and an audit head all spend the
+same 32-bit budget. Whether it lasts the product's life depends on their
+combined write rate, not on the counter's width alone
+([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.3); that
+rate is not set here, so the budget is **not confirmed**.
+
 ## 8. What could not be confirmed
 
 1. JEDEC JESD84-B51 (eMMC 5.1), the RPMB standard itself: a JEDEC document,
