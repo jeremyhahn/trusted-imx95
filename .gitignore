@@ -5,3 +5,5 @@ cst-*.tgz
 cst-*/
 # The integration image tar the CI trivy image step writes
 it-image.tar
+# The pinned tools `make tools` installs where there is no devcontainer image
+.tools/

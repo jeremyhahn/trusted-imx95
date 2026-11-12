@@ -29,6 +29,14 @@ IT_IMAGE           ?= $(shell scripts/image-tag.sh integration $(REPO_NAME))
 TOOLCHAIN_IMAGE    ?= $(shell scripts/image-tag.sh toolchain $(REPO_NAME))
 export APK_INDEX_SUM
 
+# The pinned tools outside the devcontainer image: `make tools` installs the
+# same digest-checked releases the image's fetch stage does (scripts/
+# fetch-tools.sh) into this gitignored directory, which every recipe sees
+# first on PATH. A gate whose tool is in neither place fails naming it.
+TOOLS_DIR := $(CURDIR)/.tools/bin
+export PATH := $(TOOLS_DIR):$(PATH)
+NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
+
 # Every shell script git tracks, and every Python script under scripts/.
 SH_SCRIPTS := $(sort $(wildcard scripts/*.sh test/*.sh test/integration/*.sh))
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
@@ -38,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image
+	docker-run toolchain-image it-image tools
 
 help: ## List the targets
 	@echo "Targets:"
@@ -96,12 +104,12 @@ deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs th
 lint: lint-shell lint-workflows lint-docs ## shellcheck, actionlint and the Markdown link check
 
 lint-shell: ## shellcheck every shell script
-	@shellcheck --version >/dev/null 2>&1 || { echo "lint-shell: shellcheck is not on PATH"; exit 1; }
+	@$(call NEED_TOOL,shellcheck)
 	@shellcheck -x $(SH_SCRIPTS)
 	@echo "lint-shell: OK ($(words $(SH_SCRIPTS)) scripts)"
 
 lint-workflows: ## actionlint every workflow (with shellcheck of their run steps)
-	@actionlint -version >/dev/null 2>&1 || { echo "lint-workflows: actionlint is not on PATH"; exit 1; }
+	@$(call NEED_TOOL,actionlint)
 	@actionlint -config-file .github/actionlint.yaml
 	@echo "lint-workflows: OK"
 
@@ -114,10 +122,20 @@ check-tracked-cst: ## Fails when a tracked path is cst-*.tgz or inside cst-*/
 	@scripts/check-tracked-cst.sh .
 
 secret-scan-tree:
+	@$(call NEED_TOOL,gitleaks)
 	@scripts/secret-scan.sh tree .
 
 secret-scan-history:
+	@$(call NEED_TOOL,gitleaks)
 	@scripts/secret-scan.sh history .
+
+## --- The pinned tools without the devcontainer image ---
+
+tools: ## Install the pinned, digest-checked tools of scripts/tool-pins.sh into .tools/bin
+	@[ "$$(uname -s)-$$(uname -m)" = Linux-x86_64 ] || \
+		{ echo "tools: the pins are Linux x86_64 releases, this is $$(uname -s)-$$(uname -m)"; exit 1; }
+	@sh scripts/fetch-tools.sh scripts/tool-pins.sh $(TOOLS_DIR)
+	@echo "tools: OK ($(PINNED_TOOLS) in .tools/bin)"
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 

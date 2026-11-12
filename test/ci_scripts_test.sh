@@ -32,8 +32,10 @@ if [[ "$OUT" == *e.md* ]]; then fail "check-doc-links: a fenced link is not chec
 
 # --- scripts/secret-scan.sh ------------------------------------------------
 
+# The pinned tools: the image's, or those `make tools` put in .tools/bin.
+PATH="$ROOT/.tools/bin:$PATH"
 if ! command -v gitleaks >/dev/null 2>&1; then
-	fail "secret-scan: gitleaks is on PATH (run in the devcontainer image)"
+	fail "secret-scan: gitleaks is on PATH or in .tools/bin (run make tools)"
 else
 	repo="$TMP_ROOT/secrets"
 	mkdir -p "$repo"

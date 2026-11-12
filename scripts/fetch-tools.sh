@@ -3,8 +3,8 @@
 #
 # Downloads every pinned tool of the pin file, checks each archive against
 # its SHA-256 and installs the binary into <out-dir>. Run by the Dockerfile's
-# fetch stage only; a missing pin, a failed download or a digest mismatch
-# fails the build by name.
+# fetch stage, and by `make tools` into .tools/bin where there is no image; a
+# missing pin, a failed download or a digest mismatch fails by name.
 set -eu
 
 pins=${1:?usage: fetch-tools.sh <pin-file> <out-dir>}
