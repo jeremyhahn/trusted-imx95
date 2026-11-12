@@ -36,7 +36,18 @@ What could not be confirmed is collected in §7.
 
 ## 3. The board's eMMC
 
-TODO
+- The upstream Linux device tree for the board (`imx95-19x19-frdm-pro.dts`,
+  model "NXP FRDM-IMX95-PRO") describes `usdhc1` as a non-removable, 8-bit
+  device with SD and SDIO disabled, that is an eMMC, and `usdhc2` as a 4-bit
+  slot with card detect, that is the SD card [S12]. RPMB is an eMMC feature,
+  so only the `usdhc1` device is in scope.
+- The eMMC part number, its eMMC version (RPMB needs 4.41 or later; U-Boot
+  checks for this [S7]) and its RPMB partition size are not given in any public
+  source read here (§7). The board user manual (UM12527) is held in the
+  project's private references and was not used for this survey.
+- U-Boot's `mmc info` prints the RPMB capacity, and `mmc bootpart-resize` can
+  change the boot and RPMB partition sizes on parts that allow it [S7]. Both
+  are noted for a later, owner-approved step; neither is run here.
 
 ## 4. Software that uses RPMB
 
@@ -119,8 +130,9 @@ The key is the decision that cannot be undone: once written into the eMMC it
 stays for the life of that chip [S1].
 
 - **Derived, not stored.** OP-TEE derives the RPMB key from the platform's HUK
-  (through its HUK sub-key mechanism, with the eMMC's identity as input) rather
-  than storing it [S1, S3]. A hard-coded test key exists (`CFG_RPMB_TESTKEY`,
+  (through its HUK sub-key mechanism, with the eMMC's CID as input) rather
+  than storing it [S1, S3]. It masks the CID's product-revision and CRC
+  fields first, so an eMMC firmware update does not change the key [S3]. A hard-coded test key exists (`CFG_RPMB_TESTKEY`,
   default `n` in 4.11.0) for development only [S1, S2].
 - **The HUK must be secret and stable.** The derivation is only as good as the
   HUK. OP-TEE's documentation notes that secure SoCs give a different HUK
@@ -150,16 +162,155 @@ stays for the life of that chip [S1].
 
 ## 6. RPMB beside the EdgeLock enclave
 
-TODO
+- **OP-TEE's HUK on the i.MX 95 comes from the enclave.** Upstream OP-TEE
+  4.11.0 builds the ELE driver for the `mx95evk` flavour and gets its HUK by
+  asking the enclave to derive a key from a fixed context string; boot stops
+  if the enclave does not answer [S10]. NXP's fork, tag `lf-6.18.37_2.1.0`,
+  enables the same driver for the i.MX 95 [S11]. So the RPMB key of §5 would
+  be bound to the enclave's own device secret. Neither platform file sets
+  `CFG_RPMB_FS`, so RPMB storage is off by default on the i.MX 95 in both
+  [S2, S10, S11].
+- **Neither tree has an FRDM flavour.** Both list only `mx95evk` for the
+  i.MX 95 [S10, S11]. A board port, or the EVK flavour with board changes, is
+  needed before any of §4.1 applies to this board.
+- **Inputs to the RPMB key can change with configuration.** In 4.11.0 the
+  i.MX platforms use a backward-compatible derivation that mixes the die ID
+  into the RPMB and storage keys; enabling the SE05x driver turns that mode
+  off and takes the die ID from the SE05x instead [S2, S10, S14]. Our
+  inference: a build that changes these options after the RPMB key is written
+  would derive a different key and lose RPMB access. The SE051 on the board
+  (SPEC row `secure-key-handling`) therefore bears on the RPMB decision.
+- **The enclave's key store does not use RPMB.** NXP's secure enclave library
+  ships an NVM daemon that saves the enclave's storage as a file on the Linux
+  file system, by default under `/etc/ele/` [S13]. The SPEC row records that
+  the enclave protects its key store from rollback with its own monotonic
+  counter (RM00284 §2.4.2, a non-public NXP document). If that holds, RPMB
+  adds nothing to the key store's rollback protection, and the key store does
+  not need it. This could not be confirmed from a public source (§7).
+- **Where RPMB would still help.** State that lives in OP-TEE, not in the
+  enclave: OP-TEE secure storage, the REE FS integrity hash, the TA version
+  floor, and boot-time rollback indexes read by U-Boot [S1, S2, S7]. Whether
+  the project has any such state depends on the SPEC row's open question of
+  which side calls the HSM API.
 
 ## 7. What could not be confirmed
 
-TODO
+1. JEDEC JESD84-B51 (eMMC 5.1), the RPMB standard itself: a JEDEC document,
+   not read. §2 rests on OP-TEE's summary of it [S1].
+2. NXP's FRDM-IMX95 public product pages: the URLs tried returned 404 from
+   the lane. The eMMC part, its version and its RPMB size are unconfirmed.
+3. Whether the enclave-derived HUK differs between the OEM open and OEM
+   closed life cycles. OP-TEE says secure SoCs generally do this [S1]; no
+   public NXP source read here says so for the i.MX 95 enclave.
+4. The enclave's own anti-rollback mechanism for its key store: from the SPEC
+   row (RM00284), not from a public source.
+5. NXP's Yocto recipes (`meta-imx`) and U-Boot fork (`uboot-imx`,
+   `lf_v2026.04`): not read, so NXP's shipped defaults for `CFG_RPMB_FS`,
+   `CONFIG_SUPPORT_EMMC_RPMB` and tee-supplicant on the i.MX 95 are
+   unconfirmed. NXP's fork of the OP-TEE ELE driver was not read; the upstream
+   one was [S10].
+6. Which tagged Linux release first carries the FRDM-IMX95-PRO device tree:
+   read on `master` only [S12].
+7. The NXP secure enclave library was read at its default branch head, not
+   at a release tag [S13].
 
 ## 8. Sources
 
-TODO
+All read 2026-11-12. Paths are within the named repository at the named
+version.
+
+- [S1] OP-TEE documentation, "Secure storage" (`architecture/secure_storage.rst`),
+  `master`. https://github.com/OP-TEE/optee_docs/blob/master/architecture/secure_storage.rst
+  (rendered at https://optee.readthedocs.io/en/latest/architecture/secure_storage.html)
+- [S2] OP-TEE OS 4.11.0, build configuration `mk/config.mk`.
+  https://github.com/OP-TEE/optee_os/blob/4.11.0/mk/config.mk
+- [S3] OP-TEE OS 4.11.0, RPMB file system `core/tee/tee_rpmb_fs.c`.
+  https://github.com/OP-TEE/optee_os/blob/4.11.0/core/tee/tee_rpmb_fs.c
+- [S4] OP-TEE client 4.11.0, tee-supplicant RPMB handler
+  `tee-supplicant/src/rpmb.c`.
+  https://github.com/OP-TEE/optee_client/blob/4.11.0/tee-supplicant/src/rpmb.c
+- [S5] Linux v6.12: `drivers/misc/Kconfig` (`config RPMB`),
+  `drivers/misc/rpmb-core.c` (absent in v6.11), `drivers/mmc/core/block.c`.
+  https://github.com/torvalds/linux/tree/v6.12/drivers/misc
+- [S6] Linux `master`, OP-TEE driver RPC handling `drivers/tee/optee/rpc.c`.
+  https://github.com/torvalds/linux/blob/master/drivers/tee/optee/rpc.c
+- [S7] U-Boot v2026.10: `drivers/mmc/Kconfig`, `cmd/mmc.c`,
+  `drivers/tee/optee/rpmb.c`, `drivers/tee/optee/Kconfig`, `cmd/optee_rpmb.c`.
+  https://github.com/u-boot/u-boot/tree/v2026.10
+- [S8] mmc-utils v1.0, `mmc.c` command table.
+  https://git.kernel.org/pub/scm/utils/mmc/mmc-utils.git/tree/mmc.c?h=v1.0
+- [S9] Linux kernel documentation, "MMC tools introduction"
+  (`Documentation/driver-api/mmc/mmc-tools.rst`), `master`.
+  https://docs.kernel.org/driver-api/mmc/mmc-tools.html
+- [S10] OP-TEE OS 4.11.0: `core/drivers/crypto/ele/ele.c`,
+  `core/arch/arm/plat-imx/conf.mk`.
+  https://github.com/OP-TEE/optee_os/tree/4.11.0/core/drivers/crypto/ele
+- [S11] NXP `imx-optee-os`, tag `lf-6.18.37_2.1.0`,
+  `core/arch/arm/plat-imx/conf.mk`.
+  https://github.com/nxp-imx/imx-optee-os/blob/lf-6.18.37_2.1.0/core/arch/arm/plat-imx/conf.mk
+- [S12] Linux `master`, `arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts`.
+  https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts
+- [S13] NXP `imx-secure-enclave`, default branch at commit
+  `d7e1180b7f7d` (2026-06-09; latest tag `lf-6.18.37-2.1.0`): `README`,
+  `src/common/nvm/nvmd.conf`. https://github.com/nxp-imx/imx-secure-enclave
+- [S14] OP-TEE OS 4.11.0, SE05x die ID `core/drivers/crypto/se050/core/die_id.c`.
+  https://github.com/OP-TEE/optee_os/blob/4.11.0/core/drivers/crypto/se050/core/die_id.c
 
 ## 9. Questions for the owner
 
-TODO
+Writing the RPMB key cannot be undone on a given eMMC (§5). Until these are
+answered, no RPMB key is written on the project's board.
+
+1. **Does the project use RPMB at all?**
+   - (a) No. OP-TEE (if used) keeps secure storage on the REE file system
+     with no rollback protection [S1]; the enclave's key store relies on the
+     enclave's own counter (§6).
+   - (b) As a rollback anchor: `CFG_RPMB_FS=y`, keeping the REE FS integrity
+     hash and the TA version floor in RPMB, bulk data on the REE FS [S1, S2].
+   - (c) As the main secure store for OP-TEE data.
+   - Recommendation: (b), if OP-TEE holds any state of its own; it is the only
+     option OP-TEE rates as hardware rollback protection, and keeps RPMB use
+     small [S1, S2]. If the answer to the SPEC row's HSM-caller question leaves
+     OP-TEE with no state, (a).
+2. **Who writes the RPMB key, and how?**
+   - (a) OP-TEE on the device (`CFG_RPMB_WRITE_KEY=y`), gated by
+     `plat_rpmb_key_is_ready()` and pinned to the eMMC's CID
+     (`CFG_RPMB_WRITE_KEY_CID`) [S1, S2, S3].
+   - (b) A factory tool (mmc-utils or U-Boot) with the key computed off the
+     device [S1, S7, S8].
+   - Recommendation: none firm. OP-TEE advises (b) for production and warns
+     against (a) [S1], but on the i.MX 95 the HUK is derived inside the enclave
+     [S10], so for (b) the key would first have to be taken off the device,
+     which is the exposure (a) has. Decide together with the
+     `oem-key-provisioning` row's provisioning flow.
+3. **When is the key written, relative to closing the life cycle?**
+   - (a) After the device is OEM closed. (b) Before.
+   - Recommendation: (a). OP-TEE warns that a key written before the device
+     is secured may stop working after [S1]; whether the enclave's HUK changes
+     at close is unconfirmed (§7, item 3), so (a) is the safe order.
+4. **What fixes the inputs to the key?** The SE051's role, and the OP-TEE
+   options that feed the derivation (`CFG_NXP_SE05X`,
+   `CFG_CORE_HUK_SUBKEY_COMPAT_USE_OTP_DIE_ID`), must not change after the key
+   is written (§6).
+   - (a) Settle the SE051's role first, then freeze these options in the
+     board's OP-TEE configuration. (b) Leave them open.
+   - Recommendation: (a).
+5. **How do RPMB frames reach the eMMC?**
+   - (a) In the kernel (Linux v6.12 or later, `CONFIG_RPMB`) [S5, S6].
+   - (b) tee-supplicant in user space [S4].
+   - (c) Also U-Boot, for boot-time rollback indexes [S7].
+   - Recommendation: (a), as OP-TEE 4.11.0 announces it by default [S2] and it
+     works before user space; add (c) only if verified boot needs rollback
+     indexes in U-Boot.
+6. **Should anything of the enclave's be kept in RPMB?**
+   - (a) No: the NVM daemon keeps the enclave's storage file on the root file
+     system (`/etc/ele/` by default) [S13], protected by the enclave's counter.
+   - (b) Yes, move it under OP-TEE's RPMB storage.
+   - Recommendation: (a), provided the owner confirms the enclave's counter
+     covers the key store on the i.MX 95 (§7, item 4); the sources read give
+     no RPMB path for the enclave.
+7. **Board port.** Neither OP-TEE tree has an FRDM-IMX95-PRO flavour (§6).
+   - (a) Use the `mx95evk` flavour with board changes. (b) Add an FRDM
+     flavour.
+   - Recommendation: none; this belongs to the trusted-firmware row and is
+     noted here because RPMB storage depends on it.
