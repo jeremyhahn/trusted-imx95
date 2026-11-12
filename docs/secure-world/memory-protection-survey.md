@@ -10,10 +10,18 @@ other bus masters out of it, and which software sets that up. The `secure-world`
 [SPEC.md](../SPEC.md) leaves the secure world's scope open and notes that no document in
 [references/](../references/README.md) gives the i.MX 95's TrustZone configuration.
 
+Issue #63 asks for three things, each covered here:
+
+- what the i.MX 95 and its public software offer for DRAM protection: secure-memory carve-outs for TF-A
+  and OP-TEE (§3-§7), inline encryption (§8), and DMA protection for the PCIe and Ethernet devices (§9);
+- which of these NXP's public BSP turns on today, and what each defends against: cold boot, bus probing,
+  and DMA from the 10 GbE card (§10);
+- answers to the memory-encryption and DMA-isolation questions of the threat model (issue #48) (§10, §12).
+
 This survey reads only public NXP and upstream source trees, at the tags named in §2. It does not use the
 i.MX 95 Reference Manual (IMX95RM) or the Security Reference Manual, which are not public and are listed as
 missing in the references index. Every statement of behaviour is therefore a reading of source code and
-configuration, not of a hardware manual; §8 lists what that leaves unconfirmed. All addresses below are
+configuration, not of a hardware manual; §11 lists what that leaves unconfirmed. All addresses below are
 copied from the cited configuration files and are physical addresses.
 
 ## 2. Sources surveyed
@@ -25,9 +33,15 @@ copied from the cited configuration files and are physical addresses.
 | S3 | Upstream Trusted Firmware-A, `plat/imx/imx9/` | tag `v2.15.0` | https://github.com/ARM-software/arm-trusted-firmware |
 | S4 | NXP fork of OP-TEE OS (imx-optee-os), `core/arch/arm/plat-imx/` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/imx-optee-os |
 | S5 | Upstream OP-TEE OS, `core/arch/arm/plat-imx/` | tag `4.11.0` | https://github.com/OP-TEE/optee_os |
-| S6 | NXP Linux kernel (linux-imx), `arch/arm64/boot/dts/freescale/imx95-15x15-frdm.dts` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
+| S6 | NXP Linux kernel (linux-imx), FRDM-IMX95-PRO device tree `arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts` (model string "NXP FRDM-IMX95-PRO") | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
+| S7 | NXP Linux kernel (linux-imx), SoC device tree `arch/arm64/boot/dts/freescale/imx95.dtsi` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
+| S8 | NXP Linux kernel (linux-imx), NXP's kernel configuration `arch/arm64/configs/imx_v8_defconfig` and the generic `arch/arm64/configs/defconfig` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
+| S9 | NXP Linux kernel (linux-imx), `drivers/iommu/Kconfig` (default IOMMU domain type) | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
+| S10 | NXP System Manager (imx-sm), EVK configuration `configs/mx95evk.cfg` and SoC headers `devices/MIMX95/` | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm |
 
-S1-S5 were reached from the lane by `git clone` at the tags shown, S6 by fetching the one file at its tag.
+S1-S5 and S10 were reached from the lane by `git clone` at the tags shown, S6-S9 by fetching each file at
+its tag. NXP's public i.MX 95 product page and fact sheet were tried at their usual nxp.com addresses and
+returned "not found" to the lane, so no NXP marketing or data-sheet claim is used here.
 The i.MX 95 Reference Manual, the Security Reference Manual and NXP's System Manager user guide were not
 reached (not public, or not found as public pages) and are not used.
 
@@ -41,7 +55,7 @@ secure/privileged attribute of each bus master are set by per-master formatting 
 `sa=secure`, `sa=nonsecure` or `sa=bypass`, which passes the core's own TrustZone state through). The SM
 programs these rules into the resource domain controller's memory region checkers, DDR among them
 (`devices/MIMX95/sm/dev_sm_rdc.c` in S1); NXP calls this block the Trusted Resource Domain Controller (TRDC). The register-level behaviour of the TRDC is in IMX95RM,
-which this lane could not read (§8).
+which this lane could not read (§11).
 
 So the secure world's DRAM on this part is "the DRAM regions whose rule for the A55's domain says
 secure-only", and it is protected against the other cores and DMA masters only to the extent that their
@@ -119,9 +133,8 @@ the SM's `LM2` memory rules would put OP-TEE in memory the normal world can reac
 
 ## 7. Linux side: reserved memory and what the normal world sees
 
-NXP's Linux device tree for the board, `arch/arm64/boot/dts/freescale/imx95-15x15-frdm.dts` in
-linux-imx at tag `lf-6.18.37-2.1.0` (S6, https://github.com/nxp-imx/linux-imx), has these
-`reserved-memory` entries that bear on §4:
+NXP's Linux device tree for this board, `imx95-19x19-frdm-pro.dts` (S6), has these `reserved-memory`
+entries that bear on §4. (The smaller FRDM-IMX95 board's `imx95-15x15-frdm.dts` has the same entries.)
 
 - The M7 RPMsg vrings, buffer and resource table at `0x8800_0000`-`0x8822_0FFF`, all `no-map`. This is
   inside the range S1 shares between the M7 and A55 non-secure, which supports the reading in §4.
@@ -134,7 +147,73 @@ to the DT it is handed); this lane did not trace where. If Linux did touch the w
 would block the access; the effect would be a bus fault rather than a leak, but the reservation is still
 needed for a working system.
 
-## 8. What could not be confirmed
+## 8. Inline DDR encryption
+
+**Not found in public sources.** None of the surveyed sources configures, enables or names an inline
+encryption engine for DRAM on the i.MX 95:
+
+- the SM SoC headers and both SM board configurations (S1, S10) were searched for inline encryption,
+  memory encryption and the NXP block names IEE and PRINCE; the only DRAM-controller feature they expose
+  near this area is parity and error checking, which is not encryption;
+- TF-A (S2, S3) and OP-TEE (S4, S5) set up no DRAM encryption for the i.MX 95;
+- NXP's kernel configuration and device trees (S6-S8) declare no such block.
+
+Whether the silicon has a DRAM inline-encryption engine at all is a question for IMX95RM or the Security
+Reference Manual, which are not public (§11). For this survey the answer is: the public BSP stores all DRAM
+contents, including the secure window of §4, in the clear.
+
+## 9. DMA protection for the PCIe and Ethernet devices
+
+Two layers apply to a bus master such as a PCIe device or the Ethernet controller.
+
+**Layer 1, the TRDC (§3, §4).** In NXP's EVK configuration (S10, `configs/mx95evk.cfg`), the A55 non-secure
+environment owns the PCIe controllers (`PCIE1_ROOT`, `PCIE2_ROOT`), the network controller (`NETC`, its
+virtual stations and its logical DMA IDs, each given an SMMU stream ID `0x20`-`0x27`) and the `SMMU` itself.
+Its transactions carry the non-secure attribute (`sa=nonsecure`). On that reading, DMA from these devices
+is held to the A55 non-secure DRAM rules and cannot reach the secure window at `0x8A00_0000`, whatever the
+SMMU does. The FRDM configuration (S1) has the same structure for the A55 non-secure environment, but its
+resource list for PCIe and NETC was not compared line by line (§11).
+
+**Layer 2, the SMMU.** The SoC device tree (S7) has one Arm SMMUv3 at `0x490D_0000`, with no `status`
+property, so it is enabled by default. These masters are routed to it:
+
+| Master (S7) | SMMU stream IDs | Enabled on the FRDM-IMX95-PRO (S6) |
+|---|---|---|
+| PCIe controller 0 (`pcie0`) | `0x10`, `0x11`-`0x17` by requester ID | yes, M.2 M-key slot 1 |
+| PCIe controller 1 (`pcie1`) | `0x18`, `0x19`-`0x1F` by requester ID | yes, M.2 M-key slot 2 |
+| NETC Ethernet (`netc_bus0`: ENETC physical and virtual functions) | `0x20`-`0x27` | yes, two 1 GbE ports |
+| USB 3, USB 2, other multimedia masters | single IDs | per board |
+
+The FRDM-IMX95-PRO board file (S6) does not override these stream maps, so the SoC file's apply.
+NXP's kernel configuration enables the SMMUv3 driver (`CONFIG_ARM_SMMU_V3=y`, S8) and does not choose a
+default IOMMU domain type, so the kernel's default applies: translated, with strict invalidation, on arm64
+(S9). With that default, each device can reach only the pages that its driver has mapped for DMA, until
+they are unmapped. NXP's configuration does not enable the restricted DMA pool (`CONFIG_DMA_RESTRICTED_POOL`
+is set in the generic `defconfig` but not in `imx_v8_defconfig`, S8). The kernel command line in the
+shipped image was not checked, and `iommu.passthrough=1` there would turn translation off (§11).
+
+**The 10 GbE card.** The SPEC row places it on the Slim-SAS connector. The board file (S6) names "ETH 10G"
+control lines on an I/O expander but enables only the two 1 GbE NETC ports; no 10 GbE port node is enabled
+and no overlay for the card was found. If the card is driven by the SoC's own NETC 10 GbE port, its DMA is
+the NETC's and is covered by the stream IDs above. If it is a PCIe network card, its DMA is covered by the
+PCIe stream IDs. Which of the two it is, is not confirmed (§11).
+
+## 10. What the public BSP turns on, and what each defends against
+
+| Mechanism | On in the public BSP today? | Cold boot (DRAM read after power-off or reset) | Bus probing (interposer on the DRAM bus) | DMA from a PCIe or 10 GbE device |
+|---|---|---|---|---|
+| TRDC secure window for TF-A and OP-TEE (§4-§6) | yes: SM rules (S1), TF-A and OP-TEE addresses (S2, S4) agree | no | no | yes for the secure window, if the reading in §9 holds |
+| SMMUv3 translation for PCIe and NETC (§9) | yes: node enabled (S7), driver built in (S8), translated default (S9) | no | no | yes for normal-world memory not mapped to that device |
+| Restricted DMA pool | no (S8) | no | no | would add bounce buffering for untrusted devices |
+| Inline DDR encryption (§8) | not found | would be the defence | would be the defence | no |
+| SM region clearing (`clr=` on the A55 non-secure DRAM rule, S1) | present in configuration; meaning unconfirmed (§11) | possibly, for one region at boot | no | no |
+
+So, from public sources: DMA isolation is in place in two layers. Cold boot and bus probing are not
+defended for anything in DRAM, the secure window included. This answers the memory-encryption and
+DMA-isolation questions of the threat model (#48) as far as public sources allow. The practical consequence
+is that long-term secrets must stay in the EdgeLock enclave (the `secure-key-handling` row) and not in DRAM.
+
+## 11. What could not be confirmed
 
 - **TRDC hardware semantics.** The meaning of `sec_rw`, `full`, `nodbg` and `clr=` and the region granularity
   are read from the SM configuration names and `devices/MIMX95/sm/dev_sm_rdc.c` (S1), not from IMX95RM,
@@ -152,9 +231,17 @@ needed for a working system.
   is in UM12527, not checked here.
 - **The issue text of #63** could not be read from the lane (the forge API refused the request); this survey
   is written from the lane brief and the `secure-world` row of SPEC.md.
-- **Upstream Linux** was not surveyed; only NXP's tree (S6).
+- **Upstream Linux** was not surveyed; only NXP's tree (S6-S9).
+- **Inline DDR encryption.** Whether the i.MX 95 silicon has one is not stated in any public source reached (§8).
+- **DMA masters under the TRDC.** That PCIe and NETC transactions carry the A55 non-secure domain and
+  attribute is read from the EVK SM configuration (S10). It is not confirmed from a manual, and not
+  confirmed line by line for the FRDM configuration (S1).
+- **The kernel command line and any device-tree overlay** in NXP's shipped FRDM-IMX95-PRO image (an
+  `iommu.passthrough` setting, a 10 GbE overlay) were not checked.
+- **The 10 GbE card's interface** (SoC NETC port or PCIe network card) is not confirmed (§9).
+- **The meaning of `clr=`** in the SM configuration (region clearing at boot is a guess from the name).
 
-## 9. Questions for the owner
+## 12. Questions for the owner
 
 1. **Who owns the TRDC configuration?**
    Options: (a) use NXP's System Manager with the stock `mx95frdm` configuration; (b) use NXP's System
@@ -179,7 +266,7 @@ needed for a working system.
    `0x8B00_0000`-`0x8BFF_FFFF`?**
    Options: (a) keep NXP's rule; (b) remove the V2X grants over the secure window; (c) ask NXP first.
    Recommendation: (c), then (b) if the V2X block is unused on this device. The sources do not say what
-   needs it (§8).
+   needs it (§11).
 6. **Should the M7 share DRAM with Linux?**
    Options: (a) keep NXP's shared `0x8800_0000`-`0x89FF_FFFF` (RPMsg); (b) no M7 DRAM access if the M7 is
    unused. Recommendation: (b) if the `secure-key-handling` row does not put the HSM caller on the M7;
@@ -188,3 +275,20 @@ needed for a working system.
    Options: (a) a build-time check in this repository; (b) review only.
    Recommendation: (a). Four sources must agree by hand on the same addresses (§5-§7), and a mismatch fails
    silently into an unprotected secure world.
+8. **Is cold-boot and bus-probing exposure of DRAM acceptable?**
+   Options: (a) accept it, and keep every long-term secret in the EdgeLock enclave so that DRAM holds only
+   short-lived material; (b) ask NXP, under NDA, whether the i.MX 95 has an inline DRAM encryption engine
+   and what enabling it involves; (c) physical counter-measures only (enclosure, tamper detection: the
+   `hsm-self-defence` row).
+   Recommendation: (a) now, with (b) asked in parallel. No public source shows a DRAM encryption engine
+   (§8), so the design should not rely on one.
+9. **How strict should DMA isolation be for the PCIe slots and the 10 GbE card?**
+   Options: (a) NXP's default, SMMU translation with strict invalidation (§9); (b) also mark the external
+   PCIe ports untrusted and enable the restricted DMA pool, so that device DMA is bounce-buffered;
+   (c) leave the M.2 slots disabled in the device tree if the product does not use them.
+   Recommendation: (a) as the minimum, with a build-time check that the kernel command line never sets
+   `iommu.passthrough=1`, plus (c) for any slot the product does not use. (b) only if a removable PCIe
+   device is in the threat model (#48); the sources do not settle that.
+10. **What is the 10 GbE card's interface?**
+    Options: (a) the SoC's NETC 10 GbE port; (b) a PCIe network card. Recommendation: none from these
+    sources. The answer decides which SMMU stream IDs and which SM resources protect its DMA (§9).
