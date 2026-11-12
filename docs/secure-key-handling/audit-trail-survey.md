@@ -120,7 +120,7 @@ A transport-neutral export bundle could carry:
 
 The verifier keeps the newest head it has accepted. A later bundle must extend it: for a linear chain the verifier recomputes the chain from its stored head; for a tree, a consistency proof does the same with less data (S3, S4). A board that shows a shorter chain, or a head that does not extend the stored one, has lost or rewritten records. The check covers only history up to the stored head: if Linux root can use the audit key, a fabricated extension of the stored head passes it (§4.1).
 
-The audit key's public key and an attestation are exported at enrolment, so heads can still be checked after the key is gone (§6).
+The audit key's public key and an attestation are exported at enrolment, so heads can still be checked after the key is gone (§6). The public key reaches the verifier through Linux, so the verifier accepts it only if it is authenticated independently of Linux, for example by enclave evidence that binds that key to the device, checked against an NXP root the verifier trusts. The device attestation of §4.2 does not cover the audit key, and whether the i.MX 95 offers a key attestation that does is **unconfirmed** (§8); until then, an audit public key supplied by a compromised Linux at enrolment is the attacker's.
 
 Pull (the verifier asks, with a nonce) gives freshness. Push (the board sends after each signing) keeps the window between a signing and the verifier's copy small. Q3 asks which.
 
@@ -154,6 +154,7 @@ Recommendation, where the sources support one: start with A alone, with a linear
 ## 8. What could not be confirmed
 
 - The number of monotonic counter advances the i.MX 95's fuses allow, and whether `hsm_data_storage` advances the counter on each write: in the Security Reference Manual, which is missing.
+- Whether the i.MX 95 enclave can attest one of its own public keys (the audit key) so that a verifier can authenticate it independently of Linux, and which NXP root that evidence chains to (§5).
 - Any mechanism that commits an audit chain head inside the protected key store atomically with a key store update, so that the counter covers it (option C, §4.2, §7). Neither the data storage header nor any other source read here documents one.
 - Whether S1 has an application-usable counter read or increment apart from key store updates: none was found in the headers at `lf-6.6.52-2.2.2`.
 - What the enclave erases on a tamper response on the i.MX 95.

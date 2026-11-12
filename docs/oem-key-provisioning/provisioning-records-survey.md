@@ -94,7 +94,12 @@ public options:
    public-key attestation test). A device-signed statement of its own life-cycle
    state, firmware version and key public halves, bound to a station nonce,
    lets a Verifier check the record against the device rather than trusting
-   the station. This is the RATS Evidence/Endorsement split. S7; S4.
+   the station. This is the RATS Evidence/Endorsement split. S7; S4. It holds
+   only if the Verifier checks the signature against an NXP root or
+   attestation key it trusts independently of the station; an attestation
+   public key that the station itself puts in the record proves nothing
+   about the device. Which key signs i.MX 95 attestation, and the chain a
+   Verifier would check, are **unconfirmed** (§7).
 3. **Trusted time-stamp.** An RFC 3161 time-stamp over the signed record fixes
    when it existed. S9.
 4. **Append-only log.** Records appended to a Merkle-tree log, as Certificate
@@ -129,7 +134,11 @@ What this survey can say, and what it leaves to the other repositories:
   ELE library (S4) has get-info, device attestation and public-key attestation
   interfaces, but the lane's tooling does not allow reading code outside this
   repository, so the fields (UID, life cycle, SRK hash readback, firmware
-  version) were not read. The API reference (RM00284) is private.
+  version) were not read. The API reference (RM00284) is private. Nor was
+  the key that signs the attestation, or a chain to an NXP root that a
+  Verifier could check independently of the station, found in a public
+  source; until it is, device-signed evidence in the record is only as
+  trustworthy as the station that supplied it (§5).
 - **Whether Linux on the i.MX 95 populates the SoC serial number from the
   enclave UID.** S6 documents the attribute only.
 - **Which silicon revision the FRDM-IMX95-PRO carries, and so which SRK hash

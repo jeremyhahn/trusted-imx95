@@ -105,7 +105,9 @@ section relies only on what SPEC.md already records about it and on the public t
 - the pinned tools of §3.3 and their lock file, checked before use (§6);
 - the boot images the flow loads over serial download mode (a signed U-Boot with AHAB support, S4), taken from this
   repository's build by digest;
-- public material only: the SRK table and its hash, the enclave's public key-exchange output, and certificates;
+- public material only: the SRK table and its hash, the enclave's public key-exchange output, and certificates. The host
+  relays the enclave's key-agreement public key but is not trusted for it: go-xkms authenticates it independently of the
+  host before wrapping (§5);
 - the wrapped key blobs, but only as **potentially reusable provisioning credentials**, not as harmless data. The SPEC
   row describes import of a wrapped key (S11), but no source read here shows that a blob is bound to one device: the
   key-ceremony survey ([key-ceremony-survey.md](key-ceremony-survey.md) §3.1) records that the import and wrapping keys
@@ -153,6 +155,15 @@ This repository only states the requirement: the wrap happens inside go-xkms cus
 wrapped blob. The repository also asks for the blob to be bound to one device, but whether the i.MX 95 import format can
 do that is unconfirmed (§7), so host custody must not rely on it.
 
+The wrap is only as safe as the peer key it is made for. The enclave's key-agreement public key reaches go-xkms through
+the host, and a compromised host could substitute a public key whose private half it knows, then unwrap the OEM key from
+the blob go-xkms returns, with every secret still inside go-xkms. Signing the exchange request does not prevent this; it
+authenticates the OEM to the enclave, not the enclave's key to go-xkms. So the requirement also includes: **before any
+production wrap, go-xkms verifies the peer key itself**, against an NXP key-agreement public key it trusts from an
+authenticated NXP source, or against authenticated evidence that binds the peer key to the device, checked against an NXP
+root go-xkms trusts. Neither mechanism is documented in a public source for the i.MX 95 (§7), so production import stays
+blocked until one is confirmed from vendor documents ([key-ceremony-survey.md](key-ceremony-survey.md) §3.3).
+
 ## 6. How this repository would pin and check the tools
 
 The model is the CST rule in [references/README.md](../references/README.md) (S11): the build never reads the tool from
@@ -190,6 +201,10 @@ this tree, takes its location from an environment variable, stops and names the 
 7. NXP's public SPSDK and uuu product pages were not read; the GitHub and PyPI sources were used instead. Any signing
    NXP applies on its own download site (outside GitHub and PyPI) is not confirmed.
 8. Whether the uuu Windows and macOS binaries are code-signed by NXP with an Authenticode or Apple identity; not checked.
+9. How go-xkms can authenticate the enclave's key-agreement public key independently of the host: whether NXP publishes
+   or signs the production key-agreement public key through a channel go-xkms can verify, or whether the enclave's
+   attestation binds it to the device. Neither is shown in a public source; production import is blocked until one is
+   confirmed (§5; key-ceremony survey §3.3, §7).
 
 ## 8. Questions for the owner
 
@@ -210,7 +225,8 @@ this tree, takes its location from an environment variable, stops and names the 
    Options: (a) a new go-xkms row that produces the enclave's import blob inside go-xkms custody; (b) a generic go-xkms
    export reshaped on the host.
    Recommendation: (a). Option (b) puts key material on the host, which §4 rules out. This is go-xkms's decision; the
-   question here is whether to ask go-xkms for the row.
+   question here is whether to ask go-xkms for the row. The row must include go-xkms's own check of the enclave's
+   key-agreement public key before wrapping (§5); without it, (a) does not keep the OEM key from a compromised host.
 5. **What identity does the provisioning host present to go-xkms?**
    Options: (a) a device-onboarding permission (go-xkms `authz-device-onboarding`, planned, S15); (b) a dedicated
    provisioning-station service account.

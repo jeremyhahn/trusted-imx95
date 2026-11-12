@@ -84,7 +84,17 @@ i.MX 95. In outline [S9]:
    key exchange and import run under a separate "OEM provisioning" enclave
    firmware, and normal use runs under the runtime firmware.
 
-Three points from S9 matter for the custody design:
+Four points from S9 matter for the custody design:
+
+- **The enclave's public key reaches the host through the station.** In
+  step 2 the host takes NXP's key-agreement public key from whatever the
+  station reads from the device. Signing the exchange request in step 3
+  authenticates the host to the enclave, not the enclave's key to the host.
+  A compromised station could hand the host an ECDH public key whose private
+  half it knows. The host, or the HSM, would then derive wrap and CMAC keys
+  the station also knows, and the station could unwrap the OEM key from the
+  returned blob, even with every host secret kept inside the HSM. No step
+  in S9 authenticates that public key independently of the station.
 
 - **The master key is shared by a fleet.** Because the enclave side uses
   NXP's production key, every device with the same SRKH derives the same
@@ -159,6 +169,19 @@ hold (provisioning-host-survey §4). So, in this survey:
   custody, and the station receives only the wrapped blob. Until that is
   confirmed, there is **no production import path**; production keys are
   not imported.
+- **Production prerequisite: an authenticated peer key.** Before any
+  production wrap, the HSM or go-xkms side verifies the enclave's
+  key-agreement public key itself, independently of the station: either
+  against an NXP key-agreement public key it already trusts from an
+  authenticated NXP source, or against authenticated evidence that binds the
+  peer key to the device (for example enclave attestation that the HSM side
+  checks against an NXP root it trusts). A key relayed by the station and
+  checked only by the station does not count. No public source read here
+  documents either mechanism for the i.MX 95: whether NXP publishes or signs
+  the production key-agreement public key, or whether the enclave's
+  attestation covers it, is **unconfirmed** (section 7). Until one is
+  confirmed from vendor documents, production import stays **blocked**, even
+  if the wrap itself runs inside the HSM.
 - **Software fallback, development only.** SPSDK with the keys in host
   memory or in files (as in S9) is acceptable only with disposable
   development keys: a throw-away host ECDH key and SRK set, on development
@@ -329,6 +352,13 @@ cycle before and after, date, station and the people present.
   CMAC of section 3.3 inside the HSM. Until it is confirmed, production
   OEM key import has no path that this survey accepts (section 3.3,
   question 2).
+- How the HSM or go-xkms side can authenticate the enclave's key-agreement
+  public key independently of the station: whether NXP publishes or signs
+  the production key-agreement public key (`0x70000000`) through a channel
+  the HSM side can verify, or whether the enclave's attestation binds that
+  key to the device. Neither is shown in a public source. Until one is
+  confirmed from vendor documents, production OEM key import is blocked
+  (section 3.3, question 2).
 - The i.MX 95 equivalents of U-Boot's `ahab_status` and `ahab_close` [S10],
   and whether fuses can be written after OEM closed.
 - Who should be present at a provisioning step and what to record: no NXP
@@ -348,8 +378,9 @@ cycle before and after, date, station and the people present.
    in the OEM's custody, and it needs no link to NXP's service [S3, S9].
    That holds only if the ECDH, key derivation and wrap run inside the HSM
    or go-xkms custody (question 2); with SPSDK doing them on the station,
-   the fleet import keys sit in host memory (section 3.3). The i.MX 95
-   support is not confirmed (section 7).
+   the fleet import keys sit in host memory (section 3.3), and only if the
+   HSM side authenticates the enclave's public key itself (section 3.3). The
+   i.MX 95 support is not confirmed (section 7).
 2. **Where do the ECDH, key derivation and wrap run?**
    - (a) Inside the go-xkms HSM, or inside go-xkms custody with only the
      wrapped blob returned to the station.
@@ -363,7 +394,10 @@ cycle before and after, date, station and the people present.
    development boards only, never for keys that protect a fleet. If go-xkms
    cannot do (a), production import is blocked until it can; there is no
    production software fallback. Whether go-xkms can do (a) is not
-   confirmed (section 7).
+   confirmed (section 7). Under any option the HSM side must also
+   authenticate the enclave's key-agreement public key independently of the
+   station before a production wrap (section 3.3); until a vendor-documented
+   way to do so is confirmed, production import is blocked even under (a).
 3. **Should the derived import keys be salted with the device SRKH?**
    - (a) Zero salt.
    - (b) SRKH salt [S9].
