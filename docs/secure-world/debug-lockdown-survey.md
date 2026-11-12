@@ -34,6 +34,8 @@ Each source is public. "Reached" means this lane read it; the version is the one
 | S4 | NXP AN14579, *Secure Debug Enablement on ELE-based Platforms* | not known | <https://docs.nxp.com/bundle/AN14579/page/topics/introduction.html> | **no**: the portal renders the text with JavaScript and the lane got only the page shell; the PDF URL answered 404 |
 | S5 | SPSDK, i.MX 95 DC example and its field comments (`examples/dat/imx9/inputs/dc_config_95.yaml`, `dc_config_95.diffc`) | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/tree/v3.13.0/examples/dat/imx9/inputs> | yes |
 | S6 | SPSDK, i.MX 95 DAT example configuration (`examples/dat/imx9/inputs/dat_config_95.yaml`) | tag `v3.13.0` | same directory as S5 | yes |
+| S7 | NXP imx-sm, *Monitor* (`sm/doc/monitor.md`) | tag `rel_imx_sm_2026q3` (also `lf-6.18.37-2.1.0`), commit `eec2328` (2026-09-03) | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/monitor.md> | yes |
+| S8 | NXP imx-sm, *Debug* (`sm/doc/debug.md`) | same as S7 | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md> | yes |
 
 ## 3. Debug paths on the i.MX 95
 
@@ -100,12 +102,135 @@ What follows from this for a lockdown policy:
 
 ## 6. Software-side controls (System Manager, TF-A, OP-TEE, U-Boot, Linux)
 
-TODO
+The life cycle controls the debug *port*. It does nothing about a console that the signed
+software itself offers. A signed image with a debug shell in it is a debug path that an
+OEM Closed part will boot without complaint.
+
+### 6.1 System Manager (Cortex-M33) debug monitor
+
+NXP's System Manager (SM) runs on the M33. It owns the TRDC set-up, power, clocks and
+resets of the whole SoC. The public imx-sm repository has a board port for this board
+(`boards/mcimx95frdm`, `configs/mx95frdm.cfg`). Its monitor document (S7) says:
+
+- The SM build option `M` selects a **debug monitor** on the SM debug UART. `M=1` drops
+  into the monitor at boot and `M=2` enters it when a character arrives on the UART.
+  **The default is `M=1`.** `M=0` builds no monitor.
+- The document says `M=0` is the only valid option for production and the monitor must
+  never ship in a product. The reason it gives is timing.
+- Its commands include reading and writing any address (`md`, `mm`), reading and
+  **writing fuses** (`fuse.w`), starting, holding and re-vectoring CPUs (`cpu.w`),
+  changing the boot stage, and dumping the TRDC set-up and ELE information (S7, the
+  command tables).
+
+So a default SM build gives anyone at the SM debug UART a shell on the core that sets up
+the SoC's isolation (the TRDC), with memory and fuse write. That is a secure-world debug path, and it is
+open in every life cycle. Whether the TRDC set-up limits what the M33's `mm` can reach is
+not stated in S7 and is not confirmed. The SM debug UART is one of the per-core UARTs on
+the board (SPEC.md cites UM12527 §2.19, whose port mapping is not fixed).
+
+The SM's debug document (S8) also shows that the SM records JTAG-caused resets
+(`jtag`, `jtag_sw` reset reasons) and reports them to agents over SCMI. A product could
+use that as a sign that someone attached a debugger. S8 does not say how JTAG causes
+these resets, so this is unconfirmed.
+
+### 6.2 U-Boot
+
+U-Boot's i.MX 9x guide (S1) uses the U-Boot shell to read life-cycle state and events
+(`ahab_status`), program fuses (`fuse prog`) and close the part (`ahab_close`). The same
+shell has the generic memory commands. If the production U-Boot keeps an interactive
+shell on its console, those commands stay reachable on an OEM Closed part. The guide
+does not say how to turn the shell off for production. U-Boot's own options for this
+(for example a keyed or disabled autoboot interrupt, or leaving the `fuse` and `ahab`
+commands out of the build) are listed in §8 as options but were not surveyed here in
+detail.
+
+### 6.3 TF-A, OP-TEE and Linux
+
+The lane did not survey TF-A, OP-TEE or the Linux console for i.MX 95 debug controls
+within this slice. They are listed in §7 as not confirmed. The owner's question in §8 on
+consoles covers them as a class.
 
 ## 7. What could not be confirmed
 
-TODO
+1. **AN14579** (S4), NXP's application note on secure debug for ELE-based parts, could
+   not be read: the documentation portal needs JavaScript and the PDF URL answered 404.
+   Everything below that "S4 would say" stays open until someone reads it.
+2. The **i.MX 95 Security Reference Manual** and the **ELE API reference / user guide**
+   are not public (S2 and S5 refer to them). Not confirmed without them:
+   - which fuses disable debug, and whether per domain or for the whole SoC;
+   - the bit layout of `cc_socu` (which debug domains and enables exist);
+   - the life cycles past OEM Closed on the i.MX 95, and what each does to debug;
+   - whether OEM Open allows debug without authentication (S2 implies it, but does not say so).
+3. How long an authenticated debug session lasts (S2 does not say).
+4. Whether NXP's released SM binaries (BSP or Yocto builds) are built with `M=0`. S7 gives
+   only the source default (`M=1`). The lane did not read the Yocto recipes.
+5. Whether the TRDC set-up limits the SM monitor's `mm` command; how JTAG causes the
+   `jtag` reset reasons that the SM records (S8).
+6. Debug and console controls in **TF-A**, **OP-TEE** and **Linux** for the i.MX 95: not
+   surveyed in this slice.
+7. The FRDM-IMX95-PRO's debug connector pinout and which UART carries the SM console:
+   these are in UM12527, which is in the private reference set, not a public source.
+   SPEC.md says the port mapping is not fixed.
+8. Issue #61's own text: the lane could not read it from the forge. This file works
+   from the brief and the `secure-world` row in SPEC.md.
 
 ## 8. Questions for the owner
 
-TODO
+1. **Which life cycle do shipped boards end in?**
+   - (a) OEM Open: the debug port is open and signatures are not enforced (S1 §1.7).
+   - (b) OEM Closed: signatures are enforced; debug only with a valid DC (S1 §1.8, S2 §2).
+   - (c) OEM Closed plus the debug-disable fuses: no debug at all, even for the OEM (S2 §2).
+   - (d) A later life cycle: not confirmed for the i.MX 95 (§7 item 2).
+
+   Recommendation: (b) for the product, with (c) left open until AN14579 and the Security
+   Reference Manual say what the fuses cover and whether field return is still possible.
+   Development boards stay in (a). This is irreversible, so it waits for #9 (signing
+   tool) and the SRK custody decision. The lane recommends no step and runs none.
+
+2. **Who may issue debug credentials, and with which key?** The DC is signed with an SRK
+   private key (S5).
+   - (a) The SRK holder signs each DC by hand, offline.
+   - (b) A signing service with the SRK, run to a written policy.
+   - (c) No DC is ever issued (that is option 1(c) in practice, without fusing).
+
+   Recommendation: (a) until the `oem-key-provisioning` row settles SRK custody. Sources
+   support no more than that.
+
+3. **What scope may a DC have?**
+   - (a) A single part: the UUID is set, and `cc_socu` holds only the domains needed.
+   - (b) A single part with all domains.
+   - (c) A zero UUID, which S5 says opens debug on **every part of the chip family**. In
+     practice (by inference, not confirmed) that means every part fused with the SRK hash
+     that signed it, so the whole fleet.
+
+   Recommendation: (a), and a written rule that the project never issues a zero-UUID DC.
+   The `cc_socu` values cannot be chosen until the ELE user guide is read (§7 item 2).
+
+4. **Does the production System Manager build carry the debug monitor?**
+   - (a) `M=0`: no monitor (S7 says this is the only valid production option).
+   - (b) `M=2`: monitor on UART input.
+   - (c) `M=1`: the source default, monitor at boot.
+
+   Recommendation: (a) for every image that will run on a closed part. The build system
+   (issue #14) should set it explicitly instead of trusting the default. Development
+   images may keep (b).
+
+5. **What stays on the consoles of the signed images (U-Boot, TF-A, OP-TEE, Linux)?**
+   - (a) Output only: no interactive U-Boot shell, and no `fuse` or `ahab_close` commands
+     in the production U-Boot.
+   - (b) A U-Boot shell behind a keyed autoboot interrupt.
+   - (c) As the BSP ships.
+
+   Recommendation: (a) for production. The lane did not survey the exact U-Boot, TF-A
+   and OP-TEE options (§7 item 6), so the next survey should list them.
+
+6. **Should the product treat a debugger attach as a security event?** The SM records
+   JTAG-caused resets and reports them over SCMI (S8).
+   - (a) Yes: report the SM reset reason to the `hsm-self-defence` row as a tamper input.
+   - (b) No.
+
+   No recommendation: S8 does not say what produces those resets (§7 item 5).
+
+7. **Should someone with portal access fetch AN14579 and the i.MX 95 Security Reference
+   Manual into the private reference set?** Questions 1, 3 and 6 depend on them.
+   Recommendation: yes, before any decision on question 1.
