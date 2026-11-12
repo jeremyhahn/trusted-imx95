@@ -71,7 +71,7 @@ Surveyed at tag `lf-6.18.37-2.1.0` [S1]. The library's own version file gives li
 - The shipped systemd unit starts `nvm_daemon` as root, early, ordered before the initrd root filesystem targets [S1 `src/common/nvm/nvm_daemon.service`].
 - What this means for this row:
   - the key store's persistence depends on the Linux root filesystem and on a root daemon there. Whoever writes or rolls back `/etc/ele/` can delete the key store or replay an old one;
-  - SPEC.md records that the monotonic counter, advanced by strict operations, is the enclave's defence against replay (RM00284 §2.4.2). This survey did not confirm how the daemon and the counter interact;
+  - SPEC.md records that the monotonic counter, advanced by strict operations, is the enclave's defence against replay (RM00284 §2.4.2). That defence holds only if the caller fails closed: past the store's update cap, or with no counter split written, the enclave accepts strict operations with a warning and no counter advance, so the caller must reject counter warnings and confirm the counter advanced ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). This survey did not confirm how the daemon and the counter interact;
   - if the blobs are lost, the keys in them are likely lost too. This is an inference: the sources read do not say whether the enclave can rebuild a key store.
 
 ### 3.4 Silicon revision matters
@@ -170,7 +170,7 @@ The M7 side may give better isolation from Linux, which the `hsm-self-defence` r
    *Recommendation:* (a), pinned by tag and commit, with an update procedure for later.
 4. **Where does the key-store blob storage live, and how is rollback handled?**
    - (a) The default, `/etc/ele/` on the root filesystem.
-   - (b) A dedicated partition, with every key-store update made as a strict operation so the monotonic counter advances (RM00284 §2.4.2, via SPEC.md).
+   - (b) A dedicated partition, with every key-store update made as a strict operation, meant to advance the monotonic counter (RM00284 §2.4.2, via SPEC.md); whether it did must be checked, as the recommendation below says.
    - (c) Something else that RM00284 recommends.
 
    *Recommendation:* (b) as the starting design, on a fail-closed condition. The strict flag alone does not guarantee that the counter advanced. Past the store's update cap, or with no counter split written, the enclave accepts updates with only a warning ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1). The caller must reject every counter warning and confirm that the counter advanced before it treats an update as committed. The rollback interaction is unconfirmed (§7 item 5) and needs RM00284 to settle.

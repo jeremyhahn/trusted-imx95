@@ -228,9 +228,19 @@ own custody.
   only with RPMB (S4), because the database itself can otherwise be rolled
   back.
 - **Revoking one TA.** None of the documents read describes a revocation
-  list. The mechanism they give is the version floor: shipping a higher
-  version of the TA (or a stub with a higher version) blocks older ones,
-  again only with RPMB. Early TAs change only with a new boot container.
+  list. The mechanism they give is the version floor, and shipping a
+  higher version of the TA (or a stub with a higher version) does not by
+  itself revoke the old one. The floor rises only when OP-TEE loads the
+  newer TA and persists its version, and REE FS TAs reach OP-TEE through
+  Linux and tee-supplicant. A compromised Linux or tee-supplicant can
+  withhold the new `.ta` file and keep presenting the old, validly signed
+  one, so the floor never advances. Revocation of a REE FS TA is
+  therefore complete only once the newer version has been loaded on that
+  board and its floor persisted in RPMB, or when the trusted image itself
+  enforces a revocation policy (for example a minimum version or a
+  denied-TA list built into the signed OP-TEE image, which none of the
+  documents read describes; not confirmed). Early TAs change only with a
+  new boot container.
 - **Revoking the TA signing key.** With a single root key built into the
   image, the key is replaced by building OP-TEE with a new public key and
   shipping a new signed boot container. Every REE FS TA must then be
@@ -334,7 +344,11 @@ names today.
    `ta_ver.db` on RPMB for TAs, and a new boot container for the key;
    (b) early TAs only, so every change is a new signed container.
    Recommendation: (b) if OP-TEE is kept minimal, else (a), after the
-   enclave's container anti-rollback is confirmed (section 8).
+   enclave's container anti-rollback is confirmed (section 8). Under (a)
+   a TA counts as revoked on a board only once the newer version has been
+   loaded there and its floor persisted, because Linux can withhold the
+   new file; a revocation policy in the trusted image would remove that
+   dependency but none is documented (section 8).
 7. **Can the non-public i.MX 95 security documents be added to the
    private references?** The ELE HUK derivation and its life-cycle
    behaviour (section 10, items 1 and 6) cannot be settled from public

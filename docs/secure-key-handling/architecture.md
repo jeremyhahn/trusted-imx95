@@ -23,9 +23,19 @@ key in the clear, and what crosses the boundary is a request through the HSM API
 
 ## Key store rollback protection
 
-An update to the key store counts only after an operation carrying the strict-operation flag is acknowledged. That
-operation also advances the monotonic counter that protects the stored key store from rollback (RM00284 §2.4.2). An
-update made without the flag, or not yet acknowledged, is not a committed update (RM00284 §2.4.2).
+An update to the key store counts only after an operation carrying the strict-operation flag is acknowledged
+(RM00284 §2.4.2, as the SPEC row cites it). An update made without the flag, or not yet acknowledged, is not a
+committed update (RM00284 §2.4.2).
+
+The acknowledgement alone does not show that the monotonic counter advanced. The public library's sources show that
+past a key store's `max_updates_number` the enclave still accepts updates, returning the `HSM_KEY_STORE_COUNTER`
+warning, without moving the counter, and that with no counter split written it returns warnings and gives no
+rollback protection ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). The rollback protection
+therefore holds only if the caller fails closed: it treats every counter warning as a failure, confirms that the
+counter split is configured, and confirms that the counter advanced (for example with the `MONOTONIC` sync flags or a
+`chip_monotonic_counter` read before and after) before it treats a persistent update as committed. Whether these
+checks are enough on the i.MX 95 is **unconfirmed** until tested on the board's firmware
+([monotonic-counter-survey.md](monotonic-counter-survey.md) §6).
 
 The monotonic counter fuses are configured once, during provisioning; that belongs to the `oem-key-provisioning`
 row (RM00284 §3.24, as cited by that row in [SPEC.md](../SPEC.md)).
@@ -54,8 +64,8 @@ The candidates are the Cortex-A55 Linux side and the Cortex-M7 ([SPEC.md](../SPE
 | Cortex-A55, Linux | The enclave's HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from Linux to the enclave; the TrustZone configuration that decides whether the caller runs in the secure or the normal world | The HSM API is in RM00284. The A55 path to the enclave and the TrustZone configuration are under [Missing](#missing); the latter is the `secure-world` row's open question ([SPEC.md](../SPEC.md)) |
 | Cortex-M7 | The same HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from the M7 to the enclave; the resources the System Manager grants the M7 ([SPEC.md](../SPEC.md), row `system-manager-config`) | The HSM API is in RM00284. The M7 path to the enclave and the System Manager's resource grants are under [Missing](#missing) |
 
-Under either choice the keys stay in the enclave's key store (RM00284 §2.4, §3.2) and the rollback rule holds
-(RM00284 §2.4.2).
+Under either choice the keys stay in the enclave's key store (RM00284 §2.4, §3.2), and the rollback rule applies
+(RM00284 §2.4.2) under the caller's fail-closed checks above.
 
 ## The SE051 secure element
 
@@ -91,6 +101,19 @@ under [Missing](#missing).
   [references/](../references/README.md) names them.
 - **The number of keys, key types and key store size** the board needs: the cited sections give no figures for the
   board's use.
+
+## Proposed SPEC change, pending owner approval
+
+This section proposes a change to the `secure-key-handling` row of [SPEC.md](../SPEC.md). It is not a requirement
+until the owner approves it, and the row's text is unchanged.
+
+- Proposed wording: a key store update counts as committed only when the strict operation is acknowledged with no
+  counter warning, the counter split is configured, and the counter is confirmed to have advanced.
+- Reason: past a key store's update cap, or with no counter split written, the enclave accepts updates without
+  rollback protection ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). The row's current
+  wording, that an acknowledged strict operation also advances the counter, does not hold in those cases.
+- The same wording would apply to the restatements in [secure-world/architecture.md](../secure-world/architecture.md)
+  and [oem-key-provisioning/architecture.md](../oem-key-provisioning/architecture.md).
 
 ## Open questions
 
