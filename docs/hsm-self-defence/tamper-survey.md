@@ -164,8 +164,20 @@ no procedure that uses them.
    - (b) Stop the A55 LM, zeroise keys in the ELE, then shut down the system.
    - (c) Option (b), but with an ELE abort instead of zeroisation.
 
-   *Recommendation*: (b). It is the only option the public APIs fully cover (F3, F5).
-   (c) depends on unconfirmed abort semantics (F4).
+   *Recommendation*: none of the zeroising options is fully supported yet; (a) is the
+   only one the public sources cover end to end (F2, F3). (b) as ordered does not
+   give a durable deletion. A strict delete counts only once the updated key store is
+   written to non-volatile storage (F5). The writer named in the public sources is the
+   Linux user-space `nvm_daemon` on the A55 side
+   ([decommission survey §4.1](../device-lifecycle/decommission-survey.md)). Once the
+   A55 LM is stopped, that daemon is stopped too, so a delete issued after it cannot
+   be acknowledged as durable. The key store blob left in storage would still hold the
+   keys. Running the strict deletes before stopping the A55 LM does not solve this,
+   because the daemon then sits on the side that may be under attack. A persistence
+   or irreversible-invalidation path that stays available during containment (for
+   example one the M7 or the SM drives) is **unresolved**: no public source read here
+   names one (F5, F4). Until one is confirmed, (b) and (c) are both unconfirmed, and
+   (a) is the backstop. (c) also depends on unconfirmed abort semantics (F4).
 
 4. **How should keys be zeroised?**
    - (a) Delete each key with the strict flag.
@@ -173,7 +185,9 @@ no procedure that uses them.
    - (c) An irreversible life-cycle or fuse action.
 
    *Recommendation*: (a), then (b). The strict delete gives rollback protection through
-   the monotonic counter (F5). (c) belongs to `oem-key-provisioning` and is out of
+   the monotonic counter (F5). Both need the key store's persistence path to be
+   running when they are issued (question 3); during a tamper response that path is
+   unresolved. (c) belongs to `oem-key-provisioning` and is out of
    scope here (F6).
 
 5. **Should the M7 get per-domain power and PHY control?** (This is a change to the

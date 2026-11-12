@@ -94,11 +94,12 @@ Ways to update it in the field:
 
 The sources show three separate layers:
 
-- **Hardware floor (AHAB).** The container header carries a software version (`-sw_version`, above) [S19][S20]. NXP's U-Boot has an `ahab_commit` command that writes any new SRK revocation and firmware version information found in the NXP (ELE firmware) and OEM containers into the fuses [S16]. This is irreversible, so this survey only describes it; no step here runs or scripts it. The ELE's monotonic counter is a separate floor for the key store (SPEC, row `secure-key-handling`; RM00284 §2.4.2, as cited in SPEC).
+- **Hardware floor (AHAB).** The hardware barrier is the container's `fuse_version` and the commit policy. The ELE loads a container only if its `fuse_version` is at least the value held in fuses, and the fused value moves up only on an ELE commit ([verified-boot survey §3.8](verified-boot-survey.md)). NXP's U-Boot has an `ahab_commit` command that writes any new SRK revocation and firmware version information found in the NXP (ELE firmware) and OEM containers into the fuses [S16]. This is irreversible, so this survey only describes it; no step here runs or scripts it.
+- **Container `sw_version` (software).** The `-sw_version` that imx-mkimage writes when `ROLLBACK_INDEX_IN_CONTAINER` is set [S19][S20] is not the fuse floor. It lets software choose between images that share a fuse version ([verified-boot survey §3.8](verified-boot-survey.md)). It refuses a downgrade only if a software check that compares it is explicitly implemented, for example in U-Boot or OP-TEE. No such check was found in the sources read here. The ELE's monotonic counter is a separate floor for the key store (SPEC, row `secure-key-handling`; RM00284 §2.4.2, as cited in SPEC).
 - **Boot loader floor (software).** LmP keeps a boot firmware version in the U-Boot device tree and refuses older firmware once a `rollback_protection` flag is set [S14].
 - **OS floor (software).** SWUpdate refuses images below `no-downgrading` [S6]. RAUC leaves this to an `install-check` hook [S3]. OSTree/TUF metadata carries versions, and TUF is designed to resist rollback of the metadata [S13].
 
-Ordering (my inference from the above, not a vendor statement): if the AHAB fuse version is committed while the new image is being installed, the old image can no longer boot, so a failed update cannot fall back. A safe order is: install to the inactive slot, boot it, mark it good (reset the boot count), and only then commit the version.
+Ordering (my inference from the above, not a vendor statement): if the AHAB fuse version were committed while the new image is being installed, the old image could no longer boot, so a failed update could not fall back. Any raise of the fuse floor therefore has to come after the new slot has been installed, booted and marked good (boot count reset). Whether and when the floor is raised is a decision for the `boot-container` and `oem-key-provisioning` rows; this survey does not make the commit a step.
 
 ## 7. Comparison
 
@@ -117,7 +118,7 @@ Against the requirements (a)–(e) in section 2:
 
 - **Issue #66 text.** The issue could not be read from the lane (`gh` is not authenticated, and the public API hit its rate limit). This survey follows the lane brief's description of the issue.
 - **i.MX 95 boot ROM fallback.** Whether the boot ROM, on an AHAB authentication failure, falls back to the other eMMC boot partition or to a secondary container set. The sources are IMX95RM and the i.MX 95 Security Reference Manual, which are missing from the references (SPEC).
-- **How ELE compares the container `sw_version` with the fuse version** on the i.MX 95, and which fuse word holds it. This needs the same missing manuals. I read only the U-Boot command text [S16] and the mkimage options [S19][S20].
+- **The fuse version on the i.MX 95.** The public source read for this ([verified-boot survey §3.8](verified-boot-survey.md)) says the ELE checks the container `fuse_version` against fuses, and that `sw_version` is for software to choose among images. Two things are unconfirmed: whether the ELE checks `sw_version` at all, and which fuse word holds the fuse version and how many steps it has. This needs the same missing manuals. I read only the U-Boot command text [S16] and the mkimage options [S19][S20].
 - **Mender.** Its A/B rollback mechanics with U-Boot and its downgrade policy. The device-side overview page returned 404.
 - **SWUpdate.** Build-side signing from an HSM, and whether it can update the eMMC boot partitions.
 - **LmP on the i.MX 95.** Whether LmP supports the FRDM-IMX95-PRO, and whether its boot firmware floor maps to the AHAB version.

@@ -61,7 +61,7 @@ Together, the two calls could give:
 ### 1.4 What the enclave evidence does not cover
 
 - **Not measured.** None of the fields in 1.1 is a measurement of the Linux image, the kernel or user space [S1].
-- **What it does show.** The image is bound only indirectly, through the OEM SRK hash: that is the root that AHAB secure boot checks containers against. AHAB's verification rules are documented in IMX95RM and the Security Reference Manual, which are not public and are listed as missing in [SPEC](../SPEC.md).
+- **What it does show.** The OEM SRK hash identifies the signing root that AHAB secure boot checks containers against. That is signing-root identity evidence, not image attestation. Every image signed under the same root gives the same hash, so the evidence cannot tell them apart. The hash also does not show that the Linux kernel and user space were verified, or that verification was enforced, on this boot. AHAB's verification rules are documented in IMX95RM and the Security Reference Manual, which are not public and are listed as missing in [SPEC](../SPEC.md).
 - **Not present.** No public source read here shows a measured-boot log (in the style of a TPM PCR or a DICE chain) that the ELE keeps or signs: **unconfirmed / not found**.
 
 ## 2. Key and certificate chain
@@ -151,11 +151,11 @@ Together, the two calls could give:
    *Recommendation:* (a), with the verifier choosing the nonce and checking the echo [S1, S7]. The silicon revision on the FRDM-IMX95-PRO is **unconfirmed**; if it is B0 or later, (b) costs nothing.
 
 4. **How is the image attested?**
-   - (a) Rely on AHAB secure boot, with the OEM SRK hash in the evidence (1.4).
+   - (a) Rely on AHAB secure boot, with the OEM SRK hash in the evidence (1.4). This gives signing-root identity evidence only, not image attestation.
    - (b) (a) plus a measured-boot or IMA log from the Linux side, signed by a key held in the enclave and attested under question 1(b).
    - (c) Defer image attestation.
 
-   *Recommendation:* (a) now, and (b) once the `hsm-self-defence` question on the IMA log is answered. The enclave evidence does not measure the Linux image [S1].
+   *Recommendation:* image attestation stays **unresolved (missing)**. (a) can be carried now, but only as evidence of the signing root, not of the booted image (1.4). The enclave evidence does not measure the Linux image [S1]. Image attestation needs evidence that binds trusted measurements of the booted image to the device and to the verifier's challenge. (b) is a candidate once the `hsm-self-defence` question on the IMA log is answered, but whether its measurements can be trusted and bound in this way is unconfirmed.
 
 5. **Which side calls the attestation API?** (This is SPEC's open question on the HSM API caller.)
    - (a) The Cortex-A55 Linux side, through `imx-secure-enclave` and NXP's `se_ctrl` driver.

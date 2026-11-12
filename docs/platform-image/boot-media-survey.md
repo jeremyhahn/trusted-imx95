@@ -128,8 +128,12 @@ UM12527 before anyone writes a flashing procedure.
   set the glitch, voltage and temperature detector behaviour of the
   EdgeLock Enclave. `FAST_HASH=YES` sets a fast-hash flag per medium.
 - `ROLLBACK_INDEX_IN_CONTAINER`, when set, writes a software version into
-  the TF-A/U-Boot container (`-sw_version`). That is the hook the
-  boot-container row's anti-rollback floor would use.
+  the TF-A/U-Boot container (`-sw_version`). This is not the hardware
+  anti-rollback floor. The ELE enforces the container's `fuse_version`
+  against fuses. `sw_version` only lets software choose between images that
+  share a fuse version, and it refuses nothing unless a software check is
+  explicitly implemented
+  ([verified-boot survey §3.8](verified-boot-survey.md)).
 
 ### 3.3 What the containers hold
 
@@ -255,9 +259,11 @@ S4).
   verify the Cortex-M7 image as a signed container before it runs, the
   image must be in the boot image container (`flash_all`/`flash_m7`
   family), not loaded later by U-Boot or Linux. Signing applies to the boot
-  image container and the TF-A/U-Boot container separately. The
-  `-sw_version` hook (section 3.2) is where the anti-rollback version would
-  be set.
+  image container and the TF-A/U-Boot container separately. The hardware
+  anti-rollback floor is each container's `fuse_version` and the ELE commit
+  policy, which belong to the boot-container row. The `-sw_version` hook
+  (section 3.2) only gives a software version, which needs its own,
+  explicitly implemented check.
 - **system-manager-config.** The System Manager binary and `MSEL` are
   chosen at `flash.bin` build time (S1, S3, S5).
 - **build system (#31).** Both `meta-imx` (S3) and mainline U-Boot (S5) can
@@ -307,7 +313,9 @@ S4).
    - (b) leave it unset for now.
 
    *Recommendation: (b) until the boot-container row fixes its version
-   scheme.* The hook exists (S1). The fuse side is out of scope here and
+   scheme.* The hook exists (S1). Setting it alone does not give
+   anti-rollback: `sw_version` needs a software check, and the hardware floor
+   is the `fuse_version` (section 5). The fuse side is out of scope here and
    documented only in the missing manuals.
 6. **Factory flashing tool.**
    - (a) `uuu` pinned to a tag, with `-b emmc_all`;
