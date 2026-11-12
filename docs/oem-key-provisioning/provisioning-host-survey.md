@@ -106,9 +106,14 @@ section relies only on what SPEC.md already records about it and on the public t
 - the boot images the flow loads over serial download mode (a signed U-Boot with AHAB support, S4), taken from this
   repository's build by digest;
 - public material only: the SRK table and its hash, the enclave's public key-exchange output, and certificates;
-- the wrapped key blobs, which are already encrypted for one device's enclave and are useless elsewhere (the SPEC row
-  describes import of a wrapped key, S11; that a blob is bound to one device is how the row reads AN14861, not checked
-  here, §7);
+- the wrapped key blobs, but only as **potentially reusable provisioning credentials**, not as harmless data. The SPEC
+  row describes import of a wrapped key (S11), but no source read here shows that a blob is bound to one device: the
+  key-ceremony survey ([key-ceremony-survey.md](key-ceremony-survey.md) §3.1) records that the import and wrapping keys
+  are shared by every device with the same SRK hash, and neither survey shows a separately authenticated device UID in
+  the import TLV. Device binding on the i.MX 95 is **unconfirmed** (§7). Until it is verified, a blob may import into
+  any device of the fleet, so the host holds blobs under the same access controls as the session credential below: only
+  the provisioning account reads them, they are kept only for the wrap-to-import window of one device and then
+  deleted, and they never leave the host except to the device being provisioned;
 - a session credential to go-xkms (§5), short-lived and scoped to the wrap operation, not a key.
 
 **Must not hold:**
@@ -144,8 +149,9 @@ for one device's enclave and returning only the wrapped blob. **What go-xkms dec
    (S15 lists `authz-device-onboarding` as planned);
 3. the transport the host uses (REST, gRPC or other; S16 says every transport serves the key-management RPCs).
 
-This repository only states the requirement: the wrap happens inside go-xkms custody, and the host receives a
-device-bound blob.
+This repository only states the requirement: the wrap happens inside go-xkms custody, and the host receives only the
+wrapped blob. The repository also asks for the blob to be bound to one device, but whether the i.MX 95 import format can
+do that is unconfirmed (§7), so host custody must not rely on it.
 
 ## 6. How this repository would pin and check the tools
 
@@ -176,7 +182,10 @@ this tree, takes its location from an environment variable, stops and names the 
 3. Whether uuu 1.5.243 and SPSDK's `nxpuuu` name the i.MX 95 family for their built-in scripts (§3.2).
 4. The SoC part number on the FRDM-IMX95-PRO, and so which SPSDK device entry applies (UM12527 is private, not read here).
 5. Whether a wrapped key from the AN14861 flow is bound to one device, and its format on the i.MX 95 (AN14861 is written
-   for the RT1180, S11; IMX95RM and the i.MX 95 Security Reference Manual are missing).
+   for the RT1180, S11; IMX95RM and the i.MX 95 Security Reference Manual are missing). The key-ceremony survey records
+   fleet-shared import and wrapping keys for devices with the same SRK hash, and no source read shows a separately
+   authenticated device UID in the import TLV. Until binding is verified, the host treats every blob as a reusable
+   provisioning credential (§4); its custody does not rest on the blob being useless on another device.
 6. Whether SPSDK's PKCS#11 signer works with go-xkms's PKCS#11 module.
 7. NXP's public SPSDK and uuu product pages were not read; the GitHub and PyPI sources were used instead. Any signing
    NXP applies on its own download site (outside GitHub and PyPI) is not confirmed.

@@ -195,7 +195,8 @@ and `Readme.imx95`) [S9] builds `flash.bin` from two AHAB containers:
    `UBOOT_LOAD_ADDR` (`0x90200000`) and, if a `tee.bin` is present, OP-TEE at
    `TEE_LOAD_ADDR` (`0x8C000000`, the same as `BL32_BASE`). All three are
    tagged for core `a55`. `-sw_version` sets a container software version
-   when `ROLLBACK_INDEX_IN_CONTAINER` is given. Container format version 2
+   when `ROLLBACK_INDEX_IN_CONTAINER` is given; it is enforced only by a
+   consumer that reads it (section 5). Container format version 2
    is used for the i.MX 95 B0 silicon.
 
 So BL31 never sits in the ROM-loaded container. U-Boot SPL, running on the
@@ -224,9 +225,19 @@ sources above:
 - The chain of trust is: ROM and ELE check container 1 (SM, SPL); SPL, through
   the ELE, checks container 2 (BL31, BL32, U-Boot). It holds only if SPL is
   built with `CONFIG_AHAB_BOOT` [S11].
-- Rollback protection for container 2 is via the container software
-  version (`-sw_version`) [S9]; how the ELE enforces it against fuses was not
-  confirmed (see section 6).
+- Rollback of container 2 involves two separate mechanisms, which must not be
+  confused (see [firmware-update-survey.md](firmware-update-survey.md) §5.1,
+  §5.2):
+  - the container's **fuse version** (`fuse_version`) is the hardware floor,
+    checked by the ELE against a fuse-backed version. The exact comparison the
+    ELE makes on the i.MX 95 is **unconfirmed** (see section 6). Advancing the
+    fused value is irreversible and is not a step any lane runs or scripts;
+  - the container's **software version** (`-sw_version`) [S9] is not checked
+    by the ELE. In the public sources, only SPL in NXP's Trusty configuration
+    (`CONFIG_IMX_TRUSTY_OS`) reads it, against an eMMC RPMB index, and it skips
+    the check when no RPMB key is set. In a plain Linux BSP build nothing
+    enforces it. So `-sw_version` is rollback protection only where such an
+    enforcing consumer is built in and provisioned.
 - Load addresses in `soc.mak` must match `BL31_BASE` and `BL32_BASE` in
   TF-A and the secure DDR window in the SM configuration. They do in the
   default values [S2, S5, S9].
@@ -354,13 +365,20 @@ All reached from the lane on 2026-11-12 unless marked unreachable.
 
 6. **Container 2 authentication (for #32 and #55).**
    Options: (a) build SPL with `CONFIG_AHAB_BOOT` and sign container 2 with
-   the same key set as container 1; (b) as (a), plus a container
-   `-sw_version` rollback index; (c) no authentication of container 2 during
-   development.
+   the same key set as container 1; (b) as (a), plus an anti-rollback floor
+   for container 2 that a confirmed consumer enforces: the container fuse
+   version checked by the ELE, and `-sw_version` only together with an
+   enforcing consumer (for example an SPL rollback check against a
+   provisioned RPMB index) that is built in and shown to refuse an older
+   container; (c) no authentication of container 2 during development.
    Recommendation: (b) as the target and (a) at least, from the first
    signed build. Without `CONFIG_AHAB_BOOT`, BL31 is loaded unchecked [S11].
-   How the rollback index is enforced must first be confirmed from NXP
-   documents that the lane could not reach (section 6).
+   Setting `-sw_version` alone is not (b): with no enforcing consumer, older
+   signed BL31/BL32 containers stay bootable. Until the fuse-version
+   comparison (section 6) and an enforcing consumer are confirmed, container 2
+   has no confirmed rollback protection, and the SPEC.md anti-rollback
+   requirement for it stays open. Committing a fuse version is irreversible
+   and is not described here as a step to run.
 
 7. **Which versions to pin?**
    Options: (a) one NXP BSP release tag across `imx-atf`, `imx-sm`,

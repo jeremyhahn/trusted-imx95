@@ -155,7 +155,7 @@ This section is input to #97 (key hierarchy). It recommends; the owner decides (
 | Post-quantum signing | ML-DSA-65 next to the ECDSA key, as a hybrid pair, once the board is shown to be later than B0 and to run firmware 2.0.7 or later | S3, S5, S6; go-xkms supports ML-DSA-44, -65 and -87 (S9) |
 | Data storage and key wrapping in the enclave | AES-256 (GCM where the call offers it) | S1. HMAC is not available on the i.MX 95 (S2), so integrity comes from AEAD or CMAC |
 | Hashing | SHA-384 with P-384 keys, SHA-256 with P-256 keys | S1 |
-| Key agreement and KEM | Not in the enclave. ML-KEM-768 (or ML-KEM-1024), if needed, runs in go-xkms on the Cortex-A55 Linux side, and its private key is sealed with an AES key held in the enclave | No ML-KEM in S1. Key Exchange and Key Import APIs not supported on the i.MX 95 (S2). go-xkms offers ML-KEM-768/1024 from the Go standard library (S9) |
+| Key agreement and KEM | None on the device for now (question 5). Enclave ML-KEM support is *unconfirmed*. Running ML-KEM in go-xkms on the Linux side would put the private key in Linux memory while in use, against the `secure-key-handling` row, so it is blocked unless the owner approves a SPEC change | No ML-KEM in S1. Key Exchange and Key Import APIs not supported on the i.MX 95 (S2). go-xkms offers ML-KEM-768/1024 from the Go standard library (S9) |
 | Avoid | RSA (large keys, and i.MX 95 support *not confirmed in public sources*), SM2/SM3/SM4 (no project need), HMAC (not supported on the i.MX 95, S2) | S1, S2 |
 
 **What go-xkms decides, and what this project decides.** go-xkms defines the
@@ -166,8 +166,8 @@ row). Which algorithms the enclave holds, and so which keys stay in hardware, is
 this repository (#97). The recommendation above fits inside the set go-xkms already offers
 (RSA, ECDSA, Ed25519, ML-DSA-44/65/87, ML-KEM-512/768/1024; S9). go-xkms notes that its
 ML-KEM-512 comes from CIRCL and sits outside the Go Cryptographic Module, and that ML-DSA
-needs Go Cryptographic Module v1.26.0 or later (S9). That favours ML-KEM-768/1024 and
-argues against ML-KEM-512.
+needs Go Cryptographic Module v1.26.0 or later (S9). If device-side ML-KEM is ever allowed
+(question 5), that favours ML-KEM-768/1024 and argues against ML-KEM-512.
 
 ## 7. What could not be confirmed
 
@@ -205,15 +205,19 @@ argues against ML-KEM-512.
    Options: (a) firmware 2.0.7 with library `lf-6.18.37-2.1.0`; (b) firmware 2.0.6 with
    `lf-6.18.20-2.0.0`, which has no ML-DSA in the library.
    Recommendation: (a). It is the only public pairing whose library has ML-DSA.
-5. **ML-KEM.** The enclave offers none publicly.
+5. **ML-KEM.** The enclave offers none publicly; enclave ML-KEM support on the i.MX 95 is
+   **unconfirmed** (missing from every source read here).
    Options: (a) ML-KEM-768 or ML-KEM-1024 in go-xkms on the Cortex-A55 Linux side, with its
    private key sealed by an enclave-held AES-256 key; (b) no key encapsulation on the device
-   until NXP publishes enclave support; (c) ML-KEM-512.
-   Recommendation: (a) with ML-KEM-768, if the protocol in go-xkms #1521 needs key
-   encapsulation at all. The trade-off: the ML-KEM key is in the clear in Linux memory while
-   it is used, which falls short of the row's rule that keys never leave the enclave in the
-   clear. (c) is advised against, because go-xkms's ML-KEM-512 is outside the Go
-   Cryptographic Module (S9).
+   until an enclave ML-KEM implementation is confirmed; (c) ML-KEM-512.
+   Recommendation: (b). Device-side ML-KEM is deferred under the current row. Option (a)
+   breaks the `secure-key-handling` rule in docs/SPEC.md that keys never leave the enclave in
+   the clear: sealing protects the private key at rest only, and while it is in use it sits
+   in Linux memory, readable by a compromised kernel. (a) is therefore blocked unless the
+   owner approves a change to that SPEC row; this survey does not propose one. If go-xkms
+   #1521 turns out to need key encapsulation before enclave support is confirmed, that is an
+   open question for the owner. (c) is advised against in any case, because go-xkms's
+   ML-KEM-512 is outside the Go Cryptographic Module (S9).
 6. **Integrity without HMAC.** HMAC is not supported on the i.MX 95 (S2).
    Options: (a) AES-256-GCM; (b) AES-CMAC; (c) HMAC computed outside the enclave.
    Recommendation: (a). It is in S1, and the README lists no i.MX 95 limitation for it.
