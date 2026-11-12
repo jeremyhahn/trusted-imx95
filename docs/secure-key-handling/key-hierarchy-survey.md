@@ -201,6 +201,11 @@ flag that commits the imported key to NVM with the counter advanced [S2,
   UUID, the IV, the ciphertext and the signature. It also takes a device life-cycle mask that limits
   in which states the data can be read back [S2, `op_enc_data_storage_args_t`,
   `ENC_DATA_TLV_*`].
+- Neither form is shown to inherit the key store's rollback protection: whether a data storage
+  write is covered by the monotonic counter is **unconfirmed**
+  ([audit-trail-survey.md](audit-trail-survey.md) §4.2). A design that needs a data object to
+  resist rollback must first have vendor confirmation or a board test showing that an older copy
+  is refused.
 
 ### 4.8 What a production key should carry
 
