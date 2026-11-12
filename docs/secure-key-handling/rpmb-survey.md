@@ -130,8 +130,15 @@ Two routes carry OP-TEE's RPMB frames to the eMMC on the Linux side:
 - No other RPMB-backed rollback counter was found in U-Boot v2026.10. Its
   VBE A/B/recovery boot method says rollback protection is planned but not
   there yet [S16].
-- So RPMB can serve boot-time rollback state (U-Boot, before the kernel) as
-  well as run-time state (Linux, §4.2), through the same OP-TEE file system.
+- So RPMB can serve boot-time rollback state (U-Boot proper, before the
+  kernel) as well as run-time state (Linux, §4.2), through the same OP-TEE
+  file system. This holds only for code that runs after OP-TEE has started.
+- **NXP's SPL rollback index is different.** NXP's U-Boot fork has SPL read
+  and raise a bootloader rollback index in RPMB in its Android/Trusty build
+  ([firmware-update-survey.md](../secure-world/firmware-update-survey.md)
+  §5.2). SPL runs before BL31 and BL32, so it cannot use OP-TEE's AVB trusted
+  application or file system; it is a raw RPMB user, with the conflicts of
+  §7.2.
 - NXP's U-Boot fork (`nxp-imx/uboot-imx`, branch `lf_v2026.04`) was not read
   for i.MX 95 board defaults (§8).
 
@@ -240,6 +247,7 @@ stays for the life of that chip [S1].
 | The enclave's NVM storage daemon (`nvm_daemon`) | No | Plain files under `/etc/ele/` on the root file system | [S13] |
 | U-Boot's AVB rollback indexes and lock state | Only through OP-TEE | Files in OP-TEE's RPMB file system, written by the AVB trusted application | [S15, S16] |
 | U-Boot `mmc rpmb` and mmc-utils `rpmb` | Raw block access, given the key | Direct authenticated reads and writes, and key programming | [S7, S8] |
+| NXP SPL bootloader rollback index (Android/Trusty build) | Yes, raw, before OP-TEE runs | SPL reads and raises its own index in RPMB | [firmware-update-survey.md](../secure-world/firmware-update-survey.md) §5.2 |
 
 ### 7.2 Conflicts when more than one user wants RPMB
 
@@ -251,8 +259,13 @@ stays for the life of that chip [S1].
 - **OP-TEE takes the whole partition.** OP-TEE's file system puts its header
   and file allocation table at the start of the partition and file data
   downward from the end [S1]. It has no way to share space with another
-  user. Our inference: a raw authenticated write by U-Boot or mmc-utils
-  would corrupt OP-TEE's store, or be corrupted by it. OP-TEE can also be
+  user. Our inference: a raw authenticated write by U-Boot, SPL's rollback
+  index or mmc-utils would corrupt OP-TEE's store, or be corrupted by it. A
+  raw user that runs before OP-TEE, as SPL does, would also need the same
+  authentication key as OP-TEE, derived the same way. So OP-TEE RPMB storage
+  and NXP's SPL rollback index are **not supported together** until a
+  shared partition layout and a compatible key derivation are shown and
+  validated; no public source read here does that for the i.MX 95. OP-TEE can also be
   built to clear the partition at cold boot (`CFG_RPMB_RESET_FAT`, default
   `n`), which would erase any other user's data [S2].
 - **Several routes, one owner.** U-Boot (before Linux), the kernel and
@@ -275,7 +288,12 @@ OP-TEE should be the only owner of the RPMB partition. Every other need goes
 through an OP-TEE trusted application: U-Boot's AVB rollback indexes already
 do [S15, S16], and so does the TA version floor [S2]. The enclave keeps its
 file-based storage [S13]. Nothing else writes raw RPMB blocks, and no raw key
-programming takes place outside the flow chosen in question 2 of §10. The
+programming takes place outside the flow chosen in question 2 of §10. That
+rules out NXP's SPL rollback index (§4.3), which writes RPMB before OP-TEE
+runs; with OP-TEE as owner, container anti-rollback rests on the ELE fuse
+version instead ([firmware-update-survey.md](../secure-world/firmware-update-survey.md)
+§5.1, question 5). If the owner chooses the SPL index, SPL is the only owner
+and OP-TEE does not use RPMB. The
 sources support this: U-Boot's AVB guide describes RPMB as managed by OP-TEE
 [S16], and OP-TEE's guidance keeps the key inside OP-TEE [S1]. This is
 question 8 in §10.
@@ -401,7 +419,8 @@ answered, no RPMB key is written on the project's board.
    - (c) Also U-Boot, for boot-time rollback indexes [S7].
    - Recommendation: (a), as OP-TEE 4.11.0 announces it by default [S2] and it
      works before user space; add (c) only if verified boot needs rollback
-     indexes in U-Boot.
+     indexes in U-Boot proper, through OP-TEE. SPL's own rollback index is
+     not a route for OP-TEE's frames but a separate raw user (§4.3, §7.2).
 6. **Should anything of the enclave's be kept in RPMB?**
    - (a) No: the NVM daemon keeps the enclave's storage file on the root file
      system (`/etc/ele/` by default) [S13], protected by the enclave's counter.
@@ -418,10 +437,13 @@ answered, no RPMB key is written on the project's board.
    - (a) OP-TEE alone. U-Boot's AVB rollback indexes and any other
      rollback state go through OP-TEE trusted applications; no raw RPMB
      writes by U-Boot or mmc-utils.
-   - (b) OP-TEE and a raw user (U-Boot `mmc rpmb` or mmc-utils) sharing the
-     key.
+   - (b) OP-TEE and a raw user (U-Boot `mmc rpmb`, mmc-utils or NXP's SPL
+     rollback index) sharing the key. Not supported until a shared layout
+     and a compatible key derivation are validated (§7.2).
    - (c) No owner: RPMB stays unused (question 1, option (a)).
+   - (d) NXP's SPL rollback index alone, with OP-TEE not using RPMB.
    - Recommendation: (a). U-Boot's AVB guide already puts RPMB under OP-TEE
      [S16], OP-TEE's guidance keeps the key inside OP-TEE [S1], and OP-TEE's
-     file system leaves no room for a second user [S1]. If question 1 is
-     answered (a), then (c).
+     file system leaves no room for a second user [S1]. Under (a), the SPL
+     rollback index of [firmware-update-survey.md](../secure-world/firmware-update-survey.md)
+     §5.2 is not used. If question 1 is answered (a), then (c).

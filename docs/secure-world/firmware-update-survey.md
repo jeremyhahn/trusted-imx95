@@ -134,6 +134,18 @@ OP-TEE's own.
 - This is the scheme that `ROLLBACK_INDEX_IN_CONTAINER` in the packer feeds
   (§4). Outside the Trusty build, the public sources show nothing that reads
   the SW version, so on a plain Linux BSP build it is not enforced.
+- **RPMB ownership.** SPL runs this check before it starts BL31 and BL32,
+  so it cannot reach OP-TEE's RPMB file system or the OP-TEE AVB trusted
+  application that U-Boot proper uses for its rollback indexes
+  ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §4.3). It reads
+  and writes the partition itself, as a second raw RPMB user. OP-TEE's RPMB
+  file system takes the whole partition, and another raw writer is expected
+  to corrupt it or be corrupted by it (rpmb-survey.md §7.2). The two would
+  also have to derive the same authentication key, since the partition has
+  only one. So this SPL check and OP-TEE RPMB storage
+  (`CFG_RPMB_FS=y`) are **not supported together** on this board until a
+  shared partition layout and a compatible key derivation are shown and
+  validated. No public source read here does that for the i.MX 95.
 
 ### 5.3 Inside TF-A and OP-TEE
 
@@ -259,7 +271,9 @@ SPL-level second container.
    row settles the life cycle. A fuse commit cannot be undone and the fuse
    width is not confirmed (§5.1, §8). The SW version check exists only in
    NXP's Trusty build (§5.2), so it would have to be enabled or ported for
-   this board's build.
+   this board's build. It makes SPL a raw RPMB user, so (a) and the SW-version
+   part of (c) exclude OP-TEE RPMB storage (question 5 (a)) until a shared
+   layout and key derivation are validated (§5.2).
 
 3. **Which A/B scheme carries the secure-world images?**
    Options: (a) NXP's SPL dual bootloader (`bootloader_a`/`bootloader_b`
@@ -270,7 +284,9 @@ SPL-level second container.
    copies of the container holding TF-A and OP-TEE, and a FRDM-IMX95-PRO
    defconfig enables it (`imx95_19x19_frdm_pro_android_trusty_dual`) (§6.1).
    But (a) leaves the first container (ELE firmware, System Manager, SPL)
-   single-slot. (b) and (c) are not confirmed for this SoC (§7.2, §8). Decide
+   single-slot, and its rollback index is the SPL one of §5.2, a raw RPMB
+   user that cannot share the partition with OP-TEE RPMB storage until that
+   is validated. (b) and (c) are not confirmed for this SoC (§7.2, §8). Decide
    this together with the platform-image row (#14). This row only needs the
    answer to be one container per slot.
 
@@ -285,13 +301,22 @@ SPL-level second container.
 5. **Should OP-TEE use RPMB secure storage, which also gives TA downgrade
    protection?**
    Options: (a) yes, `CFG_RPMB_FS=y`; (b) no, REE-FS storage only.
-   Recommendation: (a) if the board boots from eMMC, because the SPL
-   rollback index (§5.2) needs RPMB as well. RPMB key programming is a
-   provisioning step that belongs to the oem-key-provisioning row and is not
-   covered here.
+   Recommendation: (a) if the board boots from eMMC and OP-TEE holds state
+   of its own, with OP-TEE as the **only** RPMB owner, as
+   [rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §7.3 recommends.
+   That excludes the SPL rollback index of §5.2, which writes RPMB directly
+   before OP-TEE runs: the two are not supported together until a shared
+   layout and a compatible key derivation are validated (§5.2). Under (a),
+   the container's anti-rollback rests on the fuse version (§5.1, question 2
+   (b)) and any later check that goes through OP-TEE. If the owner prefers
+   the SPL index, then (b), and SPL is the only RPMB owner. RPMB key
+   programming is a provisioning step that belongs to the oem-key-provisioning
+   row and is not covered here.
 
 6. **Which boot device does the product use?**
    Options: (a) eMMC; (b) FlexSPI NOR (`imx95_19x19_frdm_pro_fspi_defconfig`
    exists [S3]).
    Recommendation: none from the sources. Questions 2 (a), 3 (a) and 5 (a)
-   all need eMMC RPMB or GPT, so a NOR-only design would rule them out.
+   all need eMMC RPMB or GPT, so a NOR-only design would rule them out. Even
+   on eMMC, the SPL rollback index (2 (a), and 3 (a), which raises it) and
+   OP-TEE RPMB storage (5 (a)) cannot both own RPMB (§5.2).
