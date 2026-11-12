@@ -44,7 +44,7 @@ UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check lint lint-shell lint-workflows lint-docs check-tracked-cst cst-check \
+	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools
 
@@ -75,7 +75,10 @@ test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_te
 		echo "--- $$t"; bash "$$t" || { echo "FAIL $$t"; fail=1; }; \
 	done; exit $$fail
 
-coverage: test ## Unit tests, then the share of project scripts a test runs (COVERAGE_THRESHOLD)
+# coverage runs the suite once: check-script-tests.sh runs every test, prints
+# its output as `make test` does, and fails when one fails. A `test`
+# prerequisite would run the suite a second time.
+coverage: check-tracked-cst ## Unit tests, once, and the share of project scripts a test runs (COVERAGE_THRESHOLD)
 	@scripts/check-script-tests.sh $(COVERAGE_THRESHOLD)
 
 integration-test: ## Integration tests in the integration image (IT_IMAGE_ID if set, else IT_IMAGE), hardened, no network
@@ -107,7 +110,7 @@ deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs th
 
 ## --- The lint-class gates the canonical ci.yml runs on the PR tier ---
 
-lint: lint-shell lint-workflows lint-docs ## shellcheck, actionlint and the Markdown link check
+lint: lint-shell lint-workflows lint-docs docs-check ## shellcheck, actionlint, the Markdown link check and docs-check
 
 lint-shell: ## shellcheck every shell script
 	@$(call NEED_TOOL,shellcheck)
@@ -121,6 +124,11 @@ lint-workflows: ## actionlint every workflow (with shellcheck of their run steps
 
 lint-docs: ## Every relative link and anchor in the tracked Markdown resolves
 	@python3 scripts/check-doc-links.py .
+
+# docs-check is in lint, which ci.yml's image job runs (`make lint`). It is
+# offline and needs no tool beyond python3.
+docs-check: ## docs/, ROADMAP.md, README.md: links, anchors, and no internal host, IP or /home path
+	@python3 scripts/docs-check.py .
 
 gosec: check-tracked-cst secret-scan-tree ## The PR tier's security gate (ci.yml's `make gosec`): CST guard and tree secret scan
 

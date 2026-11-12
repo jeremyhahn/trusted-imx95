@@ -234,6 +234,90 @@ printf 'exit 1\n' >>"$mini/test/mini_test.sh"
 run "$mini/scripts/check-script-tests.sh" 100
 check "check-script-tests: a failing test fails the count" 1 "test/mini_test.sh failed"
 
+# --- make coverage runs the suite once; make docs-check ----------------------
+# A second mini repository with this Makefile and the scripts its coverage
+# and docs-check targets run. Its one test counts its runs.
+mk2="$TMP_ROOT/mk2"
+mkdir -p "$mk2/scripts" "$mk2/test" "$mk2/docs"
+for s in tool-pins.sh check-script-tests.sh check-tracked-cst.sh docs-check.py check-doc-links.py; do
+	cp "$ROOT/scripts/$s" "$mk2/scripts/"
+done
+cp "$ROOT/Makefile" "$mk2/"
+cat >"$mk2/test/count_test.sh" <<'EOF'
+#!/usr/bin/env bash
+echo run >>"$COUNT_FILE"
+echo "ok   counted"
+[ -z "${COUNT_FAIL:-}" ]
+EOF
+printf '# Readme\n\nSee [the roadmap](ROADMAP.md#roadmap) and [a doc](docs/a.md).\n' >"$mk2/README.md"
+printf '# Roadmap\n\nRM00284 §3.2.6.3; an example host at 192.0.2.10.\n' >"$mk2/ROADMAP.md"
+printf '# A\n\n## Part one\n\nBack to [the readme](../README.md) and [part one](#part-one).\n' >"$mk2/docs/a.md"
+git -C "$mk2" init -q && git -C "$mk2" add -A
+export COUNT_FILE="$TMP_ROOT/count"
+: >"$COUNT_FILE"
+run make --no-print-directory -C "$mk2" coverage COVERAGE_THRESHOLD=0
+check "make coverage: passes with its tests" 0 "--- test/count_test.sh" "ok   counted" "check-script-tests:"
+expect "make coverage: runs the suite once" test "$(grep -c . "$COUNT_FILE")" = 1
+: >"$COUNT_FILE"
+COUNT_FAIL=1 run make --no-print-directory -C "$mk2" coverage COVERAGE_THRESHOLD=0
+check "make coverage: a failing test fails it" nonzero "FAIL test/count_test.sh"
+expect "make coverage: a failing suite also runs once" test "$(grep -c . "$COUNT_FILE")" = 1
+
+run make --no-print-directory -C "$mk2" docs-check
+check "make docs-check: links, anchors, a § section and an RFC 5737 address pass" 0 "docs-check: OK (3 Markdown files"
+printf 'A [broken link](docs/none.md).\n' >>"$mk2/README.md"
+run make --no-print-directory -C "$mk2" docs-check
+check "make docs-check: a broken relative link fails it" nonzero "README.md:4: link target does not exist"
+printf '# Readme\n\nSee [the roadmap](ROADMAP.md#nowhere).\n' >"$mk2/README.md"
+run python3 "$ROOT/scripts/docs-check.py" "$mk2"
+check "docs-check: an anchor the target lacks fails" 1 "README.md:3: anchor not found in the link target"
+printf '# Readme\n' >"$mk2/README.md"
+mkdir -p "$mk2/docs/sub"
+{
+	printf 'Clone http://gitbox:3000/x and see build1.corp.\n'
+	# Built here, so this file holds no address or home path itself.
+	printf '%s\nssh admin@%s\ncd /%s/dev/tree\n%s\n' '~~~' "10.20.$((15 * 2)).40" "ho""me" '~~~'
+	printf 'Not an address: v1.35.2.1 or 1.2.3.4.5; an address: 300.1.1.1 is not one.\n'
+	printf 'The local registry at https://localhost:5000 is fine.\n'
+} >"$mk2/docs/sub/b.md"
+run python3 "$ROOT/scripts/docs-check.py" "$mk2"
+check "docs-check: an internal host, an IP and a /home path fail, fenced or not, in a nested docs/ file" 1 \
+	"docs/sub/b.md:1: a URL names an internal (single-label) host" "docs/sub/b.md:1: an internal host name" \
+	"docs/sub/b.md:3: an IP address" "docs/sub/b.md:4: a /home path"
+for n in 5 6 7; do
+	if [[ "$OUT" == *"docs/sub/b.md:$n:"* ]]; then fail "docs-check: line $n of b.md (a version, a fence, localhost) passes" "$OUT"; else pass "docs-check: line $n of b.md (a version, a fence, localhost) passes"; fi
+done
+if [[ "$OUT" == *admin@* || "$OUT" == *"10.20."* || "$OUT" == *gitbox* || "$OUT" == *dev/tree* ]]; then
+	fail "docs-check: a finding prints the rule, not the matched text" "$OUT"
+else
+	pass "docs-check: a finding prints the rule, not the matched text"
+fi
+rm -rf "$mk2/docs/sub"
+rm "$mk2/ROADMAP.md"
+run python3 "$ROOT/scripts/docs-check.py" "$mk2"
+check "docs-check: a missing ROADMAP.md fails" 1 "ROADMAP.md: missing"
+run python3 "$ROOT/scripts/docs-check.py" "$ROOT"
+check "docs-check: this repository's docs/, ROADMAP.md and README.md pass" 0 "docs-check: OK"
+expect "make lint runs docs-check (so ci.yml's make lint enforces it)" \
+	grep -qE '^lint:.* docs-check( |$)' "$ROOT/Makefile"
+
+# --- ci.yml: marking a draft ready starts the Gate (handbook v1.35.3, DS-8551)
+run python3 - "$ROOT/.github/workflows/ci.yml" <<'EOF'
+import re, sys
+lines = open(sys.argv[1]).read().split("\n")
+on = lines.index("on:")
+pr = next(n for n in range(on, len(lines)) if lines[n] == "  pull_request:")
+for l in lines[pr + 1:]:
+    if l.strip() and not l.startswith("    "):
+        sys.exit("pull_request has no types")
+    m = re.match(r"^    types: \[(.*)\]\s*(#.*)?$", l)
+    if m:
+        print("types:", " ".join(t.strip() for t in m.group(1).split(",")))
+        break
+EOF
+check "ci.yml: the pull_request types include ready_for_review beside the others" 0 \
+	"types: opened synchronize reopened ready_for_review"
+
 # --- ci.yml: every event runs the tree secret scan ---------------------------
 #
 # The tree secret scan runs in the lint job's `make gosec` step or in the

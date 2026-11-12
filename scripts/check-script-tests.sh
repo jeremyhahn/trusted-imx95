@@ -45,11 +45,14 @@ done
 
 tests=(test/*_test.sh)
 [ -f "${tests[0]}" ] || { echo "check-script-tests: no test/*_test.sh found" >&2; exit 1; }
+# `make coverage`'s only run of the suite: each test's output is printed as
+# `make test` prints it, and a failing test fails the count.
 fail=0
 for t in "${tests[@]}"; do
-	PATH="$work/shims:$PATH" bash "$t" >"$work/out" 2>&1 || {
-		echo "check-script-tests: $t failed:" >&2
-		cat "$work/out" >&2
+	echo "--- $t"
+	PATH="$work/shims:$PATH" bash "$t" 2>&1 || {
+		echo "FAIL $t"
+		echo "check-script-tests: $t failed" >&2
 		fail=1
 	}
 done

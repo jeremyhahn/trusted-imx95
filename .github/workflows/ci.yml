@@ -258,7 +258,9 @@
 # carries a green or skipped gate into its merge. Marking the PR ready
 # starts no run, and there is no edited or ready_for_review trigger (an
 # edited run would join the PR's group and cancel a run in flight): the
-# PR's own lane pushes an empty commit when the PR leaves draft.
+# PR's own lane pushes an empty commit when the PR leaves draft. (Handbook
+# v1.35.3, Software DS-8551, adds `ready_for_review` to the types; see
+# `on.pull_request` below.)
 # v1.25.4 (2026-10-21, from a Codex review): `pull_request` lists its types,
 # [opened, synchronize, reopened], with no `labeled`, as several repositories'
 # CUSTOMIZE copies already did. A `ci:full` label takes effect on the PR's
@@ -613,7 +615,11 @@ on:
     # nothing: no run, no status. The cost: adding `ci:full` waits for the
     # PR's next push or update-branch, or takes effect through
     # `workflow_dispatch`.
-    types: [opened, synchronize, reopened]
+    # Handbook v1.35.3 (Software DS-8551) adds `ready_for_review`, so marking
+    # a draft ready starts the Gate. A draft's run does nothing (v1.26), so
+    # this run has no work in flight to cancel. test/ci_scripts_test.sh
+    # holds this.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:                    # re-fire a whole workflow; also the
                                         # only retry when a run was never
                                         # created (see v1.3 correction above)
