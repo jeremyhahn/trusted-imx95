@@ -11,6 +11,24 @@
 # `git grep <commit>`: nothing from the pull request is checked out, built or
 # run. Its token is `contents: read` and is not persisted in the clone.
 #
+# Where the secret lives (Codex finding on #19): a repository- or
+# organization-scope secret is readable by any same-repository
+# `pull_request` run, whose author can add a step naming it to their own
+# ci.yml. RELEASABILITY_PATTERNS is therefore an ENVIRONMENT secret of the
+# `releasability` environment, which this job declares, and that
+# environment's deployment branch policy allows `main` alone:
+# pull_request_target and push-to-main runs resolve to main and get it; a
+# `pull_request` run resolves to refs/pull/N/merge and is refused the
+# environment. The owner's repository settings (only the owner can change them):
+#   1. create the environment `releasability`;
+#   2. set its deployment branches to selected branches, `main` only;
+#   3. add RELEASABILITY_PATTERNS as a secret of that environment;
+#   4. delete the repository-scope RELEASABILITY_PATTERNS secret (and any
+#      organization-scope one this repository can see).
+# Until steps 1-3 are done the secret is absent here and the job fails
+# closed. test/ci_scripts_test.sh checks that every job naming the secret
+# declares the environment and that no pull_request workflow declares it.
+#
 # The rules are ci.yml v1.33.2's lint step, moved here unchanged: every
 # non-blank, non-`#` line of the secret is `class<TAB>regex`, the class one of
 # coord-host, internal-email, lab-address, lab-host or owner-path (optional
@@ -54,6 +72,9 @@ jobs:
   releasability:
     name: Releasability
     runs-on: ubuntu-latest
+    # The secret lives only in this environment, whose deployment branch
+    # policy is main alone (see the header).
+    environment: releasability
     timeout-minutes: 5
     permissions:
       contents: read

@@ -1314,6 +1314,70 @@ printf '          RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}\
 run prsecret "$wfo"
 check "releasability: the check fails a ci.yml that hands the secret to a pull_request run" 1 \
 	"runs on pull_request and names the private pattern secret: ci.yml"
+# relenv <dir>: the secret lives in the `releasability` environment, whose
+# branch policy is main alone (Codex finding on #19: a repository-scope secret
+# is open to any same-repo pull_request run). Fails, naming the file and job,
+# when a job that names the secret declares no `environment: releasability`,
+# or when a workflow that runs on `pull_request` declares that environment.
+relenv() {
+	python3 - "$1" <<'EOF'
+import glob, os, re, sys
+envre = re.compile(r"^\s+environment:\s*(?:\n\s+name:\s*)?['\"]?releasability['\"]?\s*$", re.M)
+bad = []
+for p in sorted(glob.glob(os.path.join(sys.argv[1], "*.yml")) + glob.glob(os.path.join(sys.argv[1], "*.yaml"))):
+    name = os.path.basename(p)
+    lines = [re.sub(r"\s+#.*$|^\s*#.*$", "", l) for l in open(p, encoding="utf-8").read().split("\n")]
+    on, inon = [], False
+    for l in lines:
+        if re.match(r"^['\"]?on['\"]?\s*:", l):
+            inon = True
+            on.append(l.split(":", 1)[1])
+            continue
+        if inon:
+            if re.match(r"^\S", l):
+                break
+            on.append(l)
+    if re.search(r"\bpull_request\b", "\n".join(on)) and envre.search("\n".join(lines)):
+        bad.append("runs on pull_request and declares the releasability environment: " + name)
+    jobs, job, injobs = {}, None, False
+    for l in lines:
+        if re.match(r"^jobs:\s*$", l):
+            injobs = True
+            continue
+        if injobs and re.match(r"^\S", l):
+            injobs = False
+        if not injobs:
+            continue
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", l)
+        if m:
+            job = m.group(1)
+            jobs[job] = []
+        elif job:
+            jobs[job].append(l)
+    for job, body in jobs.items():
+        text = "\n".join(body)
+        if "secrets.RELEASABILITY_PATTERNS" in text and not envre.search(text):
+            bad.append("names the private pattern secret without the releasability environment: " + name + " " + job)
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+EOF
+}
+run relenv "$ROOT/.github/workflows"
+check "releasability: every job naming the secret uses the releasability environment, and no pull_request workflow does" 0
+wfe=$TMP_ROOT/wf-env
+mkdir -p "$wfe"
+cp "$ROOT/.github/workflows/"*.yml "$wfe/"
+# The slice-20 releasability job: the secret, no environment.
+sed -i '/^    environment: releasability$/d' "$wfe/releasability.yml"
+run relenv "$wfe"
+check "releasability: the check fails a job that names the secret without the environment" 1 \
+	"names the private pattern secret without the releasability environment: releasability.yml releasability"
+cp "$ROOT/.github/workflows/releasability.yml" "$wfe/releasability.yml"
+printf 'on:\n  pull_request:\njobs:\n  x:\n    runs-on: ubuntu-latest\n    environment: releasability\n    steps:\n      - run: "true"\n' >"$wfe/prenv.yml"
+run relenv "$wfe"
+check "releasability: the check fails a pull_request workflow that declares the environment" 1 \
+	"runs on pull_request and declares the releasability environment: prenv.yml"
 rel=$ROOT/.github/workflows/releasability.yml
 relon=$(sed -n '/^on:/,/^[^ o]/p' "$rel")
 relevents() { [[ "$relon" == *pull_request_target:* && "$relon" == *push:* && "$relon" != *" pull_request:"* ]]; }
