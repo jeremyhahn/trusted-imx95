@@ -646,14 +646,19 @@ permissions:
   contents: read
 
 env:
-  # CUSTOMIZE (Codex security P1, 2026-11-12): the forge runners inject the
+  # CUSTOMIZE (Codex security P1s, 2026-11-12): the forge runners inject the
   # private-module credentials as GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and
   # GIT_CONFIG_VALUE_0 (dependency-resolution.md §6). This repository has no
-  # private modules, and its jobs run a pull request's own scripts, so every
-  # step sees them blank: workflow env overrides the runner's. The
-  # gomodauth.env files below carry GOPRIVATE alone, and
-  # scripts/in-toolchain-image.sh forwards no credential. A runner that
-  # exposes the values some other way is fleet infrastructure, not this file.
+  # private modules, so these lines blank them for every step. That is
+  # defence in depth for the trusted path (push, schedule and dispatch,
+  # which run main's ci.yml) only. It is NOT a boundary for a pull request:
+  # a pull_request run reads this file from the pull request, which can
+  # delete these lines and add a step that reads the runner's values. Keeping
+  # a credential from a pull request's job is the runner's responsibility (a
+  # PR job runs on a runner provisioned with no credential), outside this
+  # repository. The gomodauth.env files below carry GOPRIVATE alone, and
+  # scripts/in-toolchain-image.sh forwards no credential into a container;
+  # both are likewise defence in depth, not the isolation.
   GIT_CONFIG_COUNT: "0"
   GIT_CONFIG_KEY_0: ""
   GIT_CONFIG_VALUE_0: ""
@@ -913,7 +918,11 @@ jobs:
   # this file). On a push to main only, on the release runner, which alone
   # holds the registry credential (rulings 169 and 173): when the registry
   # lacks `<repo>-toolchain:<hash>-main` under CI_IMAGE_NAMESPACE, it builds
-  # the image and pushes it; otherwise it does nothing. The integration image
+  # the image and pushes it; otherwise it does nothing. v5 of the script
+  # builds straight to the registry and checks the pushed digest, and every
+  # trusted pull reads its digest from the registry. Both need the runner's
+  # docker buildx plugin. Without it publish fails, and a pull falls back to
+  # the local build. The integration image
   # stays keyed by the tree (ruling 220(5)) and is built where it runs.
   # This job is not in CI Gate's needs: a registry fault must not turn main
   # red, and every consumer falls back to a local build. CUSTOMIZE: a

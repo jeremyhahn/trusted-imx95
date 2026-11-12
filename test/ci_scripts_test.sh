@@ -501,18 +501,27 @@ check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a l
 
 # --- A trusted run never uses a toolchain tag the shared daemon holds ---
 # (Codex security P1: a pull request's job can tag any image with main's tag.)
-# The stub docker keeps each reference's image ID, and its RepoDigests, as
-# files under $IMG_STATE; an image ID is a reference to itself. A pull
-# succeeds while $IMG_STATE/registry exists and gives the registry's image,
-# $IMG_GOOD, digest sha256:dgood. A build gives sha256:<sha256 of its target>
-# and writes it to its --iidfile. Every container start (create, run) is
-# logged to $IMG_STARTS.
+# The stub docker keeps each local reference's image ID, and its RepoDigests,
+# as files under $IMG_STATE; an image ID is a reference to itself. The
+# registry is $IMG_STATE/registry/, present while it is up: a tag's file
+# holds its manifest digest, a digest's file its image ID. A build gives
+# sha256:<sha256 of its target> and writes it to its --iidfile; a buildx
+# build pushes its result as sha256:<sha256 of manifest:<target>>. Every
+# container start (create, run) is logged to $IMG_STARTS. The races another
+# job on the shared daemon can run:
+#   IMG_RACE_PULL   after any pull, the toolchain's remote tag is moved to an
+#                   older image the registry still holds ($IMG_OLD, $DOLD)
+#   IMG_RACE_PUSH   a push first finds the tag moved to $IMG_EVIL
+#   IMG_REG_OVERWRITE  after a buildx push, the registry's tag names $DOLD
+#   IMG_NOBUILDX    the runner has no buildx plugin
 mkdir -p "$TMP_ROOT/imgbin"
 cat >"$TMP_ROOT/imgbin/docker" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$IMG_LOG"
 key() { printf '%s' "$1" | tr '/:@' '___'; }
 s=$IMG_STATE
+r=$s/registry
+h() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 case "$1 ${2:-}" in
 "image inspect")
 	ref=${*: -1}
@@ -525,16 +534,33 @@ case "$1 ${2:-}" in
 	esac ;;
 "image rm") rm -f "$s/$(key "$3")" "$s/$(key "$3").digests" ;;
 "pull -q")
-	[ -f "$s/registry" ] || exit 1
+	[ -d "$r" ] || exit 1
 	ref=$3
-	repo=${ref%@*}
-	[ "$repo" != "$ref" ] || repo=${ref%:*}
-	echo "$IMG_GOOD" >"$s/$(key "$ref")"
-	echo "$IMG_GOOD" >"$s/$(key "$IMG_GOOD")"
-	if [ -z "${IMG_NODIGEST:-}" ]; then echo "$repo@sha256:dgood" >"$s/$(key "$ref").digests"; fi ;;
+	case $ref in
+	*@*) repo=${ref%@*} d=${ref#*@} ;;
+	*) repo=${ref%:*}; d=$(cat "$r/$(key "$ref")" 2>/dev/null) || exit 1 ;;
+	esac
+	id=$(cat "$r/$(key "$d")" 2>/dev/null) || exit 1
+	echo "$id" >"$s/$(key "$ref")"
+	echo "$id" >"$s/$(key "$id")"
+	echo "$repo@$d" >"$s/$(key "$ref").digests"
+	if [ -n "${IMG_RACE_PULL:-}" ]; then
+		echo "$IMG_OLD" >"$s/$(key "$IMG_REMOTE")"
+		echo "$IMG_OLD" >"$s/$(key "$IMG_OLD")"
+		echo "${IMG_REMOTE%:*}@$DOLD" >"$s/$(key "$IMG_REMOTE").digests"
+	fi ;;
 "tag "*)
+	case $3 in *@*) echo "refusing to create a tag with a digest reference" >&2; exit 1 ;; esac
 	cp "$s/$(key "$2")" "$s/$(key "$3")"
 	if [ -f "$s/$(key "$2").digests" ]; then cp "$s/$(key "$2").digests" "$s/$(key "$3").digests"; else rm -f "$s/$(key "$3").digests"; fi ;;
+"push "*)
+	ref=${*: -1}
+	if [ -n "${IMG_RACE_PUSH:-}" ]; then echo "$IMG_EVIL" >"$s/$(key "$ref")"; fi
+	id=$(cat "$s/$(key "$ref")")
+	d=sha256:$(h "pushed:$id")
+	echo "$d" >"$r/$(key "$ref")"
+	echo "$id" >"$r/$(key "$d")"
+	echo "${ref%:*}@$d" >"$s/$(key "$ref").digests" ;;
 "build "*)
 	iid= tag= target=
 	shift
@@ -546,15 +572,45 @@ case "$1 ${2:-}" in
 		*) shift ;;
 		esac
 	done
-	id=sha256:$(printf '%s' "$target" | sha256sum | cut -c1-64)
+	id=sha256:$(h "$target")
 	echo "$id" >"$s/$(key "$id")"
 	if [ -n "$tag" ]; then echo "$id" >"$s/$(key "$tag")"; rm -f "$s/$(key "$tag").digests"; fi
 	if [ -n "$iid" ]; then printf '%s' "$id" >"$iid"; fi ;;
+"buildx "*)
+	[ -z "${IMG_NOBUILDX:-}" ] || { echo "docker: unknown command: docker buildx" >&2; exit 1; }
+	case $2 in
+	version) echo "github.com/docker/buildx v0 stub" ;;
+	imagetools)
+		[ "${3:-}" = inspect ] && [ -d "$r" ] || exit 1
+		d=$(cat "$r/$(key "$4")" 2>/dev/null) || exit 1
+		printf '{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"%s","size":1}\n' "$d" ;;
+	build)
+		meta= out= target=
+		shift 2
+		while [ $# -gt 0 ]; do
+			case $1 in
+			--metadata-file) meta=$2; shift 2 ;;
+			--output) out=$2; shift 2 ;;
+			--target) target=$2; shift 2 ;;
+			*) shift ;;
+			esac
+		done
+		case $out in type=registry,name=*) name=${out#type=registry,name=} ;; *) exit 4 ;; esac
+		[ -d "$r" ] || exit 1
+		id=sha256:$(h "$target")
+		d=sha256:$(h "manifest:$target")
+		echo "$d" >"$r/$(key "$name")"
+		echo "$id" >"$r/$(key "$d")"
+		echo "$id" >"$s/$(key "$name")"
+		printf '{"containerimage.digest":"%s"}\n' "$d" >"$meta"
+		if [ -n "${IMG_REG_OVERWRITE:-}" ]; then echo "$DOLD" >"$r/$(key "$name")"; fi ;;
+	*) exit 3 ;;
+	esac ;;
 "create "* | "run "*)
 	echo "$*" >>"$IMG_STARTS"
 	case " $* " in *" --entrypoint du "*) printf '4\t/c\n' ;; esac ;;
 "cp "*) cat >/dev/null ;;
-"start "* | "rm "* | "ps "* | "push "*) ;;
+"start "* | "rm "* | "ps "*) ;;
 "volume ls") echo "${IMG_VOLS:-}" ;;
 "login "*) cat >/dev/null ;;
 "manifest inspect") exit 1 ;;
@@ -566,17 +622,25 @@ IMG_LOG=$TMP_ROOT/img.log
 IMG_STATE=$TMP_ROOT/img
 IMG_STARTS=$TMP_ROOT/img-starts.log
 IMG_GOOD=sha256:$(printf 'a%.0s' {1..64})
+IMG_OLD=sha256:$(printf 'b%.0s' {1..64})
 IMG_EVIL=sha256:$(printf 'e%.0s' {1..64})
-export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD
+DGOOD=sha256:$(printf 'd%.0s' {1..64})
+DOLD=sha256:$(printf 'c%.0s' {1..64})
 ltag=trusted-imx95-toolchain:abc
 itag=trusted-imx95-integration:abc
+rrepo=forge.example/ns/trusted-imx95-toolchain
+IMG_REMOTE=$rrepo:abc-main
+export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD IMG_OLD IMG_EVIL DGOOD DOLD IMG_REMOTE
 tc_built=sha256:$(printf '%s' toolchain | sha256sum | cut -c1-64)
+tc_pushed=sha256:$(printf '%s' manifest:toolchain | sha256sum | cut -c1-64)
 it_built=sha256:$(printf '%s' integration | sha256sum | cut -c1-64)
 skey() { printf '%s' "$1" | tr '/:@' '___'; }
 lkey=$(skey "$ltag")
+rkey=$(skey "$IMG_REMOTE")
 rt=$TMP_ROOT/rt # the job's RUNNER_TEMP
-# seed <registry up: yes|no>: a fresh daemon whose $ltag and $itag a pull
-# request tagged with its own image ($IMG_EVIL, no registry digest).
+# seed yes|empty|no: a fresh daemon whose $ltag and $itag a pull request
+# tagged with its own image ($IMG_EVIL), and a registry that holds the
+# toolchain's remote tag (yes), only an older image (empty), or is down (no).
 seed() {
 	rm -rf "$IMG_STATE" "$rt"
 	mkdir -p "$IMG_STATE" "$rt"
@@ -586,7 +650,12 @@ seed() {
 	echo "$IMG_EVIL" >"$IMG_STATE/$lkey"
 	echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$itag")"
 	echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$IMG_EVIL")"
-	[ "$1" = no ] || : >"$IMG_STATE/registry"
+	[ "$1" != no ] || return 0
+	mkdir -p "$IMG_STATE/registry"
+	echo "$IMG_OLD" >"$IMG_STATE/registry/$(skey "$DOLD")"
+	[ "$1" = yes ] || return 0
+	echo "$DGOOD" >"$IMG_STATE/registry/$rkey"
+	echo "$IMG_GOOD" >"$IMG_STATE/registry/$(skey "$DGOOD")"
 }
 # move: a pull request's job moves both tags back to its image.
 move() { echo "$IMG_EVIL" >"$IMG_STATE/$lkey"; echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$itag")"; }
@@ -599,26 +668,46 @@ here=$PWD
 cd "$ROOT" || exit 1
 seed yes
 run cache push
-check "ci-image-cache: a push run pulls by digest over a tag the daemon already holds" 0 \
-	"pulled forge.example/ns/trusted-imx95-toolchain@sha256:dgood as $ltag"
-expect "ci-image-cache: the push run's tag names the registry's image, not the seeded one" \
-	grep -qx "$IMG_GOOD" "$IMG_STATE/$lkey"
-expect "ci-image-cache: the push run pulls the digest itself" \
-	grep -qx "pull -q forge.example/ns/trusted-imx95-toolchain@sha256:dgood" "$IMG_LOG"
+check "ci-image-cache: a push run pulls by the registry's digest over a tag the daemon already holds" 0 \
+	"pulled $rrepo@$DGOOD as $IMG_GOOD"
+expect "ci-image-cache: the push run reads the tag's digest from the registry" \
+	grep -qx "buildx imagetools inspect $IMG_REMOTE --format {{json .Manifest}}" "$IMG_LOG"
+expect "ci-image-cache: the push run pulls the digest itself" grep -qx "pull -q $rrepo@$DGOOD" "$IMG_LOG"
+if grep -qx "pull -q $IMG_REMOTE" "$IMG_LOG"; then
+	fail "ci-image-cache: the push run never pulls the mutable tag" "$(cat "$IMG_LOG")"
+else
+	pass "ci-image-cache: the push run never pulls the mutable tag"
+fi
 expect "ci-image-cache: the push run exports the verified image ID" \
 	grep -qx "TOOLCHAIN_VERIFIED_ID=$IMG_GOOD" "$TMP_ROOT/github_env"
+# Finding 3: another job retags the remote tag between the pull and the
+# digest's read, to an older image the registry still holds.
+seed yes
+IMG_RACE_PULL=1 run cache push
+if { [ "$RC" = 0 ] && grep -qx "TOOLCHAIN_VERIFIED_ID=$IMG_GOOD" "$TMP_ROOT/github_env"; } ||
+	{ [ "$RC" != 0 ] && [ ! -s "$TMP_ROOT/github_env" ]; }; then
+	pass "ci-image-cache: a retag between the pull and the digest's read never exports another image"
+else
+	fail "ci-image-cache: a retag between the pull and the digest's read never exports another image" \
+		"rc $RC; $(cat "$TMP_ROOT/github_env"); $OUT"
+fi
 seed no
 run cache schedule
 check "ci-image-cache: a scheduled run with the registry down falls back to the build, not the seeded tag" 1 \
-	"is not in the registry"
+	"the registry gave no digest for $IMG_REMOTE"
 if [ -s "$TMP_ROOT/github_env" ]; then
 	fail "ci-image-cache: a failed trusted pull exports no verified ID" "$(cat "$TMP_ROOT/github_env")"
 else
 	pass "ci-image-cache: a failed trusted pull exports no verified ID"
 fi
 seed yes
-IMG_NODIGEST=1 run cache push
-check "ci-image-cache: a trusted pull with no registry digest falls back to the build" 1 "has no registry digest"
+IMG_NOBUILDX=1 run cache push
+check "ci-image-cache: a trusted pull on a runner without buildx falls back to the build" 1 "no docker buildx"
+if [ -s "$TMP_ROOT/github_env" ]; then
+	fail "ci-image-cache: a trusted pull without buildx exports no verified ID" "$(cat "$TMP_ROOT/github_env")"
+else
+	pass "ci-image-cache: a trusted pull without buildx exports no verified ID"
+fi
 seed yes
 run cache pull_request
 check "ci-image-cache: a pull request still uses the tag its daemon holds" 0 "the daemon holds $ltag; no pull"
@@ -716,14 +805,39 @@ check "make integration-test: an IT_IMAGE_ID that is a tag is refused" nonzero "
 expect "a trusted job: a refused tag starts no container" test ! -s "$IMG_STARTS"
 run tc env GITHUB_EVENT_NAME=pull_request "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
 check "in-toolchain-image: a pull request may still name a tag" 0
-# publish tags the ID its build recorded, not the tag another job moved.
-seed yes
-rm -f "$IMG_STATE/registry"
-GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token run cache push publish
-check "ci-image-cache: publish pushes the image its build recorded" 0 "published $ltag"
-expect "ci-image-cache: publish tags the recorded ID, never the local tag" \
-	grep -qx "tag $tc_built forge.example/ns/$ltag-main" "$IMG_LOG"
+# Finding 2: publish pushes the build's own result, never a local tag
+# another job can move, and checks the registry's digest after the push.
+pub() { GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token cache push publish; }
+reg_image() { cat "$IMG_STATE/registry/$(skey "$(cat "$IMG_STATE/registry/$rkey")")"; }
+seed empty
+run pub
+check "ci-image-cache: publish pushes the image its build made" 0 "published $ltag as $rrepo@$tc_pushed"
+expect "ci-image-cache: the registry's tag names the built image" test "$(reg_image)" = "$tc_built"
+expect "ci-image-cache: publish builds straight to the registry" \
+	grep -q "^buildx build .*--output type=registry,name=$IMG_REMOTE " "$IMG_LOG"
+if grep -qE '^(push|tag) ' "$IMG_LOG"; then
+	fail "ci-image-cache: publish resolves no local tag (no docker tag or push)" "$(cat "$IMG_LOG")"
+else
+	pass "ci-image-cache: publish resolves no local tag (no docker tag or push)"
+fi
 if [[ "$OUT" == *fake-token* ]]; then fail "ci-image-cache: publish prints no credential" "$OUT"; else pass "ci-image-cache: publish prints no credential"; fi
+seed empty
+IMG_RACE_PUSH=1 run pub
+if [ "$RC" != 0 ] || [ "$(reg_image)" = "$tc_built" ]; then
+	pass "ci-image-cache: a retag between the tag and the push never publishes another image as done"
+else
+	fail "ci-image-cache: a retag between the tag and the push never publishes another image as done" "registry $(reg_image); $OUT"
+fi
+seed empty
+IMG_REG_OVERWRITE=1 run pub
+check "ci-image-cache: publish fails when the registry's digest is not the build's" 1 \
+	"the registry's $IMG_REMOTE is $DOLD, not the image this run built ($tc_pushed)"
+seed empty
+IMG_NOBUILDX=1 run pub
+check "ci-image-cache: publish without buildx fails" 1 "publish needs the runner's docker buildx"
+seed yes
+run pub
+check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry holds $IMG_REMOTE; nothing to publish"
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref, and hands the

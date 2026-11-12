@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# ci-image-cache.sh v5 (2026-11-12, Codex security P1s on trusted-imx95 #19):
+# v4 still resolved the shared daemon's tags at two points. The trusted pull
+# read the registry digest from the RepoDigests of the tag it had just
+# pulled, and another job could retag that in between. Publish tagged the
+# built ID and then pushed the tag, which could be retagged before the push.
+# Now a trusted run reads the tag's digest from the registry itself
+# (`docker buildx imagetools inspect`, which asks the registry, not the
+# daemon), pulls that digest and takes TOOLCHAIN_VERIFIED_ID from the
+# by-digest reference. A digest reference cannot be retagged. Publish builds
+# with `docker buildx build --output type=registry`, which pushes the build's
+# own result. It then reads the registry's digest for the tag and fails
+# unless that digest is the build's (its --metadata-file).
+# Both need the runner's docker buildx CLI plugin; this runs on the runner
+# host, not in the toolchain image. Without buildx a trusted pull falls back
+# to the local build, and publish fails.
 # ci-image-cache.sh v4 (2026-11-12, Codex security P1 on trusted-imx95 #19):
 # checking the tag once left a race, because later steps resolved it again.
 # The Makefile now records the image ID a trusted build settles on (the
@@ -80,8 +95,21 @@ esac
 remote="$host/$ns/$local_tag-main"
 
 cfg=$(mktemp -d)
-cleanup() { rm -f "$cfg/config.json"; rmdir "$cfg" 2>/dev/null || true; }
+cleanup() { rm -rf "$cfg"; }
 trap cleanup EXIT
+# The private DOCKER_CONFIG still finds the user's CLI plugins (buildx),
+# which the CLI looks up under it first.
+plugins=${DOCKER_CONFIG:-${HOME:-/nonexistent}/.docker}/cli-plugins
+if [ -d "$plugins" ]; then ln -s "$plugins" "$cfg/cli-plugins"; fi
+repo=${remote%:*}
+
+# registry_digest <ref>: the manifest digest the registry holds for <ref>,
+# asked of the registry and never of the shared daemon (v5, above). Prints
+# nothing and fails when it cannot be read.
+registry_digest() {
+  DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null \
+    | jq -er '.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' 2>/dev/null
+}
 
 case ${1:-} in
   pull)
@@ -91,37 +119,34 @@ case ${1:-} in
       echo "ci-image-cache: the daemon holds $local_tag; no pull"
       exit 0
     fi
-    [ "$trusted" = 0 ] || echo "ci-image-cache: a trusted run ($GITHUB_EVENT_NAME) never uses the daemon's $local_tag; pulling it by digest"
+    if [ "$trusted" = 1 ]; then
+      echo "ci-image-cache: a trusted run ($GITHUB_EVENT_NAME) never uses the daemon's $local_tag; pulling it by the registry's digest"
+      # The digest from the registry (v5), then the pull of that digest. The
+      # ID is the by-digest reference's, which no other job can retag.
+      digest=$(registry_digest "$remote") \
+        || { echo "ci-image-cache: the registry gave no digest for $remote (not there, unreachable, or no docker buildx); the job builds it"; exit 1; }
+      DOCKER_CONFIG=$cfg docker pull -q "$repo@$digest" >/dev/null 2>&1 \
+        || { echo "ci-image-cache: the pull of $repo@$digest failed; the job builds it"; exit 1; }
+      id=$(docker image inspect --format '{{.Id}}' "$repo@$digest" 2>/dev/null) && [[ "$id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || { echo "ci-image-cache: $repo@$digest is not in the daemon after its pull; the job builds it"; exit 1; }
+      # The tag is for people only. Nothing in a trusted job reads it, because
+      # the Makefile's docker-build-toolchain records this ID for the job's
+      # containers (v4, above).
+      docker tag "$repo@$digest" "$local_tag" || true
+      if [ -n "${GITHUB_ENV:-}" ]; then echo "TOOLCHAIN_VERIFIED_ID=$id" >> "$GITHUB_ENV"; fi
+      echo "ci-image-cache: pulled $repo@$digest as $id"
+      exit 0
+    fi
     if ! DOCKER_CONFIG=$cfg docker pull -q "$remote" >/dev/null 2>&1; then
       echo "ci-image-cache: $remote is not in the registry (or the pull failed); the job builds it"
       exit 1
     fi
-    # The registry's digest for the tag: the RepoDigests entry of this
-    # repository, which only a pull from (or a push to) the registry sets.
-    repo=${remote%:*}
-    digest=
+    # For the log only: the RepoDigests entry of this repository.
+    digest=unknown
     while IFS= read -r d; do
       case $d in "$repo"@sha256:*) digest=${d#"$repo"@}; break ;; esac
     done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$remote" 2>/dev/null || true)
-    if [ -z "$digest" ]; then
-      [ "$trusted" = 0 ] || { echo "ci-image-cache: $remote has no registry digest; the job builds it"; exit 1; }
-      digest=unknown
-    fi
-    if [ "$trusted" = 1 ]; then
-      # Pull by digest, then tag that content and nothing else.
-      DOCKER_CONFIG=$cfg docker pull -q "$repo@$digest" >/dev/null 2>&1 \
-        || { echo "ci-image-cache: the pull of $repo@$digest failed; the job builds it"; exit 1; }
-      id=$(docker image inspect --format '{{.Id}}' "$repo@$digest") \
-        || { echo "ci-image-cache: $repo@$digest is not in the daemon after its pull; the job builds it"; exit 1; }
-      docker tag "$repo@$digest" "$local_tag"
-      [ "$(docker image inspect --format '{{.Id}}' "$local_tag")" = "$id" ] \
-        || { echo "ci-image-cache: $local_tag does not name $repo@$digest after the tag; the job builds it"; exit 1; }
-      # The Makefile's docker-build-toolchain records this ID for the job's
-      # containers (v4, above).
-      if [ -n "${GITHUB_ENV:-}" ]; then echo "TOOLCHAIN_VERIFIED_ID=$id" >> "$GITHUB_ENV"; fi
-    else
-      docker tag "$remote" "$local_tag"
-    fi
+    docker tag "$remote" "$local_tag"
     docker image rm "$remote" >/dev/null 2>&1 || true   # untags only; $local_tag keeps the image
     echo "ci-image-cache: pulled $repo@$digest as $local_tag"
     ;;
@@ -132,20 +157,31 @@ case ${1:-} in
     [ -n "${RELEASE_REGISTRY_USER:-}" ] || die "RELEASE_REGISTRY_USER is not set (the release runner's env file exports it)"
     [ -n "${RELEASE_REGISTRY_TOKEN:-}" ] || die "RELEASE_REGISTRY_TOKEN is not set (the release runner's env file exports it)"
     [ "${RELEASE_REGISTRY:-$host}" = "$host" ] || die "RELEASE_REGISTRY is not this forge's registry; refusing the push"
-    if DOCKER_CONFIG=$cfg docker manifest inspect "$remote" >/dev/null 2>&1; then
+    DOCKER_CONFIG=$cfg docker buildx version >/dev/null 2>&1 \
+      || die "publish needs the runner's docker buildx CLI plugin (v5, above)"
+    if registry_digest "$remote" >/dev/null; then
       echo "ci-image-cache: the registry holds $remote; nothing to publish"
       exit 0
     fi
-    make docker-build-toolchain "$@"
-    # The ID the build recorded, never $local_tag, which the shared daemon's
-    # other jobs can move (v4, above).
-    id=$(make -s toolchain-ref "$@") || die "make -s toolchain-ref failed"
+    # The Makefile names the Dockerfile; the make args reach it as they did.
+    # shellcheck disable=SC2016 # $(DOCKERFILE) is make's, expanded by make
+    dockerfile=$(make -s --no-print-directory --eval 'ci-image-cache-dockerfile: ; @echo $(DOCKERFILE)' \
+      ci-image-cache-dockerfile "$@") || die "make could not name the Dockerfile"
+    [ -f "$dockerfile" ] || die "the Makefile's Dockerfile '$dockerfile' is not a file"
     printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null
-    docker tag "$id" "$remote"
-    DOCKER_CONFIG=$cfg docker push -q "$remote" >/dev/null
-    digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$remote" 2>/dev/null || echo unknown)
-    docker image rm "$remote" >/dev/null 2>&1 || true
-    echo "ci-image-cache: published $local_tag as $digest"
+    # The build pushes its own result: no local tag is resolved between the
+    # build and the push (v5, above).
+    DOCKER_CONFIG=$cfg docker buildx build --no-cache --provenance=false --sbom=false \
+      --target toolchain -f "$dockerfile" --metadata-file "$cfg/build.json" \
+      --output "type=registry,name=$remote" . \
+      || die "the build and push of $remote failed"
+    built=$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "$cfg/build.json" 2>/dev/null) \
+      || die "the build recorded no image digest for $remote"
+    got=$(registry_digest "$remote") || die "the registry gave no digest for $remote after the push"
+    [ "$got" = "$built" ] \
+      || die "the registry's $remote is $got, not the image this run built ($built)"
+    docker image rm "$remote" >/dev/null 2>&1 || true   # the build's local name, if its driver kept one
+    echo "ci-image-cache: published $local_tag as $repo@$built"
     ;;
   *)
     die "usage: ci-image-cache.sh pull | publish [make args]"
