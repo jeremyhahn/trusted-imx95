@@ -88,8 +88,11 @@ LM1 layout but is **unconfirmed** (§8 item 1).
 ### 3.3 Reset domains
 
 No reset domain is named for the M7 in S1 or S2. The M7 CPU is started and stopped by the SM through `CPU_M7P`
-(LM1 start step 2, stop step 1), and a fault on the M7 (lock-up, reset request, `WDOG5`, `SW1`) resets the M7 LM
-(`lm_reset`). Whether the M7 firmware needs any SCMI reset domain (Reset domain protocol) for its own
+(LM1 start step 2, stop step 1), and in S1 (reference) a fault on the M7 (lock-up, reset request, `WDOG5`, `SW1`)
+resets the M7 LM (`lm_reset`); S10 lists the lock-up, reset and `WDOG5` faults, with reactions **unconfirmed**. A
+reaction on the M7 LM alone leaves the A55 running without the tamper responder, which is fail-open; this
+repository's configuration must put those faults on `sys_reset` or `sys_shutdown` (fault-recovery-survey.md §7,
+§10 question 1). Whether the M7 firmware needs any SCMI reset domain (Reset domain protocol) for its own
 peripherals is **unconfirmed**: the reset-domain identifiers are in imx-sm's generated headers, which this lane
 could not read (§8).
 
@@ -197,7 +200,7 @@ domain and clock IDs are not given: they are in headers this lane could not read
 | M7 SysTick clock | `CLK_M7SYSTICK` | Clock (0x14) | M7 run time | **unconfirmed** | yes (with `M7P`) | S2 |
 | M7 console UART | `LPUART7` on S10 (`LPUART3` on S1) | none (owned peripheral) | M7 run time | **yes** (`LPUART7`) | `LPUART3`, not this device's | S1, S10 |
 | M7 pins | `GPIO_IO36`, `GPIO_IO37` on S10 (`GPIO_IO14`, `GPIO_IO15` on S1) | Pin control (0x19) | M7 run time; wiring on the PRO **unconfirmed** | **yes** (`GPIO_IO36/37`) | `GPIO_IO14/15`, not this device's | S1, S10 |
-| M7 reset | LM1 reset (`lm_reset` fault reaction) | none from the M7; LMM (0x80) from another agent | M7 run time | **yes** (M7 lock-up, M7 reset, WDOG5 reactions) | n/a | S1, S10 |
+| M7 reset | LM1 reset (`lm_reset` fault reaction in S1; must become `sys_reset` or `sys_shutdown`, §3.3) | none from the M7; LMM (0x80) from another agent | M7 run time | **yes** for the M7 lock-up, M7 reset and WDOG5 fault entries; their reaction **unconfirmed** | n/a | S1, S10 |
 | Peripheral reset domains | **unconfirmed** | Reset (0x16) | M7 run time | **unconfirmed** | **unconfirmed** | S5 |
 | NETC power domain | `PD_NETC` | Power (0x11), `POWER_STATE_SET` | tamper response | **unconfirmed** | **no** (owner `AP-NS`) | S1, S3 |
 | NETC reference clock | `CLK_ENETREF` | Clock (0x14), `CLOCK_CONFIG_SET` | tamper response | **unconfirmed** | **no** | S3 |

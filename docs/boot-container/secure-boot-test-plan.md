@@ -112,7 +112,12 @@ repository (see question 2).
 can check everything that is a property of the container alone, and can check
 the fuse-dependent cases only as policy: by comparing the container against
 values this repository records as expected (the SRK table hash, the revocation
-policy, the anti-rollback floor).
+policy, the anti-rollback floor). Those values are per signer: the OEM
+containers are compared with the OEM records, and the NXP-signed enclave
+firmware container with its own pinned vendor record (its digest and version
+fields from the pinned firmware package), never with the OEM hash or floor
+([dev-boot-workflow-survey.md](dev-boot-workflow-survey.md), "Container
+roles"; [ele-firmware-survey.md](ele-firmware-survey.md) §7).
 
 | ID | Host check | Board needed for the real behaviour | Life cycle |
 |---|---|---|---|
@@ -171,8 +176,11 @@ Proposed, in order:
    the host verifier rejects each tampered image and accepts the good one. These
    need no board, fuse or key in the repository.
 2. **Host policy checks, in CI and at release (C2, C3, C4).** Before an image is
-   released, check its SRK table hash, `used_srk_id`, `srk_revoke_mask` and
-   `fuse_version` against values recorded in the repository. These catch the
+   released, check each container's SRK table hash, `used_srk_id`,
+   `srk_revoke_mask` and `fuse_version` against the recorded values of its
+   signer's role (OEM records for OEM containers, the pinned vendor record for
+   the NXP enclave firmware container), and include a complete mixed-signer
+   image that must be accepted. These catch the
    mistake on the host; they cannot show that the enclave rejects the image.
 3. **On-board tests in OEM open, manual, outside CI (C1, C2b, C5a, C5b, C6).**
    Boot each tampered image on an OEM open board and record the event log. Only

@@ -264,9 +264,19 @@ the survey's reading of the sources is:
   `FAULT_DRAM` is **unconfirmed** and must be checked.
 - Keep the M7 as the only S-EENV, so that only the trusted firmware receives
   and clears `fusa` faults.
-- Keep the M7 and A55 watchdog faults on `lm_reset` only if the M7 must keep
-  running while Linux restarts; if a hung M7 is itself a security event,
-  `sys_reset` or `lm_shutdown` is the stricter choice.
+- A55 watchdog faults (`FAULT_WDOG3`, `FAULT_WDOG4`) may stay on `lm_reset`
+  of the A55 LM: the M7 keeps running and supervises the restart.
+- M7 faults (`FAULT_M7_LOCKUP`, `FAULT_M7_RESET`, `FAULT_WDOG5`) are listed
+  under LM1, so a reaction without `lm=` acts on the M7 alone (option table
+  above). The M7 carries the tamper response (docs/SPEC.md,
+  `hsm-self-defence`), so any reaction that stops or restarts only the M7
+  leaves the A55 running unsupervised. `lm_shutdown` is the worst case: the
+  M7 stays off until the next boot while the A55 runs on with no tamper
+  responder, which is fail-open, not stricter. Put these faults on
+  `sys_reset` or `sys_shutdown`, which stop the A55 together with the M7
+  (section 10, question 1). Whether a reaction can name more than one LM
+  with `lm=` is **unconfirmed** (S3, S6 show a single LM); until it is, no
+  LM-level reaction is acceptable for them.
 - Keep the FCCU delayed reaction (system reset) enabled, so that an SM that
   cannot handle a fault still resets the chip.
 - Ship a production SM build, not a debug-monitor or test build (S11, FRDM
@@ -359,11 +369,15 @@ whether it already calls the FuSa protocol; that repository was not read.
    **unconfirmed** (S12). The 15x15 FRDM file (reference) sets `lm_reset`.
    Options: (a) `lm_reset`, as in the FRDM file, the M7 restarts alone;
    (b) `lm_shutdown`, the M7 stays off until the next boot;
-   (c) `sys_reset`, the whole board restarts.
-   Recommendation: (c) `sys_reset`. In this design the M7 runs the trusted
-   firmware and the tamper response; restarting it alone leaves the A55
-   running with no supervisor while it comes back (S3, S6). The sources do not
-   settle it: it depends on whether a hung M7 counts as a security event.
+   (c) `sys_reset`, the whole board restarts;
+   (d) `sys_shutdown`, the whole board stays off until power is cycled.
+   Recommendation: (c) `sys_reset`, or (d) if a restart loop is a concern.
+   In this design the M7 runs the trusted firmware and the tamper response
+   (docs/SPEC.md, `hsm-self-defence`). (a) leaves the A55 running with no
+   supervisor while the M7 comes back; (b) leaves it running with no tamper
+   responder until the next boot (S3, S6). Both are fail-open and are
+   rejected, not merely weaker; section 7 says the same. Any reaction that
+   targets only LM1 is rejected for the same reason.
 
 2. **Reaction to a Cortex-A55 watchdog timeout** (`FAULT_WDOG3`,
    `FAULT_WDOG4`).

@@ -149,6 +149,12 @@ Three layers, each cheap, none of which runs a fuse or provisioning step.
    - a test build fails unless the hash is on the test list;
    - a production build fails if the hash is on the deny-list, and unless it equals the production hash the owner
      has recorded.
+
+   These rules apply to the containers this project signs (the OEM containers). The image also carries the
+   NXP-signed EdgeLock enclave firmware container, whose SRK table is NXP's ([ele-firmware-survey.md](ele-firmware-survey.md)
+   §7): it is checked against its own pinned vendor record, not against the production or test hash
+   ([dev-boot-workflow-survey.md](dev-boot-workflow-survey.md), "Container roles"). Comparing every table in the
+   image with the one production hash would reject every legitimate image.
    The check reads the image, not the signing configuration, so it also catches a container signed with the wrong
    set by hand.
 

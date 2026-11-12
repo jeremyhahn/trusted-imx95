@@ -211,9 +211,12 @@ is decided until the owner answers section 8.
    the system in the 15x15 FRDM file (reference only); the PRO file lacks the
    NoC fault entries (`public-source-survey.md` item 16), and its DRAM fault
    reaction is unconfirmed. In the 15x15 file the M7 faults reset only the M7
-   LM; the PRO file's M7 fault reactions are unconfirmed. Whether
-   an M7 fault should instead reset or shut down the whole SoC, since the M7
-   carries the tamper response, is a question for the owner (SM-FRDM-CFG).
+   LM; the PRO file's M7 fault reactions are unconfirmed. Since the M7
+   carries the tamper response, a reaction that resets or shuts down only the
+   M7 LM leaves the A55 running without it and is fail-open: M7 faults should
+   reset or shut down the whole SoC (`sys_reset` or `sys_shutdown`;
+   fault-recovery-survey.md §7 and §10 question 1). Which of the two is the
+   owner's choice (SM-FRDM-CFG).
 8. **Disable auto-boot on events that an attacker can cause.** The `auto=` key
    can boot an LM on a button press (SM-CONFIG); the reference file does not set
    it, and a deployment should keep it unset unless the owner wants power-on by
@@ -356,9 +359,10 @@ unless `public-source-survey.md` items 14-16 state it.
    remote party change the device's power state (section 3, section 5 item 4).
 5. **What happens when the M7, which carries the tamper response, faults?**
    Options: (a) reset the M7 LM only, as shipped; (b) reset the whole SoC; (c)
-   shut the SoC down. No public source supports one option over another; the
-   choice depends on whether an M7 fault is treated as a possible attack. This
-   survey leans to (b), so that the tamper path is never silently absent.
+   shut the SoC down. (a) leaves the A55 running without the tamper responder
+   while the M7 restarts, so it is fail-open and rejected. Recommendation: (b),
+   or (c) if a reset loop is a concern, so that the tamper path is never
+   silently absent (fault-recovery-survey.md §10 question 1).
 6. **Must secrets be cleared from DDR before suspend?**
    Options: (a) no, rely on the TRDC carve-outs while asleep; (b) yes, the
    secure world wipes session keys and re-derives them from the ELE on resume;

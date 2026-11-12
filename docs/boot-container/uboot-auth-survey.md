@@ -238,7 +238,7 @@ inside the authenticated U-Boot container.
 
 | Link | Contents | Verified by | Row |
 |---|---|---|---|
-| 1 | Containers 1-3: ELE firmware (NXP-signed), V2X firmware, optional executable image, Cortex-M image, SPL | ELE ROM / ELE firmware, against the SRK hash in fuses | `boot-container` (#12) |
+| 1 | Containers 1-3: ELE firmware (NXP-signed), V2X firmware, optional executable image, Cortex-M image, SPL | ELE ROM / ELE firmware. The NXP-signed ELE firmware container is authenticated against NXP's key, not the OEM SRK hash ([ele-firmware-survey.md](ele-firmware-survey.md) §1); the OEM containers against the SRK hash in fuses. Which root the V2X firmware container uses is **unconfirmed**. Host acceptance checks each container against its own signer's records ([dev-boot-workflow-survey.md](dev-boot-workflow-survey.md), "Container roles") | `boot-container` (#12) |
 | 2 | Container 4: Arm Trusted Firmware, U-Boot proper (and OP-TEE when used) | SPL asks the ELE to authenticate it | `boot-container` (#12) |
 | 3 | U-Boot's configuration: the built-in environment, boot command, enabled commands, control DTB with any FIT key (§5) | Covered by link 2, because it is compiled into U-Boot proper | `boot-container` (#12): this survey's subject |
 | 4 | The next stage: kernel, DTB, initramfs, as an AHAB OS container [S2] or a signed FIT [S5] | U-Boot, via the ELE (A) or itself (B) | Boundary: see below |
