@@ -172,9 +172,9 @@ non-NXP vendor), never into this repository, and its row moves into the tables a
 
 ### The CST executable under CST_PATH
 
-The build runs CST's `cst` executable as `$CST_PATH/linux64/bin/cst`, where `CST_PATH` is the top of an extracted
-CST release (the directory that holds `linux64/`; in `tools/cst/cst-3.1.0.tgz` that is `release/`). Beside it in
-`linux64/bin/` are `srktool`, which builds the SRK table and SRK hash, and `ahab_pki_tree`, which builds the AHAB
+`CST_PATH` is the directory that contains the extracted `release/` directory, as `scripts/cst-check.sh` checks it
+(`$CST_PATH/release/docs/CST_UG.pdf` must exist); it is not `release/` itself. The build runs CST's `cst` executable
+as `$CST_PATH/release/linux64/bin/cst`. Beside it in `$CST_PATH/release/linux64/bin/` are `srktool`, which builds the SRK table and SRK hash, and `ahab_pki_tree`, which builds the AHAB
 PKI tree. Das U-Boot's AHAB introduction (above) places `srktool` and `ahab_pki_tree` in `linux64/bin/` of the CST
 package; that `cst` sits in the same directory of CST 3.1.0 is not confirmed from a public source and must be checked
 against the archive in `jeremyhahn/vendor-nxp` when the build is written. No build target uses `CST_PATH` yet. The

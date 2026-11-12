@@ -259,6 +259,9 @@ All read on 2026-11-12.
 
    *Recommendation: (a) as the goal, with (b) as the first milestone.* Yocto's selftest can gate the
    root filesystem in CI now [S3]. The System Manager's timestamps [S8] need a patch first.
+   A module-signing key made fresh at each build would break (a) and (b) for the kernel; the
+   [hardening survey, question 3](hardening-survey.md) pins the release's public certificate instead
+   and verifies module signatures separately from the unsigned payloads.
 
 3. **How do we pin NXP's inputs?**
    - (a) Use NXP's manifest as is (three layers pinned by tag).

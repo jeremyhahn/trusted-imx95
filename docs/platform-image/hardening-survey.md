@@ -189,7 +189,10 @@ likely conflict, to be confirmed in the first hardened build (Q2).
   `MODULE_SIG_ALL`. Whether the Yocto `module` class signs out-of-tree modules
   with the same key is not confirmed (Q2). If it does not, those modules fail
   to load. The signing key is created at kernel build time; where it is kept,
-  or whether it is thrown away after the build, is the owner's call (Q3).
+  or whether it is thrown away after the build, is the owner's call (Q3). A key
+  made fresh at each build changes the certificate embedded in the kernel and
+  every module signature, so identical sources would no longer reproduce
+  ([reproducible-build survey, question 2](reproducible-build-survey.md)).
 - **`DEVMEM=n`.** NXP test tools that poke registers (for example a
   `memtool`-style utility in imx-test) need `/dev/mem`. I did not find them
   in the image recipes I read, so this is unconfirmed. A production image
@@ -314,9 +317,18 @@ keeping a policy for the whole image.
    (c) `MODULES=n`. *Recommendation: (b). (c) drops the out-of-tree BSP modules
    (§6); (a) leaves the biggest gap.*
 3. **Module signing key.** (a) a key made per build and thrown away after
-   signing; (b) a long-lived project key held offline. *Recommendation: (a);
-   it leaves no key to steal, and any later module must come from a new kernel
-   build. No source settles this; it is a policy choice.*
+   signing; (b) a long-lived project key held offline. (a) leaves no key to
+   steal, but it conflicts with the reproducible-build goal: a fresh key changes
+   the kernel's embedded certificate and every module signature, so identical
+   sources do not reproduce ([reproducible-build survey, question 2](reproducible-build-survey.md)).
+   *Recommendation: (b), with the key held offline (for example in the HSM),
+   and the public certificate of each release treated as a pinned build input,
+   so the kernel that embeds it reproduces. Signing then runs as a separate
+   step: the unsigned kernel and modules are the reproducible payloads, and the
+   module signatures are verified separately against the pinned certificate.
+   Whether the Yocto kernel and `module` classes can sign in a separate step is
+   not confirmed and is to be validated. No source settles this; it is a policy
+   choice for the owner.*
 4. **Lockdown mode.** (a) none; (b) integrity; (c) confidentiality, early.
    *Recommendation: (c) for production (KSPP's setting [S2]), with a separate
    debug image if debugfs-based tools are needed. Revisit if the split (§9)
