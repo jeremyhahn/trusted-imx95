@@ -54,6 +54,26 @@ else
 
 	run "$ROOT/scripts/secret-scan.sh" sideways "$repo"
 	check "secret-scan: an unknown mode is refused" 2 "unknown mode"
+
+	# A key committed, then removed in the next commit: the tree is clean, the
+	# history is not. (The CI checkout of the history scan is full depth.)
+	hist="$TMP_ROOT/history"
+	mkdir -p "$hist"
+	g() { git -C "$hist" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+	g init -q
+	printf 'aws_access_key_id = %s\n%s\n' "$key" "$secret" >"$hist/creds.ini"
+	g add -A && g commit -qm "add creds"
+	rm "$hist/creds.ini"
+	printf 'nothing here\n' >"$hist/ok.txt"
+	g add -A && g commit -qm "remove creds"
+	run "$ROOT/scripts/secret-scan.sh" tree "$hist"
+	check "secret-scan: the tree without the removed key passes" 0 "OK"
+	run "$ROOT/scripts/secret-scan.sh" history "$hist"
+	check "secret-scan: a key committed and removed later fails the history scan" 1 "creds.ini:1:"
+	if [[ "$OUT" == *"$key"* ]]; then fail "secret-scan: the history scan never prints the matched text" "$OUT"; else pass "secret-scan: the history scan never prints the matched text"; fi
+	git clone -q --depth 1 "file://$hist" "$TMP_ROOT/shallow"
+	run "$ROOT/scripts/secret-scan.sh" history "$TMP_ROOT/shallow"
+	check "secret-scan: a shallow clone, which hides the removed key, is refused" 1 "shallow clone"
 fi
 
 # --- a stub curl for deps-check and fetch-tools ----------------------------
@@ -174,14 +194,41 @@ check "image-tag: an unknown family is refused" 2 "unknown family"
 
 # --- scripts/check-script-tests.sh -----------------------------------------
 
-run "$ROOT/scripts/check-script-tests.sh" 100
-check "check-script-tests: every project script has a test" 0 "threshold 100%"
+# A mini repository: one script a test runs, one its test names only in a
+# comment. (This repository's own count is make coverage; running it here
+# would run this suite inside itself.)
+mini="$TMP_ROOT/mini"
+mkdir -p "$mini/scripts" "$mini/test"
+cp "$ROOT/scripts/check-script-tests.sh" "$mini/scripts/"
+printf '#!/usr/bin/env bash\ntrue\n' >"$mini/scripts/mini-run.sh"
+printf '#!/usr/bin/env bash\ntrue\n' >"$mini/scripts/mini-comment.sh"
+printf '#!/bin/sh\ntrue\n' >"$mini/scripts/mini-sh.sh"
+printf 'print("ok")\n' >"$mini/scripts/mini-py.py"
+chmod +x "$mini/scripts/"*
+cat >"$mini/test/mini_test.sh" <<'EOF'
+#!/usr/bin/env bash
+# Mentions scripts/mini-comment.sh and runs nothing of it.
+root="$(dirname "${BASH_SOURCE[0]}")/.."
+"$root/scripts/mini-run.sh"
+sh "$root/scripts/mini-sh.sh"
+python3 "$root/scripts/mini-py.py" >/dev/null
+bash -n "$root/scripts/mini-comment.sh"
+echo "scripts/mini-comment.sh"
+EOF
+run "$mini/scripts/check-script-tests.sh" 100
+check "check-script-tests: a script named only in a comment, a string or bash -n is untested" 1 \
+	"scripts/mini-comment.sh: no test" "3 of 5 scripts tested"
+for s in mini-run.sh mini-sh.sh mini-py.py; do
+	if [[ "$OUT" == *"scripts/$s: no test"* ]]; then fail "check-script-tests: $s, executed, is tested" "$OUT"; else pass "check-script-tests: $s, executed, is tested"; fi
+done
 
-repo="$TMP_ROOT/untested"
-fixture_repo "$repo"
-name="fixture-$$.sh" # built at run time, so no test names it
-printf '#!/bin/sh\n' >"$repo/scripts/$name"
-run "$repo/scripts/check-script-tests.sh" 100
-check "check-script-tests: an untested script fails naming it" 1 "scripts/$name: no test"
+# shellcheck disable=SC2016 # a literal line of the mini test
+printf '"$(dirname "${BASH_SOURCE[0]}")/../scripts/mini-comment.sh"\n' >>"$mini/test/mini_test.sh"
+run "$mini/scripts/check-script-tests.sh" 80
+check "check-script-tests: a script once executed counts" 0 "4 of 5 scripts tested (80%"
+
+printf 'exit 1\n' >>"$mini/test/mini_test.sh"
+run "$mini/scripts/check-script-tests.sh" 100
+check "check-script-tests: a failing test fails the count" 1 "test/mini_test.sh failed"
 
 finish

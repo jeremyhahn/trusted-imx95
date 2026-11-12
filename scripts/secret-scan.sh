@@ -21,7 +21,15 @@ trap 'rm -f "$report"' EXIT
 
 case "$mode" in
 tree) sub=(dir "$dir") ;;
-history) sub=(git "$dir") ;;
+history)
+	# A shallow clone hides every commit before its depth: scanning it would
+	# pass a secret committed and removed earlier. Refuse, never pass.
+	if [ "$(git -C "$dir" rev-parse --is-shallow-repository 2>/dev/null)" != false ]; then
+		echo "secret-scan (history): $dir is a shallow clone or not a git repository; the history scan needs the full history (actions/checkout fetch-depth: 0, or git fetch --unshallow)" >&2
+		exit 1
+	fi
+	sub=(git "$dir")
+	;;
 *)
 	echo "secret-scan: unknown mode '$mode' (tree or history)" >&2
 	exit 2

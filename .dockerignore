@@ -1,3 +1,5 @@
 .git
 **/cst-*.tgz
 **/cst-[0-9]*
+# The pinned tools make tools installs outside the image
+.tools/

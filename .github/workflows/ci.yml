@@ -1214,6 +1214,11 @@ jobs:
       CI_CACHE_CLASS: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'main' || 'pr' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        # CUSTOMIZE: full history. make security scans every commit
+        # (scripts/secret-scan.sh history), and a shallow checkout hides a
+        # secret committed and removed earlier; the scan refuses one.
+        with:
+          fetch-depth: 0
 
       # v1.21.1 (Company Agent m605 item 8): mask the forge credentials before
       # any other step. The runner injects them as plain environment
