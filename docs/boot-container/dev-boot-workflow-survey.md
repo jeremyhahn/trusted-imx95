@@ -197,7 +197,8 @@ S11), both missing.
 
 ## 8. Link to the host-side signing pipeline (#9)
 
-The loop gives #9 a fixed hand-off. Acceptance rests on host-side checks against an independently approved SRK hash.
+The loop gives #9 a fixed hand-off. Acceptance rests on host-side checks against an independently approved SRK hash
+and an independently approved revocation and version policy.
 The board run comes after them and is diagnostic only.
 
 **Not usable on a real device yet.** Nothing below about the tools' checks or writes has been verified. That covers
@@ -212,13 +213,20 @@ established:
 The procedure must not be used to accept a container for a real device until every required negative test below
 shows "rejected" **at its named stage**, at the pinned versions.
 
-Step 2 has two separate stages, and each fixture names the one that must reject it:
+Step 2 has three separate stages, and each fixture names the one that must reject it:
 
 - **2.1, signature verifier:** checks each container's structure, its payload digests and its signature against the
   SRK table carried *inside the image*. This is `nxpimage ahab verify` (SPSDK 3.13.0, S8), or the independent check of
   owner question 7 (b). It is given no approved-root input, so it cannot tell an approved key from any other key.
 - **2.2, trust-anchor check:** compares the hash of the image's SRK table with the independently approved SRK hash
   (step 2.2 below). It looks at no signature and no payload.
+- **2.3, revocation and rollback policy check:** compares the container's `used_srk_id`, `srk_revoke_mask` and
+  `fuse_version` with the independently approved policy record (step 2.3 below): the list of revoked SRK indexes and
+  the version floor. It is the host-side form of the policy checks C2, C3 and C4 of the test plan
+  ([secure-boot-test-plan.md](secure-boot-test-plan.md) §7, item 2) and serves the anti-rollback requirement of the
+  boot-container row ([SPEC.md](../SPEC.md)). It is needed because an unfused, OEM-open board enforces neither
+  revocation nor the version floor: 2.1 and 2.2 alone accept a correctly signed container that uses a revoked key
+  from the approved table, or that carries an older `fuse_version`.
 
 A fixture counts as passed only if the run's report shows the rejection coming from the stage named below. If another
 stage rejects it first, the fixture has not tested the stage it was built for. That stage must then be run on the
@@ -231,7 +239,10 @@ fixture alone, or the fixture rebuilt.
 | N3 | an approved-key container whose payload was changed after signing, payload digest left as signed | 2.1 | payload integrity; it does **not** test the cryptography (a digest mismatch alone rejects it) | **rejected** at 2.1 |
 | N4 | an approved-key container with bits flipped in the signature only; structure, payload digests and SRK table untouched | 2.1, as a *signature* failure | that the signature is checked cryptographically | **rejected** at 2.1, reported as a signature failure, not a structure or digest error |
 | N5 | an approved-key container whose payload was changed and whose payload digest in the container header was recomputed to match; signature unchanged | 2.1, as a *signature* failure | that the signature covers the digests: digests consistent, signature over the old header | **rejected** at 2.1, reported as a signature failure |
-| N6 | a known-good container signed with an approved key (control) | none | that the stages accept a valid image | accepted at 2.1 and 2.2 |
+| N6 | a known-good container signed with an approved, unrevoked key, with `fuse_version` at or above the floor (control) | none | that the stages accept a valid image | accepted at 2.1, 2.2 and 2.3 |
+| N7 | a container signed correctly with a key from the approved SRK table whose index the approved policy marks revoked (`used_srk_id` names it) | 2.3 | revocation. 2.1 and 2.2 are expected to *accept* it, because the signature is valid and the SRK table is the approved one; the report must show both passing and 2.3 rejecting | **rejected** at 2.3 |
+| N8 | a container signed correctly with an approved, unrevoked key, whose `fuse_version` is below the approved floor | 2.3 | rollback. 2.1 and 2.2 are expected to *accept* it; the report must show both passing and 2.3 rejecting | **rejected** at 2.3 |
+| N9 | as N6, but with a `srk_revoke_mask` that differs from the one the approved policy sets for this release | 2.3 | that a container carrying an unapproved revocation mask is caught on the host | **rejected** at 2.3 |
 
 Each run records the tool version, the exact command, the stage that rejected, and the output that shows that stage's
 rejection. N4 and N5 are the only fixtures that isolate cryptographic verification. If `nxpimage ahab verify` does not
@@ -239,11 +250,14 @@ reject both as signature failures, it is not a signature verifier for this proce
 question 7 (b) then replaces it at 2.1, and that check is put through N1 and N3 to N6. Building N4 and N5 means editing
 the signature and header fields of an AHAB container. Where those fields are on the i.MX 95 needs the AHAB chapter of
 IMX95RM or the Security Reference Manual (S10, S11, missing), or SPSDK's source, which this lane did not read:
-**unverified**. The test plan itself belongs to #118.
+**unverified**. N7, N8 and N9 are built by signing, not by editing: they are valid containers whose key index,
+revocation mask or version the policy forbids. N7 needs an approved SRK table with more than one key and a policy
+record that marks one index revoked; N8 needs a recorded floor above the lowest version the build can set. The
+test plan itself belongs to #118.
 
 1. #9 builds `flash.bin` and signs its containers with the tool #30 chooses (CST 3.1.0 or SPSDK, keys in an HSM after
    AN14471, per S2). Output: the signed `flash.bin`, with fuse scripts suppressed.
-2. **Acceptance, on the host, before any load or write** (tool behaviour **unverified** until N1 to N6 each give
+2. **Acceptance, on the host, before any load or write** (tool behaviour **unverified** until N1 to N9 each give
    the expected result at the named stage):
    1. *Signature verifier (stage 2.1):* `nxpimage ahab verify -f <family> -r <revision> -b flash.bin` (SPSDK 3.13.0,
       S8) must report no problems. Its help says only "Verify AHAB Image". Whether it checks each container's
@@ -255,7 +269,19 @@ IMX95RM or the Security Reference Manual (S10, S11, missing), or SPSDK's source,
       build's own output is never the reference. Three points are **unverified**: whether `parse` extracts the SRK
       table at all, which output file carries it, and the hash rule for the i.MX 95 SRK table. They need the AHAB
       chapter of IMX95RM or the Security Reference Manual (S10, S11, missing), a check of SPSDK's source, or test N2.
-   A container that fails either stage is rejected and is not loaded. Passing 2.1 alone never accepts a container.
+   3. *Revocation and rollback policy check (stage 2.3):* read the container's `used_srk_id`, `srk_revoke_mask`
+      and `fuse_version` from the `nxpimage ahab parse` output (S8) and compare them with the **approved policy
+      record**. That record holds the revoked SRK indexes, the expected `srk_revoke_mask` for the release, and the
+      `fuse_version` floor. Like the approved SRK hash, the owner records and reviews it outside the build that
+      produced the image, and the build's own output is never the reference. Reject the container if `used_srk_id`
+      names a revoked index, if `srk_revoke_mask` differs from the approved mask, or if `fuse_version` is below
+      the floor. The check runs on every candidate, also before any key has been revoked or any floor raised: the
+      record then states "no index revoked" and the current floor explicitly, and a missing record is a rejection,
+      not a pass. Whether `parse` reports these three fields, and in which output, is **unverified** at 3.13.0
+      (N7, N8, N9); if it does not, they must be read from the container's signature block by an independent
+      parser, whose field offsets need IMX95RM or the Security Reference Manual (S10, S11, missing).
+   A container that fails any of the three stages is rejected and is not loaded or written. Passing 2.1 alone, or
+   2.1 and 2.2 alone, never accepts a container.
 3. **Board run in OEM open (diagnostic):** reset the board into SW4 serial download, load the accepted container over
    the ROM serial downloader with uuu or `nxpuuu` at the pinned version (S4/S8), boot it from RAM, and record
    `nxpele get-events` / `get-info` (S8) for #131. Record the SHA-256 of the file that was booted. The run shows
@@ -273,7 +299,7 @@ IMX95RM or the Security Reference Manual (S10, S11, missing), or SPSDK's source,
 5. A failure at step 3 or 4 is recovered with §6 and reported back to #9 with the event output.
 
 The pipeline therefore needs one pinned host-tool version for steps 2 to 4 (question 1), an approved SRK hash
-recorded outside the build (question 7), and one known-good container kept beside every candidate for recovery.
+and an approved revocation and version policy, both recorded outside the build (question 7), and one known-good container kept beside every candidate for recovery.
 
 ## 9. Unconfirmed items
 
@@ -292,10 +318,14 @@ recorded outside the build (question 7), and one known-good container kept besid
    target is already running (§5). This is **unverified**: taken from the script text, not from a run. A write is
    bound to a booted candidate only by the §5 conditions (same SHA-256, same session or a fresh ROM download).
 8. Which `nxpimage ahab parse` output carries the SRK table, and the i.MX 95 rule for hashing it into the fused
-   value: needs IMX95RM or the Security Reference Manual (both missing), or SPSDK's source.
+   value: needs IMX95RM or the Security Reference Manual (both missing), or SPSDK's source. Likewise, whether
+   `parse` reports `used_srk_id`, `srk_revoke_mask` and `fuse_version` (§8 step 2.3), and where those fields sit
+   in the i.MX 95 signature block: **unverified** (N7 to N9).
 9. Board-side confirmation of the signing root: an OEM-open board has no SRK hash fused, so a board run in OEM open
    cannot confirm which key signed the container. Event results are diagnostic only until IMX95RM and the Security
-   Reference Manual are available (§7, §8).
+   Reference Manual are available (§7, §8). The same holds for revocation and the version floor: an OEM-open,
+   unfused board enforces neither, so a revoked key or a below-floor `fuse_version` is caught only by the host
+   check of §8 step 2.3.
 10. Which firmware answers `nxpele`'s `mboot` transport on the i.MX 95.
 11. U-Boot's AHAB status command at a named U-Boot version (not surveyed; U-Boot belongs to #42 and #9).
 12. The i.MX Linux User's Guide's i.MX 95 uuu instructions (S12, not in docs/references/).
@@ -328,11 +358,14 @@ recorded outside the build (question 7), and one known-good container kept besid
    `get-info`, `get-events` and the fuse reads can run; (b) keep the fuse scripts, quarantined, as review material.
    Recommendation: **(a)**: this row's rule is that no fuse step is scripted, and the approved SRK hash is recorded
    outside the build (question 7).
-7. **Where does the approved SRK hash come from, and how is a container's signature checked?** (a) the owner
-   records the SRK hash, computed from the HSM's SRK public keys, in a reviewed file outside the build. The pipeline
-   compares each image's SRK table hash against it (stage 2.2) and runs `nxpimage ahab verify` (stage 2.1). This
-   holds only once the §8 fixtures N1 to N6 have each given the expected result at their named stage at the pinned
-   version: N2 rejected at 2.2, and N4 and N5 rejected at 2.1 as signature failures. (b) as (a), with a second,
+7. **Where do the approved SRK hash and the approved revocation and version policy come from, and how is a
+   container's signature checked?** (a) the owner records the SRK hash, computed from the HSM's SRK public keys, and
+   the policy record (revoked SRK indexes, the release's `srk_revoke_mask`, the `fuse_version` floor) in reviewed
+   files outside the build. The pipeline runs `nxpimage ahab verify` (stage 2.1), compares each image's SRK table
+   hash against the approved hash (stage 2.2), and checks `used_srk_id`, `srk_revoke_mask` and `fuse_version`
+   against the policy (stage 2.3). This holds only once the §8 fixtures N1 to N9 have each given the expected result
+   at their named stage at the pinned version: N2 rejected at 2.2, N4 and N5 rejected at 2.1 as signature failures,
+   and N7, N8 and N9 rejected at 2.3. (b) as (a), with a second,
    independent signature check at 2.1, whether or not `verify` passes those tests. An example is CST's or OpenSSL's
    verification of each signature block against the SRK public key. Neither tool has been tried for this, so (b) is
    **unverified** too. (c) rely on the board run in OEM open. Recommendation: **(a)**, moving to **(b)** if `verify`
