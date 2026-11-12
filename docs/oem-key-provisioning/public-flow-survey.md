@@ -84,7 +84,7 @@ A claim marked **unconfirmed** could not be checked against a source that this l
 
 - On Linux, the imx-secure-enclave library gives the i.MX95 ELE-HSM, V2X-SHE and V2X-HSM services (S5, Table 1).
 - An NVM manager daemon serves the ELE firmware's storage requests. It keeps the ELE key store at rest on the Linux file system, under `/etc/ele/` on the i.MX95 (S5, NVM Manager and Table 2). So persistent OEM keys depend on a Linux file-system path. How the stored blobs are protected is **unconfirmed**.
-- OP-TEE `4.11.0` has an ELE crypto driver with key-management and sign/verify parts, and has i.MX95 platform registers (S9). Whether it and the Linux library can share the enclave at the same time is **unconfirmed**. This bears on the `secure-world` row.
+- OP-TEE `4.11.0` has an ELE crypto driver with key-management and sign/verify parts, and has i.MX95 platform registers (S9). The ECC key and signing path in that driver is limited to the i.MX 91 and i.MX 93, and it returns private keys to caller memory in plain text. On the i.MX 95, upstream OP-TEE uses the enclave for the HUK and RNG only, and no opaque-key-store path was found ([ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md) §5.1). It does not provide enclave-held keys on this board. Whether it and the Linux library can share the enclave at the same time is **unconfirmed**. This bears on the `secure-world` row.
 
 ## What the public sources give, against the SPEC row
 

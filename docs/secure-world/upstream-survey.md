@@ -87,7 +87,15 @@ Files read in each tree:
   - the ELE driver, reached through the messaging unit (`CFG_IMX_MU`, `CFG_IMX_ELE`);
   - 2 GiB of DDR at 0x80000000, with a second non-secure DDR bank from 0x100000000, and UART1 as the console.
 
-  The upstream ELE driver covers key management, signing and verification, and ECC (S3 `core/drivers/crypto/ele/`).
+  What upstream OP-TEE gets from the ELE on the i.MX 95 is the messaging unit, the hardware unique key (HUK) and
+  random numbers. The upstream ELE directory also holds key-generation, ECDSA signing and verification code
+  (S3 `core/drivers/crypto/ele/`), but at the same `4.11.0` release that ECC path is limited by its commit message to
+  the i.MX 91 and i.MX 93 and does not build for the i.MX 95. It also returns the private key to caller memory in
+  plain text, and no upstream use of the enclave's opaque key store on the i.MX 95 was found
+  ([ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md) §5.1). Upstream OP-TEE therefore does
+  **not** by itself give the enclave-held signing that [SPEC.md](../SPEC.md)'s `secure-key-handling` row requires.
+  Enabling the plain-text path would break that row's rule that keys never leave the enclave in the clear.
+  Opaque-key (enclave key store) integration in OP-TEE for the i.MX 95 is required work, not existing support.
   A comment in S3's `conf.mk` says the TZASC check is not yet supported on the i.MX 9 family.
 - Upstream places OP-TEE's secure DRAM at the top of the DDR size it is given. For `mx95evk` that works out at about
   0xFE000000 (this survey's own arithmetic from the S3 defaults). TF-A and `imx-mkimage` expect BL32 at 0x8C000000
@@ -95,7 +103,8 @@ Files read in each tree:
 - NXP's `imx-optee-os` at `lf-6.18.37-2.1.0` puts the i.MX 95 secure DRAM at DRAM base + 0x0C000000, that is
   0x8C000000, with 32 MiB for OP-TEE and 2 MiB of shared memory after it. This matches TF-A and `imx-mkimage` (S4
   `conf.mk`). For the i.MX 95 it also adds:
-  - ELE-backed RSA, a key-store source and a fuse source;
+  - ELE-backed RSA, a key-store source and a fuse source (NXP-specific; whether the key-store source keeps private
+    keys inside the enclave on the i.MX 95 was not read and is **unconfirmed**);
   - a trusted-keys early TA;
   - `CFG_IMX_TRUSTED_ARM_CE`;
   - the external DTB overlay (S4 `conf.mk`, `core/drivers/crypto/ele/`).
@@ -174,8 +183,14 @@ Files read in each tree:
    - (b) OP-TEE.
    - (c) Trusty, which NXP's TF-A supports with `SPD=trusty` for its Android builds (S2).
 
-   *Recommendation: (b).* NXP's container build places an OP-TEE image beside BL31 (S8). OP-TEE has an ELE driver for
-   key management and signing (S3, S4). The SM gives the A55 secure environment the ELE messaging units (S7).
+   *Recommendation: (b).* NXP's container build places an OP-TEE image beside BL31 (S8). Upstream OP-TEE takes the HUK
+   and random numbers from the ELE on the i.MX 95 ([ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md)
+   §5.1). It does not provide enclave-held key management or signing
+   there: its ELE ECC path is limited to the i.MX 91/93 and returns plain-text private keys (see the OP-TEE section
+   above). NXP's fork adds ELE-backed RSA and a key-store source whose key handling is unconfirmed (S4). The SM gives
+   the A55 secure environment the ELE messaging units (S7). So (b) is recommended for the HUK, RNG and secure
+   storage; enclave-held signing from OP-TEE needs opaque-key integration as separate work, and the plain-text ECC
+   path must stay disabled.
 3. **Which trees does the build use?**
    - (a) NXP's `lf-6.18.37-2.1.0` trees (S2, S4, S6, S8) and `meta-imx`.
    - (b) Upstream TF-A `v2.15.0`, OP-TEE `4.11.0` and U-Boot `v2026.10`, adding the PRO's board support ourselves.

@@ -111,6 +111,20 @@ reading of the device tree and the SM configuration, which grants Linux
 rights at all [S1, S4]. Whether Linux can therefore start or stop the M7 under
 NXP's configuration could not be confirmed from the documents alone (section 6).
 
+Linux's own SCMI rights are not the only path. NXP's TF-A fork adds
+normal-world SiP calls that set the M7's reset address and start, stop and
+query it, and an LMM SiP call that boots or force-shuts down a logical machine
+chosen by the caller, with no allow-list in TF-A
+([tfa-scmi-survey.md](tfa-scmi-survey.md) §2.2;
+[attack-surface-survey.md](attack-surface-survey.md) §3.1). TF-A makes those
+calls with the secure agent's (`AP-S`) rights, not Linux's. A compromised
+Linux can therefore reach M7 lifecycle control through TF-A even where its
+own SCMI agent holds notifications only. Whether the SM configuration
+refuses those calls from `AP-S` (for example because the SYS, CPU or LMM
+rights it holds do not cover the M7) was not established and is
+**unverified**; it has not been tested on the PRO (interface I6, section 6
+item 9).
+
 On the M7, NXP's RPMsg-Lite (tag `v5.5.0`) is the usual peer. Its README
 states that the shared memory must be reachable by both cores, non-cacheable
 (or managed with its cache option), and kept away from the rest of the
@@ -199,8 +213,9 @@ NXP's.
 | I1 | M7 to SM (SCMI) | MU9, SMT shared memory, three channels | The SM checks every call against the agent's per-protocol, per-resource rights compiled into its configuration [S3]; the FRDM configuration adds a CRC-32 on the M7's channels [S1]. A CRC detects corruption; it does not authenticate. | Rights: this repo. Which calls the M7 makes: TF. SM code: NXP. |
 | I2 | Linux to M7 (RPMsg) | MU7 doorbells, vrings, buffer pool and resource table in the shared DDR window | No transport-level check against a hostile peer is described. The master side, which is Linux, sets up the shared memory and vrings [S5]; RPMsg-Lite's pointer check is off by default and documented as unsuitable for a Linux peer, and buffer clearing is off by default [S6]. | TF, entirely: see below. Window placement and size: this repo (SM configuration and device tree). |
 | I3 | M7 to EdgeLock enclave | MU_ELE5, owned by the M7 [S1] | The enclave validates its own commands; the HSM API and its strict-operation rule are in RM00284, as cited in SPEC.md [S8]. | Whether the M7 or Linux calls the HSM API: owner (SPEC.md open question) [S8]. Key policy: TF. |
-| I4 | Linux to SM, M7 lifecycle | Linux's SCMI agent (MU3), LMM protocol | The SM checks Linux's rights; in NXP's FRDM configuration Linux holds only notifications on the M7's LM [S1]. | this repo. |
+| I4 | Linux to SM, M7 lifecycle | Linux's SCMI agent (MU3), LMM protocol | The SM checks Linux's rights; in NXP's FRDM configuration Linux holds only notifications on the M7's LM [S1]. This bounds the direct path only; see I6 for the path through TF-A. | this repo. |
 | I5 | A55 secure world to M7 | none in NXP's FRDM configuration [S1] | n/a | this repo (`secure-world` row) and owner. |
+| I6 | Linux to TF-A to SM, M7 lifecycle (indirect) | SMC into NXP TF-A's SRC (M7) and LMM SiP services, which call the SM over the secure agent's channel (`AP-S`, MU1) ([tfa-scmi-survey.md](tfa-scmi-survey.md) §2.2) | TF-A checks nothing: any normal-world caller may set the M7 reset address, start or stop it, or boot or shut down a logical machine it names. The SM checks only `AP-S`'s rights, not Linux's. Whether those rights refuse M7 control is **unverified**, not tested on the PRO. | this repo (`secure-world` row: remove the services from TF-A or restrict them) and the SM configuration. |
 
 ### 5.1 What the M7 firmware has to check on I2
 
@@ -259,6 +274,11 @@ threat model for RPMsg.
    were not read.
 8. Whether the ELE and V2X domains' whole-DDR access [S1] is a fixed property
    of NXP's firmware or a configuration choice.
+9. Whether the SM refuses NXP TF-A's M7 and LMM SiP calls (interface I6)
+   when they are made under `AP-S` rights, and which TF-A build the PRO ships
+   with. Until the services are removed from TF-A, or a restriction is tested
+   on the PRO, Linux's notification-only SCMI rights do not establish that
+   Linux cannot stop or restart the M7.
 
 ## 7. Questions for the owner
 
@@ -283,6 +303,12 @@ threat model for RPMsg.
    Recommendation: (a), because any other choice lets the less trusted side
    restart the M7 with firmware of its choosing unless boot-container
    verification covers reloads, which no source reached here confirms.
+   Precondition: NXP's notification-only rights for Linux do not by themselves
+   give (a). NXP's TF-A exposes M7 and LMM SiP calls to the normal world that
+   act with the secure agent's rights (I6). Policy (a) holds only once those
+   services are removed from TF-A, or restricted in TF-A or the SM
+   configuration and that restriction is tested on the PRO. Until then the
+   restriction is **unverified** and (a) is not in effect.
 
 4. **Which side calls the EdgeLock HSM API?** (SPEC.md `secure-key-handling`.)
    (a) the M7 over its own enclave MU, MU_ELE5 [S1];

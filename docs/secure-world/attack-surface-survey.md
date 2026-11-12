@@ -93,7 +93,12 @@ What the NXP history shows for the i.MX 9 family [S3]:
 
 - OP-TEE talks to the EdgeLock Enclave itself, through a "trusted" MU, for
   the hardware unique key, random numbers, fuse reads, the device life
-  cycle, and (recently) ELE-backed RSA and ECC keys.
+  cycle, and (recently) ELE-backed RSA and ECC keys. The RSA keys are in
+  NXP's fork. Upstream's ELE ECC path is limited to the i.MX 91/93 and
+  returns plain-text private keys, so neither is shown to keep i.MX 95 keys
+  inside the enclave
+  ([ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md)
+  §5.1; [upstream-survey.md](upstream-survey.md)).
 - Fuse reads through OP-TEE are refused once the life cycle is closed.
   This rests on a commit message in the history only; the code was not
   read and the behaviour was not tested on the i.MX 95, so it is
@@ -199,7 +204,7 @@ This section is the survey's reading of §3 against the board's use in
 | NXP SiP: M7 start/stop/reset address, LM boot/shutdown (TF-A) | Only if Linux manages the M7 (remoteproc). SPEC leaves the M7's role open. | Leave the M7 SiP calls out of the TF-A build, or have TF-A refuse them, if the M7 is started by the SM and Linux does not control it. Whether the i.MX 95 build has a switch for this is not confirmed [S2]. |
 | Other NXP SiP calls (SoC info and older families' calls) | SoC info is used for identification; the rest is not known to be needed. | Audit which handlers the i.MX 95 build compiles in (not confirmed, §6). |
 | SDEI (TF-A) | Not known to be needed. | Leave disabled; this also removes the TFV-11 class [S9]. |
-| OP-TEE SMC and TA sessions | Only if a secure-side service is wanted (secure storage, PKCS#11 TA, ELE-backed keys through OP-TEE). SPEC's key rows put keys in the ELE and leave the caller open. | If OP-TEE is not needed, do not load it (TF-A then has no SPD). If it is: build only the TAs needed, and rebase to OP-TEE 4.11.0 or carry the §5.2 fixes. |
+| OP-TEE SMC and TA sessions | Only if a secure-side service is wanted (secure storage, PKCS#11 TA, ELE-backed keys through OP-TEE). SPEC's key rows put keys in the ELE and leave the caller open. ELE-backed keys through OP-TEE on the i.MX 95 need opaque-key integration that neither tree is shown to have (§3.2). | If OP-TEE is not needed, do not load it (TF-A then has no SPD). If it is: build only the TAs needed, and rebase to OP-TEE 4.11.0 or carry the §5.2 fixes. |
 | ELE MUs `MU_ELE3`/`MU_ELE4` (Linux) | Yes if Linux calls the ELE HSM API directly, which is one of SPEC's open options. | Remove them from the "AP-NS" resources in the SM configuration if only the secure side (OP-TEE) or the M7 calls the ELE; the TRDC then blocks Linux from the MUs in hardware [S1]. |
 | SCMI "AP-NS" agent (SM) | Yes: clocks, performance, sensors, RTC, power domains of Linux's peripherals. | Already narrowed: no `SYS` control and only `LMM` notifications [S1]. Further narrowing is possible per item (for example the `BRD_SM_CTRL_TEST_A` and `BUTTON ... test` grants) by editing the board configuration and rebuilding the SM. |
 | TRDC resource isolation (SM) | Defines what memory and peripherals the non-secure A55 can touch. | The FRDM file gives the non-secure A55 broad ownership of display, camera, NETC, eDMA1 and others [S1]. DMA-capable peripherals owned by Linux can reach memory the TRDC lets them; the memory ranges for secure DDR (TF-A, OP-TEE) must be outside what those masters may write. The secure A55 DDR range in the file is `0x8A000000` to `0x8DFFFFFF` [S1]; that its exclusion from non-secure masters is complete is not confirmed. |
