@@ -69,6 +69,11 @@ not sought. Where SPEC.md relies on them, this file says so and does not restate
 - Because the counter is small and one-way, the guidance is to batch updates into one group and
   set the flag once. When the counter is exhausted, every later export returns a warning that the
   update is no longer rollback-protected [S2, "NVM writing"].
+- So the flag is not fail-closed on its own. The enclave still accepts updates past the counter
+  cap, and with no counter split written it gives warnings and no rollback protection
+  ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1). The caller has to reject every
+  counter warning, confirm that the counter split is configured, and confirm that the counter
+  advanced, before it treats a persistent update (above all a deletion or rotation) as committed.
 - This agrees with the row's statement in [SPEC.md](../SPEC.md) (`secure-key-handling`), which cites
   RM00284 §2.4.2.
 
@@ -202,7 +207,8 @@ flag that commits the imported key to NVM with the counter advanced [S2,
 Drawn from §3–§4; the choice of values for this board is §5.
 
 - Persistent lifetime, committed with the strict flag in a batch, so the key survives reset and its
-  blob is rollback-protected (§3.3, §4.4).
+  blob is rollback-protected, provided the caller treats counter warnings as failures and confirms
+  that the counter advanced (§3.3, §4.4).
 - One usage set and one permitted algorithm, the narrowest the key's role needs; no export usage on
   anything but the public half of a signing or agreement pair (§4.2, §4.3).
 - A key life-cycle mask of closed (and closed-locked if used), so a production key cannot be
@@ -234,13 +240,17 @@ Rules the proposal follows, each from §3–§4:
   public-key export call (§3.1).
 - Every persistent change is committed with the strict flag in batches per group, so the one-way
   counter lasts the product's life (§3.3). Groups are laid out by write frequency: the identity group
-  is written once, client-key groups often.
+  is written once, client-key groups often. A commit counts only once it is acknowledged with no
+  counter warning and the counter is confirmed to have advanced. Once the counter or the store's cap
+  is used up, persistent changes are refused rather than accepted unprotected (§3.3).
 - No production key carries the permanent attribute unless the owner wants it irrevocable (§4.4).
 - Development keys are made with an open life-cycle mask and production keys with a closed one, so a
   development key cannot sign once the device is closed and a production key cannot be used before,
   if the enclave enforces the mask as the header describes (unconfirmed, §4.5).
 - The key store blobs stay in the NVM manager's directory on the board (§3.2) and are device-bound;
-  restoring an older copy is what the counter refuses (§3.3).
+  restoring a stale copy (one older than the latest committed update) is what the counter is
+  expected to refuse (§3.3). A current-version snapshot restored to the same SoC is not a rollback
+  (question 8).
 
 ## 6. What could not be confirmed
 
@@ -311,9 +321,16 @@ Rules the proposal follows, each from §3–§4:
 8. **Should the key store blobs be backed up?**
    Options: (a) no: the blobs are device-bound, and a lost store means re-enrollment; (b) yes, as an
    encrypted copy for the same device; (c) a go-xkms-level backup of client keys by wrapped export.
-   Recommendation: (a) for the device store. An older blob cannot be restored past the rollback
-   counter (§3.3), and secret keys cannot be exported (§3.1). Client-key backup, option (c), is
-   go-xkms's decision and needs an export path the sources do not show (§6).
+   Recommendation: (b), conditionally, for the device store, as a current-version snapshot: a
+   coherent copy taken after the latest committed strict update, retaken after each one, and restored
+   only to the same SoC. A **stale** blob, one taken before a later committed update, is expected to
+   be refused by the rollback counter (§3.3) and must never be restored. Secret keys cannot be
+   exported (§3.1), so without such a snapshot a lost filesystem loses every enclave-generated key.
+   Exact restore support needs NXP confirmation or validation on the board's firmware. Until
+   chip-bound sealing is confirmed, every copy is handled as key material under custody controls.
+   If restore cannot be validated, fall back to (a). See
+   [key-recovery-survey.md](key-recovery-survey.md) §3.1 and question 4. Client-key backup, option
+   (c), is go-xkms's decision and needs an export path the sources do not show (§6).
 9. **Does the i.MX 95's V2X HSM hold any key?**
    Options: (a) no, the ELE only; (b) yes, for high-rate signing.
    Recommendation: (a) until a public source describes the V2X HSM's key store and its binding to

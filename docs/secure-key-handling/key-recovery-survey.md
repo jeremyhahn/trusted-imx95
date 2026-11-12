@@ -34,8 +34,9 @@ A build note matters for the i.MX 95. The library's `ele` build, which serves th
 - Mechanically, the key store is a set of files under `/etc/ele/` on Linux (§2). So the files themselves can be copied off the board with the root filesystem.
 - S1 offers no API to re-target, re-wrap or migrate a key store to another chip. Its key store calls are create, load, close, status, and "reprovisioning enable". Per the header, reprovisioning erases every key store the HSM handles and needs a signed message (S1, `hsm_key_store.h`, `common/key_store.h`). It is a wipe, not a migration.
 - Whether a copied key store loads on another i.MX 95 depends on how the files are sealed. That is **not confirmed** (§2, §6). Two facts point to "no", but neither proves it. First, key store access is bound to the creating domain and Messaging Unit. Second, the library's general-purpose data blob can bind its key to the chip's unique ID (S1, `hsm_blob_unblob.h`, derivation-context flags).
-- Rollback adds a further barrier. The key store is tied to the monotonic counter (§2; SPEC.md row). So even a same-board restore of an older copy of `/etc/ele/` is expected to be refused once the counter has moved on. The exact refusal behaviour is **not confirmed** from a public source.
-- **Assessment:** there is no supported cross-board migration path in the public API. A same-board file backup protects at most against loss of the filesystem, not against loss of the board. Even that is limited by the counter.
+- Rollback adds a further barrier. The key store is tied to the monotonic counter (§2; SPEC.md row). So a same-board restore of a **stale** copy of `/etc/ele/`, one taken before a later committed (strict) update, is expected to be refused once the counter has moved on. The exact refusal behaviour is **not confirmed** from a public source.
+- A **current-version snapshot** is different. It is a coherent copy taken after the latest committed strict update, restored to the same SoC before the counter advances again, and it carries the counter version the enclave expects. Restoring it is not a rollback, and it is expected to load. It is the only same-board protection against filesystem loss for keys generated inside the enclave, which wrapped re-import cannot recover (§3.3, §3.4). Whether the i.MX 95 enclave accepts such a restore exactly is **not confirmed**; it needs vendor confirmation or validation on the board's firmware (§6).
+- **Assessment:** there is no supported cross-board migration path in the public API. A same-board current-version snapshot protects at most against loss of the filesystem, not against loss of the board. It is invalidated by the next committed update, so it must be retaken after each one.
 
 ### 3.2 Wrapped export of individual keys
 
@@ -75,7 +76,7 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 
 **3.1 Key store file backup (same board only)**
 
-- `secure-key-handling`: a restored older copy is exactly the rollback that the monotonic counter exists to refuse (§2). A backup scheme that "works" would be a sign that rollback protection is not in force.
+- `secure-key-handling`: a restored **stale** copy, taken before a later committed update, is exactly the rollback that the monotonic counter exists to refuse (§2). If a stale copy loads, rollback protection is not in force. A current-version snapshot loading on the same SoC is expected and proves nothing either way (§3.1). The backup procedure must therefore record which committed update each snapshot follows, retake it after every strict update, and never restore a snapshot older than the latest committed update.
 - `platform-image`: the key store files live in `/etc/ele/` on the Linux filesystem (S1). If an image update replaces or rolls back the root filesystem, the key store is replaced or rolled back with it. This is a way to lose keys without losing the board. It is a risk whether or not a backup path is adopted (question 3).
 - `hsm-self-defence`: copies of the key store files outside the board are harmless only if the sealing is chip-bound, which is **not confirmed** (§6). If it is not chip-bound, every copy weakens zeroisation.
 
@@ -98,7 +99,7 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 - **How the ELE seals the key store files** under `/etc/ele/`: the key, whether it is chip-unique, and whether a copy loads on another i.MX 95. S1's headers, README and its generated API document (`doc/ele_hsm_api_document.rtf`, same tag) do not state it. The ELE firmware API manual (RM00284) is in the repository's private references, not on a public URL: `https://www.nxp.com/docs/en/reference-manual/RM00284.pdf` returned "page not available" from the lane.
 - **Whether ELE firmware has a key export or migration command** that S1 does not expose. The PSA build of S1 has none at tag `lf-6.18.37-2.1.0`.
 - **Whether the i.MX 95 firmware serves any wrapped key import** usable for re-provisioning. S1's headers declare `hsm_import_key` and `hsm_key_exchange`, but S1's README at the same tag lists the Key Exchange and Key Import APIs as not supported on the i.MX 95 ([algorithm-support-survey.md](algorithm-support-survey.md) §3.2), and whether the OEM import path is a separate service is open (same survey, question 7). Needs NXP confirmation or validation on the board's firmware.
-- **The exact behaviour when an older key store copy is restored** on the same board after the monotonic counter has advanced.
+- **The exact behaviour when an older key store copy is restored** on the same board after the monotonic counter has advanced, and whether a current-version snapshot taken after the latest committed update restores on the same SoC (§3.1). Needs NXP confirmation or validation on the board's firmware.
 - **The i.MX 95 Security Reference Manual and IMX95RM**: they are missing from the references (SPEC.md) and not public.
 - **NXP EdgeLock 2GO** (the service behind the `E2GO_TLV` import input in S1): the public product pages tried returned "page not available" from the lane. Its re-provisioning model for a replacement device is not surveyed.
 - **go-xkms's and go-trusted-platform's decisions** on key custody, device replacement and revocation: no public source was reachable from the lane, and the lane cannot read issues. §4 names who decides; it does not report what was decided.
@@ -126,9 +127,14 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
    Recommendation: **(b)** (or (c), which is equivalent). The key store is plain files under `/etc/ele/` (S1), and a rolled-back copy conflicts with the monotonic counter (§2, §5).
 4. **Should a same-board backup of the key store files be made?**
    - (a) No.
-   - (b) Yes, against filesystem loss only.
+   - (b) Yes, against filesystem loss only, as a current-version snapshot retaken after every committed update.
 
-   Recommendation: **(a).** It does not survive board loss (§3.1). On a working board it is expected to be refused once the counter moves. Its safety rests on chip-bound sealing that is not confirmed (§6).
+   Recommendation: **(b), conditionally.** Without it, a lost filesystem loses every enclave-generated key, which wrapped re-import cannot bring back (§3.4). Conditions:
+   - It is a current-version snapshot, taken after the latest committed strict update and retaken after each one. A stale copy is expected to be refused and must never be restored (§3.1, §5).
+   - Restore support is validated on the board's firmware or confirmed by NXP first (§6).
+   - Until chip-bound sealing is confirmed, every copy is handled as key material under custody controls (access-controlled, encrypted at rest, destroyed on zeroisation), because a copy off the board is harmless only if the sealing is chip-bound (§5, §6).
+
+   It does not survive board loss (§3.1). If restore cannot be validated, fall back to (a).
 5. **How should the open facts in §6 be confirmed?**
    - (a) Add the ELE firmware API manual's key store chapter and the i.MX 95 Security Reference Manual to the private references and cite them.
    - (b) Ask NXP support.

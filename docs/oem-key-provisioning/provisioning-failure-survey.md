@@ -132,4 +132,4 @@ Whether the key import (step 5) must instead come after the close is not confirm
    Recommendation: (a), for the fuse-word lock rules and the interrupted-close behaviour; #99 should not be finalised without them.
 6. **How many monotonic-counter bits may provisioning spend per device?**
    Options: (a) one strict operation per key group, with retries limited by the station; (b) no limit.
-   Recommendation: (a). Each strict operation burns OTP, and once the counter is used up, updates lose rollback protection (S3).
+   Recommendation: (a). Each strict operation burns OTP, and once the counter is used up, updates lose rollback protection (S3). So the station fails closed: it treats `HSM_KEY_STORE_COUNTER` and every counter warning as a failure, confirms that the counter split is configured and that the counter advanced, and stops provisioning that device rather than accept unprotected updates.

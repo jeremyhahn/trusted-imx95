@@ -173,7 +173,7 @@ The M7 side may give better isolation from Linux, which the `hsm-self-defence` r
    - (b) A dedicated partition, with every key-store update made as a strict operation so the monotonic counter advances (RM00284 §2.4.2, via SPEC.md).
    - (c) Something else that RM00284 recommends.
 
-   *Recommendation:* (b) as the starting design. The rollback interaction is unconfirmed (§7 item 5) and needs RM00284 to settle.
+   *Recommendation:* (b) as the starting design, on a fail-closed condition. The strict flag alone does not guarantee that the counter advanced. Past the store's update cap, or with no counter split written, the enclave accepts updates with only a warning ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1). The caller must reject every counter warning and confirm that the counter advanced before it treats an update as committed. The rollback interaction is unconfirmed (§7 item 5) and needs RM00284 to settle.
 5. **Which i.MX 95 silicon revision is the target?**
    - (a) Confirm the board's revision and support only that one.
    - (b) Support A1 and B1.
