@@ -23,7 +23,7 @@ LINK = re.compile(r"!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 REF_DEF = re.compile(r"^ {0,3}\[(?!\^)((?:[^\]\\]|\\.)+)\]:\s*(?:<([^>\s]*)>|(\S+))")
 # A full ([text][label]) or collapsed ([label][]) reference link.
 REF_USE = re.compile(r"!?\[((?:[^\]\\]|\\.)*)\]\[((?:[^\]\\]|\\.)*)\]")
-# Inline code: `a[i][j]` is not a reference link.
+# Inline code: `a[i][j]` and `[text](x.md)` are not links.
 CODE_SPAN = re.compile(r"(`+).*?\1")
 SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
@@ -83,9 +83,11 @@ def scan(path):
         if d:
             yield lineno, d.group(2) if d.group(2) is not None else d.group(3), None
             continue
-        for m in LINK.finditer(line):
+        # Inline code renders as code, not as a link, for both link forms.
+        text = CODE_SPAN.sub("", line)
+        for m in LINK.finditer(text):
             yield lineno, m.group(1), None
-        for m in REF_USE.finditer(CODE_SPAN.sub("", line)):
+        for m in REF_USE.finditer(text):
             ref = label(m.group(2) or m.group(1))
             if ref and ref not in defined:
                 yield lineno, None, "reference link has no definition"

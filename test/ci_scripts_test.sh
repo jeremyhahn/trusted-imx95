@@ -291,6 +291,17 @@ run python3 "$ROOT/scripts/check-doc-links.py" "$mk2"
 check "check-doc-links: the same reference-style links fail lint-docs" 1 \
 	"README.md:3: reference link has no definition" "README.md:7: link target does not exist" \
 	"README.md:8: anchor not found in the link target"
+# An inline-code link example renders as code, not a link, and passes; a
+# broken inline link beside it still fails.
+{
+	printf '# Readme\n\nCode %s[label](missing.md)%s and %s[x](none.md#a)%s.\n' '`' '`' '``' '``'
+	printf 'A [broken link](docs/none.md).\n'
+} >"$mk2/README.md"
+for chk in docs-check check-doc-links; do
+	run python3 "$ROOT/scripts/$chk.py" "$mk2"
+	check "$chk: a broken inline link beside inline-code link examples fails" 1 "README.md:4: link target does not exist"
+	if [[ "$OUT" == *"README.md:3:"* ]]; then fail "$chk: an inline-code link example passes" "$OUT"; else pass "$chk: an inline-code link example passes"; fi
+done
 printf '# Readme\n' >"$mk2/README.md"
 mkdir -p "$mk2/docs/sub"
 {
