@@ -40,6 +40,18 @@ is summarised in this document's own words; nothing is quoted.
 | S9 | U-Boot, `boot/Kconfig` (FIT, standard boot, legacy image options) | tag `v2026.10` | https://github.com/u-boot/u-boot/blob/v2026.10/boot/Kconfig |
 | S10 | U-Boot, `cmd/Kconfig` (`CMDLINE`, `CMD_FUSE`) | tag `v2026.10` | https://github.com/u-boot/u-boot/blob/v2026.10/cmd/Kconfig |
 | S11 | NXP U-Boot fork, `arch/arm/mach-imx/Kconfig` (`APPEND_BOOTARGS`, `FSL_MFGPROT`) | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/uboot-imx/blob/lf-6.18.37-2.1.0/arch/arm/mach-imx/Kconfig |
+| S12 | U-Boot, `arch/arm/mach-imx/ele_ahab.c` (command table: `auth_cntr`, `ahab_status`, `ahab_close`, `ahab_derive`, and others; i.MX 95 life-cycle names) | tag `v2026.10` | https://github.com/u-boot/u-boot/blob/v2026.10/arch/arm/mach-imx/ele_ahab.c |
+| S13 | U-Boot, `arch/arm/mach-imx/imx9/Kconfig` (`AHAB_BOOT` for i.MX 9; i.MX 95 targets) | tag `v2026.10` | https://github.com/u-boot/u-boot/blob/v2026.10/arch/arm/mach-imx/imx9/Kconfig |
+| S14 | SPSDK documentation, "AHAB SIGN" example for i.MX 95, and its sibling examples (i.MX 95 AHAB with U-Boot; i.MX 93 signed AHAB image for U-Boot and kernel) | `latest`, read 2026-11-12; no version shown | https://spsdk.readthedocs.io/en/latest/examples/ahab/imx95/imx95_ahab_sign.html |
+
+Upstream U-Boot `v2026.10` carries the same AHAB support for i.MX 9:
+`CONFIG_AHAB_BOOT` [S13] and the `auth_cntr` command that hands an OS
+container to the ELE [S12]. Option A is therefore not tied to NXP's fork. The
+NXP environment and defconfig [S3, S4] are the only i.MX 95 board files read;
+no FRDM-IMX95-PRO specific U-Boot configuration was found in the sources
+reached. SPSDK documents AHAB signing for the i.MX 95 boot image and, for the
+i.MX 93, a signed AHAB image for U-Boot and kernel [S14]; the pages were
+listed, not studied.
 
 ## 3. Option A: AHAB authentication through the enclave
 
@@ -54,9 +66,11 @@ the OS "extending the root of trust" [S2 §1].
 **What U-Boot loads.** The kernel (and, in NXP's flow, what imx-mkimage puts
 beside it) is wrapped in an AHAB *OS container* by imx-mkimage and signed with
 CST against the same PKI as the boot container [S2 §2.1–2.3]. U-Boot hands the
-container to the ELE for verification, either through an explicit
-`auth_cntr <address>` command or as part of booting it with `booti` on the
-container address [S2 §2; S3 `auth_os`].
+container to the ELE for verification through the `auth_cntr <address>`
+command [S2 §2; S12]. The EVK's own script instead boots the container
+address directly with `booti` [S3 `auth_os`], which implies that NXP's
+`booti` recognises and checks the container; that code was not read
+(**not confirmed**, §7).
 
 **How the EVK wires it.** The i.MX 95 EVK environment sets `sec_boot=yes`
 when U-Boot is built with `CONFIG_AHAB_BOOT`, and `no` otherwise [S3]. With
@@ -217,6 +231,143 @@ inside the authenticated U-Boot container.
 
 ## 6. Where the boot container's chain of trust ends
 
+**The links, as the sources describe them for the i.MX 95** [S6 §1.3; S1 §1.4]:
+
+| Link | Contents | Verified by | Row |
+|---|---|---|---|
+| 1 | Containers 1-3: ELE firmware (NXP-signed), V2X firmware, optional executable image, Cortex-M image, SPL | ELE ROM / ELE firmware, against the SRK hash in fuses | `boot-container` (#12) |
+| 2 | Container 4: Arm Trusted Firmware, U-Boot proper (and OP-TEE when used) | SPL asks the ELE to authenticate it | `boot-container` (#12) |
+| 3 | U-Boot's configuration: the built-in environment, boot command, enabled commands, control DTB with any FIT key (§5) | Covered by link 2, because it is compiled into U-Boot proper | `boot-container` (#12): this survey's subject |
+| 4 | The next stage: kernel, DTB, initramfs, as an AHAB OS container [S2] or a signed FIT [S5] | U-Boot, via the ELE (A) or itself (B) | Boundary: see below |
+| 5 | Root file system, dm-verity, IMA, Linux user space, xkmsd | Linux | #14, not this row |
+
+**Proposed boundary.** The boot container's chain of trust ends at the
+*decision and mechanism* of link 4: this row owns which method U-Boot uses,
+the U-Boot options that make the check mandatory (§5), and the public key or
+SRK that U-Boot trusts for it. The platform image's chain begins with the
+*artefact* of link 4: building and signing the kernel container or FIT, what
+goes in it (kernel, DTB, initramfs, kernel command line), and everything
+Linux verifies after that (root file system integrity, user space). That side
+belongs to #14, which is owner-blocked, and this survey takes no decision
+for it.
+
+**Points that straddle the line.**
+
+- *The kernel command line.* In the EVK it is assembled by environment scripts
+  (`mmcargs`, `netargs`) [S3]. With a FIT it can be fixed inside the signed
+  configuration; with an AHAB OS container the sources do not say how it is
+  protected (§7). It decides root file system integrity, so #14 needs it; its
+  immutability is a U-Boot property of this row.
+- *The device tree.* Which DTB the kernel receives, and whether it is signed,
+  depends on the method (§3, §4).
+- *Anti-rollback.* SPEC.md places the rollback floor for the boot container
+  in the AHAB version field and the enclave's monotonic counter. The same
+  container field exists on the OS container (the format is the same [S2]),
+  but whether U-Boot's `auth_cntr` path enforces a floor for OS containers is
+  **not confirmed**. FIT has no built-in rollback counter in S5; S5 names
+  rollback only as a threat that signed configurations narrow.
+- *Key custody.* If the next stage is AHAB, its key is an SRK (or SGK below
+  it) from the same fused PKI as the boot container [S1 §2], so key custody is
+  shared with this row. If it is FIT, the FIT key is a separate key that this
+  row embeds in U-Boot [S5].
+
 ## 7. Not confirmed
 
+Each item below could not be confirmed from the sources reached; none is
+guessed in the text above.
+
+1. Whether `booti` on an AHAB OS container address authenticates it in NXP's
+   fork. The EVK environment boots the container that way [S3], and NXP's
+   guide names `auth_cntr` as the explicit command [S2]; upstream `v2026.10`
+   calls the OS-container check from the `auth_cntr` command in the file
+   read [S12], but the `booti` code path was not read (lane rule: no code
+   reading outside the repository).
+2. Whether the device tree and kernel command line are inside the signed OS
+   container, or come from U-Boot unsigned, in NXP's i.MX 95 flow.
+3. Whether the OS container path enforces an anti-rollback floor (AHAB
+   version field, fuse version) for the kernel.
+4. Whether NXP's control DTB is inside the authenticated fourth container
+   (inferred from S6's layout, not confirmed from the build).
+5. Which boot methods standard boot actually reaches on a product build with
+   AHAB enabled; this depends on the final defconfig.
+6. The life-cycle naming on the i.MX 95: NXP's guide shows `ahab_close`
+   leading to a state it calls OEM Closed with value `0x20` [S6 §1.8], while
+   upstream's i.MX 95 decoder names `0x20` "OEM secure world closed" and
+   `0x40` "OEM closed" [S12]. Which state a closed FRDM-IMX95-PRO needs comes
+   from the i.MX 95 Security Reference Manual, which SPEC.md lists as missing.
+   This survey runs and scripts no life-cycle step.
+7. Whether go-xkms can act as the PKCS#11 or engine signer for mkimage
+   (option B) or for SPSDK (option A).
+8. The version of the SPSDK documentation page [S14]; the page does not show
+   one.
+9. NXP's i.MX Linux Security Reference Manual and the i.MX 95 Security
+   Reference Manual are not public sources this lane could reach; anything
+   they say about OS authentication is not reflected here.
+
 ## 8. Questions for the owner
+
+1. **Which method authenticates the kernel?**
+   Options: (a) AHAB OS container checked by the ELE [S2, S12]; (b) signed FIT
+   with signed configurations, key in U-Boot's control DTB [S5]; (c) both;
+   (d) UEFI secure boot, which the EVK defconfig already enables [S4].
+   Recommendation: **(b) signed FIT**, anchored by AHAB through U-Boot proper.
+   It binds kernel, DTB, initramfs and command line in one signed
+   configuration [S5], is upstream and generic, works with `bootm` without
+   board scripts, and its key can sit in an HSM through PKCS#11 [S5]. Keep (a)
+   if the owner wants every signature on the device checked by the ELE and one
+   PKI; then items 1-3 of §7 must be confirmed first. (c) adds keys without a
+   clear gain; (d) brings a second key database and is not described by NXP
+   for this purpose in the sources read.
+
+2. **Is there a stored U-Boot environment on a closed device?**
+   Options: (a) none, `ENV_IS_NOWHERE` only; (b) stored, with
+   `ENV_WRITEABLE_LIST` and a short list of writeable variables; (c) stored
+   and unrestricted (EVK today).
+   Recommendation: **(a)**, unless the A/B update design of #14 needs a
+   variable; then (b) with `ENV_ACCESS_IGNORE_FORCE` [S7]. (c) defeats any
+   method, since `sec_boot=no` turns off the AHAB check [S2].
+
+3. **Is there a U-Boot prompt on a closed device?**
+   Options: (a) no command line (`CMDLINE` off) [S10]; (b) command line kept,
+   `BOOTDELAY=-2` [S8]; (c) prompt behind a hashed stop string
+   (`AUTOBOOT_KEYED` + `AUTOBOOT_ENCRYPTION`) [S8]; (d) open prompt (EVK).
+   Recommendation: **(b)** for the first closed build, moving to (a) once the
+   boot path no longer relies on scripts. (a) is strongest but rules out the
+   EVK's script-based path [S3, S10]; (c) keeps a service door whose secret
+   must then be managed.
+
+4. **Which boot paths stay in the closed build?**
+   Options: (a) one path only: the chosen method from storage, with standard
+   boot reduced to it or removed, `LEGACY_IMAGE_FORMAT` off, and fastboot,
+   USB SDP, UMS, DFU, `fuse`, the `ahab_*` life-cycle and key-derivation
+   commands, `md`/`mw` and `go` removed; (b) keep a USB recovery path in
+   U-Boot; (c) EVK defaults.
+   Recommendation: **(a)** [S4, S9, S10, S12]. A U-Boot recovery path is
+   one more way to write storage or run code. Recovery could move to the boot
+   ROM's serial download mode, which loads containers that the ELE then checks
+   like any boot image [S1 §1.4]; how the ROM's download mode behaves on a
+   closed i.MX 95 is in the Security Reference Manual and is **not
+   confirmed**.
+
+5. **Which AHAB signing tool and version does SPEC.md name?**
+   Options: (a) CST 3.1.0 (SPEC.md today); (b) CST 4.0.1; (c) SPSDK.
+   Recommendation: **(c) SPSDK**. NXP says i.MX 95 B0 uses AHAB 2.0, which
+   needs CST 4.0.1 or SPSDK, and names SPSDK the recommended tool [S1 §2.1,
+   S6 §1.1]; CST 3.1.0 is the version S1 gives for the older flow. This
+   changes SPEC.md, which this lane does not edit.
+
+6. **Where is the boundary with #14?**
+   Options: (a) as in §6: this row owns the method, the U-Boot options and the
+   trusted key; #14 owns the signed artefact and everything Linux checks;
+   (b) this row also owns building and signing the kernel artefact; (c) #14
+   owns the method choice as well.
+   Recommendation: **(a)**. It keeps every U-Boot setting with the U-Boot
+   build and leaves the image contents to the row that builds the image.
+   Sources do not decide this; it is an ownership choice.
+
+7. **Is post-quantum (hybrid) signing in scope for the next stage?**
+   Options: (a) classic ECC only; (b) hybrid ECC + ML-DSA for AHAB containers
+   [S1 §2.1, §2.2]; (c) decide later.
+   Recommendation: **(c)**, no source read gives a U-Boot FIT verifier for
+   ML-DSA, so choosing (b) would also force option (a) of question 1.
+   This is a question about keys; nothing here generates or fuses one.
