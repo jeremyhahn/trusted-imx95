@@ -83,7 +83,7 @@ Life cycle as the enclave reports it (S1 §6, §7; S3). "Inferred" marks a class
 | OEM open, correct hash, signed boot clean, not closed | Recoverable, **but insecure**: an unsigned or wrongly signed image is reported, not refused | Life cycle OEM open; zero AHAB events | S1 §6–§7 |
 | OEM open, key imported with a signature warning | Insecure if carried forward | Warning code `HSM_OEM_OPEN_LC_SIGNED_MSG_VERIFICATION_FAIL` | S3 |
 | OEM closed, wrong or partial SRK hash | **Bricked** | Board does not boot any OEM container | S1 §5, §7 |
-| OEM closed, correct hash | Done; later key-store failures are recoverable by re-import, at OTP-counter cost | Life cycle OEM closed; zero AHAB events | S1 §7, S3 |
+| OEM closed, correct hash | Done. Recovery of a later key-store failure by re-import is **unconfirmed**: it needs an i.MX 95 import service that is confirmed or validated ([key-recovery-survey.md](../secure-key-handling/key-recovery-survey.md) §3.3) and an off-board master copy, and it costs OTP counter bits | Life cycle OEM closed; zero AHAB events | S1 §7, S3 |
 | Strict key-store operation sent, no acknowledgement | Indeterminate: NVM write and counter bit may or may not have happened | Reconcile after a reset (key store opens, key attributes, counter state) before any retry | S3; inferred, vendor recovery rule not confirmed |
 | Close interrupted | Unknown | Unknown | Not confirmed |
 | Monotonic counter ahead of the stored key store | Key store lost, SoC not bricked | Key-store open fails after reset | S3; inferred, not confirmed |

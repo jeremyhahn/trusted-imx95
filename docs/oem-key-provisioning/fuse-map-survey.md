@@ -223,9 +223,11 @@ recorded before the step runs.
 | P4 | debug fields `0x38`-`0x3A` (section 3.3) | owner's debug policy (question 5) | P2 verified | read back equals the policy; debugger refused where disabled | **no** |
 | P5 | boot configuration `BOOT_CFG*` (section 3.4) | only if the owner chooses fuse boot (question 6); values from IMX95RM | IMX95RM obtained | board boots from the intended device with the boot pins changed | **no** |
 | P6 | locks (`LOCK_CFG*`) | owner's choice (question 4), after the Security Reference Manual is read | P2 to P5 verified | read back | **no** |
-| P7 | version commit (`OEM_FW_FUSE`, `NXP_FW_FUSE`) | the `fuse_version` in the signed release container | a version policy exists (question 8) | `get-info` shows the version; an older image is refused | **no** |
-| P8 | life cycle to OEM closed | n/a | P1 and P2 show no events; spare board available (question 10) | life cycle reads `0x40`; signed image boots; unsigned image refused | **no** |
+| P7 | version commit (`OEM_FW_FUSE`, `NXP_FW_FUSE`) | the `fuse_version` in the signed release container | a version policy exists (question 8) | `get-info` shows the version. OEM container, still OEM open: an older-version OEM container still boots and the enclave reports an event for it (section 3.5); check that the event is reported. Refusal is checked only after P8. NXP container, a separate check: an older-version NXP container is refused already in OEM open (section 3.5) | **no** |
+| P8 | life cycle to OEM closed | n/a | P1 and P2 show no events; spare board available (question 10) | life cycle reads `0x40`; signed image boots; unsigned image refused; if P7 ran, an OEM container below the committed version is refused (section 3.5) | **no** |
 | P9 | life cycle to OEM locked | n/a | owner's explicit choice (question 7) | life cycle reads `0x80` | **no** |
+
+The "Check before" and "Check after" columns are survey checks for the owner's plan: this survey commits no version, writes no fuse and closes no life cycle. The OEM anti-rollback refusal can only be observed once the life cycle is closed (P8), because in OEM open a lower-version OEM container still boots with an event (section 3.5); the NXP container check differs and stays separate.
 
 Each step's commands, operator and record go into a signed-off provisioning log.
 They are written when the owner approves this plan, not here.

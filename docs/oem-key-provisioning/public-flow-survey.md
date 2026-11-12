@@ -128,7 +128,7 @@ A claim marked **unconfirmed** could not be checked against a source that this l
    Recommendation: (b). Each commit burns fuses for good (S2, S3), and the number of version bits is **unconfirmed**.
 6. **Is the ELE key store on the Linux file system (`/etc/ele/`, F6) acceptable?**
    - (a) Yes, on a protected partition.
-   - (b) No: keep no persistent OEM keys in the enclave key store, and re-import them each boot from go-xkms.
+   - (b) No: keep no persistent OEM keys in the enclave key store, and re-import them each boot from go-xkms. This depends on an i.MX 95 wrapped-key import service, which is **unconfirmed** ([key-recovery-survey.md](../secure-key-handling/key-recovery-survey.md) §3.3).
 
    No recommendation until the blob protection is confirmed.
 7. **Which silicon revision is the FRDM-IMX95-PRO in the kit, A0 or B0?** The ELE firmware container (S8) and SPSDK's keystore-reprovisioning support (S4) differ by revision. Recommendation: record the revision in [references/](../references/README.md) before any provisioning design is written.

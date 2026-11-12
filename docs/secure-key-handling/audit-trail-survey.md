@@ -51,7 +51,8 @@ Crosby and Wallach (S3) replace the linear chain with a history tree, a Merkle t
 What this means for the board:
 
 - A plain hash chain is enough to show reordering or editing. It shows a cut only if the verifier holds a later commitment (a chain head) than the one on the board. So the board must send chain heads off the board often (§5).
-- The chain head must be signed by a key the Linux side cannot use outside the logger. On the i.MX 95 that key can be an enclave key used only for audit (an ELE key with a usage restricted to signing, S1 `hsm_key.h` key usage flags). Root on Linux can still ask the enclave to sign a false head; what it cannot do is take the key away, so a verifier with an older signed head can still see that the history was rewritten (S3, S4).
+- The chain head is signed by an enclave key used only for audit (an ELE key whose usage is restricted to signing, S1 `hsm_key.h` key usage flags). A usage flag limits what the key may do, not which process may ask the enclave to do it: any caller with access to the key store session, a root-capable Linux process included, can have the enclave sign with it. The key not being extractable keeps it on the board, but it does not make the logger the key's only user, and it does not by itself make deletions visible. A root-capable attacker can drop the records written after the verifier's last accepted head, build a fabricated extension of that head, and have the enclave sign it; the §5 check that a new head extends the stored one passes on it.
+- So, with a logger on Linux, a signed head protects only history already committed to an independent verifier (the heads it has accepted): editing, reordering or cutting that history is visible (S3, S4). Records after the last accepted head have no protection against Linux root. Protecting them needs a logger isolated from Linux root that holds exclusive authorization to use the audit key, for example an OP-TEE trusted application or the Cortex-M7 holding the only key store session that can use it. Whether the i.MX 95 enclave can restrict a key's use to one caller or one execution domain is **unconfirmed**: no source read here shows such a mechanism (§8).
 - The forward-secure MAC of S2 needs a key that is destroyed after use. A key held by the Linux side and ratcheted in RAM gives that property only for entries written before the attacker arrived. An enclave key cannot be ratcheted in that way through the HSM API in S1, as far as this survey found (§8).
 
 ### 4.2 Anchoring in the enclave's monotonic counter
@@ -115,7 +116,7 @@ A transport-neutral export bundle could carry:
 2. a signed head over the chain (or tree root, S3, S4): sequence number, head hash, boot counter, board time, and a nonce the verifier sent, signed by the enclave audit key;
 3. when the verifier asks, an enclave device attestation over the same nonce (S1 `hsm_dev_attest.h`), so the verifier knows the board's life cycle, firmware hash and SRK hash when the head was signed. In RATS terms (S10) the board is the attester, the bundle is the evidence, and go-trusted-platform or go-xkms is the verifier.
 
-The verifier keeps the newest head it has accepted. A later bundle must extend it: for a linear chain the verifier recomputes the chain from its stored head; for a tree, a consistency proof does the same with less data (S3, S4). A board that shows a shorter chain, or a head that does not extend the stored one, has lost or rewritten records.
+The verifier keeps the newest head it has accepted. A later bundle must extend it: for a linear chain the verifier recomputes the chain from its stored head; for a tree, a consistency proof does the same with less data (S3, S4). A board that shows a shorter chain, or a head that does not extend the stored one, has lost or rewritten records. The check covers only history up to the stored head: if Linux root can use the audit key, a fabricated extension of the stored head passes it (§4.1).
 
 The audit key's public key and an attestation are exported at enrolment, so heads can still be checked after the key is gone (§6).
 
@@ -137,16 +138,16 @@ What the enclave does on a tamper event on the i.MX 95, and what it erases, is i
 
 | Option | What it is | Detects | Needs | Cost |
 |---|---|---|---|---|
-| A | Hash-chained log file on Linux; heads signed by an enclave audit key; heads exported (§5) | edits and reordering on the board; truncation once a later head is off the board | one enclave signing key for audit | low |
-| B | A, plus the head in RPMB through an OP-TEE trusted application | truncation and rollback on the board, before export | RPMB key programmed (provisioning); OP-TEE with RPMB on the i.MX 95 (unconfirmed) | medium |
-| C | A, plus the head written into each strict key store update | rollback of the log past the last key generate, import or delete | the counter fuse partition (provisioning); fuse wear | low, but coarse |
+| A | Hash-chained log file on Linux; heads signed by an enclave audit key; heads exported (§5) | edits, reordering and truncation of history already committed to the verifier (heads it accepted); nothing after the last accepted head if Linux root can use the audit key (§4.1) | one enclave signing key for audit | low |
+| B | A, plus the head in RPMB through an OP-TEE trusted application | truncation and rollback on the board, before export, only if the trusted application itself is the logger with exclusive use of the audit key; a head fed by a Linux logger can be fed fabricated records | RPMB key programmed (provisioning); OP-TEE with RPMB on the i.MX 95 (unconfirmed); exclusive key use by the TA (unconfirmed, §8) | medium |
+| C | A, plus the head written into each strict key store update | rollback of the log past the last key generate, import or delete; signing-only activity after that update has no counter anchor | the counter fuse partition (provisioning); fuse wear | low, but coarse |
 | D | A or B with a Merkle tree (S3, S4) instead of a linear chain | the same as A or B | more code in the logger and the verifier | medium |
 | E | journald Forward Secure Sealing only (S7) | edits before a compromise | nothing from the enclave | lowest; weakest |
 | F | IMA as the trail | — (not fit: IMA does not record application events, S6) | — | — |
 
 C costs nothing extra on the counter, because the strict updates it rides on happen anyway; it only adds the head to records that are written already.
 
-Recommendation, where the sources support one: start with A and C together, with a linear chain. Add B when the RPMB question (#62) is settled. Use IMA only to measure the logger. Move to D if the trail grows large enough that sending the whole chain to the verifier is a problem.
+Recommendation, where the sources support one: start with A and C together, with a linear chain, and claim for it only what it gives with a logger on Linux: protection of history already committed to the verifier. Protection of records after the last accepted head needs an isolated logger with exclusive use of the audit key (Q2), which is unconfirmed on this device (§8). Add B when the RPMB question (#62) is settled. Use IMA only to measure the logger. Move to D if the trail grows large enough that sending the whole chain to the verifier is a problem.
 
 ## 8. What could not be confirmed
 
@@ -157,14 +158,15 @@ Recommendation, where the sources support one: start with A and C together, with
 - The Linux kernel RPMB subsystem documentation: the page https://docs.kernel.org/next/misc-devices/rpmb.html returned 404.
 - RPMB write endurance and latency for the board's eMMC: the JEDEC eMMC specification is not public.
 - S2: the schneier.com archive page returned 404; the PDF was reachable but was not re-read in full for this survey.
+- Whether the i.MX 95 enclave can limit the use of a key to one caller, one key store session or one execution domain (for example OP-TEE or the Cortex-M7), so that an isolated logger has exclusive use of the audit key. S1's key usage flags restrict operations, not callers; no source read here shows such a mechanism.
 - Any intake for an audit trail in go-trusted-platform or go-xkms: their READMEs (S8, S9) describe none; their source was not searched.
 
 ## 9. Questions for the owner
 
 1. **Which audit design should the board use?** Options: A, A+C, A+B(+C), D, E (§7). Recommendation: A+C now, add B after #62 is settled; not E alone, not F.
-2. **Where does the logger run?** It must sit on the only path to the enclave's HSM API, so it follows SPEC.md's open question of which core calls that API. Options: (a) Cortex-A55 Linux, in the daemon that calls the HSM API; (b) the Cortex-M7, with the trail stored through Linux; (c) an OP-TEE trusted application. Recommendation: put the logger in the same component that holds the HSM session, whichever core the owner picks for it; no source favours one core over another for the log itself.
+2. **Where does the logger run?** It must sit on the only path to the enclave's HSM API, so it follows SPEC.md's open question of which core calls that API. Options: (a) Cortex-A55 Linux, in the daemon that calls the HSM API; (b) the Cortex-M7, with the trail stored through Linux; (c) an OP-TEE trusted application. Recommendation: put the logger in the same component that holds the HSM session, whichever core the owner picks for it. With (a), the trail protects only history already committed to the verifier, because Linux root can use the audit key (§4.1); (b) or (c) protects later records only if that component has exclusive use of the audit key, which is unconfirmed on this device (§8).
 3. **How does the trail leave the board?** Options: (a) the verifier pulls, with a nonce; (b) the board pushes after each signing; (c) both. Recommendation: (c), a push after each signing and a pull with a nonce for freshness (§5). The transport is go-xkms's decision.
 4. **What does a signing record hold about the request?** Options: (a) the signed digest; (b) a hash of the signed digest; (c) only go-xkms's request identifier. Recommendation: (b) together with the request identifier when one is given, so that the trail does not hold the signed content but a verifier holding the request can still match it.
 5. **What happens when the trail cannot be written?** For example: storage is full, or the RPMB head cannot be updated. Options: (a) refuse to sign (fail closed); (b) sign and raise an alarm (fail open). Recommendation: (a), because a signing with no record defeats the trail; no source decides this.
-6. **Is a separate enclave key for audit acceptable?** Options: (a) a dedicated audit signing key in the enclave; (b) reuse the device identity or attestation key. Recommendation: (a), so that the audit key's use can be restricted and itself logged (S1 key usage flags).
+6. **Is a separate enclave key for audit acceptable?** Options: (a) a dedicated audit signing key in the enclave; (b) reuse the device identity or attestation key. Recommendation: (a), so that the audit key signs nothing but heads (S1 key usage flags) and its use can itself be logged. The usage flags do not restrict which caller uses the key (§4.1).
 7. **After a tamper response, should the board start a new trail under a new audit key, or stay out of service until it is re-enrolled?** Recommendation: none until the i.MX 95 tamper behaviour is confirmed (§8, #44).

@@ -48,8 +48,9 @@ A build note matters for the i.MX 95. The library's `ele` build, which serves th
 
 - The ELE build imports keys with `hsm_import_key`. Input is either an ELE TLV or an EdgeLock 2GO TLV. Flags can request a strict write and a monotonic counter increment (S1, `hsm_importkey.h`). In the PSA build, a key exchange call (`hsm_key_exchange`) establishes the key under which the imported key is wrapped (S1, `hsm_key_exchange.h`).
 - SPEC.md's `oem-key-provisioning` row already describes this flow from the private references: key exchange, then import of the wrapped key.
-- This is the one recovery path the public API supports. A key that was **generated outside the enclave and kept outside it** can be imported into a replacement board, wrapped. It works only for keys that have an off-board master copy. Such a copy would be held, for example, in go-xkms custody or an offline HSM.
-- **Assessment:** re-provisioning is available. It is recovery only for keys whose master lives off the board. It cannot bring back a key that was generated inside the enclave.
+- **Not confirmed for the i.MX 95.** The calls above are declared in S1's headers, but a header declaration does not establish that the i.MX 95 firmware serves them. The README at the same tag lists the Key Exchange API and the Key Import API as not supported on the i.MX 95 ([algorithm-support-survey.md](algorithm-support-survey.md) §3.2). Whether the OEM import that SPEC.md's row describes is a separate enclave service that the i.MX 95 does serve is unresolved (same survey, question 7).
+- If an applicable i.MX 95 import service is confirmed by NXP, or validated on this board's firmware, it would be the one recovery path the public API offers. A key that was **generated outside the enclave and kept outside it** could then be imported into a replacement board, wrapped. It works only for keys that have an off-board master copy, held for example in go-xkms custody or an offline HSM.
+- **Assessment:** re-provisioning is **unconfirmed** on the i.MX 95. No source read here guarantees that a replacement board can restore any key. Keeping an off-board master copy of every key that must be recoverable is still advised, because it is the precondition of this path if the import service is confirmed. It can never bring back a key that was generated inside the enclave.
 
 ### 3.4 Re-creation (re-generate and re-enrol)
 
@@ -65,8 +66,8 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 |-----------|----------------|--------------|-----------|------------|
 | Enclave device attestation key (SPEC.md `device-lifecycle`, RM00284 §3.12) | Inside the enclave, set up by NXP. Whether it is fused or derived is **not confirmed** publicly | **No, by design.** It is the chip's identity | None. A new board brings a new attestation identity | This repository (device side); go-trusted-platform (what it trusts) |
 | Device identity and enrolment keys generated in the key store (the board's identity towards xkmsd and the control plane) | ELE key store under `/etc/ele/` | **No, by design.** Generated in the enclave; no export call exists (§3.2) | 3.4: re-create and re-enrol | go-trusted-platform (enrolment and revocation of the retired board); go-xkms (`hsm-device-protocol` identity) |
-| Keys the board holds as an HSM on behalf of go-xkms (the service's working keys) | ELE key store | **Only if a master copy exists off the board** | 3.3: wrapped re-import from custody; otherwise 3.4 and loss of what they protect | **go-xkms** (key custody model) |
-| OEM keys provisioned by `oem-key-provisioning` | ELE key store, imported wrapped | Yes, if the provisioning side keeps the master | 3.3 | This repository (`oem-key-provisioning`), with the owner |
+| Keys the board holds as an HSM on behalf of go-xkms (the service's working keys) | ELE key store | **Only if a master copy exists off the board, and only once an i.MX 95 import service is confirmed** (unconfirmed, §3.3) | 3.3: wrapped re-import from custody, conditional on that confirmation; otherwise 3.4 and loss of what they protect | **go-xkms** (key custody model) |
+| OEM keys provisioned by `oem-key-provisioning` | ELE key store, imported wrapped | **Unconfirmed.** Only if the provisioning side keeps the master and the i.MX 95 import service is confirmed or validated (§3.3) | 3.3, conditional | This repository (`oem-key-provisioning`), with the owner |
 | Code-signing keys for the boot container (SPEC.md `boot-container`) | Off the board, in an HSM under go-xkms custody (AN14471 model, per SPEC.md). The board holds only the fused key hash | Not a board recovery question. A replacement board must be fused with the same hash, which is an `oem-key-provisioning` step not covered here | n/a | go-xkms (custody); this repository (fusing, in `oem-key-provisioning`) |
 | Data blobs sealed with `hsm_blob_unblob` bound to the chip's unique ID | Caller storage | **No.** Board-bound by construction (S1) | Re-create the data from its source | This repository |
 
@@ -78,7 +79,7 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 - `platform-image`: the key store files live in `/etc/ele/` on the Linux filesystem (S1). If an image update replaces or rolls back the root filesystem, the key store is replaced or rolled back with it. This is a way to lose keys without losing the board. It is a risk whether or not a backup path is adopted (question 3).
 - `hsm-self-defence`: copies of the key store files outside the board are harmless only if the sealing is chip-bound, which is **not confirmed** (§6). If it is not chip-bound, every copy weakens zeroisation.
 
-**3.3 Wrapped re-import from an off-board master**
+**3.3 Wrapped re-import from an off-board master** (only if the i.MX 95 import service is confirmed, §3.3)
 
 - `secure-key-handling`: a key with an off-board master is only as safe as the custody that holds the master. The board stops being the only place the key exists. This is a deliberate change from "never leaves the enclave in the clear". It still holds as written, because the key travels wrapped. But the key's root of trust moves off the board.
 - `oem-key-provisioning`: re-import reuses the key exchange and wrapped import flow (S1; SPEC.md row). The replacement board must be in a life-cycle state that allows the import. Moving between life-cycle states is not run or scripted here.
@@ -96,6 +97,7 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 
 - **How the ELE seals the key store files** under `/etc/ele/`: the key, whether it is chip-unique, and whether a copy loads on another i.MX 95. S1's headers, README and its generated API document (`doc/ele_hsm_api_document.rtf`, same tag) do not state it. The ELE firmware API manual (RM00284) is in the repository's private references, not on a public URL: `https://www.nxp.com/docs/en/reference-manual/RM00284.pdf` returned "page not available" from the lane.
 - **Whether ELE firmware has a key export or migration command** that S1 does not expose. The PSA build of S1 has none at tag `lf-6.18.37-2.1.0`.
+- **Whether the i.MX 95 firmware serves any wrapped key import** usable for re-provisioning. S1's headers declare `hsm_import_key` and `hsm_key_exchange`, but S1's README at the same tag lists the Key Exchange and Key Import APIs as not supported on the i.MX 95 ([algorithm-support-survey.md](algorithm-support-survey.md) §3.2), and whether the OEM import path is a separate service is open (same survey, question 7). Needs NXP confirmation or validation on the board's firmware.
 - **The exact behaviour when an older key store copy is restored** on the same board after the monotonic counter has advanced.
 - **The i.MX 95 Security Reference Manual and IMX95RM**: they are missing from the references (SPEC.md) and not public.
 - **NXP EdgeLock 2GO** (the service behind the `E2GO_TLV` import input in S1): the public product pages tried returned "page not available" from the lane. Its re-provisioning model for a replacement device is not surveyed.
@@ -109,13 +111,13 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
    - (b) Only the keys the board holds for go-xkms, through wrapped re-import from go-xkms custody (§3.3). Device identity stays unrecoverable.
    - (c) Also the device identity keys.
 
-   Recommendation: **(b) if go-xkms keeps an off-board master, otherwise (a).** Wrapped import is the only recovery path the public API offers (S1). Device identity cannot be recovered without an export call that does not exist (§3.2), so (c) is not supported by the sources.
+   Recommendation: **(a) as the design stance now; (b) only once an i.MX 95 import service is confirmed by NXP or validated on the board's firmware, and only if go-xkms keeps an off-board master.** Wrapped import is the only recovery path the public API declares (S1), but its availability on the i.MX 95 is unconfirmed (§3.3), so no recovery of a key on a replacement board is guaranteed today. go-xkms keeping an off-board master for keys it may need to restore remains advised. Device identity cannot be recovered without an export call that does not exist (§3.2), so (c) is not supported by the sources.
 2. **Does go-xkms hold an off-board master for the working keys it places on the board, or does it generate them on the board?**
    - (a) It holds a master and imports wrapped.
    - (b) It generates on the board and accepts loss on replacement.
    - (c) It generates on the board and replicates through its own protocol.
 
-   No recommendation: this is go-xkms's decision (§4). Note that (c) needs an export path that S1 does not offer.
+   No recommendation: this is go-xkms's decision (§4). Note that (a) depends on an i.MX 95 import service that is unconfirmed (§3.3), and (c) needs an export path that S1 does not offer.
 3. **Where does `/etc/ele/` live relative to image updates (`platform-image`)?**
    - (a) On the root filesystem, replaced and rolled back with it.
    - (b) On a separate persistent partition that image updates never touch.
