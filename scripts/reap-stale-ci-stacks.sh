@@ -58,6 +58,17 @@
 # `{{.Metadata.LastTagTime.Unix}}` is a template error, the inspect line came
 # back without an id, and v3 and v4 then removed the tag whatever its age or
 # lease. An image the inspect gives no id for is now kept.
+# v6 (trusted-imx95, from a Codex review of #19): dangling images too. A
+# trusted run rebuilds the integration image with --no-cache under the same
+# content tag (Makefile docker-build), so each rebuild with a new image id
+# moves the tag and leaves the old id with no tag. The tag loop never sees
+# it, and on the persistent daemon such ids piled up until the disk filled.
+# Every integration image the Makefile builds carries the label
+# ci.reap.repository=<prefix>it, and under the same image lock the reaper
+# removes, by id, each dangling image with that label that was created at
+# least REAP_IMAGE_MIN_AGE seconds ago and that no container (a lease, a
+# stack, running or created) uses. A live lease's image is never removed:
+# the in-use check skips it, and `docker image rm` without force refuses it.
 #
 # Stale: exited or dead and finished at least <min-age-seconds> ago, or
 # created and never started at least that long ago. A project with any
@@ -181,8 +192,11 @@ docker ps -a --filter "name=^$prefix" \
 # Content-addressed integration images (v2, above), under the image lock (v5).
 images=0
 refs=
+dangling=
+reap_label="ci.reap.repository=${prefix}it"
 if [ "${REAP_DRY_RUN:-0}" = 1 ] || image_lock; then
   refs=$(docker images --filter "reference=${prefix}it" --format '{{.Repository}}:{{.Tag}}')
+  dangling=$(docker images -q --no-trunc --filter dangling=true --filter "label=$reap_label")
 else
   echo "keep  every ${prefix}it image (the image lock was not free within ${lock_wait}s)"
 fi
@@ -216,6 +230,29 @@ for ref in $refs; do
   fi
   echo "reap  image $ref"
   if run docker image rm "$ref"; then images=$((images + 1)); else echo "warn  image $ref not removed (in use?)"; fi
+done
+# v6: the dangling images a rebuild left behind, by id, under the same lock.
+for id in $dangling; do
+  case $id in sha256:*) ;; *) continue ;; esac
+  created=$(docker image inspect -f '{{.Created}}' "$id" 2>/dev/null) || created=
+  t=$(date -d "$created" +%s 2>/dev/null) || {
+    echo "keep  dangling image $id (docker image inspect gave no creation time)"
+    continue
+  }
+  if [ $((now - t)) -lt "$image_min_age" ]; then
+    echo "keep  dangling image $id (created within ${image_min_age}s)"
+    continue
+  fi
+  if ! users=$(docker ps -a -q --filter "ancestor=$id" 2>/dev/null); then
+    echo "keep  dangling image $id (could not list the containers on it)"
+    continue
+  fi
+  if [ -n "$users" ]; then
+    echo "keep  dangling image $id (in use: $(echo "$users" | wc -l) container(s))"
+    continue
+  fi
+  echo "reap  dangling image $id ($reap_label)"
+  if run docker image rm "$id"; then images=$((images + 1)); else echo "warn  dangling image $id not removed (in use?)"; fi
 done
 image_unlock
 

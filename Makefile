@@ -189,6 +189,12 @@ TRUSTED_RUN := $(if $(filter-out pull_request pull_request_target,$(GITHUB_EVENT
 TOOLCHAIN_ID_FILE ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/toolchain-image.id)
 IT_ID_FILE        ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/it-image.id)
 IT_IMAGE_ID       ?=
+# Each trusted rebuild moves the integration image's content tag to a new ID
+# and leaves the old one dangling. Every integration build carries this
+# label, the image's repository (<CI_STACK_PREFIX>it), so
+# scripts/reap-stale-ci-stacks.sh (v6) finds those IDs and removes the ones
+# no lease or stack uses.
+IT_REAP_LABEL      = ci.reap.repository=$(firstword $(subst :, ,$(IT_IMAGE)))
 # NEED_ID_FILE <file> <variable>: a trusted run fails when it has nowhere to
 # record the image ID.
 NEED_ID_FILE = [ -n "$(1)" ] || { echo "$@: a trusted run ($(GITHUB_EVENT_NAME)) records its image ID; set RUNNER_TEMP or $(2)" >&2; exit 1; }
@@ -236,11 +242,11 @@ docker-build: docker-build-toolchain ## Build both images, each only when the da
 		$(call NEED_ID_FILE,$(IT_ID_FILE),IT_ID_FILE); \
 		rm -f "$(IT_ID_FILE)"; \
 		echo "docker-build: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(IT_IMAGE) from source"; \
-		docker build --no-cache --iidfile "$(IT_ID_FILE)" --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
-			-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
+		docker build --no-cache --iidfile "$(IT_ID_FILE)" --target integration --label "$(IT_REAP_LABEL)" \
+			--build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" -t $(IT_IMAGE) -f $(DOCKERFILE) .; \
 	else \
 		docker image inspect $(IT_IMAGE) >/dev/null 2>&1 || \
-			docker build --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
+			docker build --target integration --label "$(IT_REAP_LABEL)" --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
 				-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
 	fi
 

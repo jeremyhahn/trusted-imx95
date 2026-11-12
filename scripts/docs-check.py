@@ -6,9 +6,10 @@ Markdown file under docs/ (recursively), ROADMAP.md and README.md. It reads
 the files on disk, so an untracked file is checked as well, and it fetches
 nothing. It checks:
 
-  links    every relative link resolves inside the repository, and a
-           `#anchor` names a heading of the target Markdown file (the parser
-           and the anchor rule of scripts/check-doc-links.py)
+  links    every relative link, inline or reference-style, resolves inside
+           the repository, a `#anchor` names a heading of the target
+           Markdown file, and a reference link has a definition (the scanner
+           and the rules of scripts/check-doc-links.py)
   hosts    no internal host name: a URL whose host is a single label (other
            than localhost), or any name under .internal, .local, .lan, .corp,
            .intranet, .localdomain or .home.arpa
@@ -80,24 +81,6 @@ def hygiene(line):
     return rules
 
 
-def check_links(root, rel, lineno, line):
-    out = []
-    path = os.path.join(root, rel)
-    for m in links.LINK.finditer(line):
-        target = m.group(1)
-        if links.SCHEME.match(target):
-            continue
-        file_part, _, frag = target.partition("#")
-        dest = path if not file_part else os.path.normpath(os.path.join(os.path.dirname(path), file_part))
-        if not dest.startswith(root + os.sep) and dest != root:
-            out.append("link leaves the repository")
-        elif not os.path.exists(dest):
-            out.append("link target does not exist")
-        elif frag and dest.endswith(".md") and frag not in links.anchors(dest):
-            out.append("anchor not found in the link target")
-    return out
-
-
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
     bad = 0
@@ -108,17 +91,14 @@ def main():
             print(f"{rel}: missing")
             bad = 1
             continue
-        fenced = False
+        found = []
         with open(path, encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
-                found = hygiene(line)
-                if links.FENCE.match(line):
-                    fenced = not fenced
-                elif not fenced:
-                    found += check_links(root, rel, lineno, line)
-                for rule in found:
-                    print(f"{rel}:{lineno}: {rule}")
-                    bad = 1
+                found += [(lineno, rule) for rule in hygiene(line)]
+        found += links.findings(root, path)
+        for lineno, rule in sorted(found, key=lambda f: f[0]):
+            print(f"{rel}:{lineno}: {rule}")
+            bad = 1
     if bad:
         return 1
     print(f"docs-check: OK ({len(checked)} Markdown files: docs/, ROADMAP.md, README.md)")

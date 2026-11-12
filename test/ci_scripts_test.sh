@@ -271,6 +271,26 @@ check "make docs-check: a broken relative link fails it" nonzero "README.md:4: l
 printf '# Readme\n\nSee [the roadmap](ROADMAP.md#nowhere).\n' >"$mk2/README.md"
 run python3 "$ROOT/scripts/docs-check.py" "$mk2"
 check "docs-check: an anchor the target lacks fails" 1 "README.md:3: anchor not found in the link target"
+# Reference-style links: a definition's target and anchor are checked like an
+# inline link's, and a reference with no definition fails. A good reference,
+# a footnote and `a[i][j]` in inline code pass.
+{
+	printf '# Readme\n\nSee [good][ok], [missing][gone], [anchor][bad-anchor], [undefined][nodef] and [ok][].\n'
+	printf 'Code %sa[i][j]%s and a note[^1].\n\n' '`' '`'
+	printf '[ok]: ROADMAP.md#roadmap\n[gone]: docs/none.md\n[Bad-Anchor]: ROADMAP.md#nowhere "a title"\n[^1]: a footnote, not a link\n'
+} >"$mk2/README.md"
+run python3 "$ROOT/scripts/docs-check.py" "$mk2"
+check "docs-check: a broken reference-style link, a broken reference anchor and an undefined reference fail" 1 \
+	"README.md:3: reference link has no definition" "README.md:7: link target does not exist" \
+	"README.md:8: anchor not found in the link target"
+for n in 4 6 9; do
+	if [[ "$OUT" == *"README.md:$n:"* ]]; then fail "docs-check: line $n (inline code, a good reference, a footnote) passes" "$OUT"; else pass "docs-check: line $n (inline code, a good reference, a footnote) passes"; fi
+done
+git -C "$mk2" add README.md
+run python3 "$ROOT/scripts/check-doc-links.py" "$mk2"
+check "check-doc-links: the same reference-style links fail lint-docs" 1 \
+	"README.md:3: reference link has no definition" "README.md:7: link target does not exist" \
+	"README.md:8: anchor not found in the link target"
 printf '# Readme\n' >"$mk2/README.md"
 mkdir -p "$mk2/docs/sub"
 {
@@ -834,6 +854,13 @@ seed yes
 run mk push docker-build
 expect "make docker-build: a push run rebuilds the integration image with no cache, recording its ID" \
 	grep -q "^build --no-cache --iidfile $rt/it-image.id --target integration" "$IMG_LOG"
+expect "make docker-build: the trusted rebuild labels the image with its repository, for the reaper" \
+	grep -q "^build .*--target integration --label ci.reap.repository=${itag%:*} " "$IMG_LOG"
+seed yes
+rm -f "$IMG_STATE/$(skey "$itag")"
+run mk pull_request docker-build
+expect "make docker-build: a local build labels the image with its repository, for the reaper" \
+	grep -q "^build --target integration --label ci.reap.repository=${itag%:*} " "$IMG_LOG"
 seed yes
 run mk pull_request docker-build
 if [ "$RC" = 0 ] && ! grep -q '^build' "$IMG_LOG"; then
@@ -938,6 +965,96 @@ if [ "$n_ref" = 3 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
 else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
 fi
+
+# --- reap-stale-ci-stacks.sh v6: the dangling images a rebuild leaves --------
+# (Codex reliability P1: each trusted rebuild moves the content tag to a new
+# ID and leaves the old ID dangling, which the tag loop never sees.) A stub
+# docker holds images as lines "<id> <created> <label> <tag or ->" in
+# $RP/images and containers as "<id> <image id>" in $RP/containers; `docker
+# image rm` refuses an image a container uses, as Docker does.
+mkdir -p "$TMP_ROOT/reapbin"
+cat >"$TMP_ROOT/reapbin/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$RP/log"
+case "$1 ${2:-}" in
+"ps -a")
+	case " $* " in
+	*" -q --filter ancestor="*)
+		img=${!#}
+		img=${img#ancestor=}
+		while read -r cid on; do [ "$on" != "$img" ] || echo "$cid"; done <"$RP/containers" ;;
+	esac ;;
+"images "*)
+	case " $* " in
+	*" --filter dangling=true "*)
+		want=${!#}
+		want=${want#label=}
+		while read -r id _ lab tag; do [ "$tag" = - ] && [ "ci.reap.repository=$lab" = "$want" ] && echo "$id"; done <"$RP/images" ;;
+	*) while read -r _ _ _ tag; do [ "$tag" = - ] || echo "$tag"; done <"$RP/images" ;;
+	esac ;;
+"image inspect")
+	ref=${*: -1}
+	while read -r id created _ tag; do
+		if [ "$ref" = "$id" ] || [ "$ref" = "$tag" ]; then
+			case $3 in -f) case $4 in *Id*) echo "$id $created" ;; *LastTagTime*) echo "0001-01-01 00:00:00 +0000 UTC" ;; *) echo "$created" ;; esac ;; esac
+			exit 0
+		fi
+	done <"$RP/images"
+	[ "$ref" = "${REAP_PREFIX}image-lock:base" ] || exit 1 ;;
+"image rm")
+	ref=$3
+	id=$ref
+	while read -r i _ _ tag; do [ "$ref" != "$tag" ] || id=$i; done <"$RP/images"
+	while read -r _ on; do [ "$on" != "$id" ] || { echo "conflict: image is being used" >&2; exit 1; }; done <"$RP/containers"
+	grep -v "^$id " "$RP/images" >"$RP/images.new"
+	mv "$RP/images.new" "$RP/images"
+	echo "$id" >>"$RP/removed" ;;
+"create --pull") echo lock-id ;;
+"rm "*) ;;
+*) echo "stub docker: unexpected $*" >&2; exit 3 ;;
+esac
+EOF
+chmod +x "$TMP_ROOT/reapbin/docker"
+RP=$TMP_ROOT/reap
+REAP_PREFIX=trusted-imx95-ci-
+export RP REAP_PREFIX
+mkdir -p "$RP"
+rid() { printf 'sha256:%s' "$(printf '%s' "$1" | sha256sum | cut -c1-64)"; }
+old=$(date -u -d '-5 hours' +%Y-%m-%dT%H:%M:%SZ)
+new=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+lab="${REAP_PREFIX}it"
+cat >"$RP/images" <<EOF
+$(rid current) $new $lab ${REAP_PREFIX}it:abc
+$(rid dangling) $old $lab -
+$(rid leased) $old $lab -
+$(rid fresh) $new $lab -
+$(rid other) $old other-ci-it -
+EOF
+echo "lease-container $(rid leased)" >"$RP/containers"
+: >"$RP/removed"
+: >"$RP/log"
+run env PATH="$TMP_ROOT/reapbin:$PATH" "$ROOT/scripts/reap-stale-ci-stacks.sh" "$REAP_PREFIX"
+check "reap-stale-ci-stacks: a dangling repository image no lease uses is removed" 0 "reap  dangling image $(rid dangling)" \
+	"keep  dangling image $(rid leased) (in use: 1 container(s))" "keep  dangling image $(rid fresh) (created within"
+expect "reap-stale-ci-stacks: the dangling image is gone from the daemon" grep -qx "$(rid dangling)" "$RP/removed"
+expect "reap-stale-ci-stacks: a dangling image a live lease holds is kept" grep -q "^$(rid leased) " "$RP/images"
+if grep -qx "$(rid leased)" "$RP/removed" || grep -q "image rm $(rid leased)" "$RP/log"; then
+	fail "reap-stale-ci-stacks: the leased image is never asked to go" "$(cat "$RP/log")"
+else
+	pass "reap-stale-ci-stacks: the leased image is never asked to go"
+fi
+expect "reap-stale-ci-stacks: a just-built dangling image is kept" grep -q "^$(rid fresh) " "$RP/images"
+expect "reap-stale-ci-stacks: another repository's dangling image is not touched" grep -q "^$(rid other) " "$RP/images"
+expect "reap-stale-ci-stacks: the current tagged image is kept" grep -q "^$(rid current) " "$RP/images"
+expect "reap-stale-ci-stacks: dangling images are found by the label the Makefile sets" \
+	grep -qx "images -q --no-trunc --filter dangling=true --filter label=ci.reap.repository=$lab" "$RP/log"
+echo "$(rid dangling) $old $lab -" >>"$RP/images"
+cp "$RP/images" "$RP/images.before"
+run env PATH="$TMP_ROOT/reapbin:$PATH" REAP_DRY_RUN=1 "$ROOT/scripts/reap-stale-ci-stacks.sh" "$REAP_PREFIX"
+check "reap-stale-ci-stacks: a dry run names what it would remove and removes nothing" 0 "dry   docker image rm $(rid dangling)"
+expect "reap-stale-ci-stacks: the dry run left every image" cmp -s "$RP/images" "$RP/images.before"
+expect "Makefile: the label the reaper reads is the one every integration build sets" \
+	grep -q 'IT_REAP_LABEL *= ci.reap.repository=' "$ROOT/Makefile"
 
 # --- the toolchain image carries ssh-keygen ------------------------------------
 # (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's
