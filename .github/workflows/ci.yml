@@ -1936,7 +1936,10 @@ jobs:
   # once the scan is done reads it again. It needs lint so that it starts
   # late: the scan builds nothing and has usually ended by then. CI Gate
   # requires it as `always`. A pull request can edit this file, so the
-  # ruleset also requires the Releasability context itself.
+  # ruleset also requires the Releasability context itself. When the base
+  # commit has no releasability.yml (the bootstrap: the pull request that
+  # adds it), no status can exist and this job passes with a notice; the
+  # file's presence is read at the base through the API.
   releasability:
     name: Releasability [the private-pattern scan's status]
     runs-on: ubuntu-latest
@@ -1953,6 +1956,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           SERVER: ${{ github.server_url }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           REPO_API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
           GH_API: ${{ github.api_url }}/repos/${{ github.repository }}
           JOB_TOKEN: ${{ github.token }}
@@ -1971,6 +1975,31 @@ jobs:
             [ "$(curl -sS --max-time 30 -o "$2" -w '%{http_code}' \
               -H @<(printf 'Authorization: token %s\n' "$JOB_TOKEN") "$1")" = 200 ]
           }
+          # The requirement follows the base (Codex finding on #19):
+          # pull_request_target loads releasability.yml from the base
+          # branch, so a base without it posts no status. Whether the file
+          # is there is read from the forge API at the base commit (a push
+          # or schedule run: its own commit), never from the pull request's
+          # tree, so a pull request that deletes the file still needs the
+          # status. 404 is the bootstrap; any other reply but 200 fails.
+          [ -n "$BASE_SHA" ] || { echo "FAIL no base commit to read"; exit 1; }
+          if [ "$SERVER" = https://github.com ]; then
+            wfurl="$GH_API/contents/.github/workflows/releasability.yml?ref=$BASE_SHA"
+          else
+            wfurl="$REPO_API/contents/.github/workflows/releasability.yml?ref=$BASE_SHA"
+          fi
+          code=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+            -H @<(printf 'Authorization: token %s\n' "$JOB_TOKEN") "$wfurl") || code=unreadable
+          case $code in
+            200) ;;
+            404)
+              echo "::notice::bootstrap: ${BASE_SHA:0:12} has no .github/workflows/releasability.yml, so no Releasability status can exist yet; the scan is required once it is on the base"
+              echo "OK   bootstrap: no releasability.yml at ${BASE_SHA:0:12}"
+              exit 0 ;;
+            *)
+              echo "FAIL whether ${BASE_SHA:0:12} has releasability.yml cannot be read ('$code')"
+              exit 1 ;;
+          esac
           if [ "$SERVER" = https://github.com ]; then
             want=Releasability
             get "$GH_API/commits/$HEAD_SHA/check-runs?check_name=Releasability&filter=latest" "$tmp/rel.json" \

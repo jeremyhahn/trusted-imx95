@@ -22,8 +22,10 @@
 #     step passed a pull request with a notice).
 #   - A pull request from a fork fails without a scan: its author could
 #     otherwise probe the private patterns one push at a time.
-#   - Each printed path carries a `match: ` or `waived: ` prefix, so a file
-#     name can never be read as a workflow command.
+#   - Each printed path carries a `match: ` or `waived: ` prefix and is
+#     escaped, so a file name can never be read as a workflow command.
+#   - The waiver is tested against the matched line's text only, parsed
+#     from `git grep -z`, never against the file name.
 #
 # ci.yml's `releasability` job reads this job's commit status on the pull
 # request's head (context `Releasability / Releasability (pull_request_target)`,
@@ -131,30 +133,51 @@ jobs:
             echo "::error::the private pattern secret holds no class<TAB>regex line"
             exit 1
           fi
-          # git grep on a commit prints <commit>:<path>:<line>:<text>; the
-          # commit prefix is dropped before the path and line are kept.
+          # git grep -z on a commit prints <commit>:<path> NUL <line> NUL
+          # <text> LF. The fields are split on the NULs, so a ':' or a
+          # waiver-shaped string in a file name never reaches the content,
+          # and the waiver is tested against the line's text only (Codex
+          # finding on #19: a file named `lab-string-ok: x.txt` waived every
+          # match in it). A text holds no LF, so the token after a line
+          # number is <text> LF <next commit:path>.
           rc=0
-          out=$(git grep -n -I -i -E -f "$pf" "$HEAD_SHA" --) || rc=$?
+          git grep -z -n -I -i -E -f "$pf" "$HEAD_SHA" -- > "$pf.out" || rc=$?
+          trap 'rm -f "$pf" "$pf.out"' EXIT
           case $rc in
             0|1) ;;
             *)
               echo "::error::git grep failed (rc $rc)"
               exit 1 ;;
           esac
-          out=$(printf '%s\n' "$out" | sed "s/^$HEAD_SHA://")
           waiver='lab-string-ok:[[:space:]]*[[:alnum:]]'
-          waived=$(printf '%s\n' "$out" | grep -E -e "$waiver" | cut -d: -f1,2 || true)
-          hits=$(printf '%s\n' "$out" | grep -v -E -e "$waiver" | grep -v '^$' | cut -d: -f1,2 || true)
-          unset out
-          nw=0
-          if [ -n "$waived" ]; then
-            nw=$(printf '%s\n' "$waived" | wc -l)
+          # A path is shown escaped (%q), so a LF or '::' in a file name
+          # cannot start a workflow command.
+          show() { printf '%s %q:%s\n' "$1" "${2#"$HEAD_SHA":}" "$3"; }
+          nw=0 nh=0 hits='' waived='' path='' lno='' i=0
+          while IFS= read -r -d '' tok || [ -n "$tok" ]; do
+            if [ "$i" = 0 ]; then
+              path=$tok i=1
+            elif [ "$i" = 1 ]; then
+              lno=$tok i=2
+            else
+              text=${tok%%$'\n'*}
+              if printf '%s\n' "$text" | grep -q -E -e "$waiver"; then
+                waived+=$(show waived: "$path" "$lno")$'\n'; nw=$((nw + 1))
+              else
+                hits+=$(show match: "$path" "$lno")$'\n'; nh=$((nh + 1))
+              fi
+              path=${tok#*$'\n'} i=1
+            fi
+          done < "$pf.out"
+          rm -f "$pf.out"
+          unset text tok
+          if [ "$nw" != 0 ]; then
             echo "::notice::$nw matched lines carry the lab-string-ok waiver (path:line; the values are not shown):"
-            printf '%s\n' "$waived" | sed 's/^/waived: /'
+            printf '%s' "$waived"
           fi
-          if [ -n "$hits" ]; then
+          if [ "$nh" != 0 ]; then
             echo "::error::internal names in the tree of ${HEAD_SHA:0:12} (path:line; the values are not shown):"
-            printf '%s\n' "$hits" | sed 's/^/match: /'
+            printf '%s' "$hits"
             exit 1
           fi
           echo "releasability: ${HEAD_SHA:0:12}, $count private patterns, 0 matches, $nw waived"

@@ -1370,6 +1370,12 @@ rg rm -q bad.txt
 printf 'see host-17.corp.example (lab-string-ok: a fixture)\n' >"$rr/waived.txt"
 rg add -A && rg commit -qm waived
 RWAIVED=$(rg rev-parse HEAD)
+# A waiver-shaped file name waives nothing: the waiver is read from the
+# matched line's text only (Codex finding on #19).
+rg rm -q waived.txt
+printf 'see host-17.corp.example\n' >"$rr/lab-string-ok: a name.txt"
+rg add -A && rg commit -qm named
+RNAMED=$(rg rev-parse HEAD)
 rg checkout -q "$RBAD"
 relpat=$(printf '# fixture\nlab-host\thost-[0-9]+\\.corp\\.example\n')
 rel() { # rel <event> <head> [head repo]: the step in the fixture, the pattern secret from $relpat
@@ -1389,6 +1395,9 @@ check "releasability.yml: the named commit's tree is scanned, not the checkout" 
 run rel push "$RWAIVED"
 check "releasability.yml: a line with the lab-string-ok waiver passes, listed" 0 "waived: waived.txt:1" "0 matches, 1 waived"
 novalue "releasability.yml: a waived line is printed without its value"
+run rel push "$RNAMED"
+check "releasability.yml: a waiver-shaped file name does not waive its contents" 1 "match: lab-string-ok:" "a\\ name.txt:1"
+novalue "releasability.yml: a match under a waiver-shaped name is printed without its value"
 run rel pull_request_target "$RBAD" fork/r
 check "releasability.yml: a fork's pull request fails unscanned" 1 "a pull request from a fork is not scanned"
 relpat_keep=$relpat
@@ -1415,25 +1424,30 @@ mkdir -p "$rstub"
 cat >"$rstub/curl" <<'EOF'
 #!/usr/bin/env bash
 # Writes $REL_JSON to -o, prints $REL_CODE for -w, logs the URL and headers.
-out=
+out= url=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-o) out=$2; shift 2 ;;
 	-H) cat -- "${2#@}" >>"$REL_LOG" 2>/dev/null || printf '%s\n' "$2" >>"$REL_LOG"; shift 2 ;;
 	-w | --max-time) shift 2 ;;
 	-*) shift ;;
-	*) printf 'url %s\n' "$1" >>"$REL_LOG"; shift ;;
+	*) url=$1; printf 'url %s\n' "$1" >>"$REL_LOG"; shift ;;
 	esac
 done
+# The base's releasability.yml: $REL_BASE_CODE (200 present, 404 absent).
+case $url in
+*/contents/*) printf '%s' "${REL_BASE_CODE:-200}"; exit 0 ;;
+esac
 [ -z "$out" ] || printf '%s' "$REL_JSON" >"$out"
 printf '%s' "${REL_CODE:-200}"
 EOF
 chmod +x "$rstub/curl"
 H=0123456789abcdef0123456789abcdef01234567
+B=fedcba9876543210fedcba9876543210fedcba98
 relgate() { # relgate <event> <json> [code] [server]
 	: >"$TMP_ROOT/relgate.log"
-	env PATH="$rstub:$PATH" REL_JSON="$2" REL_CODE="${3:-200}" REL_LOG="$TMP_ROOT/relgate.log" EVENT="$1" \
-		SERVER="${4:-https://forge.example}" HEAD_SHA="$H" REPO_API=https://forge.example/api/v1/repos/o/r \
+	env PATH="$rstub:$PATH" REL_JSON="$2" REL_CODE="${3:-200}" REL_BASE_CODE="${relbase:-200}" REL_LOG="$TMP_ROOT/relgate.log" EVENT="$1" \
+		SERVER="${4:-https://forge.example}" HEAD_SHA="$H" BASE_SHA="$B" REPO_API=https://forge.example/api/v1/repos/o/r \
 		GH_API=https://api.github.example/repos/o/r JOB_TOKEN=tok-not-printed RUNNER_TEMP="$TMP_ROOT" \
 		bash "$TMP_ROOT/relgate.sh"
 }
@@ -1459,5 +1473,33 @@ run relgate pull_request "[]" 404
 check "ci.yml releasability: an unreadable API fails closed" 1 "cannot be read"
 run relgate push '{"check_runs":[{"id":2,"name":"Releasability","status":"completed","conclusion":"success"}]}' 200 https://github.com
 check "ci.yml releasability: the github.com mirror reads the check run" 0 "OK   Releasability: success"
+# The requirement follows the base commit's releasability.yml (Codex finding
+# on #19): a base without it is the bootstrap and passes with a notice; a base
+# with it needs the status, whatever the pull request's head holds.
+relbase=404
+run relgate pull_request "[]"
+check "ci.yml releasability: no releasability.yml at the base passes as the bootstrap" 0 "::notice::bootstrap:" "OK   bootstrap: no releasability.yml at ${B:0:12}"
+expect "ci.yml releasability: the base's file is read at the base commit through the API" \
+	grep -qxF "url https://forge.example/api/v1/repos/o/r/contents/.github/workflows/releasability.yml?ref=$B" "$TMP_ROOT/relgate.log"
+expect "ci.yml releasability: the base's file is read with the token as a header" grep -qxF "Authorization: token tok-not-printed" "$TMP_ROOT/relgate.log"
+relbase=200
+run relgate pull_request "[]"
+check "ci.yml releasability: releasability.yml at the base and no status fails" 1 "(pull_request_target): 'none'"
+# The head is never read for the file: a pull request whose head deletes it
+# still needs the status, since only the base commit is asked.
+if grep -qF "ref=$H" "$TMP_ROOT/relgate.log"; then
+	fail "ci.yml releasability: a head that deletes releasability.yml does not lift the requirement" "the head was read: $(cat "$TMP_ROOT/relgate.log")"
+else
+	pass "ci.yml releasability: a head that deletes releasability.yml does not lift the requirement"
+fi
+relbase=500
+run relgate pull_request "[$(st 5 pull_request_target success)]"
+check "ci.yml releasability: an unreadable base fails closed" 1 "cannot be read ('500')"
+relbase=404
+run relgate push "[]" 200 https://github.com
+check "ci.yml releasability: the github.com mirror reads the base's file too" 0 "OK   bootstrap"
+expect "ci.yml releasability: the github.com mirror asks its contents API" \
+	grep -qxF "url https://api.github.example/repos/o/r/contents/.github/workflows/releasability.yml?ref=$B" "$TMP_ROOT/relgate.log"
+relbase=
 
 finish
