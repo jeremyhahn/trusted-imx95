@@ -103,7 +103,53 @@ Other facts of the FRDM M7 LM that matter to trusted-firmware (S2 `mx95frdm.cfg`
 
 ## 5. Where the M7 image runs: TCM or DDR
 
+Sources: S1, S2 `mx95frdm.cfg`.
+
+| Option | mkimage target (S1) | Load / entry | What it needs | Notes |
+|--------|---------------------|--------------|---------------|-------|
+| TCM | `flash_m7`, `flash_all` (= `flash_lpboot_sm_all`, the EVK default) | `0x0` in the M7 view, written at `0x303C0000` | nothing before it | The size comes from the M7MIX ranges the SM grants the M7 (`0x20380000-0x2047FFFF` and `0x4A060000-0x4A09FFFF` in `mx95frdm.cfg`); the split of those into ITCM and DTCM, and their exact sizes, are in IMX95RM, not read (**unconfirmed**, U2). |
+| DDR | `flash_m7_ddr`, `flash_all_ddr` | `0x80000000` | the DDR OEI in the same container, so the DDR is up before the copy | The FRDM SM grants the M7 `DDR EXEC 0x80000000-0x89FFFFFF` (160 MiB). The same range overlaps the ELE domain's `DDR DATA` and the V2X domain's read-only range in that file; the A55 and Linux memory map must keep out of it. |
+| NOR XIP | `flash_m7_flexspi_xip` | `0x28132000` | FlexSPI NOR boot | Executes from flash; the FRDM board's boot media are not surveyed here. |
+
+TCM is NXP's default (the `flash_all` target and the `flash_evk` alias). For trusted-firmware's M7
+core the choice is the linker script's: the image has to be linked for the address passed to `-m7`.
+
 ## 6. AHAB: when the M7 image's signature is checked
+
+Sources: S4 and S5 below; S1; S2 `arch.md`.
+
+| Id | Source | Version / tag | URL |
+|----|--------|---------------|-----|
+| S4 | U-Boot (NXP fork), `doc/imx/ahab/introduction_ahab.txt` | `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/uboot-imx/blob/lf-6.18.37-2.1.0/doc/imx/ahab/introduction_ahab.txt |
+| S5 | U-Boot (NXP fork), `doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt` | `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/uboot-imx/blob/lf-6.18.37-2.1.0/doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt |
+
+- **One signature for the whole first OEM container.** S5 shows the i.MX 95 image: an NXP-signed
+  container with the ELE (and V2X) firmware, then the OEM container that holds the OEI, the
+  "Cortex-M image" and the SPL, authenticated "at ELE ROM/FW level", then the ATF/U-Boot container
+  that the SPL authenticates. On AHAB the signature block sits inside the container and signs the
+  container header together with the SRK table; the header carries the image entries (S5 §1.3).
+  The image data is bound through the per-image hash in the header (the AHAB container format),
+  so the M7 image is covered by the same signature as the System Manager and the SPL. In S1 the
+  M7 image is in that container (§3), so re-signing the M7 image means re-signing that container.
+- **When.** S4 §1.4 describes the 8ULP/9x flow: the core that boots loads each image and asks the
+  ELE to authenticate it before the image is started; the Cortex-M is started only after its
+  firmware is authenticated. For the i.MX 95 lpboot flow this means the M33 boot ROM loads the M7
+  image to its load address and the ELE checks it during the ROM phase, before the System Manager
+  runs and long before the SM starts LM1. The exact i.MX 95 ROM sequence (whether the ROM checks
+  the whole container before it copies, or image by image) is in the i.MX 95 Security Reference
+  Manual, which is not public: **unconfirmed** (U1).
+- **Signing tool.** S5 §1.1 says the i.MX 95 from B0 onwards uses AHAB 2.0 and needs SPSDK or CST
+  4.0.1, and recommends SPSDK; CST is in maintenance. SPEC.md names CST 3.1.0; whether CST 3.1.0
+  supports AHAB 2.0 is a question for the owner (Q4).
+- **Anti-rollback.** S1 passes `-sw_version` only to the ATF/U-Boot container. Setting a version on
+  the container that holds the M7 means adding `-sw_version` to the first-container mkimage call
+  (an option mkimage already takes, as the U-Boot container shows); how the ELE compares that
+  field against the fuse-based floor on the i.MX 95 is in the Security Reference Manual:
+  **unconfirmed** (U3).
+- **Isolation after the check.** S2 `arch.md` says the SM reloads the TRDC configuration through
+  ELE messages when a mix powers up and that the configuration "can change ... if code is being
+  reloaded and authenticated". The TRDC grants of §4 (M7 DID 4, its TCM and DDR ranges) are what
+  keep other masters from rewriting the authenticated M7 image after the check.
 
 ## 7. Restarting the M7 with a new image at run time
 
