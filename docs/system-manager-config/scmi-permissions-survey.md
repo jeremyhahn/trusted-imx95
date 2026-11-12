@@ -280,7 +280,7 @@ was tried on hardware.
 | Power, clock, CPU or reset rights on M7 or SM resources (`PD_M7`, `CLK_M7`, `CPU_M7P`, WDOG5's clock) | gate or power off the M7 or its watchdog: the same effect as the row above, without a log entry from the LMM |
 | `VOLT_ARM` or clock rate on shared clocks at exclusive | under-volt or over-clock to inject faults into code running on the A55 secure world; this class of attack is shown in S8 |
 | Sensor trip points (exclusive) on sensors the M7 watches | move or remove thermal alarms, hiding a heat-based attack |
-| Pin control (exclusive) on SM or M7 pins (`PIN_I2C1_*` to the PMIC, `PIN_GPIO_IO14/15`) | cut the SM from the PMIC, or take the M7's inputs |
+| Pin control (exclusive) on SM or M7 pins (`PIN_I2C1_*` to the PMIC; the M7's pins, `PIN_GPIO_IO36/37` in the PRO file, `PIN_GPIO_IO14/15` in the 15x15 S1 for reference) | cut the SM from the PMIC, or take the M7's inputs |
 | `RTC` all (S1 already grants it) | roll the SoC RTC back or forward, which affects any check that trusts that clock |
 | Base-protocol priv on another agent | reset another agent's SCMI configuration |
 | `FUSA` or fault rights | clear or raise FuSa faults owned by the M7 |

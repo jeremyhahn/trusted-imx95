@@ -271,7 +271,14 @@ for it.
   container field exists on the OS container (the format is the same [S2]),
   but whether U-Boot's `auth_cntr` path enforces a floor for OS containers is
   **not confirmed**. FIT has no built-in rollback counter in S5; S5 names
-  rollback only as a threat that signed configurations narrow.
+  rollback only as a threat that signed configurations narrow. So neither
+  path is known to stop an older, correctly signed next stage, or one signed
+  with a revoked key. The SPEC's rollback requirement still applies to that
+  stage: until a device-side floor is confirmed, the release check must at
+  least compare the next stage's version and signing key against the
+  independently approved floor and revocation list on the host, as
+  `dev-boot-workflow-survey.md` §8 stage 2.3 does for the boot container.
+  The device-side mechanism stays **unresolved**, not satisfied.
 - *Key custody.* If the next stage is AHAB, its key is an SRK (or SGK below
   it) from the same fused PKI as the boot container [S1 §2], so key custody is
   shared with this row. If it is FIT, the FIT key is a separate key that this

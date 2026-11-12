@@ -113,10 +113,15 @@ From the same top-level `Makefile` (S1):
 
 The SM's debug UART and its baud rate are set per board configuration
 (`BOARD_DEBUG_UART_INSTANCE`, `BOARD_DEBUG_UART_BAUDRATE`; S1
-`sm/doc/config.md`). On the i.MX 95 FRDM port the SM owns LPUART2, which goes
-to an FTDI USB-serial bridge (S1 `sm/doc/port.md`, "NXP i.MX95 FRDM"). The
-FRDM board configuration is `mx95frdm`, board `mcimx95frdm`, and its
-`config.mak` sets `USES_FUSA ?= 1` (S1 `configs/mx95frdm/config.mak`).
+`sm/doc/config.md`). On the 15x15 i.MX 95 FRDM port the SM owns LPUART2,
+which goes to an FTDI USB-serial bridge (S1 `sm/doc/port.md`, "NXP i.MX95
+FRDM"). The 15x15 FRDM board configuration is `mx95frdm`, board
+`mcimx95frdm`, and its `config.mak` sets `USES_FUSA ?= 1` (S1
+`configs/mx95frdm/config.mak`). These are **reference only**: this device
+uses `configs/other/mx95frdm-pro.cfg` (S6) with the EVK board port
+`mcimx95evk`. The PRO file's debug UART is instance 2 at 115200, as on the
+FRDM (`sm-build-survey.md` §3); its USB-serial routing and its `USES_FUSA`
+setting are **unconfirmed** (item 4 of section 6).
 
 Output the SM prints on that UART independent of the monitor, per S1 docs:
 
@@ -212,8 +217,10 @@ Checks 2 to 5 have not been run here: this lane builds nothing.
   build files show.
 - **Persistent storage.** Shutdown records are saved by
   `BRD_SM_ShutdownRecordSave()` in the battery-backed BBNSM general-purpose
-  registers GPR0-3 on the FRDM port, and NXP says other agents must not be
-  given access to them (S4 `port.md`, "NXP i.MX95 FRDM").
+  registers GPR0-3 on the 15x15 FRDM port, and NXP says other agents must
+  not be given access to them (S4 `port.md`, "NXP i.MX95 FRDM"). This is
+  **reference only**; where the PRO's EVK board port stores them is
+  **unconfirmed** (item 4 of section 6).
 - **SCMI, to the other cores.** Any agent the configuration permits can read
   the reset reasons (`SCMI_MiscResetReason()`, `SCMI_LmmResetReason()`), the
   syslog (`SCMI_MiscSyslog()`) and LM status (`SCMI_LmmAttributes()`) (S3).

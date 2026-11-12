@@ -218,10 +218,19 @@ Proposed, in order:
    no HSM in CI.
 3. **Policy values.** Where does the repository record the expected SRK table
    hash, the revoked SRK list and the anti-rollback floor for C2–C4?
-   Options: (a) a versioned file under `docs/boot-container/`; (b) in the
-   build configuration of the image; (c) not recorded until
-   `oem-key-provisioning` decides them. No source supports one; (c) is the
-   reversible default.
+   Options: (a) a versioned, reviewed file under `docs/boot-container/`,
+   kept apart from the build that produces the image; (b) in the build
+   configuration of the image; (c) not recorded until
+   `oem-key-provisioning` decides them. No source picks one, but (b) and
+   (c) both fail the host checks' purpose: under (b) the image's own build
+   supplies the reference it is checked against, and under (c) C2–C4 do not
+   run, so a correctly signed image with a revoked `used_srk_id`, an
+   unintended `srk_revoke_mask` or a `fuse_version` below the floor passes
+   on the host, and an OEM-open board does not stop it either.
+   Recommendation: (a). Until `oem-key-provisioning` decides the values,
+   the file states them explicitly ("no SRK revoked", the current floor),
+   and a missing or unreadable file fails the release check rather than
+   skipping it (see `dev-boot-workflow-survey.md` §8, stage 2.3).
 4. **On-board OEM open runs.** Should the manual OEM open tests (section 7,
    item 3) be run at all before the event codes are confirmed? Options:
    (a) yes, record the raw event words as the reference; (b) wait for the

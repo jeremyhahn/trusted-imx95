@@ -27,7 +27,16 @@ the 19x19 FRDM-IMX95-PRO uses `configs/other/mx95frdm-pro.cfg` with the
 EVK board port, and that file lacks the NoC fault entries
 (`public-source-survey.md` items 11-16). Every "FRDM file" or "FRDM
 configuration" value below is **reference only**; the PRO value is
-unconfirmed unless that survey states it. All descriptions below are summaries in this
+unconfirmed unless that survey states it. The same holds for the FRDM board
+port (S10, S11): the PRO builds with the EVK board port `mcimx95evk`
+(`sm-build-survey.md` §3), which this lane did not read. What the repository
+records of the PRO file (S12) is: LM0 "SM", LM1 "M7" with SCMI agent "M7"
+on MU 9 over CRC32-checked channels, LM2 "AP" (the default LM) with agents
+"AP-S" on MU 1 and "AP-NS" on MU 3; M7 fault entries for M7 lockup, M7
+reset and WDOG5, and SW0 routed to the FuSa reaction; the M7 holding `LMM_2`
+with full rights; the M7 console on LPUART7 and pins GPIO_IO36/37; the
+PF5301 temperature sensor; and **no** NoC fault entries. Each section below
+says which of its values are the PRO's and which are reference only. All descriptions below are summaries in this
 repository's words; no vendor text is copied. File references are to paths
 inside that tag.
 
@@ -40,12 +49,13 @@ inside that tag.
 | S3 | SM configuration guide, `sm/doc/config.md` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/config.md | yes |
 | S4 | SM implementation notes, `sm/doc/imp.md` (in S1), section "Example Fault Flow" | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/imp.md | yes |
 | S5 | SM debug guide, `sm/doc/debug.md` (in S1), reset records and i.MX 95 fault table | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md | yes |
-| S6 | i.MX 95 FRDM board configuration, `configs/mx95frdm.cfg` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg | yes |
+| S6 | **15x15** i.MX 95 FRDM board configuration, `configs/mx95frdm.cfg` (in S1); **reference only**, not this device's file | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg | yes |
+| S12 | FRDM-IMX95-PRO configuration, `configs/other/mx95frdm-pro.cfg` (in S1), **this device's file**; not read line by line in this lane, its content is taken from `public-source-survey.md` items 12-16 and `sm-build-survey.md` §3 | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/other/mx95frdm-pro.cfg | through those surveys |
 | S7 | LMM reaction definitions, `sm/lmm/lmm_sys.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/lmm/lmm_sys.h | yes |
 | S8 | i.MX 95 reset reasons, `devices/MIMX95/sm/dev_sm_system.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/devices/MIMX95/sm/dev_sm_system.h | yes |
 | S9 | SM SCMI protocol reference, `sm/rpc/scmi/proto.md` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/rpc/scmi/proto.md | yes |
-| S10 | FRDM board low-level code, `boards/mcimx95frdm/board.c` and `board.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/tree/rel_imx_sm_2026q3/boards/mcimx95frdm | yes |
-| S11 | FRDM SM board port, `boards/mcimx95frdm/sm/brd_sm.c` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/boards/mcimx95frdm/sm/brd_sm.c | yes |
+| S10 | 15x15 FRDM board low-level code (**reference only**; the PRO uses the EVK board port `mcimx95evk`, not read), `boards/mcimx95frdm/board.c` and `board.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/tree/rel_imx_sm_2026q3/boards/mcimx95frdm | yes |
+| S11 | 15x15 FRDM SM board port, `boards/mcimx95frdm/sm/brd_sm.c` (in S1; **reference only**, as S10) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/boards/mcimx95frdm/sm/brd_sm.c | yes |
 
 Sources that this survey needed but did not reach are listed in section 9.
 
@@ -55,7 +65,10 @@ The SM partitions the SoC into logical machines. Each LM has a boot order, a
 domain ID, a safety type and a list of resources it owns; the SM is the only
 software that may reset or power them (S2, S3).
 
-The FRDM configuration (S6) defines three LMs:
+The PRO file (S12) defines the same three LMs, LM0 "SM", LM1 "M7" and LM2
+"AP" (the default LM). The boot order, `skip` and safety-type values in the
+table are read from the 15x15 FRDM file (S6) and are **reference only**;
+for the PRO they are **unconfirmed**:
 
 | LM | Name | Runs on | Boot | Safety type (`safe=`) | RPC |
 |----|------|---------|------|-----------------------|-----|
@@ -64,16 +77,20 @@ The FRDM configuration (S6) defines three LMs:
 | LM2 | AP | Cortex-A55 (secure and non-secure agents) | third, `skip=1` | default (N-EENV; S3 says the default safety type is non-safe) | SCMI |
 
 `skip=1` means a missing image for that LM in the boot container is not an
-error (S3). In the FRDM file the M7 LM is the *safe* execution environment
-(S-EENV): it is the LM that the SM notifies of faults whose reaction is
-`fusa` (S3, S6).
+error (S3). In the FRDM file (reference) the M7 LM is the *safe* execution
+environment (S-EENV): it is the LM that the SM notifies of faults whose
+reaction is `fusa` (S3, S6). The PRO file routes the M7's SW0 to the FuSa
+reaction (S12), which suggests the same, but its `safe=` value is
+**unconfirmed**.
 
 ## 4. Watchdogs
 
 The i.MX 95 has watchdogs WDOG1 to WDOG5 that the SM knows by name (S5, S8).
-In the FRDM configuration (S6) they are assigned as follows:
+In the 15x15 FRDM configuration (S6, **reference only**) they are assigned
+as follows. For the PRO (S12), only a WDOG5 fault entry on LM1 is recorded;
+its reaction, and the owners of WDOG1 to WDOG4, are **unconfirmed**:
 
-| Watchdog | Owner LM (S6) | Use as read from S5 and S6 |
+| Watchdog | Owner LM (S6, reference) | Use as read from S5 and S6 |
 |----------|---------------|----------------------------|
 | WDOG1, WDOG2 | LM0 (SM) | The SM's own watchdogs. S5 lists WDOG1/WDOG2 interrupts as M33 exceptions, and a WDOG2 timeout as FCCU fault 18 with the M33 PC as syndrome. |
 | WDOG5 | LM1 (M7) | M7 watchdog. Timeout is FCCU fault 21; FRDM reaction `lm_reset` of LM1. |
@@ -81,13 +98,17 @@ In the FRDM configuration (S6) they are assigned as follows:
 
 So a hung Cortex-M7 that stops feeding WDOG5, or a hung Cortex-A55 that
 stops feeding WDOG3/WDOG4, does not reset the whole chip under the FRDM
-configuration: the watchdog timeout is routed as an FCCU fault to the SM,
-which resets only the owning LM (S5, S6). This holds only if the software
+configuration (reference): the watchdog timeout is routed as an FCCU fault
+to the SM, which resets only the owning LM (S5, S6). Whether the PRO file
+does the same is **unconfirmed**. This holds only if the software
 on that core actually arms its watchdog; the SM configuration assigns the
 watchdog but whether the M7 firmware or Linux starts it is the business of
 those images (see section 8).
 
-The SM's own watchdog on the FRDM board port is WDOG2 (S10):
+The SM's own watchdog on the 15x15 FRDM board port is WDOG2 (S10). The list
+below is that port's behaviour, **reference only**: the PRO builds with the
+EVK board port `mcimx95evk`, which was not read, so its SM watchdog
+instance, clock, timeout, refresh and exit behaviour are **unconfirmed**:
 
 - It is clocked from the 32 kHz low-power clock with a timeout of about two
   seconds (S10).
@@ -101,9 +122,10 @@ The SM's own watchdog on the FRDM board port is WDOG2 (S10):
   the SM exits (S11). Production builds instead report a system error
   (S11). A secure deployment must not ship a monitor or test build.
 
-The same start-up code also stops the analogue temperature sensor from
-issuing its own warm reset, so that over-temperature is handled as an FCCU
-fault (S11; fault 0 in S5).
+The same start-up code (FRDM port, reference) also stops the analogue
+temperature sensor from issuing its own warm reset, so that over-temperature
+is handled as an FCCU fault (S11; fault 0 in S5). For the PRO's EVK port
+this is **unconfirmed**.
 
 Not confirmed: the WDOG3, WDOG4 and WDOG5 timeouts. They are set by the
 software on the A55 and M7, not by the SM, and were not surveyed.
@@ -146,23 +168,32 @@ notification only (the S-EENV must clear the fault through the SCMI FuSa
 protocol), or none. Every reaction also sends FuSa fault notifications when
 the fault is set and cleared (S3).
 
-### 5.3 Per-LM behaviour in the FRDM configuration
+### 5.3 Per-LM behaviour: the PRO file and the 15x15 reference
 
-From S6 (`FAULT_*` lines, each listed under the LM that owns it):
+The "Owner LM", "Reaction" and "Effect" columns are read from the 15x15
+FRDM file (S6, `FAULT_*` lines, each listed under the LM that owns it) and
+are **reference only**. The "PRO file (S12)" column gives what the
+repository records of this device's file; everything else is
+**unconfirmed** for the PRO.
 
-| Fault | Owner LM | Reaction | Effect |
-|-------|----------|----------|--------|
-| `FAULT_M7_LOCKUP` | M7 | `lm_reset` | A Cortex-M7 lockup resets the M7 LM only. |
-| `FAULT_M7_RESET` | M7 | `lm_reset` | A Cortex-M7 software reset request resets the M7 LM only. |
-| `FAULT_WDOG5` | M7 | `lm_reset` | M7 watchdog timeout resets the M7 LM. |
-| `FAULT_SW0` | M7 | `fusa` | Software fault 0: notification to the S-EENV, which must clear it. |
-| `FAULT_SW1` | M7 | `lm_reset` | Software fault 1 resets the M7 LM. |
-| `FAULT_WDOG3`, `FAULT_WDOG4` | AP | `lm_reset` | A55 watchdog timeout resets the AP LM. |
-| `FAULT_SW2` | AP | `lm_reset` | Software fault 2 resets the AP LM. |
-| `FAULT_SW3` | SM | `grp_reset` | Software fault 3 resets an LM group. |
-| `FAULT_SW4` | SM | `sys_reset` | Software fault 4 resets the system. |
-| `FAULT_DRAM` | SM | `sys_reset` | DDR multi-bit ECC error resets the system. |
-| `FAULT_MAIN_NOC`, `FAULT_MEGA_NOC`, `FAULT_CENTRAL_NOC` | SM | `sys_reset` | Interconnect mission faults reset the system. |
+| Fault | Owner LM (S6) | Reaction (S6) | Effect (S6) | PRO file (S12) |
+|-------|---------------|---------------|-------------|----------------|
+| `FAULT_M7_LOCKUP` | M7 | `lm_reset` | A Cortex-M7 lockup resets the M7 LM only. | entry on LM1; reaction **unconfirmed** |
+| `FAULT_M7_RESET` | M7 | `lm_reset` | A Cortex-M7 software reset request resets the M7 LM only. | entry on LM1; reaction **unconfirmed** |
+| `FAULT_WDOG5` | M7 | `lm_reset` | M7 watchdog timeout resets the M7 LM. | entry on LM1; reaction **unconfirmed** |
+| `FAULT_SW0` | M7 | `fusa` | Software fault 0: notification to the S-EENV, which must clear it. | on LM1, `fusa` |
+| `FAULT_SW1` | M7 | `lm_reset` | Software fault 1 resets the M7 LM. | **unconfirmed** |
+| `FAULT_WDOG3`, `FAULT_WDOG4` | AP | `lm_reset` | A55 watchdog timeout resets the AP LM. | **unconfirmed** |
+| `FAULT_SW2` | AP | `lm_reset` | Software fault 2 resets the AP LM. | **unconfirmed** |
+| `FAULT_SW3` | SM | `grp_reset` | Software fault 3 resets an LM group. | **unconfirmed** |
+| `FAULT_SW4` | SM | `sys_reset` | Software fault 4 resets the system. | **unconfirmed** |
+| `FAULT_DRAM` | SM | `sys_reset` | DDR multi-bit ECC error resets the system. | **unconfirmed** |
+| `FAULT_MAIN_NOC`, `FAULT_MEGA_NOC`, `FAULT_CENTRAL_NOC` | SM | `sys_reset` | Interconnect mission faults reset the system. | **absent**: the PRO file has no NoC fault entries |
+
+The PRO file's lack of NoC fault entries matters: what the SM does with an
+interconnect mission fault that has no configured reaction is
+**unconfirmed** (it depends on the SM's default and on `eMcem_Cfg.c`,
+section 9). Section 7 treats adding them as a required change.
 
 A fault of the SM itself (a Cortex-M33 exception, lockup, or WDOG1/WDOG2
 expiry) always ends in a reset; S5 states that exceptions always reset.
@@ -194,11 +225,12 @@ secure deployment (S5):
   apart.
 
 The record is saved by a board-port function, so where it is stored is
-board-specific (S5). The FRDM board port keeps it in the first four
-general-purpose registers of the battery-backed non-secure module (BBNSM),
-and clears it when it is read back at the next boot (S11). It therefore
-survives a reset but not a loss of the battery-backed supply, and it sits in
-a *non-secure* module (see question 5).
+board-specific (S5). The 15x15 FRDM board port (S11, **reference only**)
+keeps it in the first four general-purpose registers of the battery-backed
+non-secure module (BBNSM), and clears it when it is read back at the next
+boot. There it survives a reset but not a loss of the battery-backed
+supply, and it sits in a *non-secure* module (see question 5). Where the
+PRO's EVK board port keeps it is **unconfirmed**.
 
 LMs can read the reasons back over SCMI: the LMM protocol has a per-LM reset
 reason query and an LM event notification, and the Misc protocol has a
@@ -223,9 +255,13 @@ C source file.
 What a secure deployment should set is the owner's decision (section 10);
 the survey's reading of the sources is:
 
-- Keep hardware and interconnect faults (`FAULT_DRAM`, NoC faults) on
-  `sys_reset`, as the FRDM file does: an LM-level reset cannot be trusted to
-  clean up a shared bus or memory fault.
+- Put hardware and interconnect faults (`FAULT_DRAM`, NoC faults) on
+  `sys_reset`, as the 15x15 FRDM file (reference) does: an LM-level reset
+  cannot be trusted to clean up a shared bus or memory fault. The PRO file
+  has **no** NoC fault entries (S12), so this repository's configuration
+  must add `FAULT_MAIN_NOC`, `FAULT_MEGA_NOC` and `FAULT_CENTRAL_NOC` with
+  `sys_reset`, not inherit their absence. Whether the PRO file sets
+  `FAULT_DRAM` is **unconfirmed** and must be checked.
 - Keep the M7 as the only S-EENV, so that only the trusted firmware receives
   and clears `fusa` faults.
 - Keep the M7 and A55 watchdog faults on `lm_reset` only if the M7 must keep
@@ -233,31 +269,34 @@ the survey's reading of the sources is:
   `sys_reset` or `lm_shutdown` is the stricter choice.
 - Keep the FCCU delayed reaction (system reset) enabled, so that an SM that
   cannot handle a fault still resets the chip.
-- Ship a production SM build, not a debug-monitor or test build (S11:
-  those builds turn the SM watchdog off on exit).
+- Ship a production SM build, not a debug-monitor or test build (S11, FRDM
+  port, reference: those builds turn the SM watchdog off on exit; the EVK
+  port's behaviour is unconfirmed, and the rule stands either way).
 
 ## 8. Path from a Cortex-M7 tamper or fault response to the System Manager
 
-The M7 talks to the SM only through SCMI over a messaging unit. In the FRDM
-configuration the M7 is SCMI agent 0, on its own messaging unit at high
-priority, with a command channel, a notification channel and a priority
-channel, all with a CRC32 check (S6).
+The M7 talks to the SM only through SCMI over a messaging unit. In the PRO
+file (S12) the M7 is SCMI agent "M7" on messaging unit 9 with CRC32-checked
+shared-memory channels. The 15x15 FRDM file (S6, reference) has the same
+agent at high priority with a command, a notification and a priority
+channel; the PRO's channel set and priority are **unconfirmed**.
 
-The SCMI permissions the FRDM file grants the M7 decide what a tamper
-response on the M7 can ask the SM to do (S6, S9):
+The SCMI permissions granted to the M7 decide what a tamper response on the
+M7 can ask the SM to do (S9). The PRO column gives what is recorded for
+this device; the FRDM column is the 15x15 file, **reference only**:
 
-| M7 wants to | SCMI request (S9) | FRDM grant to the M7 (S6) |
-|-------------|-------------------|---------------------------|
-| Raise or clear a software fault, so that the SM applies its configured reaction (for example `FAULT_SW4` resets the system, `FAULT_SW3` resets an LM group) | FuSa protocol, fault set | `FUSA ALL` |
-| Reset, shut down or boot the Cortex-A55 LM | LMM protocol, reset, shutdown, boot (privileged) | `LMM_2 ALL` |
-| Reset or power off the whole system | System power protocol | `SYS ALL` |
-| Power off a power domain or peripheral it owns | Power and clock protocols | only resources listed as owned by LM1 |
-| Read why an LM or the system last reset | LMM reset reason, Misc reset reason | `LMM_2 ALL` covers the A55 LM; the rule for its own LM and for Misc was not confirmed |
+| M7 wants to | SCMI request (S9) | PRO grant to the M7 (S12) | FRDM grant to the M7 (S6, reference) |
+|-------------|-------------------|---------------------------|--------------------------------------|
+| Raise or clear a software fault, so that the SM applies its configured reaction (for example `FAULT_SW4` resets the system, `FAULT_SW3` resets an LM group) | FuSa protocol, fault set | **unconfirmed** | `FUSA ALL` |
+| Reset, shut down or boot the Cortex-A55 LM | LMM protocol, reset, shutdown, boot (privileged) | `LMM_2` with full rights | `LMM_2 ALL` |
+| Reset or power off the whole system | System power protocol | **unconfirmed** | `SYS ALL` |
+| Power off a power domain or peripheral it owns | Power and clock protocols | owned resources include LPUART7 and GPIO_IO36/37; the rest **unconfirmed** | only resources listed as owned by LM1 |
+| Read why an LM or the system last reset | LMM reset reason, Misc reset reason | `LMM_2` covers the A55 LM; the rest **unconfirmed** | `LMM_2 ALL` covers the A55 LM; the rule for its own LM and for Misc was not confirmed |
 
-The secure A55 agent (AP-S, normally TF-A) is also granted `SYS ALL`, so it
-can reset or power off the whole system too. The non-secure A55 agent
-(Linux) gets only notifications of M7 LM state and system power state
-(S6).
+In the FRDM file (reference) the secure A55 agent (AP-S, normally TF-A) is
+also granted `SYS ALL`, so it can reset or power off the whole system too,
+and the non-secure A55 agent (Linux) gets only notifications of M7 LM state
+and system power state (S6). Both grants are **unconfirmed** for the PRO.
 
 Two routes therefore exist, and the owner should pick one (question 3):
 
@@ -277,7 +316,7 @@ What belongs where:
 |-------|------------|
 | SM board configuration (`.cfg`), FCCU setup (`eMcem_Cfg.c`), board-port reactions (`BRD_SM_CustomFault()`) | this repository, row `system-manager-config` |
 | Tamper detection, decision and SCMI calls on the M7 | trusted-firmware, `imx95` and `hsm-self-defence` rows (not surveyed here) |
-| Key zeroisation in the EdgeLock secure enclave | not the SM: the M7 owns its own ELE messaging unit in the FRDM file (`MU_ELE5`, S6); the request goes from the M7 to the ELE directly. This repository's `secure-key-handling` and `hsm-self-defence` rows. |
+| Key zeroisation in the EdgeLock secure enclave | not the SM: the M7 owns its own ELE messaging unit in the FRDM file (`MU_ELE5`, S6, reference; **unconfirmed** in the PRO file); the request goes from the M7 to the ELE directly. This repository's `secure-key-handling` and `hsm-self-defence` rows. |
 | Linux-side watchdog driver and reaction to LM events | not surveyed; owner of the A55 software |
 
 Not confirmed: which SCMI client the trusted-firmware M7 image uses, and
@@ -305,12 +344,20 @@ whether it already calls the FuSa protocol; that repository was not read.
   described by S2 as out of scope of the public docs; not surveyed.
 - **WDOG3/4/5 timeouts and whether the M7 and Linux images arm them.**
 - **trusted-firmware's M7 SCMI client** (section 8).
+- **The PRO file and board port.** `configs/other/mx95frdm-pro.cfg` (S12)
+  was not read line by line, and the EVK board port `mcimx95evk` it uses
+  was not read at all. Every PRO value this survey marks unconfirmed
+  (watchdog owners, fault reactions other than SW0, `FAULT_DRAM`, the
+  M7's `FUSA` and `SYS` grants, AP-S's grants, the SM watchdog and the
+  reset-record store) needs them.
 
 ## 10. Questions for the owner
 
 1. **Reaction to a Cortex-M7 hang or lockup** (`FAULT_M7_LOCKUP`,
    `FAULT_M7_RESET`, `FAULT_WDOG5`).
-   Options: (a) `lm_reset` as in the FRDM file, the M7 restarts alone;
+   The PRO file has these three entries on LM1; their reactions are
+   **unconfirmed** (S12). The 15x15 FRDM file (reference) sets `lm_reset`.
+   Options: (a) `lm_reset`, as in the FRDM file, the M7 restarts alone;
    (b) `lm_shutdown`, the M7 stays off until the next boot;
    (c) `sys_reset`, the whole board restarts.
    Recommendation: (c) `sys_reset`. In this design the M7 runs the trusted
@@ -320,8 +367,11 @@ whether it already calls the FuSa protocol; that repository was not read.
 
 2. **Reaction to a Cortex-A55 watchdog timeout** (`FAULT_WDOG3`,
    `FAULT_WDOG4`).
-   Options: (a) `lm_reset` as in the FRDM file; (b) `lm_shutdown`;
-   (c) `fusa`, so the M7 decides.
+   Whether the PRO file has these entries, and their reactions, is
+   **unconfirmed**; the 15x15 FRDM file (reference) sets `lm_reset`.
+   Options: (a) `lm_reset`; (b) `lm_shutdown`; (c) `fusa`, so the M7 decides.
+   Whichever is chosen is written explicitly into this repository's
+   configuration, not inherited.
    Recommendation: (a) `lm_reset`. The M7 keeps running and is notified, and
    the reset reason stays readable over SCMI (S3, S9).
 
@@ -335,9 +385,12 @@ whether it already calls the FuSa protocol; that repository was not read.
    staged steps (power off the A55 LM and the PHYs) before it. Both routes are
    SCMI requests the SM must service. The FCCU's delayed system reset (S3, S4)
    covers a fault the FCCU has accepted, not a request the SM never
-   acknowledges (section 5.1). One partial backstop is sourced: if the SM is
-   hung, it stops refreshing its WDOG2, whose timeout becomes FCCU fault 18
-   and then the delayed system reset (S5, S10, S11, section 4). Nothing read
+   acknowledges (section 5.1). One partial backstop is sourced, for the 15x15
+   FRDM board port only: if the SM is hung, it stops refreshing its WDOG2,
+   whose timeout becomes FCCU fault 18 and then the delayed system reset
+   (S5, S10, S11, section 4). The PRO builds with the EVK board port, whose
+   SM watchdog setup was not read, so on this device even that backstop is
+   **unconfirmed**. Nothing read
    covers an SM that is alive but does not service the request (for example a
    stalled messaging unit or a dropped message). An independently triggered
    reaction for that case, such as the M7 escalating on a missing
@@ -347,16 +400,18 @@ whether it already calls the FuSa protocol; that repository was not read.
    must not treat it as complete until such a reaction is named with its
    source.
 
-4. **SCMI permissions of the secure A55 agent.** The FRDM file grants AP-S
-   `SYS ALL` (S6).
+4. **SCMI permissions of the secure A55 agent.** The 15x15 FRDM file
+   (reference) grants AP-S `SYS ALL` (S6). What the PRO file grants AP-S is
+   **unconfirmed** and must be read from S12 before this is decided.
    Options: (a) keep it; (b) reduce it to notifications, so that only the
    M7 and the SM can reset or power off the system.
    Recommendation: none from the sources. (b) narrows who can reset the board,
    but TF-A's PSCI system reset and power-off on the A55 depend on it. The
    owner should confirm what TF-A needs.
 
-5. **Where reset records are kept.** The FRDM port uses BBNSM general-purpose
-   registers (S11).
+5. **Where reset records are kept.** The 15x15 FRDM port (reference) uses
+   BBNSM general-purpose registers (S11); the PRO's EVK port is
+   **unconfirmed**.
    Options: (a) keep them there; (b) also forward each record to the M7 over
    SCMI and keep a signed log in trusted-firmware; (c) move them to secure
    storage in a custom board port.
@@ -365,10 +420,12 @@ whether it already calls the FuSa protocol; that repository was not read.
    Whether BBNSM GPRs can be written by non-secure software is not
    confirmed (section 9).
 
-6. **Which software faults the M7 owns, and their reactions.** The FRDM file
-   gives the M7 `FAULT_SW0` (`fusa`) and `FAULT_SW1` (`lm_reset`), and leaves
+6. **Which software faults the M7 owns, and their reactions.** The PRO file
+   gives the M7 `FAULT_SW0` with the `fusa` reaction (S12); its other
+   software-fault entries are **unconfirmed**. The 15x15 FRDM file
+   (reference) also gives the M7 `FAULT_SW1` (`lm_reset`), and leaves
    `FAULT_SW3` (`grp_reset`) and `FAULT_SW4` (`sys_reset`) to the SM (S6).
-   Options: (a) keep them; (b) assign one software fault to the M7 per tamper
+   Options: (a) keep the PRO file's entries, once read; (b) assign one software fault to the M7 per tamper
    severity, for example LM shutdown of the A55, system shutdown, and system
    reset.
    Recommendation: (b), with the mapping agreed with trusted-firmware's
@@ -378,5 +435,6 @@ whether it already calls the FuSa protocol; that repository was not read.
    Options: (a) the tag in the NXP BSP the board ships with; (b) the latest
    tag at the time of build (`rel_imx_sm_2026q3` at this survey).
    Recommendation: (a). It keeps the SM consistent with the vendor's tested
-   BSP, and it means checking each FRDM default in this survey against that
-   tag.
+   BSP, and it means checking each default in this survey against the PRO
+   file (`configs/other/mx95frdm-pro.cfg`) at that tag. The PRO file is
+   absent at `rel_imx_sm_2025q4` (`public-source-survey.md`).

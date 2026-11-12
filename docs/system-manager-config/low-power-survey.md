@@ -245,7 +245,9 @@ Points that matter for security:
   state; system suspend and shutdown requests from Linux must go through the
   secure agent, which in practice is TF-A's PSCI (SM-FRDM-CFG, LM2 sections).
 - The M7 LM may boot, reset, power off and (per the LMM protocol) control the AP
-  LM, and has full System protocol rights. This matches the SPEC's plan that the
+  LM, and in the 15x15 file has full System protocol rights. (The PRO file also
+  gives the M7 `LMM_2` with full rights, `public-source-survey.md` item 15; its
+  M7 `SYS` grant is **unconfirmed**.) This matches the SPEC's plan that the
   M7 acts on the system for `hsm-self-defence`, but it also means a compromised
   M7 can put the whole board into any power state the SM supports.
 - Several grants carry the `test` key (button and RTC for Linux, `PD_M7`). In the
@@ -262,7 +264,8 @@ All of these are build-time settings in the board's `.cfg` (SM-CONFIG,
 - **`SYS` per agent** sets the agent's rights on the SCMI System Power protocol
   (shutdown, reset, suspend and the vendor whole-SoC states). Granting `NOTIFY`
   instead of `ALL` leaves the agent able to hear about power-state changes but not
-  to request them, as the FRDM file already does for Linux.
+  to request them, as the 15x15 FRDM file (reference only) already does for
+  Linux.
 - **`LMM_n` per agent** sets the agent's rights over another LM through the LMM
   protocol (boot, reset, shut down, and notifications).
 - **`PD_*`, `CPU_*`, `PERLPI_*` per agent** decide which power domains, CPU

@@ -89,7 +89,11 @@ The OEI is not an M7 loader: on B0 silicon `soc.mak` includes only the DDR OEI; 
 (`oei-m33-tcm.bin`) is used on A0/A1 silicon only, where the comment says it is needed to load an M7
 TCM image (S1, the `ifeq ($(LC_REVISION),a1)` blocks).
 
-Other facts of the FRDM M7 LM that matter to trusted-firmware (S2 `mx95frdm.cfg`):
+Other facts of the 15x15 FRDM M7 LM that matter to trusted-firmware (S2 `mx95frdm.cfg`, **reference
+only**). For this device's `mx95frdm-pro.cfg`, `public-source-survey.md` items 14-16 confirm only the
+MU 9 agent with CRC32-checked channels, `LMM_2` with full rights, and the M7 lock-up, M7 reset and
+WDOG5 fault entries; the rest of this list (`MU_ELE5`, the A55 agents' `LMM_1` rights, the TRDC
+memory grants, and the `lm_reset` reactions) is **unconfirmed** for the PRO:
 
 - The M7 talks SCMI to the SM over MU 9 (`SCMI_AGENT0 name="M7"`), with three SMT channels
   (a2p, notify, priority), CRC32 checked.
@@ -245,8 +249,8 @@ What it must **take from** trusted-firmware:
 
 1. **Where does the M7 image run?**
    Options: (a) TCM at `0x0`, NXP's default target `flash_all`; (b) DDR at `0x80000000`
-   (`flash_all_ddr`), larger but shared with the DDR used by the ELE and V2X domains in the FRDM SM
-   configuration; (c) FlexSPI NOR XIP.
+   (`flash_all_ddr`), larger but shared with the DDR used by the ELE and V2X domains in the 15x15 FRDM
+   SM configuration (reference only; the PRO file's DDR grants are **unconfirmed**); (c) FlexSPI NOR XIP.
    Recommendation: (a) TCM, if trusted-firmware's M7 core fits once U2 gives the size; it keeps the
    M7 out of DDR, which other masters share, and it is NXP's default (S1).
 2. **Which agent loads the M7 image?**
@@ -259,8 +263,9 @@ What it must **take from** trusted-firmware:
    Options: (a) no: the M7 is updated only by replacing the boot image and rebooting, and an SM LM
    reset only restarts it; (b) yes, through U-Boot `bootaux` with a signed container only; (c) yes,
    through Linux remoteproc.
-   Recommendation: (a), and keep `LMM_1` at `NOTIFY` for Linux as the stock FRDM configuration has
-   it (S2), so that Linux cannot stop or restart the M7. (c) leaves the AHAB chain (§7, U5).
+   Recommendation: (a), and set `LMM_1` to `NOTIFY` only for Linux, as the 15x15 FRDM configuration
+   has it (S2, reference only; the PRO file's `LMM_1` rights are **unconfirmed** and must be checked
+   and, if wider, narrowed), so that Linux cannot stop or restart the M7. (c) leaves the AHAB chain (§7, U5).
 4. **Which signing tool?**
    Options: (a) SPSDK; (b) CST 4.0.1; (c) CST 3.1.0 as SPEC.md names it.
    Recommendation: (a) SPSDK, which S5 recommends for AHAB 2.0 on the i.MX 95 B0; (c) needs
