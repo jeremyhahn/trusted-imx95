@@ -9,7 +9,7 @@ Status: draft survey, surveyed 2026-11-12.
 
 The EdgeLock secure enclave (ELE) has a boot ROM of its own and can load a firmware image from the
 boot device. NXP builds that firmware, signs it with NXP's keys, and ships it as an AHAB container
-file, `mx95<rev>-ahab-container.img` for the i.MX 95 [S4][S6]. In the boot image it is the first
+file, `mx95<rev>-ahab-container.img` for the i.MX 95 [S4], [S6]. In the boot image it is the first
 container: the enclave ROM authenticates it against NXP's key, and the enclave firmware then
 authenticates the next container (the OEM-signed one) [S7]. The layout is documented for the i.MX 93
 in U-Boot [S7]; that the i.MX 95 follows the same order is an inference from the i.MX 95 binman
@@ -26,15 +26,15 @@ public source reached (section 9).
 
 NXP does not publish the enclave firmware in a git repository. It ships it as a package named
 `firmware-ele-imx-<version>-<short-hash>.bin` on its Yocto download mirror,
-`https://www.nxp.com/lgfiles/NMG/MAD/YOCTO/` [S1][S2]. The `.bin` is a self-extracting archive that
+`https://www.nxp.com/lgfiles/NMG/MAD/YOCTO/` [S1], [S2]. The `.bin` is a self-extracting archive that
 asks the user to accept NXP's licence before it unpacks (the `fsl-eula=true` fetch flag in the recipe
-handles this in Yocto; U-Boot's instructions run it with an auto-accept flag) [S1][S3][S11]. The community layer also lists a third-party mirror of the same
+handles this in Yocto; U-Boot's instructions run it with an auto-accept flag) [S1], [S3], [S11]. The community layer also lists a third-party mirror of the same
 files as a fallback [S2]; this survey treats only the NXP URL as the origin.
 
 The Yocto recipe that fetches it is `firmware-ele-imx` in meta-freescale (master, recipe version
 2.0.7, last changed by commit `c506c76`, 2026-11-10) [S1]. For the i.MX 95 the package holds two boot
 containers, `mx95b0-ahab-container.img` and `mx95b1-ahab-container.img`, one per silicon revision;
-the build picks the one that matches the board's `IMX_SOC_REV` [S4][S5]. The B1 container was added
+the build picks the one that matches the board's `IMX_SOC_REV` [S4], [S5]. The B1 container was added
 to the community layer only in November 2026, following NXP's LF6.18.37_2.1.0 BSP [S5].
 
 The boot container is not the only enclave firmware file in the package: the recipe also installs a
@@ -54,7 +54,7 @@ The version is pinned in three places in the recipe [S1]:
 
 The fetcher refuses a download whose SHA-256 differs, and the licence check refuses a package whose
 `COPYING` differs from a licence version the layer knows; the MD5 above is the one the layer calls
-`LA_OPT_NXP_SOFTWARE_LICENSE` v64.2 [S1][S3]. So a pin is the triple (version, hash abbreviation,
+`LA_OPT_NXP_SOFTWARE_LICENSE` v64.2 [S1], [S3]. So a pin is the triple (version, hash abbreviation,
 SHA-256 of the archive). Nothing in the recipe checks the individual `.img` files after unpacking;
 their integrity rests on the archive checksum, and on the boot ROM, which verifies NXP's signature on
 the container at boot [S7] (section 5).
@@ -63,7 +63,7 @@ the container at boot [S7] (section 5).
 
 | Source | Version it names for the i.MX 95 | Containers |
 |---|---|---|
-| meta-freescale master, 2026-11-12 [S1][S4] | 2.0.7-0265375 | `mx95b0`, `mx95b1` |
+| meta-freescale master, 2026-11-12 [S1], [S4] | 2.0.7-0265375 | `mx95b0`, `mx95b1` |
 | NXP meta-imx, branch `lf-6.18.37-2.1.0` [S10] | 2.0.7-0265375, same SHA-256 as above | (set by the class, not read) |
 | U-Boot master doc `doc/board/nxp/imx95_evk.rst`, read 2026-11-12 [S11] | 2.0.2-89161a8 | `mx95a0`, `mx95b0` |
 | U-Boot master `arch/arm/dts/imx95-u-boot.dtsi` [S8] | (file name only) | `mx95a0`, `mx95b0` |
@@ -171,7 +171,7 @@ Proposal (to be decided by the owner, question 1):
 4. `.gitignore` excludes `*-ahab-container.img` and `firmware-ele-imx-*` so a binary cannot be
    committed by accident.
 5. Start from the pin NXP's own BSP uses, 2.0.7-0265375 [S10], not the older one in U-Boot's doc
-   [S11]: it is the one NXP tests with the current BSP and the only one with a B1 container.
+   ([S11]), because it is the one NXP tests with the current BSP and the only one with a B1 container.
 
 ## 9. What could not be confirmed
 
@@ -248,7 +248,7 @@ Unreachable or not used: NXP's i.MX Linux Release Notes and the i.MX 95 Security
    Recommendation: (b) until the SCR is read, then decide between (a) and (b); (c) if the SCR is
    unclear.
 3. **Which package version to start from?**
-   (a) 2.0.7-0265375, as in NXP's BSP lf-6.18.37-2.1.0 and meta-freescale master [S1][S10];
+   (a) 2.0.7-0265375, as in NXP's BSP lf-6.18.37-2.1.0 and meta-freescale master [S1], [S10];
    (b) 2.0.2-89161a8, as in U-Boot's doc [S11].
    Recommendation: (a): current, NXP-tested, and the only one with a B1 container.
 4. **Which silicon revision does the board carry, B0 or B1?** Options: read it from the board's boot
