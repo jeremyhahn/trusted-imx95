@@ -1124,8 +1124,11 @@ jobs:
 
       # v1.30 (fix 5): gosec on the PR tier, through the developers' target,
       # with no network. On the full tier make security runs it in the image job.
+      # CUSTOMIZE: here gosec is the CST guard and the tree secret scan, and a
+      # docs-only change can carry a credential, so it runs on a docs-only PR
+      # too, and on any docs-only event, when the image job skips.
       - name: make gosec (PR tier)
-        if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != '' && env.CI_FULL_TIER != 'true' && needs.preflight.outputs.docs_only != 'true' }}
+        if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != '' && (env.CI_FULL_TIER != 'true' || needs.preflight.outputs.docs_only == 'true') }}
         run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" "make gosec GO_BUILD_TAGS='$GO_BUILD_TAGS'"
 
       # Fails when a library, first-party or third-party, is behind its latest

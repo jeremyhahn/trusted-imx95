@@ -159,7 +159,13 @@ docker-build: docker-build-toolchain ## Build both images, each only when the da
 		docker build --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
 			-t $(IT_IMAGE) -f $(DOCKERFILE) .
 
-docker-run: docker-build-toolchain ## Run CMD in the toolchain image, the source bind-mounted
+# The CST extraction lives outside the checkout (scripts/cst-check.sh), so a
+# set CST_PATH is bind-mounted read-only at /cst and named there; unset, it
+# stays unset in the container and cst-check fails naming it.
+CST_MOUNT = $(if $(CST_PATH),-v "$$(cd "$$CST_PATH" && pwd):/cst:ro" -e CST_PATH=/cst)
+
+docker-run: docker-build-toolchain ## Run CMD in the toolchain image, the source and a set CST_PATH (read-only) bind-mounted
 	@[ -n "$(CMD)" ] || { echo "docker-run: set CMD, for example CMD='make test'"; exit 1; }
-	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -e CST_PATH \
+	@[ -z "$${CST_PATH:-}" ] || [ -d "$$CST_PATH" ] || { echo "docker-run: CST_PATH=$$CST_PATH is not a directory"; exit 1; }
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp $(CST_MOUNT) \
 		-v "$(CURDIR):/src" -w /src --ulimit core=0 $(TOOLCHAIN_IMAGE) bash -c '$(CMD)'

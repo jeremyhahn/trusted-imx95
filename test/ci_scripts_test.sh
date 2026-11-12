@@ -231,4 +231,103 @@ printf 'exit 1\n' >>"$mini/test/mini_test.sh"
 run "$mini/scripts/check-script-tests.sh" 100
 check "check-script-tests: a failing test fails the count" 1 "test/mini_test.sh failed"
 
+# --- ci.yml: every event runs the tree secret scan ---------------------------
+#
+# The tree secret scan runs in the lint job's `make gosec` step or in the
+# image job's `make security` step. This evaluates their `if:` conditions
+# (and their jobs') for each tier and for a docs-only change, so a condition
+# that leaves an event with neither fails here.
+sel="$TMP_ROOT/scan-selection.py"
+cat >"$sel" <<'EOF'
+import re, sys
+lines = open(sys.argv[1]).read().splitlines()
+
+def cond(found, what):
+    if found is None:
+        sys.exit("scan-selection: no single-line if: for " + what)
+    return found
+
+def step_if(name):
+    for i, l in enumerate(lines):
+        if l.strip() == "- name: " + name:
+            for m in lines[i + 1:i + 4]:
+                if m.strip().startswith("if: ${{"):
+                    return m.split("if:", 1)[1].strip()
+    return cond(None, "step " + name)
+
+def job_if(job):
+    for i, l in enumerate(lines):
+        if l == "  %s:" % job:
+            for m in lines[i + 1:]:
+                if re.match(r"  \S", m):
+                    break
+                if m.startswith("    if: ${{"):
+                    return m.split("if:", 1)[1].strip()
+    return cond(None, "job " + job)
+
+def ev(expr, ctx):
+    e = expr[3:-2] if expr.startswith("${{") and expr.endswith("}}") else sys.exit("scan-selection: not an expression: " + expr)
+    e = e.replace("!cancelled()", "True").replace("!=", " NE ").replace("!", " not ").replace(" NE ", " != ")
+    e = e.replace("&&", " and ").replace("||", " or ")
+    e = re.sub(r"\b(?:env|needs|github)\.[A-Za-z_.]+", lambda m: repr(ctx.get(m.group(0), "")), e)
+    return bool(eval(e, {"__builtins__": {}}, {}))
+
+gosec = (job_if("lint"), step_if("make gosec (PR tier)"))
+security = (job_if("image"), step_if("make security"))
+bad = 0
+for docs in ("true", "false"):
+    for full in ("true", ""):
+        ctx = {"env.TOOLCHAIN_IMAGE": "toolchain", "env.CI_FULL_TIER": full,
+               "needs.preflight.outputs.verdict": "run", "needs.preflight.outputs.docs_only": docs}
+        ran = all(ev(c, ctx) for c in gosec) or all(ev(c, ctx) for c in security)
+        tier = "full" if full else "PR"
+        if ran:
+            print("scan-selection: ok   %s tier, docs_only=%s: the tree secret scan runs" % (tier, docs))
+        else:
+            print("scan-selection: FAIL %s tier, docs_only=%s: no tree secret scan" % (tier, docs))
+            bad = 1
+sys.exit(bad)
+EOF
+run python3 "$sel" "$ROOT/.github/workflows/ci.yml"
+check "ci.yml: the tree secret scan runs on every tier, a docs-only PR included" 0 \
+	"PR tier, docs_only=true: the tree secret scan runs" "full tier, docs_only=true: the tree secret scan runs"
+# The condition before this fix, which skipped a docs-only PR, is caught.
+old_if="env.CI_FULL_TIER != 'true' && needs.preflight.outputs.docs_only != 'true' }}"
+yml=$(<"$ROOT/.github/workflows/ci.yml")
+yml=${yml//"(env.CI_FULL_TIER != 'true' || needs.preflight.outputs.docs_only == 'true') }}"/"$old_if"}
+printf '%s\n' "$yml" >"$TMP_ROOT/ci-old.yml"
+run python3 "$sel" "$TMP_ROOT/ci-old.yml"
+check "ci.yml: a gosec condition that skips docs-only PRs fails the selection" 1 \
+	"FAIL PR tier, docs_only=true: no tree secret scan"
+
+# --- make docker-run: CST_PATH outside the checkout ---------------------------
+#
+# A stub docker records each invocation; `image inspect` succeeds, so no
+# image is built. The run must mount a set CST_PATH read-only and name it
+# inside the container, and must not forward an unset one.
+dstub="$TMP_ROOT/dstub"
+mkdir -p "$dstub"
+cat >"$dstub/docker" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = run ] && printf '%s\n' "$@" >"$DOCKER_LOG"
+exit 0
+EOF
+chmod +x "$dstub/docker"
+export DOCKER_LOG="$TMP_ROOT/docker.log"
+cst_host="$TMP_ROOT/host extract/cst-3.1.0"
+mkdir -p "$cst_host/release/docs"
+: >"$cst_host/release/docs/CST_UG.pdf"
+run env PATH="$dstub:$PATH" CST_PATH="$cst_host" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: runs with CST_PATH set" 0
+expect "docker-run: a set CST_PATH is bind-mounted read-only at /cst" grep -qxF -- "$cst_host:/cst:ro" "$DOCKER_LOG"
+expect "docker-run: CST_PATH names the mount inside the container" grep -qxF -- "CST_PATH=/cst" "$DOCKER_LOG"
+expect "docker-run: the command runs in the image" grep -qxF -- "make cst-check" "$DOCKER_LOG"
+: >"$DOCKER_LOG"
+run env -u CST_PATH PATH="$dstub:$PATH" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: runs with CST_PATH unset" 0
+log=$(<"$DOCKER_LOG")
+if [[ "$log" == *CST_PATH* || "$log" == *"/cst:ro"* ]]; then fail "docker-run: an unset CST_PATH is neither forwarded nor mounted" "$log"; else pass "docker-run: an unset CST_PATH is neither forwarded nor mounted"; fi
+run env PATH="$dstub:$PATH" CST_PATH="$TMP_ROOT/absent" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: a CST_PATH that is not a directory is refused" nonzero "is not a directory"
+
 finish
