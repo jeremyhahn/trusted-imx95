@@ -1,0 +1,160 @@
+# releasability-template: v1 (trusted-imx95, after signatures-template v1) —
+# the private-pattern scan.
+#
+# Why a workflow of its own (security finding on #19, ci.yml's lint step): a
+# `pull_request` run executes the pull request's own ci.yml, so a step there
+# that names the private pattern secret hands it to whatever the pull request
+# writes into that step. This workflow runs on `pull_request_target`, so the
+# forge reads it from the BASE branch, never from the pull request (the same
+# reasoning as signatures.yml's header). It checks out the base only, fetches
+# the pull request's head as git objects, and greps that commit's tree with
+# `git grep <commit>`: nothing from the pull request is checked out, built or
+# run. Its token is `contents: read` and is not persisted in the clone.
+#
+# The rules are ci.yml v1.33.2's lint step, moved here unchanged: every
+# non-blank, non-`#` line of the secret is `class<TAB>regex`, the class one of
+# coord-host, internal-email, lab-address, lab-host or owner-path (optional
+# `/i`); a malformed line, an unknown class or a regex grep -E refuses fails
+# with its line number only; a match fails, printed as path and line, never
+# the value; a matched line carrying `lab-string-ok: <reason>` is listed as
+# waived (public-hygiene.md). Three changes:
+#   - It fails closed when the secret is absent, on every event (the lint
+#     step passed a pull request with a notice).
+#   - A pull request from a fork fails without a scan: its author could
+#     otherwise probe the private patterns one push at a time.
+#   - Each printed path carries a `match: ` or `waived: ` prefix, so a file
+#     name can never be read as a workflow command.
+#
+# ci.yml's `releasability` job reads this job's commit status on the pull
+# request's head (context `Releasability / Releasability (pull_request_target)`,
+# or `(push)` on main), and CI Gate requires that job as `always`. A pull
+# request can edit ci.yml, so the ruleset also requires the Releasability
+# context itself, beside Signatures (a ruleset change, made by its owner).
+# test/ci_scripts_test.sh runs this step against git fixtures.
+name: Releasability
+
+on:
+  pull_request_target:
+    branches: [main]
+    # No draft skip: a skipped required check reads as passed.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  releasability:
+    name: Releasability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # pull_request_target checks out the base branch by default. The ref is
+      # named anyway so no edit can point it at the pull request.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.base.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Releasability (private patterns)
+        env:
+          RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          isrev() { [ -n "$1" ] && git cat-file -e "$1^{commit}" 2>/dev/null; }
+          if [ -z "${RELEASABILITY_PATTERNS:-}" ]; then
+            echo "::error::the private pattern secret is not set; the gate needs the private pattern file (public-hygiene.md)"
+            exit 1
+          fi
+          if [ "$EVENT" = pull_request_target ]; then
+            [ -n "$PR" ] && [ -n "$HEAD_SHA" ] || { echo "::error::a pull_request_target run without its number or head"; exit 1; }
+            if [ "$HEAD_REPO" != "$REPO" ]; then
+              echo "::error::a pull request from a fork is not scanned against the private patterns; a maintainer pushes its commits to a branch of this repository"
+              exit 1
+            fi
+            # The pull request's head, as objects only: nothing is checked
+            # out or run.
+            git -c protocol.version=2 fetch -q --no-tags --depth=1 origin "+refs/pull/${PR}/head:refs/remotes/pr/head" 2>/dev/null || true
+            isrev "$HEAD_SHA" || git fetch -q --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
+          fi
+          isrev "$HEAD_SHA" || { echo "::error::the head ${HEAD_SHA:0:12} cannot be read (moved on: the next synchronize run scans the new head)"; exit 1; }
+          pf=$(mktemp)
+          chmod 600 "$pf"
+          trap 'rm -f "$pf"' EXIT
+          tab=$(printf '\t')
+          n=0 bad=0 count=0
+          while IFS= read -r line || [ -n "$line" ]; do
+            n=$((n + 1))
+            line=${line%$'\r'}
+            trimmed=${line#"${line%%[![:space:]]*}"}
+            case $trimmed in ''|'#'*) continue ;; esac
+            case $line in
+              *"$tab"*) ;;
+              *) echo "::error::pattern line $n is not class<TAB>regex"; bad=1; continue ;;
+            esac
+            class=${line%%"$tab"*}
+            re=${line#*"$tab"}
+            case $class in
+              coord-host|internal-email|lab-address|lab-host|owner-path) ;;
+              coord-host/i|internal-email/i|lab-address/i|lab-host/i|owner-path/i) ;;
+              *) echo "::error::pattern line $n has an unknown class"; bad=1; continue ;;
+            esac
+            if [ -z "$re" ]; then
+              echo "::error::pattern line $n has an empty regex"; bad=1; continue
+            fi
+            rc=0
+            grep -E -e "$re" /dev/null > /dev/null 2>&1 || rc=$?
+            if [ "$rc" -ge 2 ]; then
+              echo "::error::pattern line $n has a regex grep -E refuses"; bad=1; continue
+            fi
+            printf '%s\n' "$re" >> "$pf"
+            count=$((count + 1))
+          done <<< "$RELEASABILITY_PATTERNS"
+          unset RELEASABILITY_PATTERNS
+          if [ "$bad" != 0 ]; then
+            echo "::error::the private pattern file is malformed (line numbers above; the values are not shown)"
+            exit 1
+          fi
+          if [ "$count" = 0 ]; then
+            echo "::error::the private pattern secret holds no class<TAB>regex line"
+            exit 1
+          fi
+          # git grep on a commit prints <commit>:<path>:<line>:<text>; the
+          # commit prefix is dropped before the path and line are kept.
+          rc=0
+          out=$(git grep -n -I -i -E -f "$pf" "$HEAD_SHA" --) || rc=$?
+          case $rc in
+            0|1) ;;
+            *)
+              echo "::error::git grep failed (rc $rc)"
+              exit 1 ;;
+          esac
+          out=$(printf '%s\n' "$out" | sed "s/^$HEAD_SHA://")
+          waiver='lab-string-ok:[[:space:]]*[[:alnum:]]'
+          waived=$(printf '%s\n' "$out" | grep -E -e "$waiver" | cut -d: -f1,2 || true)
+          hits=$(printf '%s\n' "$out" | grep -v -E -e "$waiver" | grep -v '^$' | cut -d: -f1,2 || true)
+          unset out
+          nw=0
+          if [ -n "$waived" ]; then
+            nw=$(printf '%s\n' "$waived" | wc -l)
+            echo "::notice::$nw matched lines carry the lab-string-ok waiver (path:line; the values are not shown):"
+            printf '%s\n' "$waived" | sed 's/^/waived: /'
+          fi
+          if [ -n "$hits" ]; then
+            echo "::error::internal names in the tree of ${HEAD_SHA:0:12} (path:line; the values are not shown):"
+            printf '%s\n' "$hits" | sed 's/^/match: /'
+            exit 1
+          fi
+          echo "releasability: ${HEAD_SHA:0:12}, $count private patterns, 0 matches, $nw waived"

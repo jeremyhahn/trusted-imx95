@@ -1273,4 +1273,191 @@ check "signatures.yml: a pull request that adds the registry is still judged by 
 	"FAIL no .github/allowed_signers at the base ${A:0:12}"
 fi
 
+# --- releasability: the private pattern secret never reaches a pull_request run ---
+# (Security finding on #19: ci.yml's lint step gave the secret to pull_request
+# runs, which execute the pull request's own ci.yml.)
+# prsecret <dir>: fails, naming the file, when a workflow in <dir> that runs on
+# `pull_request` names the private pattern secret anywhere.
+prsecret() {
+	python3 - "$1" <<'EOF'
+import glob, os, re, sys
+bad = []
+for p in sorted(glob.glob(os.path.join(sys.argv[1], "*.yml")) + glob.glob(os.path.join(sys.argv[1], "*.yaml"))):
+    text = open(p, encoding="utf-8").read()
+    on, inon = [], False
+    for l in text.split("\n"):
+        if re.match(r"^['\"]?on['\"]?\s*:", l):
+            inon = True
+            on.append(l.split(":", 1)[1])
+            continue
+        if inon:
+            if re.match(r"^\S", l):
+                break
+            on.append(l)
+    trig = "\n".join(re.sub(r"#.*", "", l) for l in on)
+    # \b after the name: pull_request_target does not match.
+    if re.search(r"\bpull_request\b", trig) and "RELEASABILITY_PATTERNS" in text:
+        bad.append(os.path.basename(p))
+for b in bad:
+    print("runs on pull_request and names the private pattern secret: " + b)
+sys.exit(1 if bad else 0)
+EOF
+}
+run prsecret "$ROOT/.github/workflows"
+check "releasability: no workflow that runs on pull_request names the private pattern secret" 0
+wfo=$TMP_ROOT/wf-old
+mkdir -p "$wfo"
+cp "$ROOT/.github/workflows/"*.yml "$wfo/"
+# The old ci.yml's lint step, in one line.
+# shellcheck disable=SC2016 # a workflow expression, not a shell one
+printf '          RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}\n' >>"$wfo/ci.yml"
+run prsecret "$wfo"
+check "releasability: the check fails a ci.yml that hands the secret to a pull_request run" 1 \
+	"runs on pull_request and names the private pattern secret: ci.yml"
+rel=$ROOT/.github/workflows/releasability.yml
+relon=$(sed -n '/^on:/,/^[^ o]/p' "$rel")
+relevents() { [[ "$relon" == *pull_request_target:* && "$relon" == *push:* && "$relon" != *" pull_request:"* ]]; }
+expect "releasability.yml: it runs on pull_request_target and push only" relevents
+# shellcheck disable=SC2016 # workflow expressions, not shell ones
+{
+	relsecret='RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}'
+	relref='ref: ${{ github.event_name == '"'push'"' && github.sha || github.event.pull_request.base.ref }}'
+	gateline='check releasability "${{ needs.releasability.result }}" always'
+}
+expect "releasability.yml: it holds the private pattern secret" grep -qF "$relsecret" "$rel"
+expect "releasability.yml: it has one checkout" test "$(grep -c 'uses: actions/checkout@' "$rel")" = 1
+expect "releasability.yml: the checkout is the base (or main's pushed commit)" grep -qF "$relref" "$rel"
+expect "releasability.yml: the checkout does not persist its token" grep -qF 'persist-credentials: false' "$rel"
+relnohead() { ! grep -nE 'head_ref|ref: .*pull_request\.head|git (checkout|switch|worktree)|\bmake |\bgo (build|test|run)' "$rel"; }
+expect "releasability.yml: it never checks out, builds or runs the head" relnohead
+expect "ci.yml: CI Gate needs the releasability job" \
+	grep -qE '^    needs: \[[^]]*\breleasability\b' "$ROOT/.github/workflows/ci.yml"
+expect "ci.yml: CI Gate requires the releasability job on every event, never skipped" \
+	grep -qF "$gateline" "$ROOT/.github/workflows/ci.yml"
+
+# stepscript <workflow> <step name> <out>: a step's run script, as written.
+stepscript() {
+	python3 - "$1" "$2" >"$3" <<'EOF'
+import sys
+lines = open(sys.argv[1]).read().split("\n")
+i = next(n for n, l in enumerate(lines) if l.strip() == "- name: " + sys.argv[2])
+i = next(n for n in range(i, len(lines)) if lines[n].strip() == "run: |")
+ind = len(lines[i]) - len(lines[i].lstrip()) + 2
+out = []
+for l in lines[i + 1:]:
+    if l.strip() and len(l) - len(l.lstrip()) < ind:
+        break
+    out.append(l[ind:])
+print("\n".join(out))
+EOF
+}
+
+# The scan, against a git fixture. It reads the named commit's tree, not the
+# working tree, and prints path and line, never the value.
+stepscript "$rel" "Releasability (private patterns)" "$TMP_ROOT/relstep.sh"
+expect "releasability.yml: the scan step's script is extracted" test -s "$TMP_ROOT/relstep.sh"
+rr=$TMP_ROOT/relrepo
+mkdir -p "$rr"
+rg() { git -C "$rr" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+rg init -q -b main
+printf 'nothing here\n' >"$rr/clean.txt"
+rg add -A && rg commit -qm clean
+RC0=$(rg rev-parse HEAD)
+printf 'see host-17.corp.example\n' >"$rr/bad.txt"
+rg add -A && rg commit -qm bad
+RBAD=$(rg rev-parse HEAD)
+rg rm -q bad.txt
+printf 'see host-17.corp.example (lab-string-ok: a fixture)\n' >"$rr/waived.txt"
+rg add -A && rg commit -qm waived
+RWAIVED=$(rg rev-parse HEAD)
+rg checkout -q "$RBAD"
+relpat=$(printf '# fixture\nlab-host\thost-[0-9]+\\.corp\\.example\n')
+rel() { # rel <event> <head> [head repo]: the step in the fixture, the pattern secret from $relpat
+	(cd "$rr" && env RELEASABILITY_PATTERNS="$relpat" EVENT="$1" PR=7 HEAD_SHA="$2" HEAD_REPO="${3:-o/r}" REPO=o/r \
+		bash "$TMP_ROOT/relstep.sh")
+}
+novalue() { # novalue <name>: the last output holds no matched value
+	if [[ "$OUT" == *host-17* ]]; then fail "$1" "the matched value is printed: $OUT"; else pass "$1"; fi
+}
+run rel push "$RBAD"
+check "releasability.yml: a match fails, path and line printed" 1 "match: bad.txt:1"
+novalue "releasability.yml: a match is printed without its value"
+run rel pull_request_target "$RBAD"
+check "releasability.yml: a pull request's head is scanned as objects" 1 "match: bad.txt:1"
+run rel push "$RC0"
+check "releasability.yml: the named commit's tree is scanned, not the checkout" 0 "1 private patterns, 0 matches, 0 waived"
+run rel push "$RWAIVED"
+check "releasability.yml: a line with the lab-string-ok waiver passes, listed" 0 "waived: waived.txt:1" "0 matches, 1 waived"
+novalue "releasability.yml: a waived line is printed without its value"
+run rel pull_request_target "$RBAD" fork/r
+check "releasability.yml: a fork's pull request fails unscanned" 1 "a pull request from a fork is not scanned"
+relpat_keep=$relpat
+relpat=
+run rel push "$RC0"
+check "releasability.yml: an absent secret fails, on a push" 1 "the private pattern secret is not set"
+relpat=$(printf 'lab-host host-17\n')
+run rel push "$RC0"
+check "releasability.yml: a line without a tab fails by its number" 1 "pattern line 1 is not class<TAB>regex"
+novalue "releasability.yml: a malformed pattern line is not printed"
+relpat=$(printf 'secret-host\thost\n')
+run rel push "$RC0"
+check "releasability.yml: an unknown class fails" 1 "pattern line 1 has an unknown class"
+relpat=$relpat_keep
+run rel push 0123456789abcdef0123456789abcdef01234567
+check "releasability.yml: a head that cannot be read fails" 1 "cannot be read"
+
+# ci.yml's releasability job, against a stub forge API: it needs the scan's
+# own status, from pull_request_target, success and the newest of its context.
+stepscript "$ROOT/.github/workflows/ci.yml" "Read the head commit's Releasability status" "$TMP_ROOT/relgate.sh"
+expect "ci.yml: the releasability job's script is extracted" test -s "$TMP_ROOT/relgate.sh"
+rstub=$TMP_ROOT/relstub
+mkdir -p "$rstub"
+cat >"$rstub/curl" <<'EOF'
+#!/usr/bin/env bash
+# Writes $REL_JSON to -o, prints $REL_CODE for -w, logs the URL and headers.
+out=
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-o) out=$2; shift 2 ;;
+	-H) cat -- "${2#@}" >>"$REL_LOG" 2>/dev/null || printf '%s\n' "$2" >>"$REL_LOG"; shift 2 ;;
+	-w | --max-time) shift 2 ;;
+	-*) shift ;;
+	*) printf 'url %s\n' "$1" >>"$REL_LOG"; shift ;;
+	esac
+done
+[ -z "$out" ] || printf '%s' "$REL_JSON" >"$out"
+printf '%s' "${REL_CODE:-200}"
+EOF
+chmod +x "$rstub/curl"
+H=0123456789abcdef0123456789abcdef01234567
+relgate() { # relgate <event> <json> [code] [server]
+	: >"$TMP_ROOT/relgate.log"
+	env PATH="$rstub:$PATH" REL_JSON="$2" REL_CODE="${3:-200}" REL_LOG="$TMP_ROOT/relgate.log" EVENT="$1" \
+		SERVER="${4:-https://forge.example}" HEAD_SHA="$H" REPO_API=https://forge.example/api/v1/repos/o/r \
+		GH_API=https://api.github.example/repos/o/r JOB_TOKEN=tok-not-printed RUNNER_TEMP="$TMP_ROOT" \
+		bash "$TMP_ROOT/relgate.sh"
+}
+st() { printf '{"id":%s,"context":"Releasability / Releasability (%s)","status":"%s"}' "$1" "$2" "$3"; }
+run relgate pull_request "[$(st 5 pull_request_target success)]"
+check "ci.yml releasability: a pull request passes on the scan's success" 0 \
+	"OK   Releasability / Releasability (pull_request_target): success on ${H:0:12}"
+expect "ci.yml releasability: it reads the head commit's statuses" \
+	grep -qxF "url https://forge.example/api/v1/repos/o/r/commits/$H/statuses?sort=recentupdate&limit=50" "$TMP_ROOT/relgate.log"
+expect "ci.yml releasability: the token reaches curl as a header" grep -qxF "Authorization: token tok-not-printed" "$TMP_ROOT/relgate.log"
+if [[ "$OUT" == *tok-not-printed* ]]; then fail "ci.yml releasability: the token is not printed" "$OUT"; else pass "ci.yml releasability: the token is not printed"; fi
+run relgate pull_request "[$(st 5 pull_request success)]"
+check "ci.yml releasability: a status from a pull_request run does not count" 1 "(pull_request_target): 'none'"
+run relgate pull_request "[$(st 5 pull_request_target success),$(st 9 pull_request_target pending)]"
+check "ci.yml releasability: the newest status decides (a re-run in progress fails)" 1 "'pending'"
+run relgate pull_request "[$(st 9 pull_request_target failure),$(st 5 pull_request_target success)]"
+check "ci.yml releasability: a failed scan fails, whatever the order" 1 "'failure'"
+run relgate push "[$(st 3 push success)]"
+check "ci.yml releasability: a push reads the push scan" 0 "OK   Releasability / Releasability (push)"
+run relgate schedule "[$(st 3 pull_request_target success)]"
+check "ci.yml releasability: a schedule run needs the push scan of its commit" 1 "(push): 'none'"
+run relgate pull_request "[]" 404
+check "ci.yml releasability: an unreadable API fails closed" 1 "cannot be read"
+run relgate push '{"check_runs":[{"id":2,"name":"Releasability","status":"completed","conclusion":"success"}]}' 200 https://github.com
+check "ci.yml releasability: the github.com mirror reads the check run" 0 "OK   Releasability: success"
+
 finish
