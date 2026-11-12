@@ -5,6 +5,20 @@ Public sources only; every claim cites a source from the [Sources](#sources) lis
 
 ## 1. Scope and method
 
+This survey covers the EL3 firmware (TF-A BL31) of the Cortex-A55 cluster on
+the NXP i.MX 95 of the FRDM-IMX95 board. It explains how BL31 depends on the
+System Manager (SM) on the Cortex-M33, what in its build affects security, and
+how it is packaged and authenticated at boot. It is input to the row's
+decision on the secure world and to issues #32 (boot chain) and #55 (code
+signing).
+
+Method: source trees were read at the tags or commits listed under
+[Sources](#sources). Statements are summaries in this document's own words.
+Values (addresses, option names) are quoted from source. Where a statement
+is an inference and not something a source states, the text says so. No
+build was run, and nothing was run on hardware. No key, fuse, life-cycle or
+provisioning step is described as a procedure here.
+
 ## 2. What TF-A provides for the i.MX 95
 
 ### 2.1 Upstream TF-A
@@ -96,8 +110,9 @@ the SCMI *platform* [S2, S5, S6]. In the upstream port [S2]:
   carries, are set by the SM configuration, not by TF-A. In NXP's SM, each
   SCMI agent is bound to a messaging-unit channel and a security state, and
   agents are grouped into logical machines (LM); the SM configuration tool
-  decides which resources each agent may touch [S5, S6]. TF-A trusts that the
-  channel it uses is the secure one; it does not verify it.
+  decides which resources each agent may touch [S5, S6]. The port does not
+  check that its MU1 channel really is the secure agent's channel; it relies
+  on the SM configuration for that [S2].
 - **ELE.** Separately from SCMI, BL31 talks to the EdgeLock Enclave over its
   own MU for SoC information and the GMID release [S2].
 
@@ -218,6 +233,139 @@ sources above:
 
 ## 6. What could not be confirmed
 
+- **NXP documents.** NXP web pages (product pages, the i.MX Linux User's Guide
+  and Reference Manual, AHAB and code-signing application notes, the i.MX 95
+  reference manual and security reference manual) could not be fetched
+  from the lane; www.nxp.com returned HTTP 404 to automated requests. Nothing
+  here relies on them. This means: the AHAB behaviour per life-cycle state,
+  the ELE's rollback enforcement against fuses, the i.MX 95 TrustZone and
+  resource-domain hardware model beyond what the SM documentation says, and
+  the CST signing flow for container 2 are **unconfirmed** in this survey.
+- **Cortex-A55 architecture level.** Armv8.2-A (hence no PAuth, BTI or
+  S-EL2) is stated from the Arm product page [S10], which returned HTTP 403
+  to the lane; **unconfirmed** here.
+- **SiP surface.** The full list of SiP calls the i.MX 95 build answers, and
+  how each checks its arguments, was not traced call by call. Section 2.2
+  covers only the M7 and LMM services.
+- **Linux dependency on NXP SiP calls** (remoteproc for the M7) was not
+  checked against kernel source.
+- **`SYS_PWR_FULL_CTRL`.** Its exact effect was not traced.
+- **Stack protector.** No `plat_get_stack_protector_canary` was found in the
+  i.MX 95 port's sources as listed in `platform.mk` [S2]. That suggests
+  `ENABLE_STACK_PROTECTOR` needs a platform addition first; not confirmed by a
+  build.
+- **SM configuration audit.** Only the A55 secure agent's section of
+  `mx95frdm.cfg` was read in full; the non-secure resource list was skimmed.
+- **OP-TEE on FRDM.** Upstream OP-TEE has only `mx95evk`; whether its DDR and
+  UART values fit the FRDM-IMX95 was not checked.
+- **SPMD/FF-A on i.MX 95.** No source shows `SPD=spmd` built or run on this
+  SoC.
+- **Release alignment.** The NXP branch heads surveyed (`imx-atf`
+  `lf_v2.14`, `imx-sm` `master`) were not matched to one NXP BSP release
+  tag. `imx-mkimage` was read at release tag `lf-6.12.49_2.2.0`. Matching
+  versions across the three repositories is for #32.
+
 ## Sources
 
+All reached from the lane on 2026-11-12 unless marked unreachable.
+
+- [S1] Trusted Firmware-A, upstream repository, tag `v2.15.0` (commit
+  `da738d5`) and `master` (commit `d70b52d`, 2026-11-11).
+  https://github.com/ARM-software/arm-trusted-firmware (mirror of
+  https://review.trustedfirmware.org/plugins/gitiles/TF-A/trusted-firmware-a)
+- [S2] TF-A `v2.15.0`, i.MX 95 port: `plat/imx/imx9/imx95/` (`platform.mk`,
+  `include/platform_def.h`, `include/imx95_scmi_def.h`, `imx95_psci.c`),
+  `plat/imx/imx9/common/` (`imx9_bl31_setup.c`, `imx9_psci_common.c`,
+  `scmi/scmi_client.c`), `plat/imx/common/imx_sip_svc.c`.
+  https://github.com/ARM-software/arm-trusted-firmware/tree/v2.15.0/plat/imx/imx9
+- [S3] TF-A documentation, "NXP i.MX 9 Series", `docs/plat/imx9.rst`, `v2.15.0`.
+  https://trustedfirmware-a.readthedocs.io/en/v2.15.0/plat/imx9.html
+- [S4] NXP `imx-atf`, branch `lf_v2.14`, commit `af9eb2c` (2026-09-01):
+  `plat/imx/imx9/imx95/` (`platform.mk`, `imx95_m7.c`, `imx95_lmm.c`),
+  `plat/imx/common/imx_sip_svc.c`.
+  https://github.com/nxp-imx/imx-atf/tree/lf_v2.14/plat/imx/imx9/imx95
+- [S5] NXP `imx-sm` (System Manager), default branch, commit `eec2328`
+  (2026-09-03, tagged `android-17.0.0_1.0.0`): `configs/mx95frdm.cfg`.
+  https://github.com/nxp-imx/imx-sm/blob/eec232878ab7dd460f5a8f3767d39dc7e9412efa/configs/mx95frdm.cfg
+- [S6] NXP `imx-sm`, same commit: configuration guide `sm/doc/config.md`
+  (agents, `secure` flag, permission groups, resource-domain notes).
+  https://github.com/nxp-imx/imx-sm/blob/eec232878ab7dd460f5a8f3767d39dc7e9412efa/sm/doc/config.md
+- [S7] TF-A "Build Options", `docs/getting_started/build-options.rst`, `v2.15.0`.
+  https://trustedfirmware-a.readthedocs.io/en/v2.15.0/getting_started/build-options.html
+- [S8] OP-TEE OS, `master` as of 2026-11-12 (latest tag seen `4.11.0`),
+  `core/arch/arm/plat-imx/conf.mk`.
+  https://github.com/OP-TEE/optee_os/blob/master/core/arch/arm/plat-imx/conf.mk
+- [S9] NXP `imx-mkimage`, tag `lf-6.12.49_2.2.0` (commit `be80fad`,
+  2025-11-14): `iMX95/soc.mak`, `Readme.imx95`.
+  https://github.com/nxp-imx/imx-mkimage/tree/lf-6.12.49_2.2.0
+- [S10] Arm, "Cortex-A55" product page. https://developer.arm.com/Processors/Cortex-A55
+  **Unreachable from the lane (HTTP 403).**
+- [S11] U-Boot, `master` commit `ece349a` (2026-07-06):
+  `common/spl/spl_imx_container.c`, `arch/arm/mach-imx/ele_ahab.c`.
+  https://github.com/u-boot/u-boot/tree/master/arch/arm/mach-imx
+- Unreachable, not used: NXP i.MX 95 product page, FRDM-IMX95 board page and
+  "Embedded Linux for i.MX Applications Processors" (i.MX Linux User's Guide
+  and Reference Manual), all on https://www.nxp.com, HTTP 404 to the lane.
+
 ## Questions for the owner
+
+1. **Which TF-A tree is the base?**
+   Options: (a) upstream TF-A tag `v2.15.0` or later; (b) NXP `imx-atf`
+   `lf_v2.14`; (c) upstream, plus only the NXP patches the board needs,
+   carried in this repository.
+   Recommendation: (c), leaning towards (a). Upstream already has the i.MX 95
+   port with the same memory map and SCMI client [S1, S2]. NXP's extra
+   surface is the M7 and LMM SiP calls, which let the normal world start and
+   stop other logical machines through the secure agent [S4]. Take those only
+   if the M7 must be driven from Linux.
+
+2. **Is there a secure OS (BL32) at all?**
+   Options: (a) none, BL31 only; (b) OP-TEE through `SPD=opteed`; (c) Trusty;
+   (d) FF-A with `SPD=spmd` and an EL3 SPMC.
+   Recommendation: (a) for the first boot chain, with (b) as the next step.
+   BL31 alone is the smallest secure surface. OP-TEE has an upstream i.MX 95
+   flavour [S8], and the port wires up `opteed` [S2]. (d) has no i.MX 95
+   evidence (section 6). The answer also decides what the row's
+   "TrustZone software" covers (SPEC.md, row `secure-world`).
+
+3. **Should NXP's M7 and LMM SiP services be in the build?**
+   Options: (a) keep them as NXP ships them; (b) remove them and start the M7
+   from the SM's boot list (`MSEL`) only; (c) keep them with an allow-list of
+   logical-machine IDs in TF-A.
+   Recommendation: (b) if the M7 firmware does not need to be restarted
+   from Linux, otherwise (c). Today `imx95_lmm.c` passes a caller-chosen
+   LM ID to the SM with the secure agent's rights [S4]. Depends on the
+   `system-manager-config` row.
+
+4. **Release build settings.**
+   Options: (a) NXP BSP defaults; (b) `DEBUG=0`, `LOG_LEVEL` at most 20,
+   `ENABLE_ASSERTIONS=1`, `HARDEN_SLS=1`, `SEPARATE_CODE_AND_RODATA=1`,
+   with `ENABLE_STACK_PROTECTOR=strong` once a canary source is added.
+   Recommendation: (b), checked against the 256 KiB BL31 limit [S2, S7].
+   `BRANCH_PROTECTION` does not apply to the A55 (unconfirmed, [S10]).
+
+5. **Who owns the secure resource list?**
+   Options: (a) start from NXP's `mx95frdm.cfg` unchanged; (b) a
+   project-owned SM configuration derived from it and reviewed against this
+   survey's section 4.
+   Recommendation: (b), in the `system-manager-config` row. TF-A's
+   isolation rests entirely on that file: the secure DDR window, MU1, the ELE
+   MUs and the CPUs [S5, S6].
+
+6. **Container 2 authentication (for #32 and #55).**
+   Options: (a) build SPL with `CONFIG_AHAB_BOOT` and sign container 2 with
+   the same key set as container 1; (b) as (a), plus a container
+   `-sw_version` rollback index; (c) no authentication of container 2 during
+   development.
+   Recommendation: (b) as the target and (a) at least, from the first
+   signed build. Without `CONFIG_AHAB_BOOT`, BL31 is loaded unchecked [S11].
+   How the rollback index is enforced must first be confirmed from NXP
+   documents that the lane could not reach (section 6).
+
+7. **Which versions to pin?**
+   Options: (a) one NXP BSP release tag across `imx-atf`, `imx-sm`,
+   `imx-mkimage` and U-Boot; (b) upstream TF-A and U-Boot with NXP's SM and
+   mkimage at a release tag.
+   Recommendation: none from the sources alone. This survey used branch
+   heads for two NXP trees (section 6). Pick in #32 once question 1 is
+   answered.
