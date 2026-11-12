@@ -57,8 +57,8 @@ expect a manufacturer to retain. Each field gives its source.
 | --- | --- | --- |
 | Device identifier: the SoC unique ID as reported by the enclave or the OS | Every record must name exactly one chip. Linux exposes a read-only SoC serial number attribute where the SoC driver supplies one; NXP's EdgeLock 2GO host tool harvests a device UUID before it provisions. Whether the i.MX 95 kernel driver fills the attribute from the enclave's UID is not confirmed (§7). | S6; S3 (`el2go-host` guide) |
 | Board identifier: carrier serial or asset tag | The SoC ID alone does not name the board in the fleet. Inference; no source surveyed requires it. | inference |
-| SRK hash written to the fuses | The SRK hash in fuses is the root of trust for signed boot; an error in it leaves a part that cannot boot signed images. The i.MX 9 family uses a 256-bit hash (SHA-256 over the SRK table) and SPSDK names the OEM SRK hash fuses and their locks for the i.MX 95. The record should hold the hash value (public) and which SRK table it came from. SPSDK v3.13.0 also builds hybrid (post-quantum) SRK sets for the i.MX 95; whether that changes the hash length or adds a second hash is not confirmed (§7). | S1 §5; S2 §2.2; S3 release notes |
-| SRK fuse lock state | SPSDK lists separate OEM SRK hash locks for the i.MX 95; a record that says the hash was written but not whether it was locked is incomplete. Inference from S3. | S3 release notes |
+| SRK hash written to the fuses | The SRK hash in fuses is the root of trust for signed boot; an error in it leaves a part that cannot boot signed images. Its width is **not** family-wide: on the i.MX 95, revisions A0 and A1 fuse a 256-bit SHA-256 hash in `OEM_SRKH0` to `OEM_SRKH7`, and revision B0 fuses a 512-bit SHA-512 hash across `OEM_SRKH0` to `OEM_SRKH15`, with a separate post-quantum SRK hash in `OEM_PQC_SRKH0` to `OEM_PQC_SRKH15` ([fuse-map-survey.md](fuse-map-survey.md) §3.1). The record should hold the silicon revision read from the device, the hash algorithm, the complete revision-specific fused hash (public), any PQC SRK hash written, and which SRK table each came from. Which revision the FRDM-IMX95-PRO carries is **unconfirmed** (§7). | S1 §5; S2 §2.2; S3 release notes; fuse-map survey §3.1 |
+| SRK fuse lock state | SPSDK lists separate OEM SRK hash locks for the i.MX 95 (`ELE_OEM_SRKH0_LOCK`, `ELE_OEM_SRKH1_LOCK` and, on B0, `ELE_OEM_PQC_SRKH_LOCK`, fuse-map survey §3.1); a record that says the hash was written but not whether each lock that applies to the revision was set is incomplete. Inference from S3. | S3 release notes; fuse-map survey §3.1 |
 | Life-cycle state before and after | U-Boot's `ahab_status` reports the life-cycle value (OEM Open, OEM Closed) and any AHAB events; NXP's guide requires no events, a fused SRK hash and a signed image that boots before the device is closed, and calls the close irreversible. The record should hold the state read back before and after, and the event list (expected empty). | S1 §6, §7 |
 | AHAB event status at provisioning | As above: evidence that a signed image authenticated with the fused SRK before closing. | S1 §6 |
 | Enclave firmware version | The enclave firmware is loaded from a signed container, and SPSDK's release notes track ELE firmware container versions per SoC. The record should hold the version the enclave reports. The exact get-info field set for the i.MX 95 could not be read from public sources (§7). | S3 release notes; S4 (`hsm_dev_getinfo` exists) |
@@ -132,9 +132,14 @@ What this survey can say, and what it leaves to the other repositories:
   version) were not read. The API reference (RM00284) is private.
 - **Whether Linux on the i.MX 95 populates the SoC serial number from the
   enclave UID.** S6 documents the attribute only.
-- **The SRK hash format for hybrid (post-quantum) SRK sets on the i.MX 95.**
-  S3 adds hybrid SRK support for the i.MX 95; the hash length and fuse layout
-  for that case were not found in a public source.
+- **Which silicon revision the FRDM-IMX95-PRO carries, and so which SRK hash
+  form applies.** The fuse-map survey (§3.1, question 1) gives the
+  revision-specific widths from SPSDK: 256-bit SHA-256 on A0 and A1, 512-bit
+  SHA-512 plus a separate PQC SRK hash on B0. The board's revision is not
+  confirmed in public sources, and the U-Boot guide shows only the A0/A1 form.
+- **The PQC SRK hash on B0.** SPSDK names its fuse group for the hash of a
+  post-quantum SRK table; whether a device must have it written and locked
+  before the close is not confirmed in public sources (fuse-map survey §3.1).
 - **The i.MX 95 life-cycle values.** S1 shows the i.MX 93 values (OEM Open,
   OEM Closed); the i.MX 95 values are in IMX95RM and the i.MX 95 Security
   Reference Manual, which SPEC lists as missing.
