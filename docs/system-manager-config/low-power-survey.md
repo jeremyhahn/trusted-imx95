@@ -13,7 +13,7 @@ the short names in the first column.
 | Short name | Title | Version | URL |
 |---|---|---|---|
 | SM-ARCH | NXP i.MX System Manager, `sm/doc/arch.md` (Architecture) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/arch.md |
-| SM-FRDM-CFG | NXP i.MX System Manager, board configuration `configs/mx95frdm.cfg` (FRDM-IMX95) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg |
+| SM-FRDM-CFG | NXP i.MX System Manager, board configuration `configs/mx95frdm.cfg` (15x15 FRDM-IMX95; reference only, not this device's configuration, see §3.2) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg |
 | SM-CONFIG | NXP i.MX System Manager, `sm/doc/config.md` (Configuration, configtool) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/config.md |
 | SM-MONITOR | NXP i.MX System Manager, `sm/doc/monitor.md` (debug monitor commands) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/monitor.md |
 | SM-DEV | NXP i.MX System Manager, `sm/doc/dev.md` (Developer's Guide, build options) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/dev.md |
@@ -87,9 +87,21 @@ i.MX 95 and in the i.MX 95 Reference Manual; neither was read for this survey
   interrupt to GPIO1, which the SM owns (SM-PORT, same section).
 - Per-peripheral wake through the low-power interface (`PERLPI_*`: CAN, GPIO2-5,
   LPUARTs, WDOG3/4 on the AP) is a separate path, configured through the CPU
-  protocol by the agent granted that resource (SM-CONFIG, SM-FRDM-CFG).
+  protocol by the agent granted that resource (SM-CONFIG; the list is from
+  SM-FRDM-CFG, reference only, and the PRO file's `PERLPI_*` grants are
+  unconfirmed).
 
-### 3.2 Wake sources on the FRDM LPDDR5 board port
+### 3.2 Wake sources on the 15x15 FRDM board port (reference only)
+
+This device, the 19x19 LPDDR5 FRDM-IMX95-PRO, does not use this board port.
+Its SM configuration is `configs/other/mx95frdm-pro.cfg`, which reuses the
+19x19 EVK board port (`mcimx95evk`) and differs from the 15x15 FRDM file in
+its M7 UART and pins, its sensors and its fault entries
+(`public-source-survey.md` items 11-16). This survey did not read the PRO
+file or the EVK board port. Everything in this section describes the 15x15
+FRDM port and is **reference only**: the PRO's wake expander, its pin
+assignments, its `BRD_SM_CTRL_*_WAKE` controls and which agents its file
+grants them to are **unconfirmed**.
 
 The `mcimx95frdm` port (SM-PORT, "NXP i.MX95 FRDM") is for the i.MX 95 LPDDR5
 15x15 FRDM board. The SM owns LPI2C1, GPIO1 and LPUART2. On LPI2C1 sit the PF09
@@ -120,11 +132,12 @@ The port also keeps its shutdown record (fault and reset reason) in BBNSM
 general-purpose registers GPR0-3 and advises that no agent be given access to
 them (SM-PORT, "NXP i.MX95 FRDM").
 
-**Not confirmed:** whether the owner's FRDM-IMX95-PRO is the LPDDR5 15x15 board
-that `mx95frdm` targets. The SM release notes say the LPDDR4 FRDM board must use
-the EVK configuration (`mx95evk`) because only the LPDDR5 board has the different
-PMICs (SM-RN, SM-444). The board's own user manual (UM12527, in the private
-references) would settle it; see question 1.
+**Settled by the sibling surveys:** the FRDM-IMX95-PRO is not the 15x15 board
+that `mx95frdm` targets, and not the LPDDR4 board that SM-RN SM-444 sends to
+`mx95evk`; it is the 19x19 LPDDR5 board with its own `mx95frdm-pro.cfg`
+(`public-source-survey.md` items 11-13; `sm-build-survey.md`). Its wake
+sources must be read from that file and the EVK board port it names; they
+are **unconfirmed** here. See question 1.
 
 ## 4. Secure state in each mode
 
@@ -138,7 +151,7 @@ they support, and what they leave open, per element:
 | EdgeLock Enclave key store and session state | **Not confirmed.** The SM does not route security services; clients talk to the ELE directly (SM-ARCH, "SCFW versus SM"), so what the ELE keeps across a system sleep is the ELE's behaviour, documented in the ELE API manual and the i.MX 95 Security Reference Manual, not in public sources. | **Not confirmed.** | **Not confirmed** whether volatile key slots survive; a reset is expected to clear them, but no public source read here states it. |
 | OP-TEE secure memory | Lives in DDR (the `AP-S` section of SM-FRDM-CFG grants the secure A55 world a DDR range); its content survives only if the system sleep mode keeps DDR in self-refresh, which is **not confirmed** for each i.MX 95 sleep mode. | Unaffected unless the DDR mix is powered down. | Lost. |
 | OP-TEE CPU and secure-IP state | OP-TEE's generic platform template stubs the CPU suspend, resume and system-off hooks; a production platform must itself save and restore CPU state, secure IP registers and memory-firewall settings (OPTEE-PORT, "Power Management / PSCI"). Whether OP-TEE's i.MX 95 platform does this was **not confirmed** (its source was not read). | — | — |
-| Cortex-M7 | Its LM suspends and wakes independently of the AP LM (SM-ARCH, "Logical Machines"). | `PD_M7` is the M7's own domain; powering it off loses TCM content. | The M7 LM can be reset or rebooted by the SM on its faults (`lm_reset` on lockup, reset and WDOG5 in SM-FRDM-CFG) or by any agent granted `LMM_1`. |
+| Cortex-M7 | Its LM suspends and wakes independently of the AP LM (SM-ARCH, "Logical Machines"). | `PD_M7` is the M7's own domain; powering it off loses TCM content. | The M7 LM can be reset or rebooted by the SM on its faults (`lm_reset` on lockup, reset and WDOG5 in SM-FRDM-CFG, reference only; the PRO file's reactions are unconfirmed) or by any agent granted `LMM_1`. |
 
 **Re-authentication on wake.** No public source read here says that the device
 re-authenticates any image when it resumes from suspend; resume continues from
@@ -163,13 +176,15 @@ These are this survey's proposals, each tied to the source that supports it. Non
 is decided until the owner answers section 8.
 
 1. **Only the secure worlds may change the system power state.** Keep Linux
-   (`AP-NS`) at `SYS NOTIFY`, as the reference file already does, so that every
+   (`AP-NS`) at `SYS NOTIFY`, as the 15x15 FRDM file already does (reference
+   only; the PRO file's grant is unconfirmed), so that every
    AP suspend or shutdown passes through TF-A (SM-FRDM-CFG, SM-CONFIG). Give the
    M7 `SYS ALL` only if `hsm-self-defence` needs it to shut the SoC down on
    tamper; otherwise reduce it.
 2. **Restrict cross-LM control to the tamper path.** `LMM_2 ALL` lets the M7
    reset or power off the AP LM, which the SPEC's `hsm-self-defence` row needs.
-   The reverse grant (`LMM_1`) should stay notify-only for Linux, as shipped, so
+   The reverse grant (`LMM_1`) should be notify-only for Linux, as in the 15x15
+   FRDM file (reference only; unconfirmed for the PRO file), so
    the A55 normal world cannot stop or reboot the M7 (SM-FRDM-CFG).
 3. **Allow LM suspend, not mix power-down, as the default low-power mode**, until
    the ELE's behaviour across power-down is confirmed. A suspend with DDR in
@@ -177,12 +192,15 @@ is decided until the owner answers section 8.
    rewriting TRDC through the ELE and on correct register restore (SM-ARCH,
    SM-CONFIG). Whole-SoC shutdown stays available for tamper response.
 4. **Keep wake sources to the ones the product uses**, and keep each in the LM
-   that owns it. On this board every external wake line comes through the
-   SM-owned expander on GPIO1 (SM-PORT), so a wake source is enabled by granting
-   its `BRD_SM_CTRL_*_WAKE` control to an agent, and disabled by not granting it.
-   For an HSM, the candidates are the on/off button, the RTC alarm and the network
-   (PCIe or Ethernet). The UART and SD3 wake lines serve debug and removable
-   media and have no HSM use; drop them.
+   that owns it. On the 15x15 FRDM port (reference only) every external wake
+   line comes through the SM-owned expander on GPIO1 (SM-PORT), so a wake source
+   is enabled by granting its `BRD_SM_CTRL_*_WAKE` control to an agent, and
+   disabled by not granting it. Whether the PRO's EVK board port routes its wake
+   lines the same way, and which wake controls it exposes, is **unconfirmed**
+   (§3.2). For an HSM, the candidates are the on/off button, the RTC alarm and
+   the network (PCIe or Ethernet). Any wake line that serves only debug or
+   removable media (on the 15x15 FRDM, UART and SD3) has no HSM use; drop it
+   from the PRO file once its wake lines are known.
 5. **No debug monitor and no test code in production.** The SM debug monitor
    can suspend, wake, shut down and reset any LM, write memory and read or write
    fuses from its UART; NXP states it is not for production and that test code
@@ -190,7 +208,10 @@ is decided until the owner answers section 8.
 6. **Keep the shutdown record private.** BBNSM GPR0-3 hold the SM's fault and
    reset record and should not be granted to any agent (SM-PORT).
 7. **Fault reactions should fail closed.** A DRAM or NoC fault already resets
-   the system in the reference file; the M7 faults reset only the M7 LM. Whether
+   the system in the 15x15 FRDM file (reference only); the PRO file lacks the
+   NoC fault entries (`public-source-survey.md` item 16), and its DRAM fault
+   reaction is unconfirmed. In the 15x15 file the M7 faults reset only the M7
+   LM; the PRO file's M7 fault reactions are unconfirmed. Whether
    an M7 fault should instead reset or shut down the whole SoC, since the M7
    carries the tamper response, is a question for the owner (SM-FRDM-CFG).
 8. **Disable auto-boot on events that an attacker can cause.** The `auto=` key
@@ -284,8 +305,10 @@ would settle each:
 - **The Linux binding for the i.MX 95 SCMI vendor protocols**
   (`Documentation/devicetree/bindings/firmware/nxp,imx95-scmi.yaml`) was fetched
   but could not be read under the lane's rules on code files.
-- **Which SM configuration fits the owner's FRDM-IMX95-PRO** (`mx95frdm` for the
-  LPDDR5 15x15 board, or `mx95evk` for the LPDDR4 board) (SM-RN, SM-444).
+- **What the PRO's own configuration grants.** The device's file is
+  `configs/other/mx95frdm-pro.cfg` (`public-source-survey.md` items 12-16), not
+  `mx95frdm` or `mx95evk`; this survey did not read it or the EVK board port it
+  uses, so its wake controls, power grants and fault reactions are unconfirmed.
 - **What the SM's alternative configuration tool, SMCT
   (https://github.com/nxp-imx/imx-smct), adds**; not surveyed.
 
@@ -295,13 +318,21 @@ read.
 
 ## 8. Questions for the owner
 
+Where a question below says "as shipped", it describes the 15x15 FRDM file
+(SM-FRDM-CFG) and is reference only; the PRO file's value is unconfirmed
+unless `public-source-survey.md` items 14-16 state it.
+
 1. **Which SM board configuration is the base for this board?**
-   Options: (a) `mx95frdm` (LPDDR5 15x15 FRDM); (b) `mx95evk` (LPDDR4 FRDM,
-   which the SM treats as EVK-compatible); (c) a new file copied from one of
-   them. Recommendation: (c), copied from whichever of (a) or (b) matches the
-   board's memory and PMICs per UM12527, since NXP's files are reference
-   configurations and the SM docs advise copying one for a new configuration
-   (SM-DEV, SM-RN SM-444).
+   Options: (a) `configs/other/mx95frdm-pro.cfg`, NXP's configuration for
+   this device, the 19x19 LPDDR5 FRDM-IMX95-PRO, on the EVK board port
+   (`public-source-survey.md` items 12-16); (b) a new file written from
+   scratch. `mx95frdm` (the 15x15 FRDM) and `mx95evk` (the LPDDR4 board) are
+   other boards and are not options. Recommendation: (a), copied at a pinned
+   tag and then reduced, since NXP's files are reference configurations and
+   the SM docs advise copying one for a new configuration (SM-DEV, SM-RN
+   SM-444). Its wake sources, power grants and fault reactions must be read
+   from the file before questions 3-5 are answered; this survey did not read
+   it.
 2. **Which low-power modes may the product use?**
    Options: (a) none: the board runs or is off; (b) LM suspend with DDR kept
    (suspend-to-RAM), no mix power-down beyond what suspend does; (c) all modes
@@ -315,8 +346,9 @@ read.
    notify-only (section 5, items 1 and 2).
 4. **Which wake sources are allowed?**
    Options: (a) on/off button only; (b) button and RTC alarm; (c) button, RTC
-   and network (PCIe or Ethernet wake); (d) all board wake lines, as shipped
-   (adds UART and SD3). Recommendation: (b) if low power is allowed at all;
+   and network (PCIe or Ethernet wake); (d) all board wake lines the PRO file
+   grants (unconfirmed; the 15x15 FRDM file adds UART and SD3, reference
+   only). Recommendation: (b) if low power is allowed at all;
    network wake only if remote wake is a product requirement, since it lets a
    remote party change the device's power state (section 3, section 5 item 4).
 5. **What happens when the M7, which carries the tamper response, faults?**

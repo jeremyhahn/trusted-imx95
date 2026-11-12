@@ -257,9 +257,12 @@ for it.
 **Points that straddle the line.**
 
 - *The kernel command line.* In the EVK it is assembled by environment scripts
-  (`mmcargs`, `netargs`) [S3]. With a FIT it can be fixed inside the signed
-  configuration; with an AHAB OS container the sources do not say how it is
-  protected (§7). It decides root file system integrity, so #14 needs it; its
+  (`mmcargs`, `netargs`) [S3]. A signed FIT does not by itself protect it:
+  U-Boot can still supply `bootargs` from the environment, extlinux `APPEND`
+  or the console after the FIT verifies. The command line must come only from
+  authenticated data or compiled-in policy, with every later override
+  removed; the U-Boot mechanism for that is **unconfirmed** (§8 question 1).
+  With an AHAB OS container the sources do not say how it is protected (§7). It decides root file system integrity, so #14 needs it; its
   immutability is a U-Boot property of this row.
 - *The device tree.* Which DTB the kernel receives, and whether it is signed,
   depends on the method (§3, §4).
@@ -314,9 +317,22 @@ guessed in the text above.
    with signed configurations, key in U-Boot's control DTB [S5]; (c) both;
    (d) UEFI secure boot, which the EVK defconfig already enables [S4].
    Recommendation: **(b) signed FIT**, anchored by AHAB through U-Boot proper.
-   It binds kernel, DTB, initramfs and command line in one signed
-   configuration [S5], is upstream and generic, works with `bootm` without
-   board scripts, and its key can sit in an HSM through PKCS#11 [S5]. Keep (a)
+   It binds kernel, DTB and initramfs in one signed configuration [S5], is
+   upstream and generic, works with `bootm` without board scripts, and its key
+   can sit in an HSM through PKCS#11 [S5]. Signing the FIT does **not**
+   protect the kernel command line: FIT verification covers the images in
+   the configuration, not the `bootargs` U-Boot supplies afterwards, so an
+   editable extlinux `APPEND`, a stored or console-set `bootargs`, or a
+   boot script can change the command line while the FIT still verifies.
+   Removing the stored environment (question 2) does not close this. The
+   closed build therefore requires that the effective command line comes
+   only from authenticated data (inside the signed image, for example the
+   signed DTB's `chosen` node) or from policy compiled into the
+   authenticated U-Boot, and that no later source (extlinux `APPEND`,
+   environment, console, script) can override it. The U-Boot mechanism
+   that enforces this is **unconfirmed**: no source read here names one.
+   Root-filesystem integrity settings on the command line depend on it.
+   Keep (a)
    if the owner wants every signature on the device checked by the ELE and one
    PKI; then items 1-3 of §7 must be confirmed first. (c) adds keys without a
    clear gain; (d) brings a second key database and is not described by NXP
@@ -351,7 +367,11 @@ guessed in the text above.
    (2) a boot medium that cannot be read; (3) an image that is missing or
    fails to load; (4) an image whose signature or container check fails;
    (5) a corrupted or absent environment. Each case must end in a halt or
-   reset, never in the U-Boot shell.
+   reset, never in the U-Boot shell. A sixth case checks the command line:
+   (6) a tampered kernel command line (a modified extlinux `APPEND`, a set
+   or imported `bootargs`, a changed boot script) must be rejected or
+   ignored, so that the kernel boots only with the authenticated command
+   line (question 1).
 
 4. **Which boot paths stay in the closed build?**
    Options: (a) one path only: the chosen method from storage, with standard

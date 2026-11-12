@@ -144,9 +144,14 @@ What follows for #41:
 - The OEM floor and the NXP firmware floor are separate numbers in separate containers. Raising this
   project's `fuse_version` does not require a new NXP firmware, and a new NXP firmware does not change
   this project's floor.
-- One command commits both [S12]. Committing for this project's sake also locks in whatever firmware
-  version is in the image at that moment. Only commit with a firmware package this project has
-  pinned and tested.
+- One enclave request carries both commits [S12], but they are **independently selectable**: the
+  commit request is a bitmask in which the NXP firmware version (bit 1) and the OEM firmware version
+  (bit 5) are separate bits (`key-rotation-survey.md` §3, SPSDK `EleInfo2Commit`). Sharing a command
+  does not require committing both floors. Setting the NXP bit locks in whatever NXP firmware version
+  is in the image at that moment, and would permanently reject an older NXP firmware that a recovery
+  image may still need. Any commit mask must be explicitly chosen and reviewed per release, bit by
+  bit; the NXP bit is set only with a firmware package this project has pinned and tested. When to
+  commit is an owner decision, not a step of this survey.
 - A pinned firmware package should be recorded next to the `fuse_version` of the release that
   carries it, so that a later release does not go back to an older firmware the fuses refuse.
 
