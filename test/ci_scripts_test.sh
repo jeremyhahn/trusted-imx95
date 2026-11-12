@@ -78,6 +78,24 @@ else
 	run "$ROOT/scripts/secret-scan.sh" history "$TMP_ROOT/shallow"
 	check "secret-scan: a shallow clone, which hides the removed key, is refused" 1 "shallow clone"
 
+	# A key that only a merge resolution adds (neither parent has it), deleted
+	# in the next commit: gitleaks' default git log emits no merge patch.
+	mrg="$TMP_ROOT/merge"
+	mkdir -p "$mrg"
+	m() { git -C "$mrg" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+	m init -q -b main
+	printf 'a\n' >"$mrg/a.txt" && m add -A && m commit -qm base
+	m checkout -qb side
+	printf 'b\n' >"$mrg/b.txt" && m add -A && m commit -qm side
+	m checkout -q main
+	printf 'c\n' >"$mrg/c.txt" && m add -A && m commit -qm main
+	m merge -q --no-ff --no-commit side >/dev/null
+	printf 'aws_access_key_id = %s\n%s\n' "$key" "$secret" >"$mrg/merged.ini"
+	m add -A && m commit -qm merge
+	m rm -q merged.ini && m commit -qm "remove merged creds"
+	run "$ROOT/scripts/secret-scan.sh" history "$mrg"
+	check "secret-scan: a key added only by a merge resolution and removed later fails the history scan" 1 "merged.ini:1:"
+
 	# A proven main push (Codex security P1, the tree proof): after a green
 	# run, two commits add a credential and remove it, so the tree is the
 	# proven one. test/ci-proven-sim.py evaluates ci.yml's job and step `if:`

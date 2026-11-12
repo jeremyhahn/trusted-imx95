@@ -28,7 +28,12 @@ history)
 		echo "secret-scan (history): $dir is a shallow clone or not a git repository; the history scan needs the full history (actions/checkout fetch-depth: 0, or git fetch --unshallow)" >&2
 		exit 1
 	fi
-	sub=(git "$dir")
+	# gitleaks' own git log (--full-history --all --diff-filter=tuxdb) emits
+	# no patch for a merge commit, so a credential added by a merge resolution
+	# and deleted later is never scanned. -m adds a diff against each parent of
+	# every merge. --log-opts replaces the default options, so these restate
+	# them with -m added.
+	sub=(git "$dir" --log-opts="--all --full-history --diff-filter=tuxdb -m")
 	;;
 *)
 	echo "secret-scan: unknown mode '$mode' (tree or history)" >&2
