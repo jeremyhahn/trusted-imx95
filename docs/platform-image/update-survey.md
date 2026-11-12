@@ -102,6 +102,48 @@ Ordering (my inference from the above, not a vendor statement): if the AHAB fuse
 
 ## 7. Comparison
 
+Against the requirements (a)–(e) in section 2:
+
+| | RAUC 1.15.2 | SWUpdate 2026.05.1 | Mender (3.7+ docs) | OSTree + TUF (LmP) |
+|---|---|---|---|---|
+| (a) signature checked before writing | Yes. CMS over the whole bundle; verity bundles are checked as they are read [S1] | Yes. Signed `sw-description` plus a hash for each image [S5] | Yes. Artifact signature against a provisioned key [S9] | Yes. TUF metadata [S12][S13] |
+| (b) signing key in an HSM | PKCS#11 URI [S2] | Not confirmed for build-side signing (section 3.2) | PKCS#11 URI or a cloud KMS [S9] | TUF keys held offline; HSM not confirmed [S12] |
+| (c) fall back after a failed boot | U-Boot `BOOT_ORDER`/`_LEFT` [S2] | U-Boot transaction marker and `ustate` [S6][S8] | Not confirmed (section 3.3) | Falls back after 3 failed boots [S10] |
+| (d) boot container update | `boot-emmc` slot type [S3] | Not confirmed in the pages read | Not confirmed | Inside the root filesystem; trigger is hardware-specific [S10] |
+| (e) downgrade refusal | Integrator's `install-check` hook [S3] | Built in: `no-downgrading` [S6] | Not confirmed | TUF metadata plus an LmP boot firmware floor [S13][S14] |
+| Tied to a build system or service | No | No | Server optional (not surveyed) | Yes: LmP and FoundriesFactory |
+
 ## 8. What could not be confirmed
 
+- **Issue #66 text.** The issue could not be read from the lane (`gh` is not authenticated, and the public API hit its rate limit). This survey follows the lane brief's description of the issue.
+- **i.MX 95 boot ROM fallback.** Whether the boot ROM, on an AHAB authentication failure, falls back to the other eMMC boot partition or to a secondary container set. The sources are IMX95RM and the i.MX 95 Security Reference Manual, which are missing from the references (SPEC).
+- **How ELE compares the container `sw_version` with the fuse version** on the i.MX 95, and which fuse word holds it. This needs the same missing manuals. I read only the U-Boot command text [S16] and the mkimage options [S19][S20].
+- **Mender.** Its A/B rollback mechanics with U-Boot and its downgrade policy. The device-side overview page returned 404.
+- **SWUpdate.** Build-side signing from an HSM, and whether it can update the eMMC boot partitions.
+- **LmP on the i.MX 95.** Whether LmP supports the FRDM-IMX95-PRO, and whether its boot firmware floor maps to the AHAB version.
+- **go-xkms as a PKCS#11 provider.** This decides whether RAUC's or Mender's PKCS#11 signing can use the project's HSM custody (SPEC, row `boot-container`, AN14471 model).
+- **NXP's own OTA guidance for the i.MX 95**, such as an i.MX Linux User's Guide chapter or an application note. None was reached from public pages in this lane, and the NXP Linux BSP documentation is listed as missing in SPEC.
+
 ## 9. Questions for the owner
+
+1. **Which update framework?**
+   Options: (a) RAUC; (b) SWUpdate; (c) Mender; (d) OSTree with aktualizr-lite / LmP.
+   Recommendation: **(a) RAUC**. It meets (a), (b), (c) and (d) from the sources [S1][S2][S3]. It does not tie the project to a build system or a hosted service. Its CMS/X.509 model accepts a PKCS#11 signing key. The cost is that downgrade refusal must be written as an `install-check` hook. SWUpdate is the close second if built-in `no-downgrading` matters more than HSM signing that the sources confirm.
+2. **Root filesystem layout on the eMMC?**
+   Options: (a) A/B root filesystem partitions plus a shared data partition; (b) OSTree deployments in one partition; (c) a single copy plus a rescue system.
+   Recommendation: **(a)**. It fits the RAUC and U-Boot boot-count model [S2][S15], and each slot can be verified as a whole (for example with dm-verity). (b) follows only if the owner picks LmP.
+3. **Is the AHAB boot container (SM, TF-A, OP-TEE, U-Boot) updated in the field?**
+   Options: (a) never in the field; (b) yes, through the eMMC boot partitions (RAUC `boot-emmc`); (c) yes, carried inside the OS update.
+   Recommendation: **(a) for now, keeping (b) as the design target**. Choose (b) only once the boot ROM fallback behaviour (section 8) is confirmed from IMX95RM or the Security Reference Manual. Without it, a bad container can only be recovered over serial download.
+4. **When is the AHAB version committed to the fuses (`ahab_commit`)?**
+   Options: (a) never automatically, only as an attended service step; (b) automatically, after the new image has booted and been marked good; (c) at install time.
+   Recommendation: **(a) or (b), never (c)**. (c) removes the fallback (section 6). Committing burns fuses, so the owner should decide this explicitly. This survey scripts nothing.
+5. **Which key signs updates, and where is it held?**
+   Options: (a) a dedicated update-signing key (X.509, issued under the project PKI) in the go-xkms HSM, through PKCS#11; (b) the same SRK hierarchy that signs AHAB containers; (c) a file key on the build host.
+   Recommendation: **(a)**. Keep the OS update key separate from the SRK, so that rotating it needs no fuse change. This assumes go-xkms can serve as a PKCS#11 provider, which is not confirmed (section 8).
+6. **Are update bundles encrypted?**
+   Options: (a) signed only; (b) signed and encrypted (RAUC `crypt` bundles, decrypted with a device key) [S1].
+   Recommendation: **(a) at first**. Revisit (b) once the device key tier (row `secure-key-handling`) decides whether an EdgeLock-held key can decrypt the manifest. Not confirmed from the sources.
+7. **Which software downgrade floor sits under the hardware floor?**
+   Options: (a) a version check in RAUC's `install-check` hook, with the floor kept on the data partition; (b) only the AHAB hardware floor; (c) both.
+   Recommendation: **(c)**. The software floor covers the root filesystem, which the AHAB version does not reach. The hardware floor covers the boot container.
