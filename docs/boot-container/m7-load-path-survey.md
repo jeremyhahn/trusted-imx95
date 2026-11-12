@@ -153,8 +153,127 @@ Sources: S4 and S5 below; S1; S2 `arch.md`.
 
 ## 7. Restarting the M7 with a new image at run time
 
+Sources: S2 `mx95frdm.cfg`; S6 and S7 below (commit messages, read through the GitHub API; the
+driver code itself was not read for this survey).
+
+| Id | Source | Version / tag | URL |
+|----|--------|---------------|-----|
+| S6 | linux-imx, `drivers/remoteproc/imx_rproc.c` history: commits 690d4a4477 "Add support for System Manager API", bfc2f4ccc6 "Add support for i.MX95", a477285239 "Pass bootaddr to SM CPU/LMM reset vector" | in `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx/commits/lf-6.18.37-2.1.0/drivers/remoteproc/imx_rproc.c |
+| S7 | uboot-imx, `arch/arm/mach-imx/imx9/imx_bootaux.c` history: commits c2fecfb1f1 "support kick M7 from AP", a72131dad1 "imx9: bootaux: Update container header check in authentication" | in `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/uboot-imx/commits/lf-6.18.37-2.1.0/arch/arm/mach-imx/imx9/imx_bootaux.c |
+
+Three ways to put a new image on the M7 after boot, and what each does to the AHAB check:
+
+1. **System Manager LM reset (no new image).** The SM resets LM1 on its own faults (`lm_reset`,
+   §4) and on an LMM-protocol request from an agent that holds `LMM_1` rights. This restarts the
+   M7 from what is already in TCM or DDR; it loads nothing. Whether an LM reset makes the SM reload
+   and re-authenticate the M7 image from the boot container, or only restarts the CPU on the image
+   in memory, could not be confirmed without reading the SM source (**unconfirmed**, U4); the
+   `skip` option ("no image in boot container", §4) shows the SM at least consults the boot
+   container's record at LM boot.
+2. **U-Boot `bootaux`.** S7 shows two modes on i.MX 9. A raw binary copied into the M7 TCM
+   (`0x203C0000`, the A55 view) and started with `bootaux` is not authenticated: the example in
+   c2fecfb1f1 is a plain copy. A container built with S1's `flash_bootaux_cntr` target is
+   authenticated: a72131dad1 describes the checks U-Boot makes on the container header before it
+   asks for authentication, and limits the image destination and entry to DDR, TCM or FlexSPI. A
+   signed M7 container loaded this way keeps the AHAB chain (same SRK, checked by the ELE).
+3. **Linux remoteproc.** S6 describes three i.MX 95 cases: the M7 in its own LM that Linux cannot
+   control; the M7 in its own LM that Linux controls with the SM's LMM protocol; and the M7 in the
+   A55's LM, controlled with the CPU protocol. The driver passes the boot address to the SM on each
+   start (a477285239), and relies on U-Boot for the M7 TCM ECC initialisation (690d4a4477).
+   Nothing in these commit messages says Linux asks the ELE to authenticate the firmware it loads:
+   remoteproc writes the ELF from the file system into TCM/DDR itself. A Linux reload is therefore
+   **outside the AHAB chain** unless something else (for example a signed root file system) covers
+   the firmware file; that the driver does no ELE authentication is **unconfirmed** at code level
+   (U5). In the stock FRDM SM configuration Linux is in the first case: `AP-NS` has
+   `LMM_1 NOTIFY` only (§4), so Linux cannot restart the M7 at all.
+
+Answer to the issue's question: the M7 can be restarted at run time with a new image *and* keep
+AHAB's guarantee only through a loader that hands a signed container to the ELE (U-Boot `bootaux`
+with `flash_bootaux_cntr`). The Linux remoteproc path and a raw `bootaux` do not keep it. The
+boot-time path (ROM + ELE, then SM) keeps it by construction.
+
 ## 8. Interface with trusted-firmware
+
+What this repository (boot-container, with system-manager-config) must **hand to** trusted-firmware's
+`imx95` row:
+
+- The load address and size budget of the M7 image: `0x0` (TCM, M7 view) or `0x80000000` (DDR),
+  from §5, and the TCM sizes once IMX95RM confirms them (U2). trusted-firmware links for it.
+- The SM side of the M7 LM: SCMI agent on MU 9 with its three SMT channels, the resources and
+  SCMI API rights the M7 holds (§4), its TRDC memory grants, and its fault reactions. These are
+  this repository's (`system-manager-config`), and the M7 firmware's SCMI client must match them.
+- `MU_ELE5`, the M7's own messaging unit to the EdgeLock enclave, if the M7 is the side that calls
+  the HSM API (SPEC.md row `secure-key-handling` leaves that open).
+- The signing and version rules: which container the image goes in, the `-sw_version` value it is
+  signed with, and that the image is signed by this repository's signing flow, not by
+  trusted-firmware.
+
+What it must **take from** trusted-firmware:
+
+- `m7_image.bin`, a raw binary linked for the agreed address (S1's `-m7` takes a binary). An ELF
+  with a resource table is needed only if the Linux remoteproc path is chosen (S6).
+- The image's version number, for the container's `-sw_version` (anti-rollback, U3).
+- The list of SCMI resources, clocks, power domains and peripherals the M7 firmware uses, so that
+  `mx95frdm.cfg`'s LM1 can be trimmed to them.
+- Whether the firmware expects the TCM ECC to be initialised by an earlier stage (S6 says Linux
+  relies on U-Boot for this when it starts the M7).
 
 ## 9. Not confirmed
 
+- **U1** The i.MX 95 boot ROM's exact order (load all images of the container, then authenticate;
+  or image by image) and that it, not the SM, copies the M7 image. Needs the i.MX 95 Reference
+  Manual boot chapter and the Security Reference Manual (SPEC.md lists both as missing). S4 gives
+  the 8ULP/9x general flow only.
+- **U2** The M7 ITCM/DTCM sizes and their split in the ranges S2 grants. Needs IMX95RM.
+- **U3** How the ELE checks the container `-sw_version` against the fuse floor on the i.MX 95.
+  Needs the Security Reference Manual.
+- **U4** Whether an SM LM reset of the M7 reloads and re-authenticates the image or only restarts
+  the CPU. Needs a code-level read of imx-sm's `sm/lmm` and device boot code at
+  `rel_imx_sm_2026q3`.
+- **U5** That Linux's `imx_rproc` does no ELE authentication of the firmware it loads. Based on the
+  commit messages in S6, not on the code.
+- **Not reached:** NXP's *i.MX Linux User's Guide* PDF (`IMX_LINUX_USERS_GUIDE.pdf` on nxp.com)
+  returned an error from the lane, so its M7 boot and remoteproc chapters were not read. The Linux
+  device-tree binding `fsl,imx-rproc.yaml` was downloaded but not read in this lane.
+
 ## 10. Questions for the owner
+
+1. **Where does the M7 image run?**
+   Options: (a) TCM at `0x0`, NXP's default target `flash_all`; (b) DDR at `0x80000000`
+   (`flash_all_ddr`), larger but shared with the DDR used by the ELE and V2X domains in the FRDM SM
+   configuration; (c) FlexSPI NOR XIP.
+   Recommendation: (a) TCM, if trusted-firmware's M7 core fits once U2 gives the size; it keeps the
+   M7 out of DDR, which other masters share, and it is NXP's default (S1).
+2. **Which agent loads the M7 image?**
+   Options: (a) boot ROM + ELE in the first container, started by the SM as LM1 (S1 `flash_all`,
+   S2 `mx95frdm.cfg`); (b) U-Boot `bootaux` with a signed `flash_bootaux_cntr` container; (c) Linux
+   remoteproc.
+   Recommendation: (a). It is the only path where the M7 runs before any A55 code, which an HSM's
+   tamper side needs, and the AHAB check is the ROM's (S4, S5).
+3. **May the M7 be reloaded with a new image at run time?**
+   Options: (a) no: the M7 is updated only by replacing the boot image and rebooting, and an SM LM
+   reset only restarts it; (b) yes, through U-Boot `bootaux` with a signed container only; (c) yes,
+   through Linux remoteproc.
+   Recommendation: (a), and keep `LMM_1` at `NOTIFY` for Linux as the stock FRDM configuration has
+   it (S2), so that Linux cannot stop or restart the M7. (c) leaves the AHAB chain (§7, U5).
+4. **Which signing tool?**
+   Options: (a) SPSDK; (b) CST 4.0.1; (c) CST 3.1.0 as SPEC.md names it.
+   Recommendation: (a) SPSDK, which S5 recommends for AHAB 2.0 on the i.MX 95 B0; (c) needs
+   confirming against AHAB 2.0 before it is kept, because S5 names CST 4.0.1 as the CST version
+   that supports it. SPEC.md's HSM custody model (AN14471) must then be checked against SPSDK's
+   HSM signing support, which this survey did not read.
+5. **Anti-rollback on the M7's container?**
+   Options: (a) add `-sw_version` to the first-container mkimage call, fed from trusted-firmware's
+   image version; (b) leave the first container at the default version, as S1 does, and rely on the
+   ATF/U-Boot container's version only.
+   Recommendation: (a), since the M7 is the HSM's firmware and S1's default leaves its container
+   unversioned; how the ELE enforces it is U3.
+6. **Who owns the SM configuration of LM1?**
+   Options: (a) this repository's `system-manager-config` row derives it from `mx95frdm.cfg` and
+   trusted-firmware declares the resources it needs (§8); (b) trusted-firmware owns LM1's section.
+   Recommendation: (a), as SPEC.md's `system-manager-config` row already says the SM configuration
+   is this repository's.
+7. **Which image format does trusted-firmware deliver?**
+   Options: (a) raw binary only (`m7_image.bin`); (b) raw binary and an ELF with a resource table.
+   Recommendation: (a) if question 3 is answered (a) or (b); (b) only if the Linux remoteproc path
+   is chosen.
