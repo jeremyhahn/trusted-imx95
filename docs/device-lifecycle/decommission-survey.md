@@ -118,11 +118,22 @@ S3 shows that the ELE HSM key store is not held only inside the enclave:
   procedure, not a documented secure-erase.
 
 **Inference** from the above: the stored blob is protected by a key the enclave
-derives inside the chip, so a copied blob is of no use on another part; and
-deleting every key with the strict flag, then deleting the blob, leaves
-nothing on the board that the enclave can reload. Neither point is stated in
-S3; the blob's protection key, and whether a deleted store's counter state
-can be rolled back, are **unconfirmed**.
+derives inside the chip, so a copied blob is of no use on another part. This is
+not stated in S3, and the blob's protection key is **unconfirmed**.
+
+On the same part, strict/sync alone does not make a deletion irreversible. Under
+the S3 semantics it only waits for the updated store to be written out. The
+monotonic flag is a separate flag, and it is the one that advances the counter
+protecting the store from rollback. A copy of the pre-deletion blob, saved
+earlier or taken from the storage medium, could then be restored on the same
+device and reloaded with the keys still in it. Deleting the current storage
+directory does nothing to such copies. SPEC (row `secure-key-handling`) reads
+RM00284 §2.4.2 as the strict flag also advancing the counter. Which behaviour the
+chosen ELE release has is **unconfirmed**. Until it is settled, a deletion counts
+as invalidating earlier blobs only if it is acknowledged with both strict/sync
+and monotonic. Even then, irreversibility is **unresolved**: no source read here
+shows the enclave rejecting a restored pre-deletion blob after a reset. That is
+an open validation item (section 7).
 
 ### 4.2 What the life-cycle states do to keys and debug
 
@@ -195,7 +206,7 @@ repository.
 |---|------|-------|-------------|-------|
 | 1 | Suspend the device (block its port, refuse boot credentials) | control plane | yes (Enable, then re-attest) | S4 §4.6, S5 |
 | 2 | Export or re-wrap any key that must outlive the device (if policy allows any) | board, ELE | n/a; impossible once step 3 runs | S3; key export policy is the secure-key-handling row's |
-| 3 | Delete every ELE key-store key with the strict/sync flag, close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | **no**: the keys are gone | S3; secure-erase property **unconfirmed** (4.1) |
+| 3 | Delete every ELE key-store key with an acknowledged deletion that advances the monotonic counter (strict/sync together with the monotonic flag, for the chosen ELE release), close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | intended **no**; irreversibility **unresolved**. Strict/sync alone does not invalidate a saved pre-deletion blob, and removing the directory does not reach copies (4.1) | S3; rejection of a restored pre-deletion blob after reset **not yet validated** (4.1, section 7) |
 | 4 | Revoke the device's certificates at the platform CA; publish the CRL | control plane | **no**: a revoked serial stays revoked; a re-enrolled device gets new serials | S6 |
 | 5 | Move the device record to revoked | control plane | **no**: terminal state | S4 §4.3, §6 |
 | 6a | Decommission: wipe the rest of the board's storage (eMMC, RPMB) | board | **no** | not surveyed here (RPMB row, #62) |
@@ -225,7 +236,11 @@ yet.
 5. Whether field return changes the device-unique keys, re-opens debug, or
    keeps signed boot (4.2).
 6. Whether deleting the `nvm_daemon` blob is a secure erase of the key store,
-   and how the monotonic counter treats a deleted store (4.1).
+   and how the monotonic counter treats a deleted store (4.1). Whether the
+   chosen ELE release advances the counter on strict/sync alone or only with
+   the monotonic flag (4.1). Open validation item: after a counter-advancing
+   deletion and a reset, a restored pre-deletion blob must be shown to be
+   rejected. Until then, step 3 is not counted as irreversible (section 6).
 7. Which go-trusted-platform operation moves a device record to revoked (5).
 8. NXP's public web site answered from the lane, but this survey did not
    find or read a public NXP application note on i.MX 95 field return or

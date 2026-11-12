@@ -107,9 +107,17 @@ aborted ELE wipes its key material or just refuses service until reset. That is 
 From S4 (headers for the ELE user library on the Linux side):
 
 - Deleting a key takes a strict flag. With that flag, the deletion counts only after the
-  updated key store has been written to non-volatile storage under a newer monotonic
-  counter value. So an older key store blob cannot be restored afterwards. This
-  matches the strict-operation rule SPEC.md cites from RM00284 §2.4.2.
+  updated key store has been written to non-volatile storage. This matches the
+  strict-operation rule SPEC.md cites from RM00284 §2.4.2.
+- Rollback protection is a separate matter. In the library headers the counter that
+  protects the store from rollback is advanced by a separate monotonic flag, used
+  together with strict
+  ([decommission survey §4.1](../device-lifecycle/decommission-survey.md)). With strict
+  alone, an older key store blob saved before the deletion might still be restored on
+  the same device. SPEC.md reads RM00284 §2.4.2 as strict also advancing the counter.
+  Which of the two applies to the chosen ELE release is **unconfirmed**. Until it is
+  settled, a deletion is counted as rollback-protected only when it is acknowledged
+  with both strict and monotonic.
 - Closing a key-store service removes the key store from the ELE's internal memory.
   Any change not yet saved to non-volatile storage is lost.
 - I found no command that erases every key or the whole enclave in one step.
@@ -120,6 +128,9 @@ From S4 (headers for the ELE user library on the Linux side):
 - Where the key store blob lives in non-volatile storage on this board.
 - Whether destroying that blob is enough to make the keys unrecoverable without also
   advancing the monotonic counter.
+- Whether a restored pre-deletion blob is rejected after a reset, once a
+  counter-advancing deletion has been acknowledged. This is an open validation item.
+  Until it is shown, deletion is not counted as irreversible.
 
 ### F6. Life-cycle and fuse actions are out of scope
 
@@ -184,8 +195,10 @@ no procedure that uses them.
    - (b) Close the key store and destroy its blob in non-volatile storage.
    - (c) An irreversible life-cycle or fuse action.
 
-   *Recommendation*: (a), then (b). The strict delete gives rollback protection through
-   the monotonic counter (F5). Both need the key store's persistence path to be
+   *Recommendation*: (a), then (b). Use the strict delete together with the monotonic
+   flag. Strict on its own waits only for persistence, and the counter that gives
+   rollback protection is advanced by the monotonic flag (F5). Irreversibility stays
+   unresolved until a restored pre-deletion blob is shown to be rejected (F5). Both need the key store's persistence path to be
    running when they are issued (question 3); during a tamper response that path is
    unresolved. (c) belongs to `oem-key-provisioning` and is out of
    scope here (F6).
