@@ -69,6 +69,17 @@
 # least REAP_IMAGE_MIN_AGE seconds ago and that no container (a lease, a
 # stack, running or created) uses. A live lease's image is never removed:
 # the in-use check skips it, and `docker image rm` without force refuses it.
+# v7 (trusted-imx95, from a Codex review of #19): the toolchain image too. A
+# trusted run without a verified registry pull rebuilds the toolchain image
+# with --no-cache under its content tag (Makefile docker-build-toolchain), so
+# each such rebuild leaves the previous id dangling, and a change to the
+# Dockerfile or the pins leaves the old tag behind. Toolchain builds now carry
+# ci.reap.repository=<repo>-toolchain, where <repo> is <prefix> without its
+# trailing "-ci-" (a prefix not of that form reaps no toolchain image). Under
+# the same lock and with the same age and in-use checks, the reaper removes
+# those dangling ids and every <repo>-toolchain tag but the current tree's
+# (scripts/image-tag.sh toolchain <repo>). When the current tag cannot be
+# computed, every toolchain tag is kept.
 #
 # Stale: exited or dead and finished at least <min-age-seconds> ago, or
 # created and never started at least that long ago. A project with any
@@ -189,19 +200,44 @@ docker ps -a --filter "name=^$prefix" \
     fi
   done
 
-# Content-addressed integration images (v2, above), under the image lock (v5).
+# Content-addressed integration images (v2, above) and toolchain images (v7),
+# under the image lock (v5).
 images=0
 refs=
 dangling=
-reap_label="ci.reap.repository=${prefix}it"
+it_repo="${prefix}it"
+tc_repo=
+tc_current=
+case $prefix in
+  ?*-ci-)
+    tc_repo="${prefix%-ci-}-toolchain"
+    tc_current=$("$(dirname "$0")/image-tag.sh" toolchain "${prefix%-ci-}" 2>/dev/null) || tc_current=
+    ;;
+esac
 if [ "${REAP_DRY_RUN:-0}" = 1 ] || image_lock; then
-  refs=$(docker images --filter "reference=${prefix}it" --format '{{.Repository}}:{{.Tag}}')
-  dangling=$(docker images -q --no-trunc --filter dangling=true --filter "label=$reap_label")
+  for repo in $it_repo $tc_repo; do
+    refs="$refs $(docker images --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}}')"
+    dangling="$dangling $(docker images -q --no-trunc --filter dangling=true --filter "label=ci.reap.repository=$repo")"
+  done
 else
-  echo "keep  every ${prefix}it image (the image lock was not free within ${lock_wait}s)"
+  echo "keep  every $it_repo${tc_repo:+ and $tc_repo} image (the image lock was not free within ${lock_wait}s)"
 fi
 for ref in $refs; do
-  case $ref in "${prefix}it:"*) ;; *) continue ;; esac
+  case $ref in
+    "$it_repo:"*) ;;
+    "$tc_repo:"*)
+      [ -n "$tc_repo" ] || continue
+      if [ -z "$tc_current" ]; then
+        echo "keep  image $ref (the current toolchain tag could not be computed)"
+        continue
+      fi
+      if [ "$ref" = "$tc_current" ]; then
+        echo "keep  image $ref (the current toolchain tag)"
+        continue
+      fi
+      ;;
+    *) continue ;;
+  esac
   id='' created=''
   read -r id created < <(docker image inspect -f '{{.Id}} {{.Created}}' "$ref" 2>/dev/null)
   if [ -z "$id" ] || [ -z "$created" ]; then
@@ -231,7 +267,7 @@ for ref in $refs; do
   echo "reap  image $ref"
   if run docker image rm "$ref"; then images=$((images + 1)); else echo "warn  image $ref not removed (in use?)"; fi
 done
-# v6: the dangling images a rebuild left behind, by id, under the same lock.
+# v6, v7: the dangling images a rebuild left behind, by id, under the same lock.
 for id in $dangling; do
   case $id in sha256:*) ;; *) continue ;; esac
   created=$(docker image inspect -f '{{.Created}}' "$id" 2>/dev/null) || created=
@@ -251,7 +287,7 @@ for id in $dangling; do
     echo "keep  dangling image $id (in use: $(echo "$users" | wc -l) container(s))"
     continue
   fi
-  echo "reap  dangling image $id ($reap_label)"
+  echo "reap  dangling image $id (labelled ci.reap.repository=$it_repo${tc_repo:+ or $tc_repo})"
   if run docker image rm "$id"; then images=$((images + 1)); else echo "warn  dangling image $id not removed (in use?)"; fi
 done
 image_unlock

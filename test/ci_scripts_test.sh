@@ -89,7 +89,7 @@ else
 	printf 'b\n' >"$mrg/b.txt" && m add -A && m commit -qm side
 	m checkout -q main
 	printf 'c\n' >"$mrg/c.txt" && m add -A && m commit -qm main
-	m merge -q --no-ff --no-commit side >/dev/null
+	m merge -q --no-ff --no-commit side >/dev/null 2>&1
 	printf 'aws_access_key_id = %s\n%s\n' "$key" "$secret" >"$mrg/merged.ini"
 	m add -A && m commit -qm merge
 	m rm -q merged.ini && m commit -qm "remove merged creds"
@@ -887,7 +887,7 @@ seed yes
 run mk push docker-build-toolchain
 check "make docker-build-toolchain: a push run rebuilds over a seeded tag" 0 "rebuilds $ltag from source"
 expect "make docker-build-toolchain: the trusted rebuild uses no cache and records its ID" \
-	grep -q "^build --no-cache --iidfile $rt/toolchain-image.id --target toolchain -t $ltag " "$IMG_LOG"
+	grep -q "^build --no-cache --iidfile $rt/toolchain-image.id --target toolchain --label ci.reap.repository=${ltag%%:*} -t $ltag " "$IMG_LOG"
 run mk push -s toolchain-ref
 check "make toolchain-ref: a push run prints the ID its rebuild recorded" 0 "$tc_built"
 seed yes
@@ -1049,8 +1049,26 @@ case "$1 ${2:-}" in
 		want=${!#}
 		want=${want#label=}
 		while read -r id _ lab tag; do [ "$tag" = - ] && [ "ci.reap.repository=$lab" = "$want" ] && echo "$id"; done <"$RP/images" ;;
+	*" --filter reference="*)
+		want=
+		for a in "$@"; do case $a in reference=*) want=${a#reference=} ;; esac; done
+		while read -r _ _ _ tag; do case $tag in "$want":*) echo "$tag" ;; esac; done <"$RP/images" ;;
 	*) while read -r _ _ _ tag; do [ "$tag" = - ] || echo "$tag"; done <"$RP/images" ;;
 	esac ;;
+"build "*)
+	# A build makes a new ID and moves its tag there: the ID that held the
+	# tag is left dangling. Its creation time is STUB_CREATED.
+	iid='' tag='' lab=-
+	shift
+	while [ $# -gt 0 ]; do
+		case $1 in --iidfile) iid=$2; shift ;; -t) tag=$2; shift ;; --label) lab=${2#ci.reap.repository=}; shift ;; esac
+		shift
+	done
+	id="sha256:$(printf 'build-%s-%s' "$(wc -l <"$RP/images")" "$tag" | sha256sum | cut -c1-64)"
+	while read -r i c l t; do [ "$t" != "$tag" ] || t=-; echo "$i $c $l $t"; done <"$RP/images" >"$RP/images.new"
+	mv "$RP/images.new" "$RP/images"
+	echo "$id ${STUB_CREATED:?} $lab $tag" >>"$RP/images"
+	[ -z "$iid" ] || echo "$id" >"$iid" ;;
 "image inspect")
 	ref=${*: -1}
 	while read -r id created _ tag; do
@@ -1114,6 +1132,39 @@ check "reap-stale-ci-stacks: a dry run names what it would remove and removes no
 expect "reap-stale-ci-stacks: the dry run left every image" cmp -s "$RP/images" "$RP/images.before"
 expect "Makefile: the label the reaper reads is the one every integration build sets" \
 	grep -q 'IT_REAP_LABEL *= ci.reap.repository=' "$ROOT/Makefile"
+
+# --- reap-stale-ci-stacks.sh v7: the toolchain images fallback rebuilds leave
+# (Codex P1: without a verified registry pull, each trusted run rebuilds the
+# toolchain image with --no-cache under the same tag, and nothing removed the
+# IDs it left.) Three trusted fallback rebuilds through the Makefile, on the
+# stub docker above, then the reaper.
+tc_tag=$(make -s --no-print-directory -C "$ROOT" toolchain-image)
+tc_repo=${tc_tag%%:*}
+: >"$RP/images" && : >"$RP/containers" && : >"$RP/removed" && : >"$RP/log"
+echo "$(rid tc-stale-tag) $old $tc_repo ${tc_repo}:0000000000000000" >>"$RP/images"
+echo "$(rid tc-fresh-tag) $new $tc_repo ${tc_repo}:1111111111111111" >>"$RP/images"
+mkdir -p "$RP/tmp"
+for n in 1 2 3; do
+	run env -u TOOLCHAIN_VERIFIED_ID PATH="$TMP_ROOT/reapbin:$PATH" STUB_CREATED="$old" \
+		make -s --no-print-directory -C "$ROOT" docker-build-toolchain GITHUB_EVENT_NAME=push RUNNER_TEMP="$RP/tmp"
+	check "docker-build-toolchain: trusted fallback rebuild $n" 0 "rebuilds $tc_tag from source"
+done
+tc_ids=$(while read -r i _ l _; do [ "$l" != "$tc_repo" ] || echo "$i"; done <"$RP/images")
+tc_last=$(cat "$RP/tmp/toolchain-image.id")
+mapfile -t tc_dangling < <(while read -r i _ _ t; do [ "$t" != - ] || echo "$i"; done <"$RP/images")
+expect "docker-build-toolchain: the rebuilds left two dangling IDs" test "${#tc_dangling[@]}" = 2
+expect "docker-build-toolchain: every toolchain build carries the reaper's label" test "$(echo "$tc_ids" | wc -l)" = 5
+# A container on the oldest dangling ID: a job still running it.
+echo "running-job ${tc_dangling[0]}" >"$RP/containers"
+run env PATH="$TMP_ROOT/reapbin:$PATH" "$ROOT/scripts/reap-stale-ci-stacks.sh" "$REAP_PREFIX"
+check "reap-stale-ci-stacks: a toolchain ID a fallback rebuild left dangling is removed" 0 \
+	"reap  dangling image ${tc_dangling[1]}" "keep  dangling image ${tc_dangling[0]} (in use: 1 container(s))" \
+	"keep  image $tc_tag (the current toolchain tag)" "reap  image ${tc_repo}:0000000000000000"
+expect "reap-stale-ci-stacks: the unused dangling toolchain ID is gone" grep -qx "${tc_dangling[1]}" "$RP/removed"
+expect "reap-stale-ci-stacks: a toolchain ID a running container uses is kept" grep -q "^${tc_dangling[0]} " "$RP/images"
+expect "reap-stale-ci-stacks: the current toolchain tag's image is kept, however old" grep -q "^$tc_last .* $tc_tag\$" "$RP/images"
+expect "reap-stale-ci-stacks: an old toolchain tag no container uses is removed" grep -qx "$(rid tc-stale-tag)" "$RP/removed"
+expect "reap-stale-ci-stacks: a toolchain tag made within the image age is kept" grep -q "^$(rid tc-fresh-tag) " "$RP/images"
 
 # --- the toolchain image carries ssh-keygen ------------------------------------
 # (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's

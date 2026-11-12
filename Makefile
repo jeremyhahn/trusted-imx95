@@ -195,6 +195,10 @@ IT_IMAGE_ID       ?=
 # scripts/reap-stale-ci-stacks.sh (v6) finds those IDs and removes the ones
 # no lease or stack uses.
 IT_REAP_LABEL      = ci.reap.repository=$(firstword $(subst :, ,$(IT_IMAGE)))
+# The same for the toolchain image (reaper v7): a trusted run without a
+# verified pull rebuilds it with --no-cache under its content tag, and each
+# rebuild leaves the previous ID dangling.
+TOOLCHAIN_REAP_LABEL = ci.reap.repository=$(firstword $(subst :, ,$(TOOLCHAIN_IMAGE)))
 # NEED_ID_FILE <file> <variable>: a trusted run fails when it has nowhere to
 # record the image ID.
 NEED_ID_FILE = [ -n "$(1)" ] || { echo "$@: a trusted run ($(GITHUB_EVENT_NAME)) records its image ID; set RUNNER_TEMP or $(2)" >&2; exit 1; }
@@ -230,11 +234,11 @@ docker-build-toolchain: ## Build the toolchain image when the daemon lacks its t
 			printf '%s\n' "$$v" > "$(TOOLCHAIN_ID_FILE)"; \
 		else \
 			echo "docker-build-toolchain: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(TOOLCHAIN_IMAGE) from source: no verified pull"; \
-			docker build --no-cache --iidfile "$(TOOLCHAIN_ID_FILE)" --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
+			docker build --no-cache --iidfile "$(TOOLCHAIN_ID_FILE)" --target toolchain --label "$(TOOLCHAIN_REAP_LABEL)" -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
 		fi; \
 	else \
 		docker image inspect $(TOOLCHAIN_IMAGE) >/dev/null 2>&1 || \
-			docker build --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
+			docker build --target toolchain --label "$(TOOLCHAIN_REAP_LABEL)" -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
 	fi
 
 docker-build: docker-build-toolchain ## Build both images, each only when the daemon lacks its tag (a trusted CI run: always, recording the ID)
