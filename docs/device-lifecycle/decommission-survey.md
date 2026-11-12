@@ -129,9 +129,10 @@ earlier or taken from the storage medium, could then be restored on the same
 device and reloaded with the keys still in it. Deleting the current storage
 directory does nothing to such copies. SPEC (row `secure-key-handling`) reads
 RM00284 §2.4.2 as the strict flag also advancing the counter. Which behaviour the
-chosen ELE release has is **unconfirmed**. Until it is settled, a deletion counts
-as invalidating earlier blobs only if it is acknowledged with both strict/sync
-and monotonic. Even then, irreversibility is **unresolved**: no source read here
+chosen ELE release has is **unconfirmed**. Proposed, **pending owner approval**
+(SPEC is unchanged): until it is settled, a deletion counts as invalidating
+earlier blobs only if it is acknowledged with both strict/sync and monotonic.
+Even then, irreversibility is **unresolved**: no source read here
 shows the enclave rejecting a restored pre-deletion blob after a reset. That is
 an open validation item (section 7).
 
@@ -153,7 +154,8 @@ These are the facts IMX95RM, the i.MX 95 Security Reference Manual and RM00284
 are expected to hold; see section 7. Until they are read, the survey treats a
 field-return state as one that may expose the board to NXP or OEM failure
 analysis and must not be relied on to erase secrets: the erasure has to be
-done in software first (section 6).
+done in software first (section 6), and it counts only once the validation in
+4.1 is done.
 
 ## 5. go-trusted-platform: revoking enrollment and attested identity
 
@@ -206,18 +208,21 @@ repository.
 |---|------|-------|-------------|-------|
 | 1 | Suspend the device (block its port, refuse boot credentials) | control plane | yes (Enable, then re-attest) | S4 §4.6, S5 |
 | 2 | Export or re-wrap any key that must outlive the device (if policy allows any) | board, ELE | n/a; impossible once step 3 runs | S3; key export policy is the secure-key-handling row's |
-| 3 | Delete every ELE key-store key with an acknowledged deletion that advances the monotonic counter (strict/sync together with the monotonic flag, for the chosen ELE release), close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | intended **no**; irreversibility **unresolved**. Strict/sync alone does not invalidate a saved pre-deletion blob, and removing the directory does not reach copies (4.1) | S3; rejection of a restored pre-deletion blob after reset **not yet validated** (4.1, section 7) |
+| 3 | Delete every ELE key-store key with an acknowledged deletion that advances the monotonic counter (strict/sync together with the monotonic flag, for the chosen ELE release; proposed, pending owner approval, 4.1), close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | intended **no**; irreversibility **unresolved**. Strict/sync alone does not invalidate a saved pre-deletion blob, and removing the directory does not reach copies (4.1) | S3; rejection of a restored pre-deletion blob after reset **not yet validated** (4.1, section 7) |
 | 4 | Revoke the device's certificates at the platform CA; publish the CRL | control plane | **no**: a revoked serial stays revoked; a re-enrolled device gets new serials | S6 |
 | 5 | Move the device record to revoked | control plane | **no**: terminal state | S4 §4.3, §6 |
-| 6a | Decommission: wipe the rest of the board's storage (eMMC, RPMB) | board | **no** | not surveyed here (RPMB row, #62) |
-| 6b | Field return: move the life cycle to *field return OEM* with an OEM-SRK-signed message | board, ELE | **no**: no surveyed command moves the life cycle back (section 7, item 9) | S1, S2; effects **unconfirmed** (4.2) |
-| 6c | Retire for good: move to *OEM locked* (if that is what it does) | board, ELE | **no** | S3 enum only; effects **unconfirmed** |
+| 6a | Decommission: wipe the rest of the board's storage (eMMC, RPMB) | board | intended **no**; the wipe method and its effect on the media were not surveyed and are **to be validated** | not surveyed here (RPMB row, #62) |
+| 6b | Field return: move the life cycle to *field return OEM* with an OEM-SRK-signed message. A life-cycle move: out of scope here and **not recommended pending owner decision** (section 8, questions 1 and 6) | board, ELE | **no**: no surveyed command moves the life cycle back (section 7, item 9) | S1, S2; effects **unconfirmed** (4.2) |
+| 6c | Retire for good: move to *OEM locked* (if that is what it does). A life-cycle move: out of scope here and **not recommended pending owner decision** (section 8, question 5) | board, ELE | **no** | S3 enum only; effects **unconfirmed** |
 | 7 | Remove the device's serial from any fleet allow-list or EAB record | control plane | yes | S4 (generic) |
 
 Order matters: steps 3 and 4 come before the board leaves the owner's hands,
 because 6b may expose the part to failure analysis and nothing surveyed says
-it erases anything. The irreversible board-side steps are 3, 6a, 6b and 6c;
-the irreversible control-plane steps are 4 and 5.
+it erases anything. The irreversible board-side steps are 6a, 6b and 6c;
+the irreversible control-plane steps are 4 and 5. Step 3 is treated as
+recoverable until a restored pre-deletion blob is shown to be rejected after
+a reset (4.1, section 7 item 6), and a board must not be released as
+sanitised before that validation is done.
 
 ## 7. What could not be confirmed
 
@@ -260,12 +265,14 @@ yet.
    owner's custody?** Options: (a) yes, always; (b) only for scrap; (c) no,
    rely on the life-cycle change. Recommendation: (a): it is the only erase
    step the public sources describe, and the life-cycle change is not shown to
-   erase anything (4.1, 4.2).
+   erase anything (4.1, 4.2). Step 3 does not make the board sanitised until the
+   validation in 4.1 is done.
 3. **May any key outlive its device (step 2)?** Options: (a) no key ever
    leaves the enclave, so decommission destroys all; (b) only keys the
    secure-key-handling row marks exportable, re-wrapped to a successor.
    Recommendation: (a), unless the hsm-device-protocol row needs key
-   migration; no source here supports either over the other.
+   migration; no source here supports either over the other. Under (a), the
+   keys are only treated as destroyed once the validation in 4.1 is done.
 4. **Which control-plane record is the revocation of record?** Options: (a)
    the CA's CRL entry; (b) the device record's revoked state; (c) both,
    with the CRL first. Recommendation: (c): the two cover different relying
@@ -275,7 +282,8 @@ yet.
    manufacture, after OEM closed, to prevent field return; (c) at
    decommission, as a final step. No recommendation: what OEM locked does on
    the i.MX 95 is unconfirmed (section 7, item 4); answer after IMX95RM is
-   read.
+   read. Moving the life cycle is out of scope for this survey, and (b) and
+   (c) are not recommended pending the owner's decision.
 6. **Who holds the authority to sign a field-return message?** Options: (a)
    the same offline SRK holder that signs boot images; (b) a separate
    ceremony with two-person control; (c) nobody (field return disabled by

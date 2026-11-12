@@ -154,10 +154,15 @@ unchanged. Its `layer.conf` lists `wrynose` among the Yocto releases it is
 compatible with; the Yocto release number for that codename is not confirmed
 here.
 
-The board's machine file is `imx95-15x15-lpddr4x-frdm.conf` in meta-imx-bsp
-[S3]; it adds the `nxpiw612-sdio` Wi-Fi feature and a dozen device-tree
-variants (camera, display, audio, NPU, RPMsg). Whether this machine also
-covers the FRDM-IMX95-PRO variant named in SPEC.md is not confirmed (Q6).
+The FRDM-IMX95-PRO's machine is `imx95-19x19-lpddr5-frdm-pro`, with its own
+device tree, U-Boot configuration, System Manager configuration and LPDDR5
+DDR selection ([build-system options §2](build-system-options.md),
+[boot-media survey §3.1](boot-media-survey.md)). This survey read the 15x15
+FRDM machine file `imx95-15x15-lpddr4x-frdm.conf` in meta-imx-bsp [S3]
+instead, not the PRO's. That file adds the `nxpiw612-sdio` Wi-Fi feature and a
+dozen device-tree variants (camera, display, audio, NPU, RPMsg). Whether the
+PRO machine sets the same features is **unverified**; the machine-specific
+points below carry that caveat (Q6).
 meta-freescale `wrynose` (head `2d08c05`, 2026-11-05) [S5] carries the shared
 `linux-imx.inc`; it has no i.MX95 FRDM machine of its own.
 
@@ -175,7 +180,8 @@ likely conflict, to be confirmed in the first hardened build (Q2).
 - **`MODULES=n`.** The resolved config has 517 options as `=m` [S1], and
   meta-imx builds out-of-tree modules: `kernel-module-imx-gpu-viv`,
   `kernel-module-isp-vvcam`, `kernel-module-nxp-wlan` (pulled in by the Wi-Fi
-  machine features), `kernel-module-dpdk-extras`, and `cryptodev-linux`
+  machine features of the 15x15 machine; whether the PRO machine pulls it in
+  is **unverified**, §5), `kernel-module-dpdk-extras`, and `cryptodev-linux`
   (`meta-imx-bsp/recipes-kernel/`) [S3]. Out-of-tree modules cannot be built
   in, so `MODULES=n` means dropping them. The hardened image could keep
   modules and force signatures instead.
@@ -288,8 +294,9 @@ keeping a policy for the whole image.
 - Whether the Yocto module class signs out-of-tree modules.
 - Whether any NXP tool in a minimal image needs `/dev/mem`, debugfs or 32-bit
   userspace.
-- Whether `imx95-15x15-lpddr4x-frdm` is the right machine for the
-  FRDM-IMX95-PRO.
+- The machine features of `imx95-19x19-lpddr5-frdm-pro`, the PRO's machine
+  (§5). This lane read the 15x15 FRDM machine file instead, so the
+  machine-dependent points in §5 and §6 are unverified for the PRO.
 - The device nodes and syscalls xkmsd uses (go-xkms owns them).
 - The state of meta-selinux and meta-security on wrynose.
 - NXP's i.MX Linux security reference documents, which SPEC.md lists as
@@ -318,9 +325,13 @@ keeping a policy for the whole image.
    (b) `DEVMEM=n`, `DEVPORT=n`, `KEXEC=n`, `KEXEC_FILE=n`, `CRASH_DUMP=n`,
    SysRq restricted, `PANIC_ON_OOPS=y`. *Recommendation: (b), per KSPP [S2]; no
    BSP dependency was found (§6).*
-6. **Machine.** Is `imx95-15x15-lpddr4x-frdm` [S3] the base for the
-   FRDM-IMX95-PRO, or does the PRO need its own machine file? *No
-   recommendation; needs the board's NXP documentation.*
+6. **Machine.** The sibling surveys already name the PRO's machine,
+   `imx95-19x19-lpddr5-frdm-pro` ([build-system options §2](build-system-options.md),
+   [boot-media survey §3.1](boot-media-survey.md)). What is still open is a
+   re-check of §5 and §6 against that machine file, which this survey did not
+   read. *Recommendation: re-read the PRO machine file before the first
+   hardened build, and keep the machine-dependent points unverified until
+   then.*
 7. **Userspace.** (a) an `fsl-imx-*-minimal` distro image; (b) a project image
    built from `core-image-minimal`, with a separate debug image.
    *Recommendation: (b).*

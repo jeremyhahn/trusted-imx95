@@ -115,9 +115,10 @@ From S4 (headers for the ELE user library on the Linux side):
   ([decommission survey §4.1](../device-lifecycle/decommission-survey.md)). With strict
   alone, an older key store blob saved before the deletion might still be restored on
   the same device. SPEC.md reads RM00284 §2.4.2 as strict also advancing the counter.
-  Which of the two applies to the chosen ELE release is **unconfirmed**. Until it is
-  settled, a deletion is counted as rollback-protected only when it is acknowledged
-  with both strict and monotonic.
+  Which of the two applies to the chosen ELE release is **unconfirmed**. Proposed,
+  **pending owner approval** (SPEC is unchanged): until it is settled, a deletion is
+  counted as rollback-protected only when it is acknowledged with both strict and
+  monotonic.
 - Closing a key-store service removes the key store from the ELE's internal memory.
   Any change not yet saved to non-volatile storage is lost.
 - I found no command that erases every key or the whole enclave in one step.
@@ -165,10 +166,13 @@ no procedure that uses them.
    - (b) The A55 secure world.
    - (c) The SM alone, using its fault reactions.
 
-   *Recommendation*: (a), with (c) as the backstop. In the stock config the M7 can
-   already stop the A55 LM and shut down the system (F3). The M7 also stays
-   trustworthy when the A55 side is the part under attack. The delayed FCCU reaction
-   resets the system even if the M7 does not respond (F2).
+   *Recommendation*: (a), with (c) as the backstop. In the stock config the M7 is
+   granted the rights to stop the A55 LM and shut down the system (F3). The M7 is
+   assumed to stay trustworthy when the A55 side is the part under attack; that rests
+   on the isolation the SM config gives, which is **unverified**. The source says the
+   delayed FCCU reaction resets the system even if the M7 does not respond (F2). All of
+   this was read from the config and source only and is **to be validated** on the
+   board.
 
 3. **What does the response do, and in what order?**
    - (a) Reset only, using an SM fault reaction.
@@ -176,7 +180,8 @@ no procedure that uses them.
    - (c) Option (b), but with an ELE abort instead of zeroisation.
 
    *Recommendation*: none of the zeroising options is fully supported yet; (a) is the
-   only one the public sources cover end to end (F2, F3). (b) as ordered does not
+   only one the public sources cover end to end (F2, F3), and it is still **to be
+   validated** on the board. (b) as ordered does not
    give a durable deletion. A strict delete counts only once the updated key store is
    written to non-volatile storage (F5). The writer named in the public sources is the
    Linux user-space `nvm_daemon` on the A55 side
@@ -195,12 +200,13 @@ no procedure that uses them.
    - (b) Close the key store and destroy its blob in non-volatile storage.
    - (c) An irreversible life-cycle or fuse action.
 
-   *Recommendation*: (a), then (b). Use the strict delete together with the monotonic
-   flag. Strict on its own waits only for persistence, and the counter that gives
-   rollback protection is advanced by the monotonic flag (F5). Irreversibility stays
-   unresolved until a restored pre-deletion blob is shown to be rejected (F5). Both need the key store's persistence path to be
-   running when they are issued (question 3); during a tamper response that path is
-   unresolved. (c) belongs to `oem-key-provisioning` and is out of
+   *Recommendation*: (a), then (b). Proposed, pending owner approval: use the strict
+   delete together with the monotonic flag. Strict on its own waits only for
+   persistence, and in the library headers the counter that gives rollback protection
+   is advanced by the monotonic flag (F5). Irreversibility stays unresolved until a
+   restored pre-deletion blob is shown to be rejected (F5). Both need the key store's
+   persistence path to be running when they are issued (question 3); during a tamper
+   response that path is unresolved. (c) belongs to `oem-key-provisioning` and is out of
    scope here (F6).
 
 5. **Should the M7 get per-domain power and PHY control?** (This is a change to the
@@ -209,8 +215,8 @@ no procedure that uses them.
      HSIO).
    - (b) No: the M7 only stops the A55 LM and shuts down the system.
 
-   *Recommendation*: (b) to start with, because the stock config already supports it
-   (F3). Choose (a) only if the threat model needs the board to stay up and partly
+   *Recommendation*: (b) to start with, because the stock config already grants it
+   (F3; read from the config, **to be validated** on the board). Choose (a) only if the threat model needs the board to stay up and partly
    working after a tamper event.
 
 6. **Which SM config is the starting point?**

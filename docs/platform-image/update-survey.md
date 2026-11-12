@@ -138,7 +138,7 @@ Against the requirements (a)–(e) in section 2:
    Recommendation: **(a) for now, keeping (b) as the design target**. Choose (b) only once the boot ROM fallback behaviour (section 8) is confirmed from IMX95RM or the Security Reference Manual. Without it, a bad container can only be recovered over serial download.
 4. **When is the AHAB version committed to the fuses (`ahab_commit`)?**
    Options: (a) never automatically, only as an attended service step; (b) automatically, after the new image has booted and been marked good; (c) at install time.
-   Recommendation: **(a) or (b), never (c)**. (c) removes the fallback (section 6). Committing burns fuses, so the owner should decide this explicitly. This survey scripts nothing.
+   Recommendation: **never (c)**: it removes the fallback (section 6). Committing burns fuses, so it is out of scope for this survey, and (a) and (b) are **not recommended pending the owner's decision**. Whether the "marked good" order in section 6 is safe on the i.MX 95 is assumed, not shown, and is **to be validated**. This survey scripts nothing.
 5. **Which key signs updates, and where is it held?**
    Options: (a) a dedicated update-signing key (X.509, issued under the project PKI) in the go-xkms HSM, through PKCS#11; (b) the same SRK hierarchy that signs AHAB containers; (c) a file key on the build host.
    Recommendation: **(a)**. Keep the OS update key separate from the SRK, so that rotating it needs no fuse change. This assumes go-xkms can serve as a PKCS#11 provider, which is not confirmed (section 8).
