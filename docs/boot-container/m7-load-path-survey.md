@@ -260,7 +260,10 @@ What it must **take from** trusted-firmware:
    S2 `mx95frdm.cfg`); (b) U-Boot `bootaux` with a signed `flash_bootaux_cntr` container; (c) Linux
    remoteproc.
    Recommendation: (a). It is the only path where the M7 runs before any A55 code, which an HSM's
-   tamper side needs, and the AHAB check is the ROM's (S4, S5).
+   tamper side needs, and the AHAB check is the ROM's (S4, S5). (b) and (c) are rejected, not
+   merely weaker: the A55 runs with no tamper responder until it has loaded the M7, which breaks
+   the invariant that the A55 never runs while the M7 is stopped or not yet started
+   (`low-power-survey.md` §5 item 3).
 3. **May the M7 be reloaded with a new image at run time?**
    Options: (a) no: the M7 is updated only by replacing the boot image and rebooting, and an SM LM
    reset only restarts it; (b) yes, through U-Boot `bootaux` with a signed container only; (c) yes,
@@ -268,6 +271,10 @@ What it must **take from** trusted-firmware:
    Recommendation: (a), and set `LMM_1` to `NOTIFY` only for Linux, as the 15x15 FRDM configuration
    has it (S2, reference only; the PRO file's `LMM_1` rights are **unconfirmed** and must be checked
    and, if wider, narrowed), so that Linux cannot stop or restart the M7. (c) leaves the AHAB chain (§7, U5).
+   (b) and (c) also stop the M7 while the A55 keeps running to load the new image, so the A55 runs
+   without the tamper responder; both are rejected for that reason too. Under (a), a restart of
+   the M7 alone is not used either: M7 faults go to `sys_reset` or `sys_shutdown`
+   (`fault-recovery-survey.md` §7), and no other agent holds rights to reset LM1.
 4. **Which signing tool?**
    Options: (a) SPSDK; (b) CST 4.0.1; (c) CST 3.1.0 as SPEC.md names it.
    Recommendation: (a) SPSDK, which S5 recommends for AHAB 2.0 on the i.MX 95 B0; (c) needs

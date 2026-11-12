@@ -191,6 +191,38 @@ is decided until the owner answers section 8.
    self-refresh keeps OP-TEE and TRDC state; a mix power-down relies on the SM
    rewriting TRDC through the ELE and on correct register restore (SM-ARCH,
    SM-CONFIG). Whole-SoC shutdown stays available for tamper response.
+   **Only the AP LM may suspend.** Each LM suspends and wakes on its own
+   (§2, §4), so this proposal must not let the M7 LM sleep while the A55
+   runs: the M7 carries the tamper response (docs/SPEC.md,
+   `hsm-self-defence`), and an A55 running with the M7 suspended is the same
+   unsupervised state item 7 rejects for M7 faults. The rule is: **the A55
+   never runs while the M7 is suspended, stopped or not yet started.** The
+   M7 LM, its watchdog (WDOG5) and the monitoring resources it acts through
+   (its SCMI channel, `LMM_2`, `SYS`, its sensors and tamper inputs) stay
+   active whenever the AP LM is running. In practice:
+   - no agent other than the M7 itself gets suspend rights on the M7 LM
+     (`LMM_1` stays notify-only for the A55, item 2), and the debug monitor
+     that can suspend any LM is absent (item 5);
+   - the M7 does not suspend itself while the AP LM is running; if the
+     product wants a whole-system sleep, the AP LM suspends first and the M7
+     suspends last, and on wake the M7 resumes and is running before the AP
+     LM is woken (resume order M7, then A55);
+   - a wake source that would wake the AP LM is routed so the M7 wakes first,
+     or the mode is not used.
+   Whether the SM can enforce this order (an LM dependency or a wake-routing
+   rule in the `.cfg`) is **unconfirmed**: SM-ARCH and SM-CONFIG describe
+   independent LM suspend, not an ordering rule. Until it is established,
+   either the M7 never suspends (only the AP LM does), or this mode is
+   blocked. An M7 suspend is allowed only once an independent tamper path,
+   active while the M7 sleeps, and a safe resume order are both confirmed.
+   **Suspend and resume check** (for the test plan, on a board in OEM
+   open): suspend and resume the AP LM, then attempt a whole-system sleep
+   and wake from every enabled wake source; at each step read the LM states
+   over SCMI (LMM notifications, which the M7 receives) and the SM's own
+   record, and fail the run if any sample shows LM2 running while LM1 is
+   suspended, stopped or booting. A failed attempt to suspend the M7 while
+   the A55 runs must also be shown. How the LM states are sampled with
+   enough resolution is **unconfirmed**.
 4. **Keep wake sources to the ones the product uses**, and keep each in the LM
    that owns it. On the 15x15 FRDM port (reference only) every external wake
    line comes through the SM-owned expander on GPIO1 (SM-PORT), so a wake source
@@ -343,8 +375,11 @@ unless `public-source-survey.md` items 14-16 state it.
    Options: (a) none: the board runs or is off; (b) LM suspend with DDR kept
    (suspend-to-RAM), no mix power-down beyond what suspend does; (c) all modes
    the SM supports, including deep sleep with mixes off. Recommendation: (a) for
-   an always-on HSM, or (b) if power saving is required; not (c) until the ELE's
-   behaviour across power-down is confirmed (section 4, section 7).
+   an always-on HSM, or (b) if power saving is required, limited to the AP LM
+   (the M7 stays running whenever the A55 runs, and resumes before it; section
+   5 item 3, with its suspend and resume check); not (c) until the ELE's
+   behaviour across power-down is confirmed (section 4, section 7). (b) with the
+   M7 suspended while the A55 runs is rejected.
 3. **Which agents may set the system power state?**
    Options: (a) TF-A (`AP-S`) and the M7, as shipped; (b) TF-A only, the M7
    notify-only; (c) the M7 only, TF-A notify-only. Recommendation: (a), because

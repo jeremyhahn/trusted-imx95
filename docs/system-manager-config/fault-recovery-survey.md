@@ -83,6 +83,19 @@ reaction is `fusa` (S3, S6). The PRO file routes the M7's SW0 to the FuSa
 reaction (S12), which suggests the same, but its `safe=` value is
 **unconfirmed**.
 
+`skip=1` on LM1 is fail-open for this design: a boot container without the
+M7 image (for example one built with `flash_a55`) still boots the A55, with
+no tamper responder (docs/SPEC.md, `hsm-self-defence`). This repository's
+configuration must not set `skip=1` on LM1, so that a missing M7 image is a
+boot error; whether the PRO file sets it is **unconfirmed**, and host
+acceptance rejects such an image independently
+([dev-boot-workflow-survey.md](../boot-container/dev-boot-workflow-survey.md),
+fixture N12). The boot order (M7 second, A55 third) starts the M7 first, but
+whether the SM waits for the M7 to be running before it starts LM2, or only
+issues the starts in order, is **unconfirmed** (S3 not read for it). The
+invariant this repository needs is that the A55 never runs while the M7 is
+stopped, suspended or not yet started (low-power-survey.md §5 item 3).
+
 ## 4. Watchdogs
 
 The i.MX 95 has watchdogs WDOG1 to WDOG5 that the SM knows by name (S5, S8).
