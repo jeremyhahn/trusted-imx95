@@ -13,8 +13,11 @@
 ARG ALPINE_IMAGE=alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 FROM ${ALPINE_IMAGE} AS base
+# coreutils: the scripts and tests use GNU date -d. safe.directory: the
+# checkout a stage runs on may belong to another uid than the stage's.
 RUN apk upgrade --no-cache \
- && apk add --no-cache bash make git python3 \
+ && apk add --no-cache bash coreutils make git python3 \
+ && git config --system --add safe.directory '*' \
  && adduser -D -u 10001 dev
 ENV HOME=/tmp
 WORKDIR /src
