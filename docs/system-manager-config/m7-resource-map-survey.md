@@ -68,6 +68,10 @@ LM1 layout but is **unconfirmed** (§8 item 1).
   S10's start and stop steps and any `test` key are **unconfirmed**.
 - `PD_WAKEUP`: holds the M7MIX TCM memory (S2). Who may switch it, and whether it is always on while the M7 runs,
   is **unconfirmed** (needs IMX95RM; see §8).
+- TCM retention: S2 puts the TCM memory outside `PD_M7`, so switching `PD_M7` off at LM stop does not by itself
+  imply that the TCM content is lost; but S2 is a resource listing, not a retention statement. Whether the TCM
+  keeps its content across `PD_M7` off, an M7 LM stop or reset, or a low-power mode is **unconfirmed** (§8 item 5).
+  Until it is established, plans must assume the M7 image is reloaded (and re-authenticated) after any of them.
 - Power domains of the M7's own peripherals (on S10, `LPUART7`, with `WDOG5` named in its M7 fault reactions;
   the rest of the list, `CAN_FD1`, `LPIT1`, `LPTMR*`, `LPTPM1`, `MU*`, is S1's and **unconfirmed** for S10): **not surveyed**; their mix files list
   them, and that check belongs to the imx-sm source survey (#33).
@@ -261,8 +265,9 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
    C headers outside the repository, so they were not read.
 4. **Reset domains.** Whether the M7 needs any SCMI reset domain, and which. Needs the device headers (item 3) and
    IMX95RM (missing).
-5. **`PD_WAKEUP` and the M7.** Whether the WAKEUP domain that holds the M7MIX TCMs can go off while the M7 runs.
-   Needs IMX95RM (missing).
+5. **`PD_WAKEUP` and the M7.** Whether the WAKEUP domain that holds the M7MIX TCMs can go off while the M7 runs,
+   and whether the TCM content is retained across `PD_M7` off, an M7 LM stop or reset, and each low-power mode
+   (§3.1; low-power-survey.md §"Cortex-M7" row). Needs IMX95RM (missing).
 6. **`PERFORMANCE_LEVEL_SET` rights.** S5 marks the message PRIV; whether owning `M7P` gives the M7 that right on
    `PERF_M7` without a `PERF_M7` API line is the permission model of #107.
 7. **The M7's SCMI mailbox.** S1 and S10 bind the M7 agent to MU index 9 (S1 also names test MU index 8), while Zephyr's M7 device tree

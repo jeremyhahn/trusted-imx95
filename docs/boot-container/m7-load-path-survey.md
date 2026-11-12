@@ -173,7 +173,9 @@ Three ways to put a new image on the M7 after boot, and what each does to the AH
 
 1. **System Manager LM reset (no new image).** The SM resets LM1 on its own faults (`lm_reset`,
    §4) and on an LMM-protocol request from an agent that holds `LMM_1` rights. This restarts the
-   M7 from what is already in TCM or DDR; it loads nothing. Whether an LM reset makes the SM reload
+   M7 from what is already in TCM or DDR; it loads nothing. That a TCM image is still there after
+   the reset is itself **unconfirmed**: the TCM sits in `PD_WAKEUP`, not `PD_M7`, but its retention
+   across an LM stop or reset is not established (m7-resource-map-survey.md §3.1, §8 item 5). Whether an LM reset makes the SM reload
    and re-authenticate the M7 image from the boot container, or only restarts the CPU on the image
    in memory, could not be confirmed without reading the SM source (**unconfirmed**, U4); the
    `skip` option ("no image in boot container", §4) shows the SM at least consults the boot
