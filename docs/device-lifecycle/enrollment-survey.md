@@ -161,14 +161,215 @@ and are not surveyed further here.
 
 ## 6. Vendor service: NXP EdgeLock 2GO
 
+Sources: the NXP `el2go-agent` repository on GitHub, tag `v6.5.2`
+(`doc/introduction.rst` and the source tree) [S13]. NXP's product pages
+for EdgeLock 2GO returned 404 from this lane, and the agent docs point
+to NXP application note AN12691, which was not read (§10).
+
+What it is, as the agent repository describes it [S13]: EdgeLock 2GO is
+an NXP-hosted cloud service that provisions keys and credentials into
+NXP secure hardware and helps onboard the device to the customer's own
+cloud. The on-device agent opens a secure connection to a per-account
+EdgeLock 2GO hostname, reports device status, and receives "secure
+objects" (keys, certificates, configuration). A device is tied to an
+account either by registering its chip UID or by injecting a claim
+code. The service is reached through NXP's own protocol (protobuf
+message definitions are in `doc/protobuf`), not through EST, ACME or
+SCEP.
+
+Platforms in the v6.5.2 tree: SE05x secure elements, TF-M/PSA targets,
+a PSA simulator, and an `smw` platform (NXP Secure Middleware, the
+library the i.MX application processors use to reach the EdgeLock
+Enclave) [S13, `platform/`]. Whether the i.MX 95 is a supported target,
+and whether the SE051 on the FRDM board (SPEC row
+`secure-key-handling`) could be its anchor instead, is not confirmed.
+
+Evidence and key binding: the trust comes from NXP's per-chip identity
+provisioned at manufacture, and the service, not the customer's CA,
+does the device authentication. It is not a way to carry the enclave's
+attestation evidence to a third-party CA. It would put an NXP cloud
+service in the enrollment path, which is a dependency decision, not a
+protocol one.
+
 ## 7. Carrying the enclave's attestation evidence
+
+The enclave offers device attestation through its HSM API (RM00284
+§3.12, cited by [SPEC](../SPEC.md), row `device-lifecycle`); the format
+and root are open (#40). Whatever the format, there are three standard
+places to put it:
+
+| Carriage | Defined by | Used with | Key binding |
+|---|---|---|---|
+| PKCS#10 attribute / CRMF extension `id-aa-attestation` holding an AttestationBundle | `draft-ietf-lamps-csr-attestation-33` [S7] | EST, CMP, CMC, SCEP (no SCEP freshness binding) | The evidence must name the CSR key; the CA/RA must validate that link [S7 §6.1] |
+| WebAuthn attestation object in the ACME challenge response (`attObj`) | `draft-ietf-acme-device-attest-10` [S6] | ACME | Signed over the ACME key authorization; the attested key versus the CSR key is format-specific [S6 §5, §6.2] |
+| Conceptual Message Wrapper (CMW), as CBOR tag, JWT/CWT claim or X.509 extension | RFC 9999 [S14] | Either of the above, as the inner statement | A wrapper only; binding comes from the wrapped evidence |
+
+Freshness: for the CSR route, `draft-ietf-lamps-attestation-freshness-10`
+gives EST, CMP and CMC a nonce request [S8]; for ACME the challenge
+token is the nonce [S6 §5].
+
+A practical consequence: an enclave evidence format needs a type
+identifier on either route, an OID for the CSR route or a WebAuthn
+format string for ACME. Wrapping it in a CMW [S14] would let one
+encoding serve both, with a single CMW type for the enclave. No
+registered identifier for EdgeLock Enclave evidence was found (§10).
 
 ## 8. Comparison
 
+Against the needs in §2:
+
+| Need | EST | ACME + device-attest | SCEP | EdgeLock 2GO |
+|---|---|---|---|---|
+| Status | RFC 7030, updated by RFC 8951 and RFC 9908 | RFC 8555 + Internet-Draft -10 (at IESG) | RFC 8894, Informational | Vendor service, closed protocol |
+| Key generated in the enclave, CSR signed there | Yes (`/simpleenroll`) | Yes (finalize CSR) | Yes | Unconfirmed for the i.MX 95 |
+| Evidence carriage | CSR attribute [S7] (draft) | `attObj` in challenge [S6] (draft) | CSR attribute only, no defined freshness | Not for a third-party CA |
+| Freshness | `getnonce` [S8] (draft) | Challenge token | None defined | Service-internal |
+| First-contact trust | TLS client cert (factory identity) or HTTP auth; BRSKI for zero-touch [S9] | External account binding, or the attestation itself [S6 §6.1] | Shared challenge password | NXP chip UID or claim code |
+| Renewal | `/simplereenroll` with the current cert | New order with the same account | Renewal request signed by current cert | Service pushes updates |
+| Third-party dependency | None | None | None | NXP cloud |
+
 ## 9. Fit with go-trusted-platform's enrollment
+
+Source: the go-trusted-platform repository, branch `main` at commit
+`641fd51b21fa` (2026-11-11): `docs/ca/acme.md`,
+`docs/device/architecture.md` and the source tree [S15]. This is input
+for go-trusted-platform's owner; it decides nothing for that project.
+
+What it already has [S15]:
+
+- An RFC 8555 ACME server. Its documented challenge set includes the
+  standard `http-01` and `dns-01`, a custom `enroll-01` that issues a
+  TPM-anchored IDevID (the client submits a TCG-CSR-IDEVID with the IAK
+  public key, the IAK-signed CSR and the EK certificate; the server then
+  runs TPM credential activation against the EK before it finalises),
+  `endorse-01` for TPM EK certificates, and `device-attest-01` listed in
+  the configuration example (`docs/ca/acme.md`).
+- Reference copies of `draft-ietf-acme-device-attest-10` and
+  `draft-ietf-lamps-csr-attestation-30` under `docs/reference/`.
+- The IDevID, held in the TPM, as the runtime mTLS credential for the
+  device's later calls (`docs/device/architecture.md` §4.4, §5).
+- No EST or SCEP code paths were found in the tree listing.
+
+Where the i.MX 95 differs: go-trusted-platform's enrollment is built on
+a TPM (EK, IAK, credential activation). The FRDM-IMX95 has the EdgeLock
+Enclave and an SE051; no TPM is named in SPEC. The enclave has no EK
+and no TPM credential activation, so `enroll-01` does not apply as is.
+
+Options, as input:
+
+1. **ACME `device-attest-01` with an enclave attestation format.** Fits
+   the ACME server go-trusted-platform already runs and the draft it
+   already tracks. Needs an attestation format identifier for the
+   enclave and a verifier for it on the server side. Where the
+   `device-attest-01` handler is implemented, and which formats it
+   accepts, was not confirmed (§10).
+2. **A new ACME challenge for the enclave**, in the pattern of
+   `enroll-01`, carrying the enclave evidence in place of the TCG-CSR.
+   Closest to the existing code, but a private extension.
+3. **ACME finalize with the csr-attestation attribute** [S7] in the CSR,
+   with an existing challenge for the identifier. Uses the standard CSR
+   carriage and would carry over to EST unchanged.
+4. **EST with csr-attestation and the freshness nonce** [S3, S7, S8].
+   Standard and widely implemented, but new to go-trusted-platform.
 
 ## 10. Not confirmed
 
+- NXP EdgeLock 2GO product pages (several nxp.com URLs returned 404 on
+  2026-11-12) and NXP AN12691 were not read. Whether EdgeLock 2GO
+  supports the i.MX 95's enclave is unconfirmed.
+- The format of the enclave's attestation evidence (RM00284 §3.12):
+  RM00284 is in the private vendor repository, which this lane cannot
+  read; this survey relies on SPEC's citation only (#40).
+- Whether the FRDM-IMX95 leaves the factory with any NXP-signed device
+  identity certificate usable as an IDevID for EST or BRSKI.
+- The IANA WebAuthn attestation format registry was not fetched; no
+  enclave format is claimed to exist or not exist beyond what §4 says.
+- go-trusted-platform: where `device-attest-01` is implemented and
+  which attestation formats it verifies. The tree has no `pkg/acme`
+  server code besides storage, so the server may live in a dependency;
+  not traced.
+- Final RFC numbers for the two drafts [S6, S7] and the freshness draft
+  [S8]; all three were drafts on 2026-11-12.
+
 ## 11. Sources
 
+All fetched 2026-11-12.
+
+- [S1] RFC 7030, *Enrollment over Secure Transport*, October 2013.
+  <https://www.rfc-editor.org/rfc/rfc7030>
+- [S2] RFC 8951, *Clarification of Enrollment over Secure Transport
+  (EST): Transfer Encodings and ASN.1*, November 2020.
+  <https://www.rfc-editor.org/rfc/rfc8951>
+- [S3] RFC 9908, *Clarification and enhancement of RFC7030 CSR
+  Attributes definition* (published from
+  `draft-ietf-lamps-rfc7030-csrattrs-23`).
+  <https://www.rfc-editor.org/rfc/rfc9908>
+- [S4] RFC 9148, *EST-coaps: Enrollment over Secure Transport with the
+  Secure Constrained Application Protocol*, April 2022.
+  <https://www.rfc-editor.org/rfc/rfc9148>
+- [S5] RFC 8555, *Automatic Certificate Management Environment (ACME)*,
+  March 2019. <https://www.rfc-editor.org/rfc/rfc8555>
+- [S6] `draft-ietf-acme-device-attest-10`, *Automatic Certificate
+  Management Environment (ACME) Device Attestation Extension*,
+  10 August 2026.
+  <https://datatracker.ietf.org/doc/draft-ietf-acme-device-attest/10/>
+- [S7] `draft-ietf-lamps-csr-attestation-33`, *Use of Remote
+  Attestation with Certification Signing Requests*, November 2026.
+  <https://datatracker.ietf.org/doc/draft-ietf-lamps-csr-attestation/33/>
+- [S8] `draft-ietf-lamps-attestation-freshness-10`, *Requesting a
+  Freshness Nonce for Attestation Evidence in Certificate Signing
+  Requests*.
+  <https://datatracker.ietf.org/doc/draft-ietf-lamps-attestation-freshness/10/>
+- [S9] RFC 8995, *Bootstrapping Remote Secure Key Infrastructure
+  (BRSKI)*, May 2021. <https://www.rfc-editor.org/rfc/rfc8995>
+- [S10] RFC 8894, *Simple Certificate Enrolment Protocol*, September
+  2020. <https://www.rfc-editor.org/rfc/rfc8894>
+- [S11] RFC 9810, *Internet X.509 Public Key Infrastructure --
+  Certificate Management Protocol (CMP)*, July 2025, and RFC 9483,
+  *Lightweight Certificate Management Protocol (CMP) Profile*, November
+  2023. <https://www.rfc-editor.org/rfc/rfc9810>,
+  <https://www.rfc-editor.org/rfc/rfc9483>
+- [S12] RFC 10002, *Certificate Management over CMS (CMC)*, July 2026.
+  <https://www.rfc-editor.org/rfc/rfc10002>
+- [S13] NXP, `el2go-agent` (EdgeLock 2GO agent), tag `v6.5.2`.
+  <https://github.com/NXP/el2go-agent/tree/v6.5.2>
+- [S14] RFC 9999, *RATS Conceptual Messages Wrapper (CMW)* (published
+  from `draft-ietf-rats-msg-wrap-23`).
+  <https://www.rfc-editor.org/rfc/rfc9999>
+- [S15] go-trusted-platform, `main` at `641fd51b21fa`.
+  <https://github.com/jeremyhahn/go-trusted-platform/tree/641fd51b21fa>
+
 ## 12. Questions for the owner
+
+1. **Which enrollment protocol does the board use?**
+   Options: (a) ACME with `device-attest-01`; (b) a new
+   go-trusted-platform ACME challenge for the enclave, like `enroll-01`;
+   (c) ACME with the evidence in the finalize CSR; (d) EST with
+   csr-attestation and the freshness nonce; (e) SCEP; (f) EdgeLock 2GO.
+   Recommendation: (a), because go-trusted-platform already runs an ACME
+   server, lists `device-attest-01` and tracks the draft [S6, S15], and
+   the draft is at the IESG. Keep (c)/(d) open as the fallback, since
+   the CSR attribute [S7] works for both. Not (e): no evidence carriage
+   or freshness [S10]. The choice is go-trusted-platform's (SPEC,
+   Purpose); this repository only needs to know it.
+2. **How is the enclave's evidence encoded on the wire?**
+   Options: (a) a private WebAuthn format string or OID for raw enclave
+   evidence; (b) the enclave evidence inside a RATS CMW [S14], so one
+   encoding serves both ACME and CSR routes. Recommendation: (b), as it
+   keeps the protocol choice in question 1 reversible. Depends on #40.
+3. **What authorises the first request?**
+   Options: (a) the enclave attestation alone, verified against NXP's
+   root; (b) external account binding with a per-device secret set at
+   provisioning [S6 §6.1]; (c) a factory IDevID certificate (EST/BRSKI
+   [S1, S9]). Recommendation: none yet; it depends on whether the
+   enclave evidence chains to an NXP root that go-trusted-platform will
+   trust (#40), and on the provisioning place (SPEC open questions).
+4. **Is an NXP cloud service acceptable in the enrollment path?**
+   Options: (a) no, enrollment talks only to go-trusted-platform;
+   (b) yes, EdgeLock 2GO for initial credentials. Recommendation: (a);
+   EdgeLock 2GO uses a closed protocol, its i.MX 95 support is not
+   confirmed [S13], and SPEC gives enrollment to go-trusted-platform.
+5. **Does the SE051 take part in enrollment?** Options: (a) no, the
+   enclave key is the identity; (b) yes, as the EdgeLock 2GO anchor or
+   a second identity. Recommendation: (a) unless the SE051 role
+   question in SPEC (`secure-key-handling`) is answered otherwise.
