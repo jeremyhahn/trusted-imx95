@@ -120,8 +120,10 @@ The developer loop, in order of preference:
 A container the ROM rejects in OEM open still matters less than in closed: in the open life cycle the enclave
 records authentication failures as events rather than refusing to run. That is the general AHAB OEM-open model; no
 source in this survey states it for the i.MX 95, and the exact rule needs the Security Reference Manual (S11,
-missing): **unconfirmed**. A bad *unsigned or mis-signed* image
-therefore tends to show up as events, while a *malformed* container that the ROM cannot parse does not boot and
+missing): **unconfirmed**. If that model holds, a bad *unsigned or mis-signed* image may run and show up only as
+events; an image signed with the *wrong* SRK may run too, because nothing on an OEM-open board holds the intended
+SRK hash yet. So a board that boots, with or without events, says nothing about which signing root was used (§8).
+A a *malformed* container that the ROM cannot parse does not boot and
 needs the recovery above.
 
 ## 7. What OEM open lets a developer check before any fuse
@@ -133,10 +135,12 @@ Everything below reads state; none of it writes a fuse or changes the life cycle
   scripts next to the image unless `--no-fuse-scripts` is given (S8): the pipeline should pass that flag, or keep
   those scripts out of every artefact and never run them (#118 owns the negative tests).
 - **On the board, after loading over USB:** read the enclave's events and status with `nxpele get-events` and
-  `nxpele get-info` over U-Boot's serial console or fastboot (S8). The same tool can write fuses and forward a
-  life-cycle change, so any script that drives it must allow the read commands only (question 6), or with U-Boot's own AHAB status command (not surveyed here: **unconfirmed** at a named
-  U-Boot version). An empty event list after booting the signed container is the evidence that the signature, the
-  SRK table and the key hash the developer intends to fuse all agree. The event log design is #131.
+  `nxpele get-info` over U-Boot's serial console or fastboot (S8), or with U-Boot's own AHAB status command (not
+  surveyed here: **unconfirmed** at a named U-Boot version). `nxpele` can also write fuses and forward a life-cycle
+  change, so any script that drives it must allow the read commands only (question 6). These reads are
+  **diagnostic only**. An OEM-open board has no SRK hash fused, so it cannot tell the intended signing root from any
+  other, and the i.MX 95 rule for logging authentication failures in OEM open is unconfirmed (§6). An empty event
+  list therefore does not show that the container was signed by the approved key. The event log design is #131.
 - **Negative checks:** loading a deliberately mis-signed container in OEM open and seeing the expected event is
   possible without any risk to the board, but the plan for it is #118.
 - **The key hash to be fused:** SPSDK's `fuses` feature lists the `mimx95*` families (S8), so the SRK hash words can
@@ -148,19 +152,34 @@ S11), both missing.
 
 ## 8. Link to the host-side signing pipeline (#9)
 
-The loop gives #9 a fixed hand-off and a check at each step:
+The loop gives #9 a fixed hand-off. Acceptance rests on host-side checks against an independently approved SRK hash.
+The board run comes after them and is diagnostic only:
 
 1. #9 builds `flash.bin` and signs its containers with the tool #30 chooses (CST 3.1.0 or SPSDK, keys in an HSM after
-   AN14471, per S2). Output: the signed `flash.bin` and the SRK table hash, with fuse scripts suppressed.
-2. Host check: parse the signed container with `nxpimage` (S8) and compare the SRK table hash with the one the
-   pipeline recorded.
-3. Board check in OEM open: load over the serial downloader with uuu or `nxpuuu` at the pinned version (S4/S8),
-   boot from RAM, read the enclave events (`nxpele`, S8). An empty list is the pass condition; events go to #131.
-4. Only a container that passed step 3 is written to the eMMC boot partition (`-b emmc`, §5).
+   AN14471, per S2). Output: the signed `flash.bin`, with fuse scripts suppressed.
+2. **Acceptance, on the host, before any load or write:**
+   1. *Signature check:* `nxpimage ahab verify -f <family> -r <revision> -b flash.bin` (SPSDK 3.13.0, S8) must
+      report no problems. Its help says only "Verify AHAB Image". Whether it checks each container's signature
+      cryptographically against the SRK table in the image is **unconfirmed** at 3.13.0. Before this step is
+      trusted, it must be shown to fail on a deliberately mis-signed container (#118 owns that test). If it does
+      not, an independent signature check of each container must be added (owner question 7).
+   2. *SRK hash check:* extract the SRK table with `nxpimage ahab parse -f <family> -r <revision> -b flash.bin -o
+      <dir>` (S8). Compute its hash on the host and compare it, byte for byte, with the **approved SRK hash**. That
+      hash is recorded by the owner from the HSM's SRK public keys, outside the build that produced the image. The
+      build's own output is never the reference. Which `parse` output file carries the SRK table, and the hash rule
+      for the i.MX 95 SRK table, are **unconfirmed**: they need the AHAB chapter of IMX95RM or the Security
+      Reference Manual (S10, S11, missing) or a check of SPSDK's source.
+   A container that fails either check is rejected and is not loaded.
+3. **Board run in OEM open (diagnostic):** load the accepted container over the serial downloader with uuu or
+   `nxpuuu` at the pinned version (S4/S8), boot it from RAM, and record `nxpele get-events` / `get-info` (S8) for
+   #131. It shows that the container boots on this silicon. Its events help find faults. It is **not** evidence about
+   the signing root (§7), and board-side confirmation of authentication stays **unconfirmed** until IMX95RM and the
+   Security Reference Manual are available.
+4. A container that passed step 2 and booted in step 3 is written to the eMMC boot partition (`-b emmc`, §5).
 5. A failure at step 3 or 4 is recovered with §6 and reported back to #9 with the event output.
 
-The pipeline therefore needs one pinned host-tool version for steps 2 to 4 (question 1) and one known-good container
-kept beside every candidate for recovery.
+The pipeline therefore needs one pinned host-tool version for steps 2 to 4 (question 1), an approved SRK hash
+recorded outside the build (question 7), and one known-good container kept beside every candidate for recovery.
 
 ## 9. Unconfirmed items
 
@@ -172,11 +191,17 @@ kept beside every candidate for recovery.
 4. The exact OEM-open rule for authentication failures on the i.MX 95 (event versus refusal): needs the Security
    Reference Manual (missing).
 5. The board's part number and silicon revision (a0, a1 or b0 in SPSDK 3.13.0).
-6. Whether `nxpimage`'s host-side parsing checks the same things as the ROM.
-7. Which firmware answers `nxpele`'s `mboot` transport on the i.MX 95.
-8. U-Boot's AHAB status command at a named U-Boot version (not surveyed; U-Boot belongs to #42 and #9).
-9. The i.MX Linux User's Guide's i.MX 95 uuu instructions (S12, not in docs/references/).
-10. Nothing here was run against a board: tool behaviour is from documentation, source history and `--help` only.
+6. Whether `nxpimage ahab verify` checks container signatures cryptographically, and whether it checks the same
+   things as the ROM (§8 step 2).
+7. Which `nxpimage ahab parse` output carries the SRK table, and the i.MX 95 rule for hashing it into the fused
+   value: needs IMX95RM or the Security Reference Manual (both missing), or SPSDK's source.
+8. Board-side confirmation of the signing root: an OEM-open board has no SRK hash fused, so a board run in OEM open
+   cannot confirm which key signed the container. Event results are diagnostic only until IMX95RM and the Security
+   Reference Manual are available (§7, §8).
+9. Which firmware answers `nxpele`'s `mboot` transport on the i.MX 95.
+10. U-Boot's AHAB status command at a named U-Boot version (not surveyed; U-Boot belongs to #42 and #9).
+11. The i.MX Linux User's Guide's i.MX 95 uuu instructions (S12, not in docs/references/).
+12. Nothing here was run against a board: tool behaviour is from documentation, source history and `--help` only.
 
 ## 10. Owner questions
 
@@ -194,11 +219,19 @@ kept beside every candidate for recovery.
    (b) keep a known-good container in the second boot partition and switch with `mmc partconf`; (c) (a) plus a
    prepared SD card per board. Recommendation: **(c)** until IMX95RM confirms the ROM's partition behaviour; then
    reconsider (b) with #42.
-5. **Should the board check (§8 step 3) be automated in #9's pipeline on a lab board?** (a) yes, with the event output
-   attached to every candidate; (b) manual for now. Recommendation: **(a)** once question 1 is settled, feeding #131;
-   it needs a board on the lab host with SW4 in serial download mode.
+5. **Should the diagnostic board run (§8 step 3) be automated in #9's pipeline on a lab board?** (a) yes, with the
+   event output attached to every candidate as diagnostics; (b) manual for now. Recommendation: **(a)** once
+   question 1 is settled, feeding #131. It needs a board on the lab host with SW4 in serial download mode. It never
+   replaces the host-side acceptance of §8 step 2.
 6. **Fuse-capable commands in the loop:** `nxpimage ahab export` emits fuse scripts unless told not to, and `nxpele`
    carries `write-fuse` and `forward-lifecycle-update`. (a) always pass `--no-fuse-scripts` and wrap `nxpele` so only
    `get-info`, `get-events` and the fuse reads can run; (b) keep the fuse scripts, quarantined, as review material.
-   Recommendation: **(a)**: this row's rule is that no fuse step is scripted, and the SRK hash is already in the
-   pipeline's record.
+   Recommendation: **(a)**: this row's rule is that no fuse step is scripted, and the approved SRK hash is recorded
+   outside the build (question 7).
+7. **Where does the approved SRK hash come from, and how is a container's signature checked?** (a) the owner
+   records the SRK hash, computed from the HSM's SRK public keys, in a reviewed file outside the build. The pipeline
+   compares each image's SRK table hash against it and runs `nxpimage ahab verify`, once #118 has shown that `verify`
+   rejects a mis-signed container. (b) as (a), with a second, independent signature check (for example CST's or
+   OpenSSL's verification of each signature block against the SRK public key) whether or not `verify` passes that
+   test. (c) rely on the board run in OEM open. Recommendation: **(a)**, moving to **(b)** if `verify` fails #118's
+   test. Never **(c)**: an OEM-open board holds no SRK hash, so it cannot confirm the signing root (§7).
