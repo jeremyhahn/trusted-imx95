@@ -1005,7 +1005,10 @@ jobs:
           fi
           make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
           rm -f "$RUNNER_TEMP/gomodauth.env"
-          echo "TOOLCHAIN_IMAGE=$(make -s toolchain-image)" >> "$GITHUB_ENV"
+          # trusted-imx95: on a trusted run, the image ID the build recorded
+          # (Makefile, toolchain-ref), so no later step resolves a tag.
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
 
       # v1.22: bound this repo's cache volumes (as in the image job). It never
       # fails the job and keeps every volume a container mounts.
@@ -1292,7 +1295,10 @@ jobs:
           fi
           make docker-build ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env" IT_IMAGE="$IT_IMAGE"
           rm -f "$RUNNER_TEMP/gomodauth.env"
-          echo "TOOLCHAIN_IMAGE=$(make -s toolchain-image)" >> "$GITHUB_ENV"
+          # trusted-imx95: on a trusted run, the image ID the build recorded
+          # (Makefile, toolchain-ref), so no later step resolves a tag.
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
 
       # v1.23: a lease on the integration image (from a Codex review). A
       # reused image can be older than REAP_IMAGE_MIN_AGE, so its age alone
@@ -1356,10 +1362,13 @@ jobs:
           }
           declare -f image_lock image_unlock > "$RUNNER_TEMP/image-lock.sh"
           trap image_unlock EXIT
+          # trusted-imx95: the reference is `make -s it-ref`, on a trusted run
+          # the ID this job's build recorded; with none yet, the build below records it.
           take_lease() {
-            id=$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null) || return 1
+            ref=$(make -s it-ref IT_IMAGE="$IT_IMAGE" 2>/dev/null) || return 1
+            id=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null) || return 1
             docker create --pull never --name "$lease" "$id" true >/dev/null || return 1
-            [ "$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null)" = "$id" ] && return 0
+            [ "$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)" = "$id" ] && return 0
             docker rm "$lease" >/dev/null 2>&1 || true
             return 1
           }
@@ -1440,7 +1449,9 @@ jobs:
           image_lock || exit 1
           docker tag "$IT_LEASE_ID" "$IT_IMAGE"
           image_unlock
-          docker save -o it-image.tar "$IT_IMAGE"
+          # trusted-imx95: the leased ID, so the scan reads the image the job
+          # holds even if another job moves the tag after the re-tag above.
+          docker save -o it-image.tar "$IT_LEASE_ID"
           scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" \
             trivy image --input it-image.tar --ignore-unfixed --skip-dirs /opt/go/mod --severity CRITICAL,HIGH --exit-code 1
 
@@ -1530,7 +1541,10 @@ jobs:
           fi
           make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
           rm -f "$RUNNER_TEMP/gomodauth.env"
-          echo "TOOLCHAIN_IMAGE=$(make -s toolchain-image)" >> "$GITHUB_ENV"
+          # trusted-imx95: on a trusted run, the image ID the build recorded
+          # (Makefile, toolchain-ref), so no later step resolves a tag.
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
 
       # v1.22: bound this repo's cache volumes (as in the image job). It never
       # fails the job and keeps every volume a container mounts.
@@ -1638,10 +1652,13 @@ jobs:
           }
           declare -f image_lock image_unlock > "$RUNNER_TEMP/image-lock.sh"
           trap image_unlock EXIT
+          # trusted-imx95: the reference is `make -s it-ref`, on a trusted run
+          # the ID this job's build recorded; with none yet, the build below records it.
           take_lease() {
-            id=$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null) || return 1
+            ref=$(make -s it-ref IT_IMAGE="$IT_IMAGE" 2>/dev/null) || return 1
+            id=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null) || return 1
             docker create --pull never --name "$lease" "$id" true >/dev/null || return 1
-            [ "$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null)" = "$id" ] && return 0
+            [ "$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)" = "$id" ] && return 0
             docker rm "$lease" >/dev/null 2>&1 || true
             return 1
           }
@@ -1692,7 +1709,7 @@ jobs:
           image_lock || exit 1
           docker tag "$IT_LEASE_ID" "$IT_IMAGE"
           image_unlock
-          make integration-test MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env" IT_PROJECT="$IT_PROJECT" IT_IMAGE="$IT_IMAGE" GO_BUILD_TAGS="$GO_BUILD_TAGS"
+          make integration-test MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env" IT_PROJECT="$IT_PROJECT" IT_IMAGE="$IT_IMAGE" IT_IMAGE_ID="$IT_LEASE_ID" GO_BUILD_TAGS="$GO_BUILD_TAGS"
 
       - name: Tear down
         if: always()
@@ -1788,10 +1805,13 @@ jobs:
           }
           declare -f image_lock image_unlock > "$RUNNER_TEMP/image-lock.sh"
           trap image_unlock EXIT
+          # trusted-imx95: the reference is `make -s it-ref`, on a trusted run
+          # the ID this job's build recorded; with none yet, the build below records it.
           take_lease() {
-            id=$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null) || return 1
+            ref=$(make -s it-ref IT_IMAGE="$IT_IMAGE" 2>/dev/null) || return 1
+            id=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null) || return 1
             docker create --pull never --name "$lease" "$id" true >/dev/null || return 1
-            [ "$(docker image inspect -f '{{.Id}}' "$IT_IMAGE" 2>/dev/null)" = "$id" ] && return 0
+            [ "$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)" = "$id" ] && return 0
             docker rm "$lease" >/dev/null 2>&1 || true
             return 1
           }
@@ -1850,7 +1870,7 @@ jobs:
             docker tag "$IT_LEASE_ID" "$IT_IMAGE"
             image_unlock
             rc=0
-            make "$SOAK_TARGET" MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env" IT_PROJECT="$p" IT_IMAGE="$IT_IMAGE" GO_BUILD_TAGS="$GO_BUILD_TAGS" || rc=$?
+            make "$SOAK_TARGET" MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env" IT_PROJECT="$p" IT_IMAGE="$IT_IMAGE" IT_IMAGE_ID="$IT_LEASE_ID" GO_BUILD_TAGS="$GO_BUILD_TAGS" || rc=$?
             IT_IMAGE="$IT_IMAGE" docker compose -f build/docker/devcontainer/compose.yaml -p "$p" down --volumes || true
             if [ "$rc" -ne 0 ]; then
               echo "::error::soak iteration $i failed (exit $rc)"

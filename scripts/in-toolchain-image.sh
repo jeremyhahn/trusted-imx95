@@ -77,6 +77,13 @@
 #   (v5, dependency-resolution.md, "No direct fetch, anywhere"); a private
 #   path is fetched by GOPRIVATE/GONOPROXY, never through GOPROXY.
 #
+# trusted-imx95 (2026-11-12, Codex security P1 on #19): pull request jobs
+# share the runners' Docker daemon and can move any tag. A trusted run
+# (GITHUB_EVENT_NAME set and not pull_request or pull_request_target)
+# therefore takes <image> only as an image ID, sha256:<64 hex>, the one
+# `make -s toolchain-ref` prints, and refuses a tag before any container
+# starts. test/ci_scripts_test.sh holds this.
+#
 # The container is named <CI_STACK_PREFIX>tc-<pid>-<random>, under the prefix
 # scripts/reap-stale-ci-stacks.sh reaps (default <checkout dir>-ci-, which in CI
 # is <repo>-ci-), and is removed on every exit. IN_IMAGE_UID is the non-root
@@ -89,6 +96,16 @@ if [ "$#" -lt 2 ]; then
 fi
 image=$1
 shift
+# A trusted run starts its containers by image ID (above).
+case ${GITHUB_EVENT_NAME:-} in
+  '' | pull_request | pull_request_target) ;;
+  *)
+    if ! [[ $image =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "in-toolchain-image: a trusted run ($GITHUB_EVENT_NAME) starts containers by image ID (sha256:...), never by a tag: $image" >&2
+      exit 2
+    fi
+    ;;
+esac
 network=${IN_IMAGE_NETWORK:-none}
 case $network in
   none | bridge) ;;

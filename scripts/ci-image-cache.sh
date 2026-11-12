@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ci-image-cache.sh v4 (2026-11-12, Codex security P1 on trusted-imx95 #19):
+# checking the tag once left a race, because later steps resolved it again.
+# The Makefile now records the image ID a trusted build settles on (the
+# verified pull's, or its own build's) and `make -s toolchain-ref` prints it;
+# publish tags and pushes that ID, never the local tag.
 # ci-image-cache.sh v3 (2026-11-12, Codex security P1 on trusted-imx95 #19):
 # pull request jobs share the runners' persistent Docker daemon and run their
 # own Makefile with Docker access, so a pull request can tag any image with
@@ -7,8 +12,8 @@
 # daemon holds: pull always pulls from the registry, takes the registry's
 # digest from the image's RepoDigests, pulls that digest, tags it, and
 # exports its image ID to the job as TOOLCHAIN_VERIFIED_ID (GITHUB_ENV). The
-# Makefile's docker-build-toolchain keeps the tag on a trusted run only while
-# it names that ID, and otherwise rebuilds from source with no cache.
+# Makefile's docker-build-toolchain uses that ID on a trusted run while the
+# daemon holds it, and otherwise rebuilds from source with no cache.
 # test/ci_scripts_test.sh holds this. A pull request run, and a run outside
 # CI, keep v2's behaviour.
 # ci-image-cache.sh v2 (2026-11-08, Company Agent m2101 item 2): the
@@ -111,8 +116,8 @@ case ${1:-} in
       docker tag "$repo@$digest" "$local_tag"
       [ "$(docker image inspect --format '{{.Id}}' "$local_tag")" = "$id" ] \
         || { echo "ci-image-cache: $local_tag does not name $repo@$digest after the tag; the job builds it"; exit 1; }
-      # The Makefile's docker-build-toolchain keeps the tag on a trusted run
-      # only while it names this ID.
+      # The Makefile's docker-build-toolchain records this ID for the job's
+      # containers (v4, above).
       if [ -n "${GITHUB_ENV:-}" ]; then echo "TOOLCHAIN_VERIFIED_ID=$id" >> "$GITHUB_ENV"; fi
     else
       docker tag "$remote" "$local_tag"
@@ -132,8 +137,11 @@ case ${1:-} in
       exit 0
     fi
     make docker-build-toolchain "$@"
+    # The ID the build recorded, never $local_tag, which the shared daemon's
+    # other jobs can move (v4, above).
+    id=$(make -s toolchain-ref "$@") || die "make -s toolchain-ref failed"
     printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null
-    docker tag "$local_tag" "$remote"
+    docker tag "$id" "$remote"
     DOCKER_CONFIG=$cfg docker push -q "$remote" >/dev/null
     digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$remote" 2>/dev/null || echo unknown)
     docker image rm "$remote" >/dev/null 2>&1 || true

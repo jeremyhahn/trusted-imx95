@@ -30,7 +30,11 @@ COPY scripts/tool-pins.sh scripts/fetch-tools.sh /pins/
 RUN sh /pins/fetch-tools.sh /pins/tool-pins.sh /out/bin
 
 FROM base AS toolchain
-RUN apk add --no-cache curl jq ca-certificates
+# openssh-keygen: git's SSH signature verification (gpg.format ssh) runs
+# ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
+# Alpine's git package does not supply it. Like every package here, its
+# version is the pinned Alpine release's.
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 

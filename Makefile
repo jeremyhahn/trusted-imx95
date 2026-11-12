@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image tools
+	docker-run toolchain-image it-image toolchain-ref it-ref tools
 
 help: ## List the targets
 	@echo "Targets:"
@@ -78,12 +78,18 @@ test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_te
 coverage: test ## Unit tests, then the share of project scripts a test runs (COVERAGE_THRESHOLD)
 	@scripts/check-script-tests.sh $(COVERAGE_THRESHOLD)
 
-integration-test: ## Integration tests in the integration image (IT_IMAGE), hardened, no network
+integration-test: ## Integration tests in the integration image (IT_IMAGE_ID if set, else IT_IMAGE), hardened, no network
 	@if command -v docker >/dev/null 2>&1; then \
-		$(MAKE) --no-print-directory docker-build IT_IMAGE=$(IT_IMAGE); \
+		ref="$(IT_IMAGE_ID)"; \
+		if [ -z "$$ref" ]; then \
+			$(MAKE) --no-print-directory docker-build IT_IMAGE=$(IT_IMAGE); \
+			ref=$$($(MAKE) -s --no-print-directory it-ref IT_IMAGE=$(IT_IMAGE)); \
+		elif ! [[ "$$ref" =~ ^sha256:[0-9a-f]{64}$$ ]]; then \
+			echo "integration-test: IT_IMAGE_ID must be an image ID (sha256:...), not $$ref"; exit 1; \
+		fi; \
 		docker run --rm --name $(IT_PROJECT) --network none --read-only \
 			--tmpfs /tmp:exec --cap-drop ALL --security-opt no-new-privileges \
-			--ulimit core=0 --user 10001 $(IT_IMAGE) make -C /src integration-test-local; \
+			--ulimit core=0 --user 10001 "$$ref" make -C /src integration-test-local; \
 	else \
 		$(MAKE) --no-print-directory integration-test-local; \
 	fi
@@ -155,33 +161,74 @@ it-image: ## Print the integration image tag (by content)
 # request jobs share the runners' persistent Docker daemon and run their own
 # Makefile with Docker access, so a pull request can tag any image with
 # main's tag; the same daemon's build cache is just as writable (a committed
-# container answers a RUN step's cache lookup). A trusted run therefore keeps
-# the toolchain tag only when it still names the image ID
-# scripts/ci-image-cache.sh pulled by digest from the registry
-# (TOOLCHAIN_VERIFIED_ID, which that script exports to the job), and
+# container answers a RUN step's cache lookup). A trusted run therefore uses
+# the toolchain image only by the ID scripts/ci-image-cache.sh pulled by
+# digest from the registry (TOOLCHAIN_VERIFIED_ID, which that script exports
+# to the job), while the daemon holds it, and
 # otherwise rebuilds from source with no cache; it always rebuilds the
 # integration image that way. Locally, and on a pull request, a tag the
 # daemon holds is used as before.
+#
+# Checking the tag once is not enough (Codex security P1 on #19): every later
+# `docker create` or `docker run` would resolve the tag again, and a pull
+# request's job can move it in between. So a trusted build records the image
+# ID it settles on, the verified pull's or its own `docker build --iidfile`,
+# in TOOLCHAIN_ID_FILE (IT_ID_FILE for the integration image), both in the
+# job's RUNNER_TEMP. `make -s toolchain-ref` (`it-ref`) prints that ID on a
+# trusted run and the tag otherwise; ci.yml exports it as TOOLCHAIN_IMAGE, so
+# every container a trusted job starts names an image ID, never a tag.
 TRUSTED_RUN := $(if $(filter-out pull_request pull_request_target,$(GITHUB_EVENT_NAME)),1)
+TOOLCHAIN_ID_FILE ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/toolchain-image.id)
+IT_ID_FILE        ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/it-image.id)
+IT_IMAGE_ID       ?=
+# NEED_ID_FILE <file> <variable>: a trusted run fails when it has nowhere to
+# record the image ID.
+NEED_ID_FILE = [ -n "$(1)" ] || { echo "$@: a trusted run ($(GITHUB_EVENT_NAME)) records its image ID; set RUNNER_TEMP or $(2)" >&2; exit 1; }
+# READ_ID <file>: print the image ID the file holds, or fail naming it.
+READ_ID = id=$$(cat "$(1)" 2>/dev/null || true); \
+	[[ "$$id" =~ ^sha256:[0-9a-f]{64}$$ ]] || { echo "$@: $(1) holds no image ID; build the image first" >&2; exit 1; }; \
+	echo "$$id"
 
-docker-build-toolchain: ## Build the toolchain image when the daemon lacks its tag (a trusted CI run: unless verified)
+toolchain-ref: ## Print the toolchain image a stage starts: a trusted CI run's recorded image ID, otherwise the tag
 	@if [ -n "$(TRUSTED_RUN)" ]; then \
-		id=$$(docker image inspect --format '{{.Id}}' $(TOOLCHAIN_IMAGE) 2>/dev/null || true); \
-		if [ -n "$${TOOLCHAIN_VERIFIED_ID:-}" ] && [ "$$id" = "$$TOOLCHAIN_VERIFIED_ID" ]; then \
-			echo "docker-build-toolchain: $(TOOLCHAIN_IMAGE) is the image pulled by digest ($$id)"; \
+		$(call NEED_ID_FILE,$(TOOLCHAIN_ID_FILE),TOOLCHAIN_ID_FILE); \
+		$(call READ_ID,$(TOOLCHAIN_ID_FILE)); \
+	else \
+		echo $(TOOLCHAIN_IMAGE); \
+	fi
+
+it-ref: ## Print the integration image a stage starts: a trusted CI run's recorded image ID, otherwise the tag
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		$(call NEED_ID_FILE,$(IT_ID_FILE),IT_ID_FILE); \
+		$(call READ_ID,$(IT_ID_FILE)); \
+	else \
+		echo $(IT_IMAGE); \
+	fi
+
+docker-build-toolchain: ## Build the toolchain image when the daemon lacks its tag (a trusted CI run: unless verified, recording the ID)
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		$(call NEED_ID_FILE,$(TOOLCHAIN_ID_FILE),TOOLCHAIN_ID_FILE); \
+		rm -f "$(TOOLCHAIN_ID_FILE)"; \
+		v=$${TOOLCHAIN_VERIFIED_ID:-}; \
+		if [[ "$$v" =~ ^sha256:[0-9a-f]{64}$$ ]] && \
+			[ "$$(docker image inspect --format '{{.Id}}' "$$v" 2>/dev/null || true)" = "$$v" ]; then \
+			echo "docker-build-toolchain: a trusted run uses the image pulled by digest, by its ID ($$v)"; \
+			printf '%s\n' "$$v" > "$(TOOLCHAIN_ID_FILE)"; \
 		else \
-			echo "docker-build-toolchain: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(TOOLCHAIN_IMAGE) from source: no verified pull names it"; \
-			docker build --no-cache --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
+			echo "docker-build-toolchain: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(TOOLCHAIN_IMAGE) from source: no verified pull"; \
+			docker build --no-cache --iidfile "$(TOOLCHAIN_ID_FILE)" --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
 		fi; \
 	else \
 		docker image inspect $(TOOLCHAIN_IMAGE) >/dev/null 2>&1 || \
 			docker build --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
 	fi
 
-docker-build: docker-build-toolchain ## Build both images, each only when the daemon lacks its tag (a trusted CI run: always)
+docker-build: docker-build-toolchain ## Build both images, each only when the daemon lacks its tag (a trusted CI run: always, recording the ID)
 	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		$(call NEED_ID_FILE,$(IT_ID_FILE),IT_ID_FILE); \
+		rm -f "$(IT_ID_FILE)"; \
 		echo "docker-build: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(IT_IMAGE) from source"; \
-		docker build --no-cache --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
+		docker build --no-cache --iidfile "$(IT_ID_FILE)" --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
 			-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
 	else \
 		docker image inspect $(IT_IMAGE) >/dev/null 2>&1 || \
@@ -202,5 +249,6 @@ docker-run: docker-build-toolchain ## Run CMD in the toolchain image, the source
 	@[ -z "$${CST_PATH:-}" ] || [ -d "$$CST_PATH" ] || { echo "docker-run: CST_PATH=$$CST_PATH is not a directory"; exit 1; }
 	@[ -z "$${CST_PATH:-}" ] || { cst=$$(cd "$$CST_PATH" && pwd -P); repo=$$(cd "$(CURDIR)" && pwd -P); \
 		case "$$cst/" in "$$repo"/*) echo "docker-run: CST_PATH=$$CST_PATH ($$cst) is inside this checkout; the CST is never read from this tree. Extract it outside the repository."; exit 1;; esac; }
+	ref=$$($(MAKE) -s --no-print-directory toolchain-ref TOOLCHAIN_IMAGE=$(TOOLCHAIN_IMAGE)); \
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp $(CST_MOUNT) \
-		-v "$(CURDIR):/src" -w /src --ulimit core=0 $(TOOLCHAIN_IMAGE) bash -c '$(CMD)'
+		-v "$(CURDIR):/src" -w /src --ulimit core=0 "$$ref" bash -c '$(CMD)'

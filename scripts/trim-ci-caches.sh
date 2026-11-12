@@ -25,6 +25,12 @@
 #
 # A failed measurement or removal is reported and skipped: this never fails
 # the job. REAP_DRY_RUN=1 prints what would be removed and removes nothing.
+#
+# trusted-imx95 (2026-11-12, Codex security P1 on #19): pull request jobs
+# share the daemon and can move any tag, so a trusted run (GITHUB_EVENT_NAME
+# set and not pull_request or pull_request_target) takes <image> only as an
+# image ID, sha256:<64 hex> (`make -s toolchain-ref`), and refuses a tag as a
+# usage error before any container starts.
 set -u
 
 prefix=${1:-}
@@ -37,6 +43,16 @@ if [ -z "$image" ]; then
   echo "usage: $0 <prefix> <image> [max-gib]" >&2
   exit 2
 fi
+# A trusted run measures with the image by its ID (above).
+case ${GITHUB_EVENT_NAME:-} in
+  '' | pull_request | pull_request_target) ;;
+  *)
+    if ! [[ $image =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "trim-ci-caches: a trusted run ($GITHUB_EVENT_NAME) starts containers by image ID (sha256:...), never by a tag: $image" >&2
+      exit 2
+    fi
+    ;;
+esac
 case $max_gib in
   '' | *[!0-9]*) echo "max-gib must be a number: $max_gib" >&2; exit 2 ;;
 esac

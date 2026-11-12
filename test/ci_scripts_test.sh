@@ -6,6 +6,9 @@
 set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# The suite's outcome must not depend on the job that runs it: a check that
+# needs a trusted run sets GITHUB_EVENT_NAME (and RUNNER_TEMP) itself.
+unset GITHUB_EVENT_NAME RUNNER_TEMP TOOLCHAIN_VERIFIED_ID TOOLCHAIN_ID_FILE IT_ID_FILE IT_IMAGE_ID
 
 # --- scripts/check-doc-links.py --------------------------------------------
 
@@ -446,7 +449,7 @@ chmod +x "$tstub/docker"
 export TC_LOG="$TMP_ROOT/tc.log"
 here=$PWD
 cd "$TMP_ROOT/tcsrc" || exit 1
-run env PATH="$tstub:$PATH" IN_IMAGE_NETWORK=bridge CI_CACHE=off IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g \
+run env -u GITHUB_EVENT_NAME PATH="$tstub:$PATH" IN_IMAGE_NETWORK=bridge CI_CACHE=off IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g \
 	GOPRIVATE=example.invalid GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://u:fake@example.invalid/.insteadOf GIT_CONFIG_VALUE_0=https://example.invalid/ \
 	FORGE_TOKEN=fake GITHUB_TOKEN=fake GITEA_TOKEN=fake "$ROOT/scripts/in-toolchain-image.sh" img:test true
 cd "$here" || exit 1
@@ -499,8 +502,11 @@ check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a l
 # --- A trusted run never uses a toolchain tag the shared daemon holds ---
 # (Codex security P1: a pull request's job can tag any image with main's tag.)
 # The stub docker keeps each reference's image ID, and its RepoDigests, as
-# files under $IMG_STATE. A pull succeeds while $IMG_STATE/registry exists and
-# gives the registry's image, sha256:good, digest sha256:dgood.
+# files under $IMG_STATE; an image ID is a reference to itself. A pull
+# succeeds while $IMG_STATE/registry exists and gives the registry's image,
+# $IMG_GOOD, digest sha256:dgood. A build gives sha256:<sha256 of its target>
+# and writes it to its --iidfile. Every container start (create, run) is
+# logged to $IMG_STARTS.
 mkdir -p "$TMP_ROOT/imgbin"
 cat >"$TMP_ROOT/imgbin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -514,7 +520,7 @@ case "$1 ${2:-}" in
 	[ -f "$s/$k" ] || exit 1
 	case "${3:-} ${4:-}" in
 	"--format "*RepoDigests*) cat "$s/$k.digests" 2>/dev/null || true ;;
-	"--format "*) cat "$s/$k" ;;
+	"--format "* | "-f "*) cat "$s/$k" ;;
 	*) echo '[]' ;;
 	esac ;;
 "image rm") rm -f "$s/$(key "$3")" "$s/$(key "$3").digests" ;;
@@ -523,35 +529,71 @@ case "$1 ${2:-}" in
 	ref=$3
 	repo=${ref%@*}
 	[ "$repo" != "$ref" ] || repo=${ref%:*}
-	echo sha256:good >"$s/$(key "$ref")"
+	echo "$IMG_GOOD" >"$s/$(key "$ref")"
+	echo "$IMG_GOOD" >"$s/$(key "$IMG_GOOD")"
 	if [ -z "${IMG_NODIGEST:-}" ]; then echo "$repo@sha256:dgood" >"$s/$(key "$ref").digests"; fi ;;
 "tag "*)
 	cp "$s/$(key "$2")" "$s/$(key "$3")"
 	if [ -f "$s/$(key "$2").digests" ]; then cp "$s/$(key "$2").digests" "$s/$(key "$3").digests"; else rm -f "$s/$(key "$3").digests"; fi ;;
-"build "*) ;;
+"build "*)
+	iid= tag= target=
+	shift
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--iidfile) iid=$2; shift 2 ;;
+		-t) tag=$2; shift 2 ;;
+		--target) target=$2; shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	id=sha256:$(printf '%s' "$target" | sha256sum | cut -c1-64)
+	echo "$id" >"$s/$(key "$id")"
+	if [ -n "$tag" ]; then echo "$id" >"$s/$(key "$tag")"; rm -f "$s/$(key "$tag").digests"; fi
+	if [ -n "$iid" ]; then printf '%s' "$id" >"$iid"; fi ;;
+"create "* | "run "*)
+	echo "$*" >>"$IMG_STARTS"
+	case " $* " in *" --entrypoint du "*) printf '4\t/c\n' ;; esac ;;
+"cp "*) cat >/dev/null ;;
+"start "* | "rm "* | "ps "* | "push "*) ;;
+"volume ls") echo "${IMG_VOLS:-}" ;;
+"login "*) cat >/dev/null ;;
+"manifest inspect") exit 1 ;;
 *) echo "stub docker: unexpected $*" >&2; exit 3 ;;
 esac
 EOF
 chmod +x "$TMP_ROOT/imgbin/docker"
 IMG_LOG=$TMP_ROOT/img.log
 IMG_STATE=$TMP_ROOT/img
-export IMG_LOG IMG_STATE
+IMG_STARTS=$TMP_ROOT/img-starts.log
+IMG_GOOD=sha256:$(printf 'a%.0s' {1..64})
+IMG_EVIL=sha256:$(printf 'e%.0s' {1..64})
+export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD
 ltag=trusted-imx95-toolchain:abc
-lkey=$(printf '%s' "$ltag" | tr '/:@' '___')
-# seed <registry up: yes|no>: a fresh daemon whose $ltag a pull request tagged
-# with its own image (sha256:evil, no registry digest).
+itag=trusted-imx95-integration:abc
+tc_built=sha256:$(printf '%s' toolchain | sha256sum | cut -c1-64)
+it_built=sha256:$(printf '%s' integration | sha256sum | cut -c1-64)
+skey() { printf '%s' "$1" | tr '/:@' '___'; }
+lkey=$(skey "$ltag")
+rt=$TMP_ROOT/rt # the job's RUNNER_TEMP
+# seed <registry up: yes|no>: a fresh daemon whose $ltag and $itag a pull
+# request tagged with its own image ($IMG_EVIL, no registry digest).
 seed() {
-	rm -rf "$IMG_STATE"
-	mkdir -p "$IMG_STATE"
+	rm -rf "$IMG_STATE" "$rt"
+	mkdir -p "$IMG_STATE" "$rt"
 	: >"$IMG_LOG"
+	: >"$IMG_STARTS"
 	: >"$TMP_ROOT/github_env"
-	echo sha256:evil >"$IMG_STATE/$lkey"
+	echo "$IMG_EVIL" >"$IMG_STATE/$lkey"
+	echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$itag")"
+	echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$IMG_EVIL")"
 	[ "$1" = no ] || : >"$IMG_STATE/registry"
 }
-cache() { # cache <event>: ci-image-cache.sh pull on the forge, for <event>
+# move: a pull request's job moves both tags back to its image.
+move() { echo "$IMG_EVIL" >"$IMG_STATE/$lkey"; echo "$IMG_EVIL" >"$IMG_STATE/$(skey "$itag")"; }
+cache() { # cache <event> [pull|publish]: ci-image-cache.sh on the forge, for <event>
 	env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME="$1" GITHUB_SERVER_URL=https://forge.example \
-		CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" \
-		"$ROOT/scripts/ci-image-cache.sh" pull
+		CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" RUNNER_TEMP="$rt" \
+		"$ROOT/scripts/ci-image-cache.sh" "${2:-pull}"
 }
 here=$PWD
 cd "$ROOT" || exit 1
@@ -560,11 +602,11 @@ run cache push
 check "ci-image-cache: a push run pulls by digest over a tag the daemon already holds" 0 \
 	"pulled forge.example/ns/trusted-imx95-toolchain@sha256:dgood as $ltag"
 expect "ci-image-cache: the push run's tag names the registry's image, not the seeded one" \
-	grep -qx sha256:good "$IMG_STATE/$lkey"
+	grep -qx "$IMG_GOOD" "$IMG_STATE/$lkey"
 expect "ci-image-cache: the push run pulls the digest itself" \
 	grep -qx "pull -q forge.example/ns/trusted-imx95-toolchain@sha256:dgood" "$IMG_LOG"
 expect "ci-image-cache: the push run exports the verified image ID" \
-	grep -qx TOOLCHAIN_VERIFIED_ID=sha256:good "$TMP_ROOT/github_env"
+	grep -qx "TOOLCHAIN_VERIFIED_ID=$IMG_GOOD" "$TMP_ROOT/github_env"
 seed no
 run cache schedule
 check "ci-image-cache: a scheduled run with the registry down falls back to the build, not the seeded tag" 1 \
@@ -581,40 +623,130 @@ seed yes
 run cache pull_request
 check "ci-image-cache: a pull request still uses the tag its daemon holds" 0 "the daemon holds $ltag; no pull"
 
-# The Makefile's builds (docker-build-toolchain, docker-build).
+# The Makefile's builds (docker-build-toolchain, docker-build) and the
+# references they record.
 mk() { # mk <event> <target> [VAR=value...]
 	local ev=$1
 	shift
-	env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME="$ev" \
-		make --no-print-directory -C "$ROOT" "$@" TOOLCHAIN_IMAGE="$ltag" IT_IMAGE=trusted-imx95-integration:abc
+	env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME="$ev" RUNNER_TEMP="$rt" \
+		make --no-print-directory -C "$ROOT" "$@" TOOLCHAIN_IMAGE="$ltag" IT_IMAGE="$itag"
 }
 seed yes
 run mk push docker-build-toolchain
 check "make docker-build-toolchain: a push run rebuilds over a seeded tag" 0 "rebuilds $ltag from source"
-expect "make docker-build-toolchain: the trusted rebuild uses no cache" \
-	grep -q "^build --no-cache --target toolchain -t $ltag " "$IMG_LOG"
+expect "make docker-build-toolchain: the trusted rebuild uses no cache and records its ID" \
+	grep -q "^build --no-cache --iidfile $rt/toolchain-image.id --target toolchain -t $ltag " "$IMG_LOG"
+run mk push -s toolchain-ref
+check "make toolchain-ref: a push run prints the ID its rebuild recorded" 0 "$tc_built"
 seed yes
-echo sha256:good >"$IMG_STATE/$lkey"
-TOOLCHAIN_VERIFIED_ID=sha256:good run mk push docker-build-toolchain
-check "make docker-build-toolchain: a push run keeps the tag that names the verified pull" 0 "is the image pulled by digest (sha256:good)"
-if grep -q '^build' "$IMG_LOG"; then fail "make docker-build-toolchain: a verified tag is not rebuilt" "$(cat "$IMG_LOG")"; else pass "make docker-build-toolchain: a verified tag is not rebuilt"; fi
+echo "$IMG_GOOD" >"$IMG_STATE/$(skey "$IMG_GOOD")"
+TOOLCHAIN_VERIFIED_ID=$IMG_GOOD run mk push docker-build-toolchain
+check "make docker-build-toolchain: a push run uses the verified pull, by its ID" 0 \
+	"uses the image pulled by digest, by its ID ($IMG_GOOD)"
+if grep -q '^build' "$IMG_LOG"; then fail "make docker-build-toolchain: a verified pull is not rebuilt" "$(cat "$IMG_LOG")"; else pass "make docker-build-toolchain: a verified pull is not rebuilt"; fi
+run mk push -s toolchain-ref
+check "make toolchain-ref: a push run prints the verified ID, not the seeded tag's" 0 "$IMG_GOOD"
 seed yes
-TOOLCHAIN_VERIFIED_ID=sha256:good run mk push docker-build-toolchain
-expect "make docker-build-toolchain: a seeded tag that is not the verified ID is rebuilt" \
-	grep -q "^build --no-cache --target toolchain" "$IMG_LOG"
+TOOLCHAIN_VERIFIED_ID=$IMG_GOOD run mk push docker-build-toolchain
+expect "make docker-build-toolchain: a verified ID the daemon lacks is rebuilt" \
+	grep -q "^build --no-cache --iidfile .* --target toolchain" "$IMG_LOG"
+seed yes
+run env -u RUNNER_TEMP PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
+	make --no-print-directory -C "$ROOT" docker-build-toolchain TOOLCHAIN_IMAGE="$ltag"
+check "make docker-build-toolchain: a trusted run with nowhere to record the ID fails" nonzero "records its image ID"
+seed yes
+run mk push -s it-ref
+check "make it-ref: a trusted run with no recorded ID fails, never prints the tag" nonzero "holds no image ID"
 seed yes
 run mk push docker-build
-expect "make docker-build: a push run rebuilds the integration image with no cache" \
-	grep -q "^build --no-cache --target integration" "$IMG_LOG"
+expect "make docker-build: a push run rebuilds the integration image with no cache, recording its ID" \
+	grep -q "^build --no-cache --iidfile $rt/it-image.id --target integration" "$IMG_LOG"
 seed yes
-echo sha256:evil >"$IMG_STATE/$(printf '%s' trusted-imx95-integration:abc | tr '/:@' '___')"
 run mk pull_request docker-build
 if [ "$RC" = 0 ] && ! grep -q '^build' "$IMG_LOG"; then
 	pass "make docker-build: a pull request keeps the tags its daemon holds"
 else
 	fail "make docker-build: a pull request keeps the tags its daemon holds" "rc $RC; $(cat "$IMG_LOG"); $OUT"
 fi
+run mk pull_request -s toolchain-ref
+check "make toolchain-ref: a pull request prints the tag" 0 "$ltag"
+
+# A trusted job end to end, as ci.yml runs it: the pull, the build, the
+# exported reference; then a pull request's job moves both tags, and every
+# container the job starts (the cache trim, each stage, the integration
+# test, docker-run) must still name an image ID.
+mkdir -p "$TMP_ROOT/tcsrc"
+seed yes
+cache push >/dev/null
+ver=$(sed -n 's/^TOOLCHAIN_VERIFIED_ID=//p' "$TMP_ROOT/github_env")
+TOOLCHAIN_VERIFIED_ID=$ver mk push docker-build-toolchain >/dev/null
+tref=$(mk push -s toolchain-ref)
+mk push docker-build >/dev/null
+iref=$(mk push -s it-ref)
+move
+: >"$IMG_STARTS"
+tc() { (cd "$TMP_ROOT/tcsrc" && env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
+	IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g CI_STACK_PREFIX=t-ci- "$@"); }
+run tc env IMG_VOLS=t-ci-cache-main-gobuild "$ROOT/scripts/trim-ci-caches.sh" t-ci- "$tref"
+check "trim-ci-caches: a push run measures with the image ID" 0 "caches:"
+run tc "$ROOT/scripts/in-toolchain-image.sh" "$tref" true
+check "in-toolchain-image: a push run starts its stage by the image ID" 0
+run mk push integration-test IT_IMAGE_ID="$iref" IT_PROJECT=t-it
+check "make integration-test: a push run starts the leased image ID" 0
+run mk push integration-test IT_PROJECT=t-it2
+check "make integration-test: a push run without IT_IMAGE_ID starts the ID its build recorded" 0
+TOOLCHAIN_VERIFIED_ID=$ver run mk push docker-run CMD=true
+check "make docker-run: a push run starts the image ID" 0
+starts=$(grep -c . "$IMG_STARTS" || true)
+untagged=$(grep -cvE " sha256:[0-9a-f]{64}( |$)" "$IMG_STARTS" || true)
+if [ "$starts" -ge 6 ] && [ "$untagged" = 0 ] && ! grep -qE "$ltag|$itag" "$IMG_STARTS"; then
+	pass "a trusted job: no container start receives a tag ($starts starts, after the tags moved)"
+else
+	fail "a trusted job: no container start receives a tag ($starts starts, after the tags moved)" "$(cat "$IMG_STARTS")"
+fi
+expect "a trusted job: the stages run the verified toolchain ID" grep -q " $IMG_GOOD " "$IMG_STARTS"
+expect "a trusted job: the integration test runs the integration build's ID" grep -q " $it_built make -C /src" "$IMG_STARTS"
+: >"$IMG_STARTS"
+run tc "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
+check "in-toolchain-image: a push run refuses a tag" 2 "never by a tag: $ltag"
+run tc "$ROOT/scripts/trim-ci-caches.sh" t-ci- "$ltag"
+check "trim-ci-caches: a push run refuses a tag" 2 "never by a tag: $ltag"
+run mk push integration-test IT_IMAGE_ID="$itag" IT_PROJECT=t-it3
+check "make integration-test: an IT_IMAGE_ID that is a tag is refused" nonzero "must be an image ID"
+expect "a trusted job: a refused tag starts no container" test ! -s "$IMG_STARTS"
+run tc env GITHUB_EVENT_NAME=pull_request "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
+check "in-toolchain-image: a pull request may still name a tag" 0
+# publish tags the ID its build recorded, not the tag another job moved.
+seed yes
+rm -f "$IMG_STATE/registry"
+GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token run cache push publish
+check "ci-image-cache: publish pushes the image its build recorded" 0 "published $ltag"
+expect "ci-image-cache: publish tags the recorded ID, never the local tag" \
+	grep -qx "tag $tc_built forge.example/ns/$ltag-main" "$IMG_LOG"
+if [[ "$OUT" == *fake-token* ]]; then fail "ci-image-cache: publish prints no credential" "$OUT"; else pass "ci-image-cache: publish prints no credential"; fi
 cd "$here" || exit 1
+
+# ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref, and hands the
+# integration test the leased ID.
+ci=$(<"$ROOT/.github/workflows/ci.yml")
+# shellcheck disable=SC2016 # the patterns match ci.yml's literal shell text
+n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
+# shellcheck disable=SC2016
+n_tag=$(grep -c 'TOOLCHAIN_IMAGE=$(make -s toolchain-image)' <<<"$ci" || true)
+# shellcheck disable=SC2016
+n_it=$(grep -cE 'make (integration-test|"\$SOAK_TARGET") .*IT_IMAGE_ID="\$IT_LEASE_ID"' <<<"$ci" || true)
+if [ "$n_ref" = 3 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
+	pass "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID"
+else
+	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
+fi
+
+# --- the toolchain image carries ssh-keygen ------------------------------------
+# (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's
+# git package does not supply it.)
+expect "Dockerfile: the toolchain stage installs openssh-keygen" \
+	python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"FROM base AS toolchain\n(.*?)\n(?:FROM|\Z)", t, re.S); sys.exit(0 if m and re.search(r"apk add [^\n]*\bopenssh-keygen\b", m.group(1)) else 1)' \
+	"$ROOT/build/docker/devcontainer/Dockerfile"
 
 # --- signatures.yml: the adoption push, against real SSH-signed git fixtures ---
 # (Codex P1: the adoption merge's push has a before with no registry.) The
@@ -636,6 +768,10 @@ EOF
 if [ -s "$TMP_ROOT/sigstep.sh" ]; then pass "signatures.yml: the verify step's script is extracted"; else fail "signatures.yml: the verify step's script is extracted"; fi
 sr=$TMP_ROOT/sigrepo
 mkdir -p "$sr"
+# No skip: without ssh-keygen the fixtures cannot be made, and that fails.
+if ! command -v ssh-keygen >/dev/null 2>&1; then
+	fail "signatures.yml fixtures: ssh-keygen is not on PATH (the toolchain image installs openssh-keygen; outside it, install OpenSSH's ssh-keygen)"
+else
 ssh-keygen -q -t ed25519 -N '' -C fixture -f "$TMP_ROOT/sigkey" # a throwaway key for the fixture only
 ssh-keygen -q -t ed25519 -N '' -C other -f "$TMP_ROOT/otherkey"
 g() { git -C "$sr" -c user.name=Dev -c user.email=dev@example.com -c gpg.format=ssh \
@@ -681,5 +817,6 @@ check "signatures.yml: the adoption push still fails a commit the registered key
 run sig pull_request_target "" "$B" "$A"
 check "signatures.yml: a pull request that adds the registry is still judged by its base's" 1 \
 	"FAIL no .github/allowed_signers at the base ${A:0:12}"
+fi
 
 finish
