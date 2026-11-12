@@ -50,6 +50,17 @@ Every claim below names one of these. Text is summarised, never copied.
   (head `2d08c05`, 2026-11-05), https://github.com/Freescale/meta-freescale.
 - [S6] Linux man-pages project, *kernel_lockdown(7)*, `master` as of 2026-11-12,
   https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/tree/man/man7/kernel_lockdown.7.
+- [S7] OpenEmbedded, *openembedded-core*, branch `wrynose` (head `2285da0`,
+  2026-11-06), https://git.openembedded.org/openembedded-core
+  (`meta/recipes-core/systemd/`, systemd 259.5).
+- [S8] Yocto Project, *Releases* wiki page, read 2026-11-12,
+  https://wiki.yoctoproject.org/wiki/Releases.
+- [S9] systemd, *systemd.exec(5)* and *systemd.resource-control(5)*, tag `v259.5`,
+  https://github.com/systemd/systemd/tree/v259.5/man.
+- [S10] Yocto Project, *meta-selinux*, branch `wrynose` (head `18ee2df`),
+  https://git.yoctoproject.org/meta-selinux — branch seen; recipes not read.
+- [S11] Yocto Project, *meta-security*, branch `wrynose` (head `2703974`),
+  https://git.yoctoproject.org/meta-security — branch seen; recipes not read.
 - [S4] Ulf Magnusson, *Kconfiglib*, `master`, https://github.com/ulfalizer/Kconfiglib
   (the tool used to resolve the configuration; not a security source).
 
@@ -94,9 +105,10 @@ Not set by NXP, grouped by what they cost (my grouping, KSPP's options) [S2]:
   `UNWIND_PATCH_PAC_INTO_SCS`, `ARM64_BTI_KERNEL`, `ARM64_MTE`,
   `KASAN_HW_TAGS`, `CFI_CLANG`. BTI and MTE are Armv8.5 features; if the
   Cortex-A55 lacks them (unconfirmed) they are moot on this SoC.
-  `SHADOW_CALL_STACK` and `CFI_CLANG` need a clang-built kernel in 6.18's
-  Kconfig, which the Yocto default (gcc) does not give (unconfirmed for
-  meta-imx).
+  In 6.18's Kconfig [S1], `SHADOW_CALL_STACK` depends on a compiler probe
+  (`ARCH_SUPPORTS_SHADOW_CALL_STACK`), and `CFI_CLANG` is a transitional name
+  for kCFI. Whether the wrynose gcc passes those probes, or a clang build is
+  needed, is unconfirmed.
 
 The tag also carries upstream's own fragments, `kernel/configs/hardening.config`
 and `arch/arm64/configs/hardening.config` [S1], which can be merged with
@@ -190,21 +202,132 @@ likely conflict, to be confirmed in the first hardened build (Q2).
   built in [S1]. None of the hardening options above removes them.
 - **`COMPAT=n`.** It drops 32-bit userspace. Some vendor binaries may be
   32-bit; I did not check (Q2).
-- **Toolchain options** (SCS, kCFI) need clang. meta-imx has a `clang-layer`
-  dynamic layer [S3], but building `linux-imx` with clang is not confirmed.
+- **Toolchain options** (SCS, kCFI) depend on compiler support (§3). meta-imx
+  has a `clang-layer` dynamic layer [S3], but a clang-built `linux-imx` is
+  not confirmed.
 
 ## 7. Minimal userspace
 
-TODO
+The board's job is to run xkmsd and the services it needs, not a display
+stack. meta-imx's own distros [S3] are built around Wayland, XWayland or a
+framebuffer; their `-minimal` variants remove X11 but keep the NXP base
+(`fsl-imx-base.inc`, not read here). OE-core `wrynose` (head `2285da0`,
+2026-11-06) [S7] ships systemd 259.5, the version §8 is written against.
+Yocto 6.0 "Wrynose" was released in April 2026 and is supported until April
+2030, per the Yocto Project releases page [S8].
+
+A minimal image for this row would:
+
+- start from OE-core's `core-image-minimal` pattern rather than an `fsl-image-*`
+  or `imx-image-*` image, and add only the kernel, firmware
+  (`firmware-ele-imx`, which the board's machine adds for i.MX95 [S3]), systemd,
+  xkmsd and its runtime needs;
+- leave out shells and debug tools in the production image (no `bash`, no
+  `gdb`, no `strace`, no `imx-test`, no package manager), and put them in a
+  separate debug image that never holds production keys;
+- mount the root filesystem read-only (verified-boot survey covers dm-verity;
+  `DM_VERITY` is off in NXP's config [S1]);
+- leave out the optional M7 demo images and camera, display and audio
+  device-tree variants the machine file lists [S3], if the product does not
+  use them.
+
+I did not build such an image; what xkmsd needs at run time is go-xkms's to
+say (Q7).
 
 ## 8. Confining xkmsd
 
-TODO
+xkmsd is go-xkms's daemon; this repository only packages it. Three layers
+are available, from cheapest to most work.
+
+**systemd sandboxing (systemd 259.5) [S9].** Every directive below exists in
+the v259.5 `systemd.exec(5)` and `systemd.resource-control(5)` sources:
+
+- filesystem: `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`,
+  `ProtectProc=invisible`, `ProcSubset=pid`, writable state only under a
+  `StateDirectory`;
+- devices: `PrivateDevices=yes`, or `DevicePolicy=closed` with `DeviceAllow`
+  for the ELE and any HSM device node only (the node names are unconfirmed);
+- privilege: `DynamicUser=yes` or a fixed system user, `NoNewPrivileges=yes`,
+  an empty or minimal `CapabilityBoundingSet`, `RestrictSUIDSGID=yes`,
+  `LockPersonality=yes`, `MemoryDenyWriteExecute=yes`, `UMask=0077`;
+- kernel: `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`,
+  `ProtectClock`, `ProtectControlGroups`, `RestrictNamespaces=yes`,
+  `RestrictRealtime=yes`;
+- syscalls: `SystemCallFilter=@system-service`, `SystemCallArchitectures=native`
+  (needs `SECCOMP_FILTER`, which NXP sets [S1]);
+- network: `RestrictAddressFamilies` to the families xkmsd uses,
+  `IPAddressAllow`/`IPAddressDeny` (needs `CGROUP_BPF`, which NXP sets [S1]);
+- secrets: `LoadCredentialEncrypted` for any key material at rest (whether
+  this fits the ELE-held keys is go-xkms's design; unconfirmed).
+
+`systemd-analyze security` scores a unit against these settings [S9]. A Go
+binary does not generate code at run time, so `MemoryDenyWriteExecute` should
+not break it; this has not been tested with xkmsd.
+
+**Landlock and Yama.** Both are in NXP's `CONFIG_LSM` string but not built
+[S1]. Building them costs little; Landlock lets xkmsd restrict its own file
+access, which go-xkms would have to code (Q8).
+
+**A MAC LSM (SELinux or AppArmor).** Neither is built [S1]. In 6.18's Kconfig
+SELinux needs `SECURITY_NETWORK`, `AUDIT`, `NET` and `INET`, and AppArmor needs
+`SECURITY` and `NET` [S1]; NXP has `SECURITY_NETWORK` off. The Yocto layers
+that carry them, meta-selinux and meta-security (AppArmor), both have a
+`wrynose` branch [S10] [S11]; I did not read their recipes, so their state on
+wrynose is unconfirmed. A MAC policy confines xkmsd even if it is compromised
+as root, which systemd sandboxing alone does not; the cost is writing and
+keeping a policy for the whole image.
 
 ## 9. What could not be confirmed
 
-TODO
+- The full configuration came from Kconfiglib with a host compiler, not from
+  `make imx_v8_defconfig` with the aarch64 cross toolchain (§1). PAC, BTI,
+  MTE, SCS and kCFI are unconfirmed, and so is whether the Cortex-A55 has the
+  PAC, BTI and MTE extensions.
+- Which lockdown restrictions fall in integrity and which in confidentiality
+  mode (`include/linux/security.h` was not read).
+- Whether the Yocto module class signs out-of-tree modules.
+- Whether any NXP tool in a minimal image needs `/dev/mem`, debugfs or 32-bit
+  userspace.
+- Whether `imx95-15x15-lpddr4x-frdm` is the right machine for the
+  FRDM-IMX95-PRO.
+- The device nodes and syscalls xkmsd uses (go-xkms owns them).
+- The state of meta-selinux and meta-security on wrynose.
+- NXP's i.MX Linux security reference documents, which SPEC.md lists as
+  missing from `references/`; no NXP PDF was read.
 
 ## 10. Questions for the owner
 
-TODO
+1. **Kernel baseline.** (a) NXP's `imx_v8_defconfig` as is; (b) plus upstream's
+   `hardening.config` fragments; (c) (b) plus the rest of KSPP's cheap group (§3)
+   in a project fragment. *Recommendation: (c), applied as a kernel-yocto
+   fragment, since meta-imx rejects `DELTA_KERNEL_DEFCONFIG` [S3]. Confirm the
+   toolchain-dependent options with a real cross build first.*
+2. **Modules.** (a) keep modules unsigned; (b) keep modules, force signatures
+   (`MODULE_SIG_FORCE`, SHA-512) and build only the drivers the board uses;
+   (c) `MODULES=n`. *Recommendation: (b). (c) drops the out-of-tree BSP modules
+   (§6); (a) leaves the biggest gap.*
+3. **Module signing key.** (a) a key made per build and thrown away after
+   signing; (b) a long-lived project key held offline. *Recommendation: (a);
+   it leaves no key to steal, and any later module must come from a new kernel
+   build. No source settles this; it is a policy choice.*
+4. **Lockdown mode.** (a) none; (b) integrity; (c) confidentiality, early.
+   *Recommendation: (c) for production (KSPP's setting [S2]), with a separate
+   debug image if debugfs-based tools are needed. Revisit if the split (§9)
+   puts a needed interface in confidentiality.*
+5. **/dev/mem, /dev/port, kexec, SysRq, oops.** (a) keep NXP's defaults;
+   (b) `DEVMEM=n`, `DEVPORT=n`, `KEXEC=n`, `KEXEC_FILE=n`, `CRASH_DUMP=n`,
+   SysRq restricted, `PANIC_ON_OOPS=y`. *Recommendation: (b), per KSPP [S2]; no
+   BSP dependency was found (§6).*
+6. **Machine.** Is `imx95-15x15-lpddr4x-frdm` [S3] the base for the
+   FRDM-IMX95-PRO, or does the PRO need its own machine file? *No
+   recommendation; needs the board's NXP documentation.*
+7. **Userspace.** (a) an `fsl-imx-*-minimal` distro image; (b) a project image
+   built from `core-image-minimal`, with a separate debug image.
+   *Recommendation: (b).*
+8. **xkmsd confinement.** (a) systemd sandboxing only; (b) (a) plus Landlock
+   and Yama; (c) (b) plus SELinux or AppArmor. *Recommendation: (b) now: it
+   needs no policy language and NXP's `CONFIG_LSM` already names both. Decide
+   (c) after go-xkms states xkmsd's device and network needs, and after
+   checking meta-selinux and meta-security on wrynose.*
+9. **SELinux or AppArmor**, if 8(c). *No recommendation from these sources;
+   SELinux also needs `SECURITY_NETWORK` turned on (§8).*
