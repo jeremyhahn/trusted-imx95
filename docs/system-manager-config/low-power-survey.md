@@ -62,8 +62,12 @@ device function that clients reach through SCMI. Grouped by scope:
 | One power domain ("mix") | Off or on | SCMI Power protocol, per `PD_*` grant (SM-ARCH, "SM Framework") |
 | One CPU | Start, hold, stop, boot vector; CPU low-power mode and the peripheral low-power interface (`PERLPI_*`) wake hooks | NXP CPU protocol, per `CPU_*`/`PERLPI_*` grant (SM-ARCH, SM-CONFIG) |
 
-In Linux and TF-A terms: Linux `suspend-to-RAM` goes through PSCI to TF-A, which
-as the secure agent of the AP LM asks the SM to suspend the LM; the M7 does the
+In Linux and TF-A terms: upstream TF-A builds BL31 for `PLAT=imx95` and boots
+it after the SPL and before U-Boot and Linux (TFA-IMX9), and in the FRDM
+configuration TF-A is the secure agent `AP-S` of the AP LM (SM-FRDM-CFG). So a
+Linux `suspend-to-RAM` goes through PSCI to TF-A, which asks the SM to suspend
+the LM; TFA-IMX9 itself says nothing about low power, so this path is read from
+the agent grants, not from a TF-A document; the M7 does the
 same for its own LM. The exact set of system sleep modes (which mixes, PLLs and
 DDR self-refresh each one keeps) is defined in the SM's device code for the
 i.MX 95 and in the i.MX 95 Reference Manual; neither was read for this survey
@@ -155,7 +159,44 @@ sources address.
 
 ## 5. What a secure deployment should allow
 
-(to be filled)
+These are this survey's proposals, each tied to the source that supports it. None
+is decided until the owner answers section 8.
+
+1. **Only the secure worlds may change the system power state.** Keep Linux
+   (`AP-NS`) at `SYS NOTIFY`, as the reference file already does, so that every
+   AP suspend or shutdown passes through TF-A (SM-FRDM-CFG, SM-CONFIG). Give the
+   M7 `SYS ALL` only if `hsm-self-defence` needs it to shut the SoC down on
+   tamper; otherwise reduce it.
+2. **Restrict cross-LM control to the tamper path.** `LMM_2 ALL` lets the M7
+   reset or power off the AP LM, which the SPEC's `hsm-self-defence` row needs.
+   The reverse grant (`LMM_1`) should stay notify-only for Linux, as shipped, so
+   the A55 normal world cannot stop or reboot the M7 (SM-FRDM-CFG).
+3. **Allow LM suspend, not mix power-down, as the default low-power mode**, until
+   the ELE's behaviour across power-down is confirmed. A suspend with DDR in
+   self-refresh keeps OP-TEE and TRDC state; a mix power-down relies on the SM
+   rewriting TRDC through the ELE and on correct register restore (SM-ARCH,
+   SM-CONFIG). Whole-SoC shutdown stays available for tamper response.
+4. **Keep wake sources to the ones the product uses**, and keep each in the LM
+   that owns it. On this board every external wake line comes through the
+   SM-owned expander on GPIO1 (SM-PORT), so a wake source is enabled by granting
+   its `BRD_SM_CTRL_*_WAKE` control to an agent, and disabled by not granting it.
+   For an HSM, the candidates are the on/off button, the RTC alarm and the network
+   (PCIe or Ethernet). The UART and SD3 wake lines serve debug and removable
+   media and have no HSM use; drop them.
+5. **No debug monitor and no test code in production.** The SM debug monitor
+   can suspend, wake, shut down and reset any LM, write memory and read or write
+   fuses from its UART; NXP states it is not for production and that test code
+   must be compiled out with `M=0` (SM-MONITOR, SM-DEV, SM-RN SM-399).
+6. **Keep the shutdown record private.** BBNSM GPR0-3 hold the SM's fault and
+   reset record and should not be granted to any agent (SM-PORT).
+7. **Fault reactions should fail closed.** A DRAM or NoC fault already resets
+   the system in the reference file; the M7 faults reset only the M7 LM. Whether
+   an M7 fault should instead reset or shut down the whole SoC, since the M7
+   carries the tamper response, is a question for the owner (SM-FRDM-CFG).
+8. **Disable auto-boot on events that an attacker can cause.** The `auto=` key
+   can boot an LM on a button press (SM-CONFIG); the reference file does not set
+   it, and a deployment should keep it unset unless the owner wants power-on by
+   button.
 
 ## 6. How the board configuration restricts modes and wake sources
 
@@ -220,8 +261,71 @@ All of these are build-time settings in the board's `.cfg` (SM-CONFIG,
 
 ## 7. Not confirmed
 
-(to be filled)
+Things this survey could not confirm from public sources, and the source that
+would settle each:
+
+- **The list of i.MX 95 system sleep modes** and what each keeps (mixes, PLLs,
+  DDR self-refresh, oscillators). Defined in the SM's i.MX 95 device code
+  (`devices/MIMX95/sm/dev_sm_system.c`, not read: the lane may not read source
+  code outside its repository) and in the i.MX 95 Reference Manual (IMX95RM),
+  which this repository lists as missing.
+- **The ELE's behaviour across suspend, mix power-down and reset**: which key
+  store contents are volatile, whether sessions must be reopened, and whether the
+  ELE re-checks anything on wake. Needs the ELE API reference (RM00284, private
+  references) and the i.MX 95 Security Reference Manual (missing).
+- **Re-authentication of images on resume** versus on LM boot. Not stated in any
+  public source read.
+- **OP-TEE's i.MX 95 suspend handling** (its `plat-imx` code was not read) and
+  **TF-A's i.MX 95 PSCI suspend handling** (NXP's `imx-atf` fork and upstream
+  `plat/imx/imx95` code were not read; TFA-IMX9 covers only the build).
+- **The Linux binding for the i.MX 95 SCMI vendor protocols**
+  (`Documentation/devicetree/bindings/firmware/nxp,imx95-scmi.yaml`) was fetched
+  but could not be read under the lane's rules on code files.
+- **Which SM configuration fits the owner's FRDM-IMX95-PRO** (`mx95frdm` for the
+  LPDDR5 15x15 board, or `mx95evk` for the LPDDR4 board) (SM-RN, SM-444).
+- **What the SM's alternative configuration tool, SMCT
+  (https://github.com/nxp-imx/imx-smct), adds**; not surveyed.
+
+Unreachable sources: none. Every public URL tried was reachable; the gaps above
+come from documents that are not public or from code the lane was not allowed to
+read.
 
 ## 8. Questions for the owner
 
-(to be filled)
+1. **Which SM board configuration is the base for this board?**
+   Options: (a) `mx95frdm` (LPDDR5 15x15 FRDM); (b) `mx95evk` (LPDDR4 FRDM,
+   which the SM treats as EVK-compatible); (c) a new file copied from one of
+   them. Recommendation: (c), copied from whichever of (a) or (b) matches the
+   board's memory and PMICs per UM12527, since NXP's files are reference
+   configurations and the SM docs advise copying one for a new configuration
+   (SM-DEV, SM-RN SM-444).
+2. **Which low-power modes may the product use?**
+   Options: (a) none: the board runs or is off; (b) LM suspend with DDR kept
+   (suspend-to-RAM), no mix power-down beyond what suspend does; (c) all modes
+   the SM supports, including deep sleep with mixes off. Recommendation: (a) for
+   an always-on HSM, or (b) if power saving is required; not (c) until the ELE's
+   behaviour across power-down is confirmed (section 4, section 7).
+3. **Which agents may set the system power state?**
+   Options: (a) TF-A (`AP-S`) and the M7, as shipped; (b) TF-A only, the M7
+   notify-only; (c) the M7 only, TF-A notify-only. Recommendation: (a), because
+   the M7 needs whole-SoC shutdown for `hsm-self-defence` and Linux is already
+   notify-only (section 5, items 1 and 2).
+4. **Which wake sources are allowed?**
+   Options: (a) on/off button only; (b) button and RTC alarm; (c) button, RTC
+   and network (PCIe or Ethernet wake); (d) all board wake lines, as shipped
+   (adds UART and SD3). Recommendation: (b) if low power is allowed at all;
+   network wake only if remote wake is a product requirement, since it lets a
+   remote party change the device's power state (section 3, section 5 item 4).
+5. **What happens when the M7, which carries the tamper response, faults?**
+   Options: (a) reset the M7 LM only, as shipped; (b) reset the whole SoC; (c)
+   shut the SoC down. No public source supports one option over another; the
+   choice depends on whether an M7 fault is treated as a possible attack. This
+   survey leans to (b), so that the tamper path is never silently absent.
+6. **Must secrets be cleared from DDR before suspend?**
+   Options: (a) no, rely on the TRDC carve-outs while asleep; (b) yes, the
+   secure world wipes session keys and re-derives them from the ELE on resume;
+   (c) forbid suspend (question 2 (a)). Recommendation: none until the ELE's
+   behaviour is confirmed (section 7); (c) is the safe default.
+7. **Should the deployment configuration be built with the SM's configtool or
+   with NXP's SMCT?** Options: (a) configtool, in the SM tree; (b) SMCT.
+   Recommendation: (a), the only one surveyed here; SMCT was not surveyed.
