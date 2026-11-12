@@ -150,14 +150,44 @@ toolchain-image: ## Print the toolchain image tag (by content)
 it-image: ## Print the integration image tag (by content)
 	@echo $(IT_IMAGE)
 
-docker-build-toolchain: ## Build the toolchain image when the daemon lacks its tag
-	@docker image inspect $(TOOLCHAIN_IMAGE) >/dev/null 2>&1 || \
-		docker build --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .
+# A trusted run (CI on any event but a pull request: a push to main, a
+# schedule, a dispatch) never trusts a tag the daemon already holds. Pull
+# request jobs share the runners' persistent Docker daemon and run their own
+# Makefile with Docker access, so a pull request can tag any image with
+# main's tag; the same daemon's build cache is just as writable (a committed
+# container answers a RUN step's cache lookup). A trusted run therefore keeps
+# the toolchain tag only when it still names the image ID
+# scripts/ci-image-cache.sh pulled by digest from the registry
+# (TOOLCHAIN_VERIFIED_ID, which that script exports to the job), and
+# otherwise rebuilds from source with no cache; it always rebuilds the
+# integration image that way. Locally, and on a pull request, a tag the
+# daemon holds is used as before.
+TRUSTED_RUN := $(if $(filter-out pull_request pull_request_target,$(GITHUB_EVENT_NAME)),1)
 
-docker-build: docker-build-toolchain ## Build both images, each only when the daemon lacks its tag
-	@docker image inspect $(IT_IMAGE) >/dev/null 2>&1 || \
-		docker build --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
-			-t $(IT_IMAGE) -f $(DOCKERFILE) .
+docker-build-toolchain: ## Build the toolchain image when the daemon lacks its tag (a trusted CI run: unless verified)
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		id=$$(docker image inspect --format '{{.Id}}' $(TOOLCHAIN_IMAGE) 2>/dev/null || true); \
+		if [ -n "$${TOOLCHAIN_VERIFIED_ID:-}" ] && [ "$$id" = "$$TOOLCHAIN_VERIFIED_ID" ]; then \
+			echo "docker-build-toolchain: $(TOOLCHAIN_IMAGE) is the image pulled by digest ($$id)"; \
+		else \
+			echo "docker-build-toolchain: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(TOOLCHAIN_IMAGE) from source: no verified pull names it"; \
+			docker build --no-cache --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
+		fi; \
+	else \
+		docker image inspect $(TOOLCHAIN_IMAGE) >/dev/null 2>&1 || \
+			docker build --target toolchain -t $(TOOLCHAIN_IMAGE) -f $(DOCKERFILE) .; \
+	fi
+
+docker-build: docker-build-toolchain ## Build both images, each only when the daemon lacks its tag (a trusted CI run: always)
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		echo "docker-build: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(IT_IMAGE) from source"; \
+		docker build --no-cache --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
+			-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
+	else \
+		docker image inspect $(IT_IMAGE) >/dev/null 2>&1 || \
+			docker build --target integration --build-arg "APK_INDEX_SUM=$(APK_INDEX_SUM)" \
+				-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
+	fi
 
 # The CST extraction lives outside the checkout (scripts/cst-check.sh), so a
 # set CST_PATH is bind-mounted read-only at /cst and named there; unset, it

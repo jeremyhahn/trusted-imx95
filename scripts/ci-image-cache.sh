@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# ci-image-cache.sh v3 (2026-11-12, Codex security P1 on trusted-imx95 #19):
+# pull request jobs share the runners' persistent Docker daemon and run their
+# own Makefile with Docker access, so a pull request can tag any image with
+# main's toolchain tag. A trusted run (GITHUB_EVENT_NAME set and not
+# pull_request or pull_request_target) therefore never trusts a tag the
+# daemon holds: pull always pulls from the registry, takes the registry's
+# digest from the image's RepoDigests, pulls that digest, tags it, and
+# exports its image ID to the job as TOOLCHAIN_VERIFIED_ID (GITHUB_ENV). The
+# Makefile's docker-build-toolchain keeps the tag on a trusted run only while
+# it names that ID, and otherwise rebuilds from source with no cache.
+# test/ci_scripts_test.sh holds this. A pull request run, and a run outside
+# CI, keep v2's behaviour.
 # ci-image-cache.sh v2 (2026-11-08, Company Agent m2101 item 2): the
 # namespace comes only from CI_IMAGE_NAMESPACE, the repository Actions
 # variable; unset, the script stops.
@@ -49,6 +61,12 @@ host=${host%%/*}
 ns=${CI_IMAGE_NAMESPACE:-}
 [ -n "$ns" ] || die "CI_IMAGE_NAMESPACE is not set (the repository Actions variable)"
 
+# A trusted run is CI on any event but a pull request (v3, above).
+case ${GITHUB_EVENT_NAME:-} in
+  '' | pull_request | pull_request_target) trusted=0 ;;
+  *) trusted=1 ;;
+esac
+
 local_tag=$(make -s toolchain-image) || die "make -s toolchain-image failed"
 case $local_tag in
   *:*) ;;
@@ -62,18 +80,45 @@ trap cleanup EXIT
 
 case ${1:-} in
   pull)
-    if docker image inspect "$local_tag" >/dev/null 2>&1; then
+    # A pull request may use a tag the daemon holds. A trusted run never does
+    # (v3, above): the shared daemon lets a pull request's job tag any image.
+    if [ "$trusted" = 0 ] && docker image inspect "$local_tag" >/dev/null 2>&1; then
       echo "ci-image-cache: the daemon holds $local_tag; no pull"
       exit 0
     fi
+    [ "$trusted" = 0 ] || echo "ci-image-cache: a trusted run ($GITHUB_EVENT_NAME) never uses the daemon's $local_tag; pulling it by digest"
     if ! DOCKER_CONFIG=$cfg docker pull -q "$remote" >/dev/null 2>&1; then
       echo "ci-image-cache: $remote is not in the registry (or the pull failed); the job builds it"
       exit 1
     fi
-    digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$remote" 2>/dev/null || echo unknown)
-    docker tag "$remote" "$local_tag"
+    # The registry's digest for the tag: the RepoDigests entry of this
+    # repository, which only a pull from (or a push to) the registry sets.
+    repo=${remote%:*}
+    digest=
+    while IFS= read -r d; do
+      case $d in "$repo"@sha256:*) digest=${d#"$repo"@}; break ;; esac
+    done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$remote" 2>/dev/null || true)
+    if [ -z "$digest" ]; then
+      [ "$trusted" = 0 ] || { echo "ci-image-cache: $remote has no registry digest; the job builds it"; exit 1; }
+      digest=unknown
+    fi
+    if [ "$trusted" = 1 ]; then
+      # Pull by digest, then tag that content and nothing else.
+      DOCKER_CONFIG=$cfg docker pull -q "$repo@$digest" >/dev/null 2>&1 \
+        || { echo "ci-image-cache: the pull of $repo@$digest failed; the job builds it"; exit 1; }
+      id=$(docker image inspect --format '{{.Id}}' "$repo@$digest") \
+        || { echo "ci-image-cache: $repo@$digest is not in the daemon after its pull; the job builds it"; exit 1; }
+      docker tag "$repo@$digest" "$local_tag"
+      [ "$(docker image inspect --format '{{.Id}}' "$local_tag")" = "$id" ] \
+        || { echo "ci-image-cache: $local_tag does not name $repo@$digest after the tag; the job builds it"; exit 1; }
+      # The Makefile's docker-build-toolchain keeps the tag on a trusted run
+      # only while it names this ID.
+      if [ -n "${GITHUB_ENV:-}" ]; then echo "TOOLCHAIN_VERIFIED_ID=$id" >> "$GITHUB_ENV"; fi
+    else
+      docker tag "$remote" "$local_tag"
+    fi
     docker image rm "$remote" >/dev/null 2>&1 || true   # untags only; $local_tag keeps the image
-    echo "ci-image-cache: pulled $digest as $local_tag"
+    echo "ci-image-cache: pulled $repo@$digest as $local_tag"
     ;;
   publish)
     shift

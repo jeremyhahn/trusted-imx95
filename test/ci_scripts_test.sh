@@ -496,4 +496,190 @@ sed -e 's/for v in GOPRIVATE; do/for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_
 run python3 "$TMP_ROOT/creds.py" "$TMP_ROOT/creds-old.yml"
 check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a loop copies GOPRIVATE GIT_CONFIG_COUNT"
 
+# --- A trusted run never uses a toolchain tag the shared daemon holds ---
+# (Codex security P1: a pull request's job can tag any image with main's tag.)
+# The stub docker keeps each reference's image ID, and its RepoDigests, as
+# files under $IMG_STATE. A pull succeeds while $IMG_STATE/registry exists and
+# gives the registry's image, sha256:good, digest sha256:dgood.
+mkdir -p "$TMP_ROOT/imgbin"
+cat >"$TMP_ROOT/imgbin/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$IMG_LOG"
+key() { printf '%s' "$1" | tr '/:@' '___'; }
+s=$IMG_STATE
+case "$1 ${2:-}" in
+"image inspect")
+	ref=${*: -1}
+	k=$(key "$ref")
+	[ -f "$s/$k" ] || exit 1
+	case "${3:-} ${4:-}" in
+	"--format "*RepoDigests*) cat "$s/$k.digests" 2>/dev/null || true ;;
+	"--format "*) cat "$s/$k" ;;
+	*) echo '[]' ;;
+	esac ;;
+"image rm") rm -f "$s/$(key "$3")" "$s/$(key "$3").digests" ;;
+"pull -q")
+	[ -f "$s/registry" ] || exit 1
+	ref=$3
+	repo=${ref%@*}
+	[ "$repo" != "$ref" ] || repo=${ref%:*}
+	echo sha256:good >"$s/$(key "$ref")"
+	if [ -z "${IMG_NODIGEST:-}" ]; then echo "$repo@sha256:dgood" >"$s/$(key "$ref").digests"; fi ;;
+"tag "*)
+	cp "$s/$(key "$2")" "$s/$(key "$3")"
+	if [ -f "$s/$(key "$2").digests" ]; then cp "$s/$(key "$2").digests" "$s/$(key "$3").digests"; else rm -f "$s/$(key "$3").digests"; fi ;;
+"build "*) ;;
+*) echo "stub docker: unexpected $*" >&2; exit 3 ;;
+esac
+EOF
+chmod +x "$TMP_ROOT/imgbin/docker"
+IMG_LOG=$TMP_ROOT/img.log
+IMG_STATE=$TMP_ROOT/img
+export IMG_LOG IMG_STATE
+ltag=trusted-imx95-toolchain:abc
+lkey=$(printf '%s' "$ltag" | tr '/:@' '___')
+# seed <registry up: yes|no>: a fresh daemon whose $ltag a pull request tagged
+# with its own image (sha256:evil, no registry digest).
+seed() {
+	rm -rf "$IMG_STATE"
+	mkdir -p "$IMG_STATE"
+	: >"$IMG_LOG"
+	: >"$TMP_ROOT/github_env"
+	echo sha256:evil >"$IMG_STATE/$lkey"
+	[ "$1" = no ] || : >"$IMG_STATE/registry"
+}
+cache() { # cache <event>: ci-image-cache.sh pull on the forge, for <event>
+	env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME="$1" GITHUB_SERVER_URL=https://forge.example \
+		CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" \
+		"$ROOT/scripts/ci-image-cache.sh" pull
+}
+here=$PWD
+cd "$ROOT" || exit 1
+seed yes
+run cache push
+check "ci-image-cache: a push run pulls by digest over a tag the daemon already holds" 0 \
+	"pulled forge.example/ns/trusted-imx95-toolchain@sha256:dgood as $ltag"
+expect "ci-image-cache: the push run's tag names the registry's image, not the seeded one" \
+	grep -qx sha256:good "$IMG_STATE/$lkey"
+expect "ci-image-cache: the push run pulls the digest itself" \
+	grep -qx "pull -q forge.example/ns/trusted-imx95-toolchain@sha256:dgood" "$IMG_LOG"
+expect "ci-image-cache: the push run exports the verified image ID" \
+	grep -qx TOOLCHAIN_VERIFIED_ID=sha256:good "$TMP_ROOT/github_env"
+seed no
+run cache schedule
+check "ci-image-cache: a scheduled run with the registry down falls back to the build, not the seeded tag" 1 \
+	"is not in the registry"
+if [ -s "$TMP_ROOT/github_env" ]; then
+	fail "ci-image-cache: a failed trusted pull exports no verified ID" "$(cat "$TMP_ROOT/github_env")"
+else
+	pass "ci-image-cache: a failed trusted pull exports no verified ID"
+fi
+seed yes
+IMG_NODIGEST=1 run cache push
+check "ci-image-cache: a trusted pull with no registry digest falls back to the build" 1 "has no registry digest"
+seed yes
+run cache pull_request
+check "ci-image-cache: a pull request still uses the tag its daemon holds" 0 "the daemon holds $ltag; no pull"
+
+# The Makefile's builds (docker-build-toolchain, docker-build).
+mk() { # mk <event> <target> [VAR=value...]
+	local ev=$1
+	shift
+	env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME="$ev" \
+		make --no-print-directory -C "$ROOT" "$@" TOOLCHAIN_IMAGE="$ltag" IT_IMAGE=trusted-imx95-integration:abc
+}
+seed yes
+run mk push docker-build-toolchain
+check "make docker-build-toolchain: a push run rebuilds over a seeded tag" 0 "rebuilds $ltag from source"
+expect "make docker-build-toolchain: the trusted rebuild uses no cache" \
+	grep -q "^build --no-cache --target toolchain -t $ltag " "$IMG_LOG"
+seed yes
+echo sha256:good >"$IMG_STATE/$lkey"
+TOOLCHAIN_VERIFIED_ID=sha256:good run mk push docker-build-toolchain
+check "make docker-build-toolchain: a push run keeps the tag that names the verified pull" 0 "is the image pulled by digest (sha256:good)"
+if grep -q '^build' "$IMG_LOG"; then fail "make docker-build-toolchain: a verified tag is not rebuilt" "$(cat "$IMG_LOG")"; else pass "make docker-build-toolchain: a verified tag is not rebuilt"; fi
+seed yes
+TOOLCHAIN_VERIFIED_ID=sha256:good run mk push docker-build-toolchain
+expect "make docker-build-toolchain: a seeded tag that is not the verified ID is rebuilt" \
+	grep -q "^build --no-cache --target toolchain" "$IMG_LOG"
+seed yes
+run mk push docker-build
+expect "make docker-build: a push run rebuilds the integration image with no cache" \
+	grep -q "^build --no-cache --target integration" "$IMG_LOG"
+seed yes
+echo sha256:evil >"$IMG_STATE/$(printf '%s' trusted-imx95-integration:abc | tr '/:@' '___')"
+run mk pull_request docker-build
+if [ "$RC" = 0 ] && ! grep -q '^build' "$IMG_LOG"; then
+	pass "make docker-build: a pull request keeps the tags its daemon holds"
+else
+	fail "make docker-build: a pull request keeps the tags its daemon holds" "rc $RC; $(cat "$IMG_LOG"); $OUT"
+fi
+cd "$here" || exit 1
+
+# --- signatures.yml: the adoption push, against real SSH-signed git fixtures ---
+# (Codex P1: the adoption merge's push has a before with no registry.) The
+# step's script is taken from the workflow and run as written; it fetches
+# from no origin here, so it reads only the fixture's objects.
+python3 - "$ROOT/.github/workflows/signatures.yml" >"$TMP_ROOT/sigstep.sh" <<'EOF'
+import sys
+lines = open(sys.argv[1]).read().split("\n")
+i = next(n for n, l in enumerate(lines) if "- name: Verify commit signatures" in l)
+i = next(n for n in range(i, len(lines)) if lines[n].strip() == "run: |")
+ind = len(lines[i]) - len(lines[i].lstrip()) + 2
+out = []
+for l in lines[i + 1:]:
+    if l.strip() and len(l) - len(l.lstrip()) < ind:
+        break
+    out.append(l[ind:])
+print("\n".join(out))
+EOF
+if [ -s "$TMP_ROOT/sigstep.sh" ]; then pass "signatures.yml: the verify step's script is extracted"; else fail "signatures.yml: the verify step's script is extracted"; fi
+sr=$TMP_ROOT/sigrepo
+mkdir -p "$sr"
+ssh-keygen -q -t ed25519 -N '' -C fixture -f "$TMP_ROOT/sigkey" # a throwaway key for the fixture only
+ssh-keygen -q -t ed25519 -N '' -C other -f "$TMP_ROOT/otherkey"
+g() { git -C "$sr" -c user.name=Dev -c user.email=dev@example.com -c gpg.format=ssh \
+	-c user.signingkey="$TMP_ROOT/${KEY:-sigkey}" -c commit.gpgsign=true "$@"; }
+g init -q -b main
+echo a >"$sr/README"
+g add README && g commit -q -m "main before the adoption"
+A=$(g rev-parse HEAD)
+g checkout -q -b adopt
+mkdir -p "$sr/.github"
+echo "dev@example.com $(cut -d' ' -f1-2 "$TMP_ROOT/sigkey.pub")" >"$sr/.github/allowed_signers"
+g add .github && g commit -q -m "ci: the signer registry"
+B=$(g rev-parse HEAD)
+g checkout -q main
+g merge -q --no-ff -m "Merge the adoption" adopt
+M=$(g rev-parse HEAD)
+echo b >>"$sr/README"
+g commit -q -am "after the adoption"
+M2=$(g rev-parse HEAD)
+# A second adoption whose registry commit the registered key did not sign.
+g checkout -q -b adopt2 "$A"
+mkdir -p "$sr/.github"
+echo "dev@example.com $(cut -d' ' -f1-2 "$TMP_ROOT/sigkey.pub")" >"$sr/.github/allowed_signers"
+g add .github && KEY=otherkey g commit -q -m "ci: the registry, signed by another key"
+g checkout -q -b main2 "$A"
+g merge -q --no-ff -m "Merge the second adoption" adopt2
+M3=$(g rev-parse HEAD)
+sig() { # sig <event> <before> <head> [base]: the step, in the fixture
+	(cd "$sr" && env EVENT="$1" BEFORE="$2" HEAD_SHA="$3" BASE_SHA="${4:-}" PR="${4:+1}" REPO=o/r \
+		API=http://127.0.0.1:9 GH_TOKEN= RUNNER_TEMP="$TMP_ROOT" bash "$TMP_ROOT/sigstep.sh")
+}
+run sig push "$A" "$M"
+check "signatures.yml: the adoption push verifies against the registry its merge adds" 0 \
+	"the adoption push: it adds the registry" "OK   ${B:0:12} signed by dev@example.com" "OK   ${M:0:12} signed by dev@example.com"
+run sig push "$A" "$M2"
+check "signatures.yml: a push whose last commit does not add the registry still fails" 1 \
+	"FAIL no .github/allowed_signers at the base ${A:0:12}"
+run sig push "$M" "$M2"
+check "signatures.yml: a later push reads the registry at its before" 0 "registry: .github/allowed_signers at ${M:0:12}"
+run sig push "$A" "$M3"
+check "signatures.yml: the adoption push still fails a commit the registered key did not sign" 1 \
+	"the adoption push" "FAIL $(g rev-parse adopt2 | cut -c1-12) signed by a key not in the registry"
+run sig pull_request_target "" "$B" "$A"
+check "signatures.yml: a pull request that adds the registry is still judged by its base's" 1 \
+	"FAIL no .github/allowed_signers at the base ${A:0:12}"
+
 finish

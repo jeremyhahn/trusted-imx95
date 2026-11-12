@@ -29,6 +29,15 @@
 # and push to main gets the `Signatures / Signatures` check, and the
 # repository ruleset requires that context beside CI Gate (a ruleset change,
 # made by its owner, not by the adoption PR).
+#
+# The adoption merge's own push run (2026-11-12, Codex P1 on trusted-imx95
+# #19): its before is main's previous commit, which has no registry, so the
+# base lookup fails and the no-before fallback does not apply. A push whose
+# before has no .github/allowed_signers is therefore checked against the
+# pushed commit's registry only when that commit itself adds the file (a
+# diff against its first parent); every other such push fails. A pull
+# request is still judged by its base's registry alone.
+# test/ci_scripts_test.sh runs this step against git fixtures.
 name: Signatures
 
 on:
@@ -103,6 +112,15 @@ jobs:
             # on main, so its own registry is the trusted one.
             git show "$HEAD_SHA:.github/allowed_signers" > "$ASF"
             echo "registry: .github/allowed_signers at ${HEAD_SHA:0:12} (no before)"
+          elif [ "$EVENT" = push ] && isrev "$REG" && isrev "$HEAD_SHA" \
+              && git cat-file -e "$HEAD_SHA:.github/allowed_signers" 2>/dev/null \
+              && [ -n "$(git diff-tree --no-commit-id --name-only -r --diff-filter=A "$HEAD_SHA^1" "$HEAD_SHA" -- .github/allowed_signers 2>/dev/null)" ]; then
+            # The adoption push: the before holds no registry, and the pushed
+            # commit itself adds it (against its first parent). That commit is
+            # already on main, as in the no-before case, so its registry is the
+            # trusted one. Any other push with no registry at the before fails.
+            git show "$HEAD_SHA:.github/allowed_signers" > "$ASF"
+            echo "registry: .github/allowed_signers at ${HEAD_SHA:0:12} (the adoption push: it adds the registry)"
           else
             echo "FAIL no .github/allowed_signers at the base ${REG:0:12}"; exit 1
           fi
