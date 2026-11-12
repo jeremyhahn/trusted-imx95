@@ -646,6 +646,17 @@ permissions:
   contents: read
 
 env:
+  # CUSTOMIZE (Codex security P1, 2026-11-12): the forge runners inject the
+  # private-module credentials as GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and
+  # GIT_CONFIG_VALUE_0 (dependency-resolution.md §6). This repository has no
+  # private modules, and its jobs run a pull request's own scripts, so every
+  # step sees them blank: workflow env overrides the runner's. The
+  # gomodauth.env files below carry GOPRIVATE alone, and
+  # scripts/in-toolchain-image.sh forwards no credential. A runner that
+  # exposes the values some other way is fleet infrastructure, not this file.
+  GIT_CONFIG_COUNT: "0"
+  GIT_CONFIG_KEY_0: ""
+  GIT_CONFIG_VALUE_0: ""
   COVERAGE_THRESHOLD: 90      # CUSTOMIZE: per testing-guidelines.md
   # CUSTOMIZE (v1.9.2): the repo's full build-tag set, SPACE separated — the go
   # tool's own form. Leave EMPTY if no package is tag-gated. Every analysis step
@@ -932,7 +943,7 @@ jobs:
       - name: Publish the toolchain image when the registry lacks its hash
         run: |
           ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-            for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+            for v in GOPRIVATE; do
               if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
             done )
           bp=
@@ -984,7 +995,7 @@ jobs:
       - name: Build the toolchain image
         run: |
           ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-            for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+            for v in GOPRIVATE; do
               if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
             done )
           # v1.29.4: Athens first, as in the image job.
@@ -1267,7 +1278,7 @@ jobs:
       - name: Build the devcontainer images
         run: |
           ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-            for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+            for v in GOPRIVATE; do
               if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
             done )
           # v1.29.4: the build's module fetches go through Athens first when
@@ -1357,7 +1368,7 @@ jobs:
             image_unlock
             echo "integration image $IT_IMAGE is missing or went before its lease; building it once"
             ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-              for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+              for v in GOPRIVATE; do
                 if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
               done )
             # v1.29.4: Athens first, as in the image job's build step.
@@ -1509,7 +1520,7 @@ jobs:
         if: ${{ steps.probe.outputs.has_target == 'true' }}
         run: |
           ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-            for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+            for v in GOPRIVATE; do
               if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
             done )
           # v1.29.4: Athens first, as in the image job.
@@ -1639,7 +1650,7 @@ jobs:
             image_unlock
             echo "integration image $IT_IMAGE is missing or went before its lease; building it once"
             ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-              for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+              for v in GOPRIVATE; do
                 if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
               done )
             # v1.29.4: Athens first, as in the image job's build step.
@@ -1670,7 +1681,7 @@ jobs:
         run: |
           umask 077
           : > "$RUNNER_TEMP/gomodauth.env"
-          for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+          for v in GOPRIVATE; do
             if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
           done
 
@@ -1789,7 +1800,7 @@ jobs:
             image_unlock
             echo "integration image $IT_IMAGE is missing or went before its lease; building it once"
             ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-              for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+              for v in GOPRIVATE; do
                 if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
               done )
             # v1.29.4: Athens first, as in the image job's build step.
@@ -1820,7 +1831,7 @@ jobs:
         run: |
           umask 077
           : > "$RUNNER_TEMP/gomodauth.env"
-          for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+          for v in GOPRIVATE; do
             if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
           done
 

@@ -26,9 +26,12 @@
 # must reach one: `make deps-check` asks the module proxy for the newest
 # releases, and `make security` fetches the vulnerability databases. Only then
 # are GOPROXY reopened, a writable module cache mounted (below; /tmp/gomodcache
-# with CI_CACHE=off), and the forge credentials passed through, by NAME from
-# this environment (the four variables dependency-resolution.md §6 has the
-# runner inject), so no token ever appears on a command line.
+# with CI_CACHE=off), and GOPRIVATE passed through by name. The forge
+# credentials the runner injects (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and
+# GIT_CONFIG_VALUE_0, dependency-resolution.md §6) are never passed in: the
+# container runs a pull request's own scripts with a network, and this
+# repository has no private modules to fetch. Nor is any *TOKEN* variable;
+# test/ci_scripts_test.sh holds both.
 #
 # v2 (ci-template v1.22, Company Agent m616 item 2): the caches live in named
 # volumes on the daemon's host (ci-standard.md §6), never in the container's
@@ -184,9 +187,8 @@ if [ "$network" = bridge ]; then
   # root module's build list; the nested modules deps-check walks fetch more.
   # Athens first when the runner sets DEVCACHE_GOPROXY (v4, above).
   args+=(--env "GOPROXY=${DEVCACHE_GOPROXY:+$DEVCACHE_GOPROXY|}https://proxy.golang.org" --env "GOMODCACHE=$modcache")
-  for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
-    if [ -n "${!v:-}" ]; then args+=(--env "$v"); fi
-  done
+  # GOPRIVATE only: no forge credential enters the container (above).
+  if [ -n "${GOPRIVATE:-}" ]; then args+=(--env GOPRIVATE); fi
 fi
 
 cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; }

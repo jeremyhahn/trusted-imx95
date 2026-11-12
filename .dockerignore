@@ -1,6 +1,11 @@
 .git
+# NXP Code Signing Tool: never in the tree or the image (.gitignore and
+# scripts/check-tracked-cst.sh). Everything inside any cst-* directory, at any
+# depth and whatever its suffix, stays out. Docker cleans a trailing slash
+# away, so `**/cst-*/` would mean `**/cst-*` and drop scripts/cst-check.sh as
+# well; `/**` matches only what lies inside such a directory.
+**/cst-*/**
 **/cst-*.tgz
-**/cst-[0-9]*
 # The pinned tools make tools installs outside the image
 .tools/
 # The vendor images .gitignore keeps out of the tree (and so out of

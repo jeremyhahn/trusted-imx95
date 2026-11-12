@@ -355,4 +355,145 @@ done <"$ROOT/.gitignore"
 if [ -z "$missing" ]; then pass ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context"; else fail ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context" "missing:$missing"; fi
 expect ".gitignore: the resources/ vendor rules the check above reads exist" grep -q '^resources/' "$ROOT/.gitignore"
 
+# --- .dockerignore: the Docker context, by Docker's matching rules -------------
+#
+# No Docker here, so ctx.py applies .dockerignore the way Docker's pattern
+# matcher does (each pattern filepath.Clean'd; `**` any number of components,
+# `*` and `?` within one; a path is out when it or a parent directory
+# matches, the last matching pattern deciding) and prints what stays in.
+cat >"$TMP_ROOT/ctx.py" <<'EOF'
+import os, re, sys
+def rx(p):
+    p = os.path.normpath(p)
+    r, i = "^", 0
+    while i < len(p):
+        c = p[i]
+        if c == "*" and p[i + 1:i + 2] == "*":
+            i += 2
+            while p[i:i + 1] == "/":
+                i += 1
+            r += ".*" if i >= len(p) else "(.*/)?"
+            continue
+        if c == "*":
+            r += "[^/]*"
+        elif c == "?":
+            r += "[^/]"
+        elif c == "[":
+            j = p.index("]", i)
+            r += p[i:j + 1]
+            i = j + 1
+            continue
+        else:
+            r += re.escape(c)
+        i += 1
+    return re.compile(r + "$")
+rules = []
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if line and not line.startswith("#"):
+        neg = line.startswith("!")
+        rules.append((neg, rx(line[1:] if neg else line)))
+def out(path):
+    parts = path.split("/")
+    for n in range(1, len(parts) + 1):
+        sub, verdict = "/".join(parts[:n]), False
+        for neg, r in rules:
+            if r.match(sub):
+                verdict = not neg
+        if verdict:
+            return True
+    return False
+for path in sys.stdin.read().split("\n"):
+    if path and not out(path):
+        print(path)
+EOF
+ctx_in() { python3 "$TMP_ROOT/ctx.py" "$1"; }
+kept=$(printf '%s\n' \
+	tools/cst-local/release/docs/CST_UG.pdf \
+	a/b/cst-mine/linux64/bin/cst \
+	cst-3.1.0/release/docs/CST_UG.pdf \
+	dist/cst-3.1.0.tgz \
+	resources/imx95-yocto-6.6.zip \
+	resources/ucm-imx95:yocto-linux/image.wic \
+	.tools/bin/gitleaks \
+	scripts/cst-check.sh test/cst_guard_test.sh resources/README.md Makefile | ctx_in "$ROOT/.dockerignore")
+want="scripts/cst-check.sh
+test/cst_guard_test.sh
+resources/README.md
+Makefile"
+if [ "$kept" = "$want" ]; then pass ".dockerignore: no cst-* extraction (tools/cst-local, a nested one), CST archive, vendor image or .tools reaches the Docker context"; else fail ".dockerignore: no cst-* extraction (tools/cst-local, a nested one), CST archive, vendor image or .tools reaches the Docker context" "kept: $(printf '%s' "$kept" | tr '\n' ' ')"; fi
+tracked=$(git -C "$ROOT" ls-files)
+if [ "$(printf '%s\n' "$tracked" | ctx_in "$ROOT/.dockerignore")" = "$tracked" ]; then pass ".dockerignore: every tracked file, scripts/cst-check.sh among them, stays in the Docker context"; else fail ".dockerignore: every tracked file, scripts/cst-check.sh among them, stays in the Docker context"; fi
+printf '**/cst-*/\n' >"$TMP_ROOT/slash.dockerignore"
+expect "ctx.py: Docker's cleaning makes **/cst-*/ drop scripts/cst-check.sh" test -z "$(echo scripts/cst-check.sh | ctx_in "$TMP_ROOT/slash.dockerignore")"
+
+# --- forge credentials: never into a container, never in a PR job's env -------
+#
+# The runner injects GIT_CONFIG_COUNT/KEY_0/VALUE_0 (dependency-resolution.md
+# §6). in-toolchain-image.sh, with a network, runs a pull request's scripts:
+# a stub docker records what `docker create` is given.
+tstub="$TMP_ROOT/tcstub"
+mkdir -p "$tstub" "$TMP_ROOT/tcsrc"
+cat >"$tstub/docker" <<'EOF'
+#!/usr/bin/env bash
+case $1 in
+create) printf '%s\n' "$@" >"$TC_LOG" ;;
+cp) cat >/dev/null ;;
+esac
+exit 0
+EOF
+chmod +x "$tstub/docker"
+export TC_LOG="$TMP_ROOT/tc.log"
+here=$PWD
+cd "$TMP_ROOT/tcsrc" || exit 1
+run env PATH="$tstub:$PATH" IN_IMAGE_NETWORK=bridge CI_CACHE=off IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g \
+	GOPRIVATE=example.invalid GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://u:fake@example.invalid/.insteadOf GIT_CONFIG_VALUE_0=https://example.invalid/ \
+	FORGE_TOKEN=fake GITHUB_TOKEN=fake GITEA_TOKEN=fake "$ROOT/scripts/in-toolchain-image.sh" img:test true
+cd "$here" || exit 1
+check "in-toolchain-image: a bridge run with the forge credentials set succeeds" 0
+expect "in-toolchain-image: a bridge run passes GOPRIVATE in" grep -qxF GOPRIVATE "$TC_LOG"
+if grep -qE 'GIT_CONFIG|TOKEN|fake' "$TC_LOG"; then fail "in-toolchain-image: no GIT_CONFIG_* or token variable reaches the container" "$(grep -E 'GIT_CONFIG|TOKEN|fake' "$TC_LOG")"; else pass "in-toolchain-image: no GIT_CONFIG_* or token variable reaches the container"; fi
+
+# ci.yml, read as text: no loop copies a credential into an env file, a
+# container's --env or GITHUB_ENV; no --env names one; the workflow env blanks
+# the runner's GIT_CONFIG_*; and a *TOKEN secret is read only on an event that
+# is not a pull request.
+cat >"$TMP_ROOT/creds.py" <<'EOF'
+import re, sys
+lines = open(sys.argv[1]).read().split("\n")
+cred = re.compile(r"GIT_CONFIG|TOKEN")
+bad = []
+for n, l in enumerate(lines):
+    m = re.search(r"for v in ([^;]*); do", l)
+    if m and cred.search(m.group(1)) and re.search(r"gomodauth|--env|GITHUB_ENV|>>", "\n".join(lines[n + 1:n + 4])):
+        bad.append("%d: a loop copies %s" % (n + 1, m.group(1)))
+    if re.search(r"(--env|\s-e)\s+\"?\$?\{?\w*(GIT_CONFIG|TOKEN)", l):
+        bad.append("%d: --env passes a credential" % (n + 1))
+    m = re.match(r"\s+(GIT_CONFIG_\w+):\s*(\S*)", l)
+    if m and m.group(2) not in ('""', '"0"'):
+        bad.append("%d: %s is set to %s" % (n + 1, m.group(1), m.group(2)))
+    if re.search(r"secrets\.\w*TOKEN", l) and not re.search(r"github\.event_name == '(schedule|push)'", l):
+        bad.append("%d: a *TOKEN secret reaches a pull_request run" % (n + 1))
+top, inside = {}, False
+for l in lines:
+    if re.match(r"\S", l):
+        inside = l.startswith("env:")
+        continue
+    m = re.match(r"  (GIT_CONFIG_\w+):\s*(\S*)", l) if inside else None
+    if m:
+        top[m.group(1)] = m.group(2)
+want = {"GIT_CONFIG_COUNT": '"0"', "GIT_CONFIG_KEY_0": '""', "GIT_CONFIG_VALUE_0": '""'}
+if top != want:
+    bad.append("the workflow env does not blank the runner's GIT_CONFIG_*: %s" % top)
+print("\n".join(bad) if bad else "OK")
+sys.exit(1 if bad else 0)
+EOF
+run python3 "$TMP_ROOT/creds.py" "$ROOT/.github/workflows/ci.yml"
+check "ci.yml: no job hands the forge credentials or a token to a pull request's code" 0 "OK"
+# The template's form before this fix fails the same check.
+sed -e 's/for v in GOPRIVATE; do/for v in GOPRIVATE GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do/' \
+	"$ROOT/.github/workflows/ci.yml" >"$TMP_ROOT/creds-old.yml"
+run python3 "$TMP_ROOT/creds.py" "$TMP_ROOT/creds-old.yml"
+check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a loop copies GOPRIVATE GIT_CONFIG_COUNT"
+
 finish
