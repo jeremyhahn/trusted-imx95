@@ -1,0 +1,149 @@
+88a89,90
+> 	mx8qmmekcockpita53 \
+> 	mx8qmmekcockpita72 \
+114a117,119
+> mx937-flavorlist = \
+> 	mx937evk \
+> 
+120a126
+> CFG_BUSFREQ ?= y
+135a142
+> CFG_BUSFREQ ?= y
+140a148
+> CFG_BUSFREQ ?= y
+152a161
+> CFG_BUSFREQ ?= y
+179a189
+> CFG_BUSFREQ ?= y
+183a194
+> CFG_BUSFREQ ?= y
+186a198
+> CFG_BUSFREQ ?= y
+229a242,243
+> $(call force,CFG_SC_IPC_BASE,SC_IPC0_BASE)
+> $(call force,CFG_TZC380,n)
+237a252,253
+> $(call force,CFG_SC_IPC_BASE,SC_IPC0_BASE)
+> $(call force,CFG_TZC380,n)
+245a262,263
+> $(call force,CFG_SC_IPC_BASE,SC_IPC0_BASE)
+> $(call force,CFG_TZC380,n)
+253a272,273
+> $(call force,CFG_SC_IPC_BASE,SC_IPC0_BASE)
+> $(call force,CFG_TZC380,n)
+267a288,290
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+> CFG_IMX_ELE_TEST_PTA ?= n
+268a292,294
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+280a307,312
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+> CFG_IMX_ELE_ECC_DRV ?= y
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+292a325,326
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+293a328,330
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+305a343,348
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+> CFG_IMX_ELE_ECC_DRV ?= y
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+317a361,384
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+> CFG_IMX_ELE_ECC_DRV ?= y
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+> else ifneq (,$(filter $(PLATFORM_FLAVOR),$(mx937-flavorlist)))
+> $(call force,CFG_MX937,y)
+> $(call force,CFG_ARM64_core,y)
+> CFG_IMX_LPUART ?= y
+> CFG_DRAM_BASE ?= 0x80000000
+> CFG_TEE_CORE_NB_CORE ?= 4
+> $(call force,CFG_NXP_SNVS,n)
+> $(call force,CFG_IMX_OCOTP,n)
+> $(call force,CFG_TZC380,n)
+> $(call force,CFG_NXP_CAAM,n)
+> CFG_IMX_MU ?= y
+> CFG_IMX_ELE ?= y
+> CFG_IMX_TRUSTED_ARM_CE = y
+> CFG_IN_TREE_EARLY_TAS += trusted_keys/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c
+> CFG_IMX_ELE_ECC_DRV ?= y
+> CFG_NXP_ELE_ECC_DRV_FALLBACK ?= y
+> CFG_IMX_ELE_RSA_DRV ?= y
+> CFG_NXP_ELE_RSA_DRV_FALLBACK ?= y
+514a582,599
+> ifneq (,$(filter $(PLATFORM_FLAVOR),mx8qmmekcockpita53))
+> CFG_DRAM_BASE := 0x80000000
+> CFG_DDR_SIZE ?= 0x40000000
+> CFG_UART_BASE ?= UART0_BASE
+> CFG_TEE_CORE_NB_CORE = 4
+> $(call force,CFG_NXP_CAAM,n)
+> CFG_COCKPIT ?= y
+> endif
+> 
+> ifneq (,$(filter $(PLATFORM_FLAVOR),mx8qmmekcockpita72))
+> CFG_DRAM_BASE := 0xC0000000
+> CFG_DDR_SIZE ?= 0x40000000
+> CFG_UART_BASE ?= UART2_BASE
+> CFG_SC_IPC_BASE = SC_IPC3_BASE
+> $(call force,CFG_NXP_CAAM,n)
+> CFG_COCKPIT ?= y
+> endif
+> 
+539c624
+< ifneq (,$(filter $(PLATFORM_FLAVOR),mx95evk mx943evk mx952evk))
+---
+> ifneq (,$(filter $(PLATFORM_FLAVOR),mx95evk mx943evk mx952evk mx937evk))
+618a704
+> CFG_PM_ARM32 ?= y
+620a707,708
+> CFG_IMX_PM ?= y
+> 
+629a718,719
+> CFG_DT ?= y
+> CFG_EXTERNAL_DTB_OVERLAY = y
+633a724,738
+> ifneq (,$(filter y, $(CFG_MX8MN) $(CFG_MX8MP) $(CFG_MX8DX) $(CFG_MX8DXL) $(CFG_MX93) $(CFG_MX91)))
+> CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) + 0x16000000)
+> else ifneq (,$(filter y, $(CFG_MX8ULP)))
+> CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) + 0x26000000)
+> else ifneq (,$(filter y, $(CFG_MX95) $(CFG_MX943) $(CFG_MX952) $(CFG_MX937)))
+> CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) + 0x0C000000)
+> # On i.MX95, i.MX943, i.MX952 & i.MX937 we will have 32MB OP-TEE memory and
+> # 2MB Shared Memory after that.
+> CFG_TZDRAM_SIZE ?= 0x02000000
+> else ifneq (,$(filter y, $(CFG_MX8MM) $(CFG_MX8MQ) $(CFG_MX8QM) $(CFG_MX8QX)))
+> CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) - 0x02000000 + $(CFG_DDR_SIZE))
+> else
+> CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) + 0x04000000)
+> endif
+> 
+636d740
+< CFG_TZDRAM_START ?= ($(CFG_DRAM_BASE) - $(CFG_TZDRAM_SIZE) - $(CFG_SHMEM_SIZE) + $(CFG_DDR_SIZE))
+657a762
+> CFG_TZC380 ?= y
+661c766
+< CFG_NXP_CAAM ?= n
+---
+> CFG_NXP_CAAM ?= y
+663a769
+> CFG_CRYPTO_DRIVER ?= y
+674a781,784
+> endif
+> 
+> ifeq ($(CFG_BUSFREQ),y)
+> $(call force,CFG_SM_PLATFORM_HANDLER,y)
