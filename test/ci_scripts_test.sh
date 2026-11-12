@@ -598,27 +598,56 @@ expect "ctx.py: Docker's cleaning makes **/cst-*/ drop scripts/cst-check.sh" tes
 # The runner injects GIT_CONFIG_COUNT/KEY_0/VALUE_0 (dependency-resolution.md
 # §6). in-toolchain-image.sh, with a network, runs a pull request's scripts:
 # a stub docker records what `docker create` is given.
+#
+# The devcontainer image's tar is BusyBox v1.37.0, which refuses GNU tar's long
+# options (#19 CI run 43168703612). Every in-toolchain-image.sh run here puts
+# this BusyBox-style tar first on PATH, so the gate catches a GNU-only flag on
+# a host whose tar is GNU tar.
+bbtar="$TMP_ROOT/bbtar"
+mkdir -p "$bbtar"
+real_tar=$(command -v tar)
+cat >"$bbtar/tar" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+	case \$a in
+	--owner*|--group*|--numeric-owner|--version) echo "tar: unrecognized option: \${a#--}" >&2; exit 1 ;;
+	esac
+done
+exec "$real_tar" "\$@"
+EOF
+chmod +x "$bbtar/tar"
 tstub="$TMP_ROOT/tcstub"
 mkdir -p "$tstub" "$TMP_ROOT/tcsrc"
 cat >"$tstub/docker" <<'EOF'
 #!/usr/bin/env bash
 case $1 in
 create) printf '%s\n' "$@" >"$TC_LOG" ;;
-cp) cat >/dev/null ;;
+cp) cat >"${TC_TAR:-/dev/null}" ;;
 esac
 exit 0
 EOF
 chmod +x "$tstub/docker"
+export TC_TAR="$TMP_ROOT/tc.tar"
 export TC_LOG="$TMP_ROOT/tc.log"
 here=$PWD
 cd "$TMP_ROOT/tcsrc" || exit 1
-run env -u GITHUB_EVENT_NAME PATH="$tstub:$PATH" IN_IMAGE_NETWORK=bridge CI_CACHE=off IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g \
+mkdir -p "$TMP_ROOT/tcsrc/sub"
+echo x >"$TMP_ROOT/tcsrc/sub/file"
+run env -u GITHUB_EVENT_NAME PATH="$bbtar:$tstub:$PATH" IN_IMAGE_NETWORK=bridge CI_CACHE=off IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g \
 	GOPRIVATE=example.invalid GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://u:fake@example.invalid/.insteadOf GIT_CONFIG_VALUE_0=https://example.invalid/ \
-	FORGE_TOKEN=fake GITHUB_TOKEN=fake GITEA_TOKEN=fake "$ROOT/scripts/in-toolchain-image.sh" img:test true
+	GITHUB_TOKEN=fake EXAMPLE_TOKEN=fake "$ROOT/scripts/in-toolchain-image.sh" img:test true
 cd "$here" || exit 1
 check "in-toolchain-image: a bridge run with the forge credentials set succeeds" 0
 expect "in-toolchain-image: a bridge run passes GOPRIVATE in" grep -qxF GOPRIVATE "$TC_LOG"
 if grep -qE 'GIT_CONFIG|TOKEN|fake' "$TC_LOG"; then fail "in-toolchain-image: no GIT_CONFIG_* or token variable reaches the container" "$(grep -E 'GIT_CONFIG|TOKEN|fake' "$TC_LOG")"; else pass "in-toolchain-image: no GIT_CONFIG_* or token variable reaches the container"; fi
+expect "in-toolchain-image: with a BusyBox-style tar, every entry in the tree's stream is owned by uid:gid 10001 and names no user" \
+	python3 -c '
+import sys, tarfile
+with tarfile.open(sys.argv[1]) as tf:
+    m = tf.getmembers()
+names = {t.name for t in m}
+sys.exit(0 if "./sub/file" in names and all((t.uid, t.gid, t.uname, t.gname) == (10001, 10001, "", "") for t in m) else 1)
+' "$TC_TAR"
 
 # ci.yml, read as text: no loop copies a credential into an env file, a
 # container's --env or GITHUB_ENV; no --env names one; the workflow env blanks
@@ -944,7 +973,7 @@ mk push docker-build >/dev/null
 iref=$(mk push -s it-ref)
 move
 : >"$IMG_STARTS"
-tc() { (cd "$TMP_ROOT/tcsrc" && env PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
+tc() { (cd "$TMP_ROOT/tcsrc" && env PATH="$bbtar:$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
 	IN_IMAGE_CPUS=1 IN_IMAGE_MEMORY=1g CI_STACK_PREFIX=t-ci- "$@"); }
 run tc env IMG_VOLS=t-ci-cache-main-gobuild "$ROOT/scripts/trim-ci-caches.sh" t-ci- "$tref"
 check "trim-ci-caches: a push run measures with the image ID" 0 "caches:"

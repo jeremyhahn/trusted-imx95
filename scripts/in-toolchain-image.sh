@@ -84,6 +84,14 @@
 # `make -s toolchain-ref` prints, and refuses a tag before any container
 # starts. test/ci_scripts_test.sh holds this.
 #
+# trusted-imx95 (2026-11-12, #19 CI run 43168703612): the tree reaches the
+# stage owned by the numeric uid:gid on every host tar. --owner, --group and
+# --numeric-owner are GNU tar options, and BusyBox tar (the devcontainer
+# image's, v1.37.0) refuses them. GNU tar keeps that command; any other tar is
+# not used, and python3's tarfile writes the same stream with uid and gid set
+# and no user or group name. test/ci_scripts_test.sh runs the script with a
+# BusyBox-style tar first on PATH and reads the owners in the stream.
+#
 # The container is named <CI_STACK_PREFIX>tc-<pid>-<random>, under the prefix
 # scripts/reap-stale-ci-stacks.sh reaps (default <checkout dir>-ci-, which in CI
 # is <repo>-ci-), and is removed on every exit. IN_IMAGE_UID is the non-root
@@ -216,6 +224,22 @@ trap cleanup EXIT
 # shellcheck disable=SC2016 # expands in the container, not here
 guard='[ -d "$TMPDIR" ] && [ -w "$TMPDIR" ] || { echo "in-toolchain-image: scratch directory $TMPDIR is missing or not writable" >&2; exit 2; }'
 docker create "${args[@]}" "$image" sh -c "$guard; $*" >/dev/null
-tar -C "$PWD" --owner="$uid" --group="$uid" --numeric-owner -cf - . |
-  docker cp -a - "$name:/src"
+tree_tar() {
+  case $(tar --version 2>/dev/null) in
+    *"GNU tar"*) tar -C "$PWD" --owner="$uid" --group="$uid" --numeric-owner -cf - . ;;
+    *)
+      python3 -c '
+import os, sys, tarfile
+uid = int(sys.argv[1])
+def own(t):
+    t.uid = t.gid = uid
+    t.uname = t.gname = ""
+    return t
+os.chdir(sys.argv[2])
+with tarfile.open(fileobj=sys.stdout.buffer, mode="w|", format=tarfile.PAX_FORMAT) as tf:
+    tf.add(".", filter=own)
+' "$uid" "$PWD" ;;
+  esac
+}
+tree_tar | docker cp -a - "$name:/src"
 docker start -a "$name"
