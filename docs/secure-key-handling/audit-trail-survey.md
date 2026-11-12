@@ -88,7 +88,7 @@ S5 says a single-block RPMB write is atomic by the eMMC specification, and that 
 
 What this means for the board:
 
-- A small trusted application could hold the audit chain's head (sequence number and head hash) in RPMB and update it on each record or each batch. Unlike the fuse counter, the RPMB write counter is not a fuse, so updating it per record is possible; eMMC wear and write latency are the limits (not quantified here, §8). The log body stays in a Linux file; the RPMB head makes a rollback or truncation of that file visible on the board itself, before any export.
+- A small trusted application could hold the audit chain's head (sequence number and head hash) in RPMB and update it on each record or each batch. Unlike the fuse counter, the RPMB write counter is not a fuse, but it is still finite: 2³² authenticated writes, about 1.36 years at 100 writes a second and about 50 days at 1,000, and one head update can take several writes ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.3). Per-record updates fit only if the signing rate, times the writes per update, times the product's service life stays inside that write budget; otherwise the head is raised per batch, with the batch size set from the audit rate. The audit rate, the batch size and the service life are not set, so whether per-record updates fit is **not confirmed**; eMMC wear and write latency are further limits (not quantified here, §8). The log body stays in a Linux file; the RPMB head makes a rollback or truncation of that file visible on the board itself, before any export.
 - The RPMB key is written once to the eMMC. S5 describes OP-TEE deriving it from the eMMC serial number and the Hardware Unique Key, and warns that using RPMB before the board is secured can lock out later access once it is. This is a provisioning step that this lane does not run or script; the RPMB survey (#62) and the oem-key-provisioning row own it.
 - Whether the FRDM-IMX95-PRO's boot medium has an RPMB partition that OP-TEE can reach, and whether NXP's OP-TEE for the i.MX 95 enables `CFG_RPMB_FS`, was not confirmed from public sources in this lane (§8).
 - The Linux kernel has an RPMB subsystem in recent releases; its documentation page was not reachable from this lane (§8).
@@ -122,7 +122,7 @@ The verifier keeps the newest head it has accepted. A later bundle must extend i
 
 The audit key's public key and an attestation are exported at enrolment, so heads can still be checked after the key is gone (§6). The public key reaches the verifier through Linux, so the verifier accepts it only if it is authenticated independently of Linux, for example by enclave evidence that binds that key to the device, checked against an NXP root the verifier trusts. The device attestation of §4.2 does not cover the audit key, and whether the i.MX 95 offers a key attestation that does is **unconfirmed** (§8); until then, an audit public key supplied by a compromised Linux at enrolment is the attacker's.
 
-Pull (the verifier asks, with a nonce) gives freshness. Push (the board sends after each signing) keeps the window between a signing and the verifier's copy small. Q3 asks which.
+Pull (the verifier asks, with a nonce) gives freshness, if the verifier also bounds the time it waits for the answer. Push (the board sends after each signing) keeps the window between a signing and the verifier's copy small, but a pushed head carries no verifier nonce: its signature authenticates an old head as well as a current one, so the verifier treats it as "at least this far", never as the board's current state, until a nonce-bound pull confirms it. Q3 asks which.
 
 ## 6. What survives a reboot, a power cut or a tamper response
 
@@ -160,7 +160,7 @@ Recommendation, where the sources support one: start with A alone, with a linear
 - What the enclave erases on a tamper response on the i.MX 95.
 - Whether NXP's OP-TEE for the i.MX 95 enables the RPMB file system, and whether the board's eMMC RPMB is reachable from OP-TEE.
 - The Linux kernel RPMB subsystem documentation: the page https://docs.kernel.org/next/misc-devices/rpmb.html returned 404.
-- RPMB write endurance and latency for the board's eMMC: the JEDEC eMMC specification is not public.
+- RPMB write endurance and latency for the board's eMMC: the JEDEC eMMC specification is not public. The RPMB write budget (audit rate, batch size, authenticated writes per head update on NXP's OP-TEE, product service life) is not set, so whether the 32-bit write counter lasts the product's life is not confirmed ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.3).
 - S2: the schneier.com archive page returned 404; the PDF was reachable but was not re-read in full for this survey.
 - Whether the i.MX 95 enclave can limit the use of a key to one caller, one key store session or one execution domain (for example OP-TEE or the Cortex-M7), so that an isolated logger has exclusive use of the audit key. S1's key usage flags restrict operations, not callers; no source read here shows such a mechanism.
 - Any mechanism on the i.MX 95 that cryptographically binds an IMA or logger measurement into authenticated evidence, outside Linux's control. The enclave's device attestation fields in S1 do not include such data (§4.2, §4.4).
