@@ -241,12 +241,140 @@ into NXP devices [S8]. SPSDK's `el2go-host` is the station-side client [S3].
 
 ## 6. Pre-close checklist (before the irreversible life-cycle step)
 
-_To be written._
+For the owner to adopt or amend. Nothing in it was run. The closest public
+procedure is U-Boot's i.MX 93 guide [S10]; the i.MX 95 equivalent was not
+found, so the commands named below are those of the i.MX 93 guide and of
+SPSDK 3.13.0, and their behaviour on the i.MX 95 is not confirmed.
+
+Before the step, the station confirms and records:
+
+1. **Life cycle is OEM open.** U-Boot's `ahab_status` prints the life
+   cycle [S10]. Closing from any other state is not covered by the source.
+2. **The SRK hash is fused and correct.** The fuse words read back from the
+   device match the hash that the SRK tool produced from the SRK table used
+   to sign the images. A wrong SRK hash leaves a part that will not boot
+   [S10]. Read-back on the host: `nxpele read-common-fuse` [S7].
+3. **A fully signed image boots with no enclave events.** U-Boot's
+   `ahab_status` reports no events after a signed boot [S10];
+   `nxpele get-events` reads the same store from the host [S7]. On the
+   i.MX 95 every OEM container (System Manager, OEI DDR firmware, SPL, then
+   TF-A and U-Boot) must be OEM-signed [S6].
+4. **The image's SRK table is the fused one.** The signed message and image
+   configurations name the SRK set, the SRK used and the revoke mask [S9].
+   The station records which SRK index signed the image and the
+   provisioning messages.
+5. **Imported keys work after the step.** Each key imported through the
+   key-import TLV has a life-cycle attribute (open, closed, closed and
+   locked) [S9]. Check that keys meant for the field allow the closed life
+   cycle, and that each key ID answers before the step.
+6. **One-time fuse decisions are made.** Fuses tied to features have to be
+   set as the owner decides, for example the i.MX 95 fast-boot enable fuse,
+   which the container's fast-boot modes depend on [S6]. Whether such fuses
+   can still be written after the move to OEM closed is **not confirmed**;
+   the monotonic counter fuse configuration that [SPEC.md](../SPEC.md)
+   names comes from a manual this lane could not reach.
+7. **Versions are recorded.** The enclave firmware version and status
+   (`get-ele-fw-version`, `get-ele-fw-status`) [S7], the SPSDK version, and
+   the digest of the signed boot image.
+8. **The step itself.** U-Boot's `ahab_close` [S10] or SPSDK's
+   `nxpele forward-lifecycle-update` [S7]. Afterwards, reboot and confirm
+   that `ahab_status` shows OEM closed with no events [S10].
+
+Per-device record (proposed; no public NXP source defines one, see 3.2):
+device UUID or serial, SRK hash read back, SRK index used, enclave firmware
+version, key IDs imported and their life-cycle attributes, image digest, life
+cycle before and after, date, station and the people present.
 
 ## 7. Not confirmed
 
-_To be written._
+- That the i.MX 95 enclave firmware supports the key exchange and key import
+  of AN14861 with the same key ID (`0x70000000`), algorithm and TLV format.
+  SPSDK lists the i.MX 95 for both blobs [S7], but no i.MX 95 document was
+  reached.
+- How the station reaches the i.MX 95 enclave in practice: `nxpele` over
+  U-Boot serial or fastboot [S4], a Linux application using
+  `imx-secure-enclave` [S12], or an EdgeLock 2GO provisioning firmware.
+- Whether the i.MX 95 needs a separate provisioning enclave firmware, as the
+  RT1180 does [S9].
+- How `el2go-host` provisions an i.MX 95, which it lists as supported [S7]
+  while its guide describes MCU boot modes only [S3]; the content of AN14586
+  and AN14544 [S11].
+- Whether SPSDK can sign signed messages and images through a PKCS#11 HSM,
+  and whether go-xkms can perform the ECDH, key derivation, RFC 3394 wrap and
+  CMAC of section 3.3 inside the HSM.
+- The i.MX 95 equivalents of U-Boot's `ahab_status` and `ahab_close` [S10],
+  and whether fuses can be written after OEM closed.
+- Who should be present at a provisioning step and what to record: no NXP
+  source was found (section 3.2).
 
 ## 8. Questions for the owner
 
-_To be written._
+1. **Which provisioning path for the OEM keys?**
+   - (a) The enclave's own key exchange and key import [S9], driven by a
+     station under go-xkms custody.
+   - (b) EdgeLock 2GO [S3, S8]: NXP's service generates the secure objects;
+     the station needs internet access and an EdgeLock 2GO account.
+   - (c) Both: EdgeLock 2GO for device credentials, (a) for the OEM's own
+     keys.
+
+   Recommendation: (a). It is the only path in which the OEM keys never
+   leave the OEM's custody, and it needs no network link at the station
+   [S3, S9]. The i.MX 95 support is not confirmed (section 7).
+2. **Where do the ECDH, key derivation and wrap run?**
+   - (a) Inside the go-xkms HSM.
+   - (b) In SPSDK on an off-line station, with the derived keys held in
+     memory only for the ceremony.
+   - (c) In SPSDK as in AN14861, with the keys in files [S9].
+
+   Recommendation: (a) if go-xkms can do it; otherwise (b) for production,
+   and (c) only with throw-away development keys on development boards.
+3. **Should the derived import keys be salted with the device SRKH?**
+   - (a) Zero salt.
+   - (b) SRKH salt [S9].
+
+   Recommendation: (b). It ties the wrap and CMAC keys to one SRK set, so a
+   leaked set of import keys is no use with a different SRK set. Sources
+   offer the option but give no guidance.
+4. **How does the station reach the i.MX 95 enclave?**
+   - (a) `nxpele` over U-Boot fastboot.
+   - (b) `nxpele` over the U-Boot serial console.
+   - (c) An on-device application (U-Boot, OP-TEE or Linux) that is given the
+     signed message and TLV, as in AN14861 [S9].
+
+   Recommendation: (a). SPSDK calls fastboot its fastest transport [S4].
+   Confirm on a development board in OEM open that it works for the i.MX 95.
+5. **When is the life cycle closed, and where?**
+   - (a) At the provisioning station, straight after the checklist in
+     section 6.
+   - (b) Later, as a separate step (for example at final test).
+   - (c) Never on the FRDM-IMX95-PRO development boards.
+
+   Recommendation: (c) for development boards and (a) for production units.
+   Closing a part that fails any item in section 6 leaves it unrecoverable
+   [S10].
+6. **Who is present at a ceremony?**
+   - (a) One operator.
+   - (b) Two people under dual control, each holding part of the go-xkms
+     authorisation, plus a witness who signs the log.
+   - (c) A scheduled ceremony on the IANA model, with published agendas and
+     named roles [S13].
+
+   Recommendation: (b) for the ceremonies that use the SRK or the import
+   master key (key generation, signing, rotation); (a) for per-device
+   station runs, with the go-xkms audit log as the record. No NXP source
+   prescribes this (section 3.2).
+7. **What is recorded, and where is it kept?**
+   - (a) The per-device record of section 6, kept by the station.
+   - (b) (a), plus a ceremony log signed by those present, kept with
+     go-xkms's audit log.
+   - (c) No formal record.
+
+   Recommendation: (b).
+8. **Which life-cycle attribute do imported keys carry?**
+   - (a) Closed only.
+   - (b) Open and closed.
+   - (c) Closed and locked as well.
+
+   Recommendation: none from the sources, which list the values but do not
+   advise [S9]. Production keys should not be usable in open; this depends
+   on question 5.
