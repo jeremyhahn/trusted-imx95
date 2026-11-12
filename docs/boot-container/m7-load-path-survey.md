@@ -58,7 +58,10 @@ From S1 (`iMX95/soc.mak`, tag `lf-6.18.37-2.1.0`):
 ## 4. Which agent loads the M7 and starts it
 
 Sources: S1; S2 `sm/doc/arch.md`, `sm/doc/config.md` (section "Configtool Commands") and
-`configs/mx95frdm.cfg` (the FRDM-IMX95 configuration, the board of this repository), all at
+`configs/mx95frdm.cfg` (the 15x15 FRDM-IMX95 configuration; **reference only**: this device, the
+19x19 FRDM-IMX95-PRO, uses `configs/other/mx95frdm-pro.cfg` with the EVK board port, see
+`docs/system-manager-config/public-source-survey.md` items 11-16; every LM1 value below taken from
+`mx95frdm.cfg` is unconfirmed for the PRO unless that survey states it), all at
 `rel_imx_sm_2026q3`.
 
 There are three agents, each with one job:
@@ -107,7 +110,7 @@ Sources: S1, S2 `mx95frdm.cfg`.
 
 | Option | mkimage target (S1) | Load / entry | What it needs | Notes |
 |--------|---------------------|--------------|---------------|-------|
-| TCM | `flash_m7`, `flash_all` (= `flash_lpboot_sm_all`, the EVK default) | `0x0` in the M7 view, written at `0x303C0000` | nothing before it | The size comes from the M7MIX ranges the SM grants the M7 (`0x20380000-0x2047FFFF` and `0x4A060000-0x4A09FFFF` in `mx95frdm.cfg`); the split of those into ITCM and DTCM, and their exact sizes, are in IMX95RM, not read (**unconfirmed**, U2). |
+| TCM | `flash_m7`, `flash_all` (= `flash_lpboot_sm_all`, the EVK default) | `0x0` in the M7 view, written at `0x303C0000` | nothing before it | The size comes from the M7MIX ranges the SM grants the M7 (`0x20380000-0x2047FFFF` and `0x4A060000-0x4A09FFFF` in the 15x15 `mx95frdm.cfg`, reference only; the PRO file's ranges are **unconfirmed**); the split of those into ITCM and DTCM, and their exact sizes, are in IMX95RM, not read (**unconfirmed**, U2). |
 | DDR | `flash_m7_ddr`, `flash_all_ddr` | `0x80000000` | the DDR OEI in the same container, so the DDR is up before the copy | The FRDM SM grants the M7 `DDR EXEC 0x80000000-0x89FFFFFF` (160 MiB). The same range overlaps the ELE domain's `DDR DATA` and the V2X domain's read-only range in that file; the A55 and Linux memory map must keep out of it. |
 | NOR XIP | `flash_m7_flexspi_xip` | `0x28132000` | FlexSPI NOR boot | Executes from flash; the FRDM board's boot media are not surveyed here. |
 
@@ -143,9 +146,10 @@ Sources: S4 and S5 below; S1; S2 `arch.md`.
   supports AHAB 2.0 is a question for the owner (Q4).
 - **Anti-rollback.** S1 passes `-sw_version` only to the ATF/U-Boot container. Setting a version on
   the container that holds the M7 means adding `-sw_version` to the first-container mkimage call
-  (an option mkimage already takes, as the U-Boot container shows); how the ELE compares that
-  field against the fuse-based floor on the i.MX 95 is in the Security Reference Manual:
-  **unconfirmed** (U3).
+  (an option mkimage already takes, as the U-Boot container shows). That field alone does not
+  protect the M7: the ELE enforces only the fuse version, and the software check of `-sw_version`
+  runs in A55 SPL, after the M7 has started (`anti-rollback-survey.md` §2.1, §2.2). The mechanism
+  that enforces a floor before the M7 executes is **unconfirmed** (U3, Q5).
 - **Isolation after the check.** S2 `arch.md` says the SM reloads the TRDC configuration through
   ELE messages when a mix powers up and that the configuration "can change ... if code is being
   reloaded and authenticated". The TRDC grants of §4 (M7 DID 4, its TCM and DDR ranges) are what
@@ -214,7 +218,7 @@ What it must **take from** trusted-firmware:
   with a resource table is needed only if the Linux remoteproc path is chosen (S6).
 - The image's version number, for the container's `-sw_version` (anti-rollback, U3).
 - The list of SCMI resources, clocks, power domains and peripherals the M7 firmware uses, so that
-  `mx95frdm.cfg`'s LM1 can be trimmed to them.
+  LM1 of this device's `mx95frdm-pro.cfg` can be trimmed to them.
 - Whether the firmware expects the TCM ECC to be initialised by an earlier stage (S6 says Linux
   relies on U-Boot for this when it starts the M7).
 
@@ -225,8 +229,9 @@ What it must **take from** trusted-firmware:
   Manual boot chapter and the Security Reference Manual (SPEC.md lists both as missing). S4 gives
   the 8ULP/9x general flow only.
 - **U2** The M7 ITCM/DTCM sizes and their split in the ranges S2 grants. Needs IMX95RM.
-- **U3** How the ELE checks the container `-sw_version` against the fuse floor on the i.MX 95.
-  Needs the Security Reference Manual.
+- **U3** Which mechanism enforces a version floor on the M7's container before the M7 executes
+  on the i.MX 95, and what floor it protects. The ELE is documented to check only the fuse
+  version; nothing read here shows it checking `-sw_version`. Needs the Security Reference Manual.
 - **U4** Whether an SM LM reset of the M7 reloads and re-authenticates the image or only restarts
   the CPU. Needs a code-level read of imx-sm's `sm/lmm` and device boot code at
   `rel_imx_sm_2026q3`.
@@ -263,13 +268,24 @@ What it must **take from** trusted-firmware:
    that supports it. SPEC.md's HSM custody model (AN14471) must then be checked against SPSDK's
    HSM signing support, which this survey did not read.
 5. **Anti-rollback on the M7's container?**
-   Options: (a) add `-sw_version` to the first-container mkimage call, fed from trusted-firmware's
-   image version; (b) leave the first container at the default version, as S1 does, and rely on the
-   ATF/U-Boot container's version only.
-   Recommendation: (a), since the M7 is the HSM's firmware and S1's default leaves its container
-   unversioned; how the ELE enforces it is U3.
+   The ELE enforces only the container's fuse version against the fuse floor
+   (`anti-rollback-survey.md` §2.1). The `-sw_version` field is a software-checked index that
+   hardware does not enforce (`anti-rollback-survey.md` §2.2); NXP's check of it runs in A55 SPL.
+   On option (a) of question 2 the M7 starts before A55 SPL runs, so that later check cannot
+   protect the M7 image: an older signed M7 image that carries the same fuse version would still
+   run. Setting `-sw_version` alone is therefore **not** an M7 rollback fix.
+   Options: (a) a fuse version on the first container, so that the ELE's own fuse-floor check
+   covers the M7 image; (b) `-sw_version` on the first container together with an explicitly
+   implemented check that runs before the M7 executes, which no source read here names; (c) leave
+   the first container at the default version, as S1 does, and rely on the ATF/U-Boot container's
+   version only, which leaves the M7 unprotected.
+   Status: **blocked**. The mechanism that enforces a version before the M7 executes on the
+   i.MX 95, and the floor it protects, are **unconfirmed** (U3); the fuse capacity behind the floor
+   is unconfirmed too (`anti-rollback-survey.md` §2.1). No option is recommended until a verified
+   mechanism is named with its source. SPEC.md's anti-rollback requirement for the boot container
+   stands; raising a fuse floor is an owner decision and is not a step of this survey.
 6. **Who owns the SM configuration of LM1?**
-   Options: (a) this repository's `system-manager-config` row derives it from `mx95frdm.cfg` and
+   Options: (a) this repository's `system-manager-config` row derives it from `configs/other/mx95frdm-pro.cfg` (this device's file, not the 15x15 `mx95frdm.cfg`) and
    trusted-firmware declares the resources it needs (§8); (b) trusted-firmware owns LM1's section.
    Recommendation: (a), as SPEC.md's `system-manager-config` row already says the SM configuration
    is this repository's.

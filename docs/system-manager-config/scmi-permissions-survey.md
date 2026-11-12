@@ -28,12 +28,18 @@ Sources surveyed (all reached from the lane on 2026-11-12):
 | S9 | Arm, System Control and Management Interface (SCMI), DEN0056 | "latest" page; version not recorded | <https://developer.arm.com/documentation/den0056/latest> |
 
 The tag `rel_imx_sm_2026q3` was the newest tag on
-<https://github.com/nxp-imx/imx-sm> when surveyed. The repository
-ships a FRDM-specific configuration (`mx95frdm`, board
-`mcimx95frdm`), so this survey uses it as the baseline instead of
-the EVK file. Whether `mcimx95frdm` describes the FRDM-IMX95-PRO
-variant exactly, or only the base FRDM-IMX95, is not confirmed
-(section 6).
+<https://github.com/nxp-imx/imx-sm> when surveyed. S1, `mx95frdm.cfg`
+(board port `mcimx95frdm`), is **not this device's configuration**: it
+targets the 15x15 FRDM-IMX95. This device, the 19x19 NXP FRDM-IMX95-PRO,
+uses `configs/other/mx95frdm-pro.cfg` at the same tag, which reuses the
+19x19 EVK board port (`mcimx95evk`) and differs in its M7 UART and pins,
+its sensors and its fault entries (`public-source-survey.md` items 11-16;
+`sm-build-survey.md` section on the PRO configuration). This survey read
+only S1. Every S1 value below is therefore **reference only**: it shows how
+NXP grants SCMI rights on a sibling board, not what the PRO file grants.
+The recommendations in sections 3 and 7 apply to the PRO file; where the
+PRO value is not shown in the sibling surveys it is **unconfirmed** and
+must be read from `mx95frdm-pro.cfg` before the proposal is adopted.
 
 ## 2. How the board configuration defines SCMI agents
 
@@ -120,7 +126,17 @@ Two rules in S2 matter for least privilege:
   readable by the non-secure side is also readable by the secure
   side (S2, notes under "Configtool Resources").
 
-### 2.4 The agents in NXP's FRDM baseline (S1, tag `rel_imx_sm_2026q3`)
+### 2.4 The agents in NXP's 15x15 FRDM file (S1, tag `rel_imx_sm_2026q3`; reference only)
+
+This table is the 15x15 FRDM's (S1), kept as a reference. For this
+device's `mx95frdm-pro.cfg`, the sibling surveys show the same LM and
+agent layout: LM1 "M7" with agent "M7" on MU 9 over CRC32-checked
+channels, LM2 "AP" with "AP-S" on MU 1 and "AP-NS" on MU 3, and the M7
+holding `LMM_2` with full rights (`public-source-survey.md` items 14-15).
+The PRO file gives the M7 LPUART7 and pins GPIO_IO36/37 rather than S1's
+UART, has the PF5301 temperature sensor, and lacks the NoC fault entries
+(`public-source-survey.md` item 16). Every other PRO grant in this table
+is **unconfirmed**.
 
 | LM | Agent | Domain ID | Secure | Mailbox | Notable API grants |
 |----|-------|-----------|--------|---------|--------------------|
@@ -129,7 +145,9 @@ Two rules in S2 matter for least privilege:
 | LM2 `AP` (default LM) | `SCMI_AGENT1` "AP-S" | 3 | yes | MU1 | `SYS` all, `PERF_A55` all, low-power interface (PERLPI) all for CAN2-5, GPIO2-5, LPUART1/4-8, WDOG3/4; owns A55 cores, `ARM_PLL`, ELE MU1/MU2 |
 | LM2 `AP` | `SCMI_AGENT2` "AP-NS" | 3 | no | MU3 | `SYS` notify only, `LMM_1` notify only (the M7 LM), `PERF_A55` all, RTC all, A55 temperature sensor all, ANA sensor set, audio/HSIO/LDB PLLs all, external and output clocks all, wake-up button notifications; owns most application peripherals (display, camera, VPU, GPU, NPU, NETC, PCIe, USB, uSDHC, LPSPI, LPI2C2-8, EDMA1/3 and most of EDMA2, SAI, FlexSPI, V2X APP/HSM/SHE0, ELE MU3/MU4, DAP pins) |
 
-What the baseline already does well, as read from S1:
+What the 15x15 FRDM file already does well, as read from S1 (reference
+only; whether the PRO file does the same is unconfirmed except where the
+previous paragraph says so):
 
 - The non-secure agent cannot reset or power off the system or the
   M7 through SCMI: `SYS` and `LMM_1` are notify-only for AP-NS. A
@@ -168,17 +186,24 @@ MU with these protocols: power (0x11), system power (0x12), perf
 (0x15, two thermal zones on sensors 0 and 1), pin control (0x19),
 and NXP's LMM (0x80), BBM (0x81), CPU (0x82) and misc/control (0x84)
 protocols. It does not declare the reset (0x16) or voltage (0x17)
-protocols. Which `mx95frdm.cfg` sensor IDs are sensors 0 and 1, and
+protocols. Which `mx95frdm-pro.cfg` sensor IDs are sensors 0 and 1, and
 whether the DT's `mu2` is the SM's `mu=3`, are not confirmed
 (section 6).
 
 ## 3. Least-privilege set for this board's agents
 
-The three agents named in #107 map onto the S1 baseline as follows:
+The three agents named in #107 map onto the PRO file's agents (the
+same names as S1, section 2.4) as follows:
 Cortex-A55 non-secure = `AP-NS` (Linux); Cortex-A55 secure world =
 `AP-S` (TF-A, and any secure OS); Cortex-M7 = `M7`. The proposal
-keeps NXP's LM and agent layout and removes grants. Each item says
-whether it is a change from S1.
+keeps NXP's LM and agent layout and removes grants. It applies to
+`mx95frdm-pro.cfg`. The "Grant in S1" columns give the 15x15 FRDM's
+grant as a **reference only**; the matching PRO grant is
+**unconfirmed** unless section 2.4 states it, and it must be read from
+the PRO file before the proposal is applied. Where the PRO file names a
+different resource (its M7 UART is LPUART7, and it has the PF5301
+temperature sensor), the proposal applies to the PRO resource, not to
+S1's.
 
 ### 3.1 All agents
 
@@ -210,7 +235,7 @@ The M7 is the board's tamper responder (docs/SPEC.md,
 | `SENSOR_TEMP_ANA` all, PMIC temperature sensors set | keep | thermal tamper detection |
 | `BUTTON`, `BRD_SM_CTRL_BUTTON` notify | keep | |
 | `BRD_SM_CTRL_TEST`, `BRD_SM_CTRL_TEST_A` all | drop | test only |
-| `LPUART3 ... test`, `PD_M7 test` | drop the `test` key | test only |
+| `LPUART3 ... test`, `PD_M7 test` | drop any `test` key on the PRO file's M7 UART (LPUART7) and `PD_M7`; whether the PRO file carries `test` keys there is unconfirmed | test only |
 | `BRD_SM_CTRL_PCA2131` all | keep only if the M7 drives the board RTC | not confirmed what it controls |
 
 ### 3.3 Cortex-A55 secure world (`AP-S`, LM2)
@@ -231,7 +256,7 @@ The M7 is the board's tamper responder (docs/SPEC.md,
 | `PERF_A55` all | priv | cpufreq needs level set (priv) and limits (set), not exclusive (S4, S6) |
 | `RTC` all | get and notify, if a secure agent or the M7 owns time (question 3) | RTC set needs exclusive (S4); in S1 Linux is the only agent that can set the SoC RTC |
 | `SENSOR_TEMP_ANA` set | notify, or get (question 4) | set lets Linux enable or disable the sensor the M7 watches (S4); whether the SM aggregates that request is not confirmed |
-| `BRD_SM_SENSOR_TEMP_PF09` all | get and notify (question 4) | all lets Linux move the PMIC sensor's trip points (S4) |
+| `BRD_SM_SENSOR_TEMP_PF09` all | get and notify (question 4) on whichever board temperature sensors the PRO file grants AP-NS (it has the PF5301 sensor; its grant names and levels are unconfirmed) | all lets Linux move the sensor's trip points (S4) |
 | `SENSOR_TEMP_A55` all | keep | Linux's own thermal zone |
 | PLLs (`AUDIO_PLL1/2`, `HSIO_PLL`, `LDB_PLL`, `VIDEO_PLL1`) and `CLOCK_*` all | keep only those used by peripherals this product enables (question 2) | rate and parent set need exclusive (S4) |
 | `BRD_SM_CTRL_TEST_A`, `BUTTON ... test`, `RTC ... test` | drop the test items | test only |
@@ -327,8 +352,11 @@ This is a proposal for #55 to adopt or reject, not a design:
 
 ## 6. What could not be confirmed
 
-- Whether `mx95frdm.cfg` / board `mcimx95frdm` (S1) matches the
-  FRDM-IMX95-PRO exactly, or only the base FRDM-IMX95.
+- The PRO file's grants. `mx95frdm.cfg` / board `mcimx95frdm` (S1) is
+  the 15x15 FRDM, not this device; the device's `mx95frdm-pro.cfg` was
+  not read in this survey. Beyond what section 2.4 takes from the
+  sibling surveys, every PRO grant, sensor ID, owned peripheral and
+  test key is unconfirmed.
 - Which SM release the board's shipped image uses. The S1 baseline
   is `rel_imx_sm_2026q3`; the shipped version was not checked.
 - Whether a `test` key changes anything in a release build beyond
@@ -353,12 +381,24 @@ This is a proposal for #55 to adopt or reject, not a design:
 
 ## 7. Questions for the owner
 
-1. **Baseline.** Start from NXP's `mx95frdm.cfg`, or write the
-   board's `.cfg` from scratch?
-   Options: (a) copy `mx95frdm.cfg` at a pinned tag and remove
-   grants; (b) write from scratch.
-   Recommendation: (a). S1 already keeps `SYS` and `LMM_1` at notify
-   for Linux, and S2 advises starting from NXP's board file.
+Where a question below cites S1, the value is the 15x15 FRDM's and is
+reference only; the PRO file's value is unconfirmed unless section 2.4
+states it.
+
+1. **Baseline.** Start from NXP's `configs/other/mx95frdm-pro.cfg`, the
+   configuration for this device, or write the board's `.cfg` from
+   scratch?
+   Options: (a) copy `mx95frdm-pro.cfg` at a pinned tag and remove
+   grants; (b) write from scratch. `mx95frdm.cfg` (S1) is not an
+   option: it is the 15x15 FRDM, with a different board port.
+   Recommendation: (a), since S2 advises starting from NXP's board file
+   and the PRO file is NXP's file for this board. Before adopting it,
+   read its grants and confirm what S1 shows for the 15x15 FRDM, that
+   `SYS` and `LMM_1` are notify-only for Linux; that is unconfirmed for
+   the PRO file. The PRO file reuses the EVK board port and lacks the
+   NoC fault entries the newer FRDM file has (`public-source-survey.md`
+   item 16), which the owner must review with
+   `fault-recovery-survey.md`.
 2. **Which peripherals Linux owns.** S1 gives AP-NS almost every
    application peripheral, each with full rights on its power domain,
    clocks, pins and perf domain.

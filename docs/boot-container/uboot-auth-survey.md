@@ -207,7 +207,10 @@ production [S11].
 
 A closed device can keep the command line (needed by NXP's script-based
 `bsp_bootcmd` [S3]) only together with `BOOTDELAY=-2` or a keyed, hashed stop
-string, and a locked environment. Removing `CMDLINE` is the stronger option
+string, a locked environment, and a failure path that halts or resets instead
+of entering the command loop when loading or authentication fails (the
+mechanism for that is unconfirmed, §8 question 3). `BOOTDELAY=-2` alone
+does not close the prompt after a failed boot. Removing `CMDLINE` is the stronger option
 but forces the boot onto standard boot or board C code, which NXP's EVK
 scripts do not use for the AHAB path [S3].
 
@@ -331,10 +334,24 @@ guessed in the text above.
    Options: (a) no command line (`CMDLINE` off) [S10]; (b) command line kept,
    `BOOTDELAY=-2` [S8]; (c) prompt behind a hashed stop string
    (`AUTOBOOT_KEYED` + `AUTOBOOT_ENCRYPTION`) [S8]; (d) open prompt (EVK).
-   Recommendation: **(b)** for the first closed build, moving to (a) once the
-   boot path no longer relies on scripts. (a) is strongest but rules out the
-   EVK's script-based path [S3, S10]; (c) keeps a service door whose secret
-   must then be managed.
+   Recommendation: **(a)**, `CMDLINE` off in the closed build. (b) is not
+   enough on its own: `BOOTDELAY=-2` only stops the countdown being
+   interrupted [S8]. If the load or the authentication fails, a `CMDLINE`
+   build still falls through to its command loop, so an attacker who makes the
+   boot media unreadable or the image invalid gets an unauthenticated prompt.
+   A locked or absent environment (question 2) does not remove interactive
+   commands. (b) is acceptable only as an interim build, and only if every
+   failure path halts or resets the board without entering the shell; the
+   U-Boot mechanism that guarantees this is **unconfirmed**, as no source read
+   here names one. (a) rules out the EVK's script-based path [S3, S10], so the
+   boot must move to standard boot or board C code first; (c) keeps a service
+   door whose secret must then be managed.
+   Whichever option is chosen, the lockdown is validated on the closed build
+   by checking that no prompt is reachable: (1) a key press during autoboot;
+   (2) a boot medium that cannot be read; (3) an image that is missing or
+   fails to load; (4) an image whose signature or container check fails;
+   (5) a corrupted or absent environment. Each case must end in a halt or
+   reset, never in the U-Boot shell.
 
 4. **Which boot paths stay in the closed build?**
    Options: (a) one path only: the chosen method from storage, with standard

@@ -22,7 +22,12 @@ The survey answers three questions for the NXP FRDM-IMX95-PRO:
 Method: the public `nxp-imx/imx-sm` repository was cloned at one release
 tag and its documentation (`sm/doc/*.md`), the i.MX 95 FRDM configuration
 (`configs/mx95frdm.cfg`) and the headers that define reactions and reset
-reasons were read. All descriptions below are summaries in this
+reasons were read. `mx95frdm.cfg` is the 15x15 FRDM, **not this device**:
+the 19x19 FRDM-IMX95-PRO uses `configs/other/mx95frdm-pro.cfg` with the
+EVK board port, and that file lacks the NoC fault entries
+(`public-source-survey.md` items 11-16). Every "FRDM file" or "FRDM
+configuration" value below is **reference only**; the PRO value is
+unconfirmed unless that survey states it. All descriptions below are summaries in this
 repository's words; no vendor text is copied. File references are to paths
 inside that tag.
 
@@ -122,8 +127,15 @@ Read from S2 and S4, a fault is handled as follows:
    *delayed* reaction, a system reset; S3 gives the period as about 300 ms on
    i.MX 95 (S3, S4).
 
-Step 4 is a hardware backstop: a fault that the SM itself cannot handle
-(for example because the M33 is hung) still ends in a system reset.
+Step 4 is a hardware backstop, but only for a fault that has reached the
+FCCU: such a fault that the SM itself cannot handle (for example because the
+M33 is hung) still ends in a system reset. It does not cover an SCMI request
+that the SM never services. A software fault set over the FuSa SCMI protocol
+(section 8) exists only once the SM has accepted the request; whether an
+accepted software fault is then raised through the FCCU, and so gets the
+delayed reaction, is **not confirmed** by the sources read. A request that is
+pending or unacknowledged raises no fault at all, so the FCCU timer never
+starts.
 
 ### 5.2 Reactions
 
@@ -252,7 +264,9 @@ Two routes therefore exist, and the owner should pick one (question 3):
 1. **Software fault route.** The M7 sets one of the software faults it owns
    through the FuSa protocol; the SM applies the reaction the board
    configuration lists for that fault. The policy lives in this repository's
-   configuration, and the M7 only states *that* something happened.
+   configuration, and the M7 only states *that* something happened. The
+   fault exists only once the SM accepts the request; an unacknowledged
+   request raises nothing and starts no FCCU timer (section 5.1, question 3).
 2. **Direct command route.** The M7 issues LMM or system power requests
    itself (shut down the A55 LM, power off domains, reset the system). The
    policy lives in the M7 firmware.
@@ -316,10 +330,22 @@ whether it already calls the FuSa protocol; that repository was not read.
    reaction is in this repository's configuration; (b) direct command
    route: the M7 issues LMM and system power requests; (c) both, with (a) as
    the last resort.
-   Recommendation: (c). Use (a) for the final reaction, because it is
-   declarative, reviewable here and still acted on by the FCCU's delayed
-   system reset if the SM cannot respond (S3, S4). Use (b) for the staged
-   steps (power off the A55 LM and the PHYs) before it.
+   Recommendation: (c), **not yet fully supported**. Use (a) for the final
+   reaction, because it is declarative and reviewable here; use (b) for the
+   staged steps (power off the A55 LM and the PHYs) before it. Both routes are
+   SCMI requests the SM must service. The FCCU's delayed system reset (S3, S4)
+   covers a fault the FCCU has accepted, not a request the SM never
+   acknowledges (section 5.1). One partial backstop is sourced: if the SM is
+   hung, it stops refreshing its WDOG2, whose timeout becomes FCCU fault 18
+   and then the delayed system reset (S5, S10, S11, section 4). Nothing read
+   covers an SM that is alive but does not service the request (for example a
+   stalled messaging unit or a dropped message). An independently triggered
+   reaction for that case, such as the M7 escalating on a missing
+   acknowledgement through a hardware path that does not depend on the SM, is
+   **unresolved**: no source read names one. The tamper-shutdown requirement
+   stands; this route does not yet meet it under that failure, and the owner
+   must not treat it as complete until such a reaction is named with its
+   source.
 
 4. **SCMI permissions of the secure A55 agent.** The FRDM file grants AP-S
    `SYS ALL` (S6).

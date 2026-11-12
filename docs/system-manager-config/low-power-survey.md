@@ -202,8 +202,11 @@ is decided until the owner answers section 8.
 
 ### 6.1 The shipped FRDM configuration
 
-NXP's SM tree has a configuration for this board, `configs/mx95frdm.cfg`
-(SM-FRDM-CFG). It is a tool input: `configtool.pl` turns it into the
+NXP's SM tree has a configuration for the 15x15 FRDM-IMX95, `configs/mx95frdm.cfg`
+(SM-FRDM-CFG). It is **not this device's**: the 19x19 FRDM-IMX95-PRO uses
+`configs/other/mx95frdm-pro.cfg` with the EVK board port
+(`public-source-survey.md` items 11-16). The table below is reference only;
+every PRO grant it does not share with that survey is unconfirmed. It is a tool input: `configtool.pl` turns it into the
 `configs/mx95frdm/*.h` headers compiled into the SM, so access rights are fixed
 at build time and cannot be changed by a client at run time (SM-ARCH, "System
 View"). What it grants, read at tag `rel_imx_sm_2026q3`:
