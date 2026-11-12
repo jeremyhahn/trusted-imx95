@@ -39,6 +39,31 @@ documented by its source only.
 
 ### 2.2 NXP TF-A (imx-atf)
 
+NXP's fork [S4] is what NXP's Linux BSP releases build. Surveyed: branch
+`lf_v2.14`, head commit `af9eb2c` (2026-09-01). The i.MX 95 port is at the same
+path and shares the upstream structure, memory map and SCMI client; its
+`platform.mk` differs from upstream `v2.15.0` only in what follows [S2, S4]:
+
+- **Extra SiP calls that drive other cores.** `imx95_m7.c` adds an SRC SiP
+  service that lets the normal world set the Cortex-M7 reset address, prepare
+  it, start it, stop it and query it. Depending on the SM configuration, it does
+  this by core control or by booting and shutting down the M7 logical machine,
+  and on stop it resets the M7 agent's SCMI configuration. `imx95_lmm.c` adds
+  an LMM SiP service that boots or force-shuts down a logical machine whose
+  number the caller passes, without an allow-list in TF-A [S4]. Both act with
+  the rights of the secure SCMI agent (section 2.4), so whatever bounds them is
+  in the SM configuration, not in TF-A.
+- **SCMI base protocol** is compiled in (agent discovery for the M7 code)
+  [S4].
+- **Trusty.** With `SPD=trusty` an FF-A shared-memory helper is added [S4].
+
+Upstream `v2.15.0` exposes on the i.MX 95 only the generic i.MX SiP calls
+plus SoC-information query; the M7 and LMM services are NXP-only [S2, S4].
+A normal-world kernel that starts the M7 through Linux remoteproc on NXP's
+BSP depends on the SRC SiP call, according to the fork's own code comments
+and function names; that dependency was not checked against the kernel (see
+section 6).
+
 ### 2.3 PSCI
 
 The i.MX 95 PSCI back end [S2, `imx95_psci.c` and `imx9_psci_common.c`]
@@ -78,9 +103,118 @@ the SCMI *platform* [S2, S5, S6]. In the upstream port [S2]:
 
 ## 3. Build options that matter for security
 
+Defaults below are from the upstream build-options guide at `v2.15.0` [S7],
+and the platform values from the i.MX 95 `platform.mk` [S2, S4].
+
+| Option | Default | What it means for this board |
+|---|---|---|
+| `DEBUG` | 0 (release) | A debug build turns on assertions and crash dumps by default and is larger; the BL31 region is only 256 KiB [S2, S7]. Ship release. |
+| `LOG_LEVEL` | 20 (notice) in release, 40 (info) in debug [S7] | The console is the boot-scope LPUART (section 2.1); a lower level prints less about the memory map and the boot. |
+| `ENABLE_ASSERTIONS` | follows `DEBUG` [S7] | Can be turned on in a release build to keep input checks that are written as `assert()`. |
+| `CRASH_REPORTING` | follows `DEBUG` [S7] | Dumps register state to the console on an unexpected exception. |
+| `ENABLE_STACK_PROTECTOR` | `none` [S7] | The guide recommends `strong` where wanted; the platform must supply a canary source, which this lane did not find in the i.MX 95 port (section 6). |
+| `BRANCH_PROTECTION` | 0 [S7] | Needs Armv8.3 pointer authentication or Armv8.5 BTI. The Cortex-A55 is an Armv8.2-A core [S10], so not applicable. |
+| `HARDEN_SLS` | 0 [S7] | Compiler hardening against straight-line speculation; costs code size only. |
+| `SEPARATE_CODE_AND_RODATA` | 0 [S7] | Puts code and read-only data on separate pages so data is not executable; costs some of the 256 KiB. |
+| `SPD` | none | `opteed` or `trusty` makes BL31 enter a BL32 at `BL32_BASE` [S2]. No SPD means no secure OS, and BL31 alone in EL3. |
+| `SPD=spmd` with `SPMD_SPM_AT_SEL2` or `SPMC_AT_EL3` | off [S7] | Secure partitions under FF-A. S-EL2 needs `FEAT_SEL2` (Armv8.4), which the A55 lacks [S7, S10]; the EL3 SPMC is the variant the guide gives for older cores. The i.MX 95 port wires up only `opteed` and `trusty` [S2]. Not confirmed to build or run on i.MX 95. |
+| `BL32_BASE`, `BL32_SIZE` | `0x8C000000`, 32 MiB [S2] | Must match the secure DDR window in the SM configuration (section 4) and OP-TEE's own load address. |
+| `SYS_PWR_FULL_CTRL` | 0 [S2] | Platform switch in the SCMI system-power path; its exact effect was not traced (section 6). |
+| `IMX_SIP_*` services | built in, no switch [S2, S4] | NXP's fork adds M7 and LMM SiP calls (section 2.2) that cannot be compiled out by an option; removing them is a patch. |
+
+**OP-TEE.** Upstream OP-TEE (`master`, 2026-11; latest tag `4.11.0`) has an
+`mx95evk` flavour in `plat-imx` [S8]. It uses the ELE over an MU and disables
+the CAAM, SNVS, OCOTP and TZC-380 drivers on this SoC. There is no FRDM flavour
+upstream; a board port, or the EVK flavour with board values overridden, would
+be needed. This lane did not check that the DDR size and UART in the EVK
+flavour fit the FRDM-IMX95.
+
 ## 4. Resources that stay secure-only
 
+On the i.MX 95 the secure/non-secure split of peripherals and memory is not set
+by TF-A: the System Manager programs the resource-domain controllers from its
+build-time configuration [S5, S6]. TF-A's own view is only its MMU map and the
+`BL31_BASE`..`BL31_LIMIT` and BL32 windows [S2]. So "what stays secure" is a
+question about the SM configuration chosen for the board, which belongs to
+the `system-manager-config` row.
+
+NXP's SM repository ships a configuration for the FRDM board,
+`configs/mx95frdm.cfg` [S5]. As published there:
+
+- The Cortex-A55 side is one logical machine, `LM2` "AP", holding two SCMI
+  agents: `AP-S`, marked secure, on MU1 (the MU BL31 uses, section 2.4), and
+  `AP-NS`, not secure, on MU3 for Linux and U-Boot.
+- Owned by the secure agent with secure-only read/write permission: the six
+  A55 cores and the A55 platform (cluster), the Arm PLL, the A side of MU1, and
+  two ELE messaging units (`MU_ELE1`, `MU_ELE2`). It is also given the
+  performance protocol for the A55, full system-protocol rights (`SYS ALL`),
+  and the low-power interface settings of the A55's UARTs, GPIOs, CANs and
+  watchdogs 3 and 4.
+- Memory with secure-only execute permission: 256 KiB of OCRAM at
+  `0x20480000` and DDR `0x8A000000`..`0x8DFFFFFF` (64 MiB). That DDR range
+  covers BL31 at `0x8A200000` and the default BL32 window `0x8C000000`, 32 MiB,
+  from section 2.1.
+- Faults from software and from watchdogs 3 and 4 reset only the AP logical
+  machine.
+
+The SM configuration guide [S6] notes that the resource-domain hardware can
+only split secure from non-secure, and that whatever the non-secure side can
+reach, the secure side can reach too. The design point that follows: the
+non-secure agent must not hold the CPU, PLL, MU1 or ELE MUs, or the secure
+DDR window. In `mx95frdm.cfg` it does not [S5]. This lane did not audit the
+whole non-secure resource list line by line (see section 6).
+
 ## 5. Placement in the boot container and verification (input to #32, #55)
+
+**Image layout.** NXP's `imx-mkimage` (tag `lf-6.12.49_2.2.0`, `iMX95/soc.mak`
+and `Readme.imx95`) [S9] builds `flash.bin` from two AHAB containers:
+
+1. **First container**, read by the boot ROM: the ELE firmware (`-append`
+   of the AHAB image), optionally an OEI (DDR set-up image) for the M33, the
+   System Manager for the Cortex-M33 (`-m33`, into M33 TCM), optionally the M7
+   image, and U-Boot SPL for the A55 (`-ap ... a55`). The `MSEL` value given here
+   is passed to the SM and selects its boot mode.
+2. **Second container**, `u-boot-atf-container.img`, appended after the first
+   at a 1 KiB-aligned offset: `bl31.bin` loaded at `ATF_LOAD_ADDR`
+   (`0x8A200000`, the same as `BL31_BASE`), `u-boot-hash.bin` at
+   `UBOOT_LOAD_ADDR` (`0x90200000`) and, if a `tee.bin` is present, OP-TEE at
+   `TEE_LOAD_ADDR` (`0x8C000000`, the same as `BL32_BASE`). All three are
+   tagged for core `a55`. `-sw_version` sets a container software version
+   when `ROLLBACK_INDEX_IN_CONTAINER` is given. Container format version 2
+   is used for the i.MX 95 B0 silicon.
+
+So BL31 never sits in the ROM-loaded container. U-Boot SPL, running on the
+A55, loads it from the second container. SPL then jumps to BL31, which enters
+U-Boot proper (and BL32 first, if `SPD` is set) [S3, S9, S11].
+
+**Verification.** In U-Boot's i.MX container loader (`master`, 2026-07-06,
+`common/spl/spl_imx_container.c` and `arch/arm/mach-imx/ele_ahab.c`) [S11],
+when `CONFIG_AHAB_BOOT` is enabled, SPL asks the ELE to authenticate the second
+container's header, which carries the signature, before it loads anything.
+It then asks the ELE to check each loaded image (BL31, U-Boot, OP-TEE)
+against the hash in that header, and finally releases the container. Without
+`CONFIG_AHAB_BOOT`, SPL loads the images without any check [S11]. Whether a
+failed check stops the boot also depends on the device's life cycle: an open
+part only logs ELE events, a closed part refuses. That is NXP's AHAB model as
+the U-Boot code and its `ahab_close`/`ahab_status` commands present it [S11];
+the behaviour per life-cycle state was not confirmed from an NXP document
+(see section 6).
+
+Inputs for #32 (boot chain) and #55 (signing), stated as facts from the
+sources above:
+
+- BL31 and BL32 are authenticated by the same container signature as U-Boot
+  proper. There is no separate TF-A signature and no TF-A Trusted Board Boot,
+  since BL2 is not used [S2, S9, S11].
+- The chain of trust is: ROM and ELE check container 1 (SM, SPL); SPL, through
+  the ELE, checks container 2 (BL31, BL32, U-Boot). It holds only if SPL is
+  built with `CONFIG_AHAB_BOOT` [S11].
+- Rollback protection for container 2 is via the container software
+  version (`-sw_version`) [S9]; how the ELE enforces it against fuses was not
+  confirmed (see section 6).
+- Load addresses in `soc.mak` must match `BL31_BASE` and `BL32_BASE` in
+  TF-A and the secure DDR window in the SM configuration. They do in the
+  default values [S2, S5, S9].
 
 ## 6. What could not be confirmed
 
