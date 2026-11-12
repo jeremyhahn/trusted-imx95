@@ -19,7 +19,8 @@ Versions surveyed (all public, read on 2026-11-12):
 | NXP defconfig | `arch/arm64/configs/imx_v8_defconfig` at that tag | [S1] |
 | Upstream hardening fragments | `kernel/configs/hardening.config`, `arch/arm64/configs/hardening.config` at that tag | [S1] |
 | KSPP recommended settings | site repository commit `04b2a2c` (2026-05-14) | [S2] |
-| meta-imx | see §5; the Yocto release it pins is listed there | [S3] |
+| meta-imx | branch `wrynose-6.18.37-2.1.0`, head `2eb758f` (2026-11-10), Yocto codename `wrynose` | [S3] |
+| meta-freescale | branch `wrynose`, head `2d08c05` (2026-11-05) | [S5] |
 
 Method: the defconfig is a minimal file; options it does not name take their
 Kconfig defaults. To compare it with KSPP I resolved the full configuration
@@ -45,6 +46,10 @@ Every claim below names one of these. Text is summarised, never copied.
   (2026-05-14), https://kspp.github.io/Recommended_Settings
   (source: https://github.com/KSPP/kspp.github.io/blob/master/Recommended_Settings.md).
 - [S3] NXP, *meta-imx* Yocto layer, https://github.com/nxp-imx/meta-imx (§5 gives the branch).
+- [S5] Freescale community, *meta-freescale* Yocto layer, branch `wrynose`
+  (head `2d08c05`, 2026-11-05), https://github.com/Freescale/meta-freescale.
+- [S6] Linux man-pages project, *kernel_lockdown(7)*, `master` as of 2026-11-12,
+  https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/tree/man/man7/kernel_lockdown.7.
 - [S4] Ulf Magnusson, *Kconfiglib*, `master`, https://github.com/ulfalizer/Kconfiglib
   (the tool used to resolve the configuration; not a security source).
 
@@ -108,7 +113,7 @@ are KSPP's [S2].
 | --- | --- | --- | --- |
 | `SECURITY_LOCKDOWN_LSM` | n | y | NXP's `CONFIG_LSM` string names `lockdown`, but the LSM is not built, so the name has no effect. |
 | `SECURITY_LOCKDOWN_LSM_EARLY` | absent | y | Needed so lockdown applies before modules load. |
-| `LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY` | absent | y | Confidentiality also blocks reading kernel memory (e.g. via BPF, perf, tracefs); integrity only blocks changing it. |
+| `LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY` | absent | y | Integrity mode stops changes to the running kernel; confidentiality mode also stops reads of kernel memory. Which interface falls in which mode is unconfirmed (§6, Q4). |
 | `MODULES` | y | n | 517 options are `=m` in the resolved config; see §6. |
 | `MODULE_SIG`, `MODULE_SIG_FORCE`, `MODULE_SIG_ALL`, `MODULE_SIG_SHA512` | n | y | KSPP's fallback when modules must stay. |
 | `DEVMEM` | y | n | `STRICT_DEVMEM` is y; `IO_STRICT_DEVMEM` is n. |
@@ -125,11 +130,68 @@ Removing `MODULES` entirely is stronger but conflicts with the BSP (§6).
 
 ## 5. What NXP's lf-6.18 defconfig and meta-imx already set
 
-TODO (meta-imx kernel recipe and any config fragments it applies)
+meta-imx branch `wrynose-6.18.37-2.1.0` (head `2eb758f`, 2026-11-10) [S3]
+builds `linux-imx` from branch `lf-6.18.y` at the same commit as tag
+`lf-6.18.37-2.1.0`, and for every i.MX9 machine names `imx_v8_defconfig` as
+`KBUILD_DEFCONFIG` (`meta-imx-bsp/recipes-kernel/linux/linux-imx_6.18.bb`).
+The recipe adds no configuration fragment of its own, and it stops the build
+if the older `DELTA_KERNEL_DEFCONFIG` variable is set; it points to
+kernel-yocto configuration fragments as the supported way to change the
+configuration. So the kernel meta-imx builds is the configuration in §3–§4,
+unchanged. Its `layer.conf` lists `wrynose` among the Yocto releases it is
+compatible with; the Yocto release number for that codename is not confirmed
+here.
+
+The board's machine file is `imx95-15x15-lpddr4x-frdm.conf` in meta-imx-bsp
+[S3]; it adds the `nxpiw612-sdio` Wi-Fi feature and a dozen device-tree
+variants (camera, display, audio, NPU, RPMsg). Whether this machine also
+covers the FRDM-IMX95-PRO variant named in SPEC.md is not confirmed (Q6).
+meta-freescale `wrynose` (head `2d08c05`, 2026-11-05) [S5] carries the shared
+`linux-imx.inc`; it has no i.MX95 FRDM machine of its own.
+
+meta-imx's distros (`fsl-imx-*` in `meta-imx-sdk/conf/distro`) [S3] are
+display stacks (Wayland, XWayland, framebuffer) with a `-minimal` variant; the
+one I read removes only `x11`. None of the files I found in meta-imx enables
+SELinux or AppArmor. In short, NXP sets the baseline in §3 and nothing more:
+no lockdown, no module signing, `/dev/mem` and `kexec` present, no MAC LSM.
 
 ## 6. Conflicts with the BSP's drivers
 
-TODO
+From the files above. None of this was tested on a board; each item is a
+likely conflict, to be confirmed in the first hardened build (Q2).
+
+- **`MODULES=n`.** The resolved config has 517 options as `=m` [S1], and
+  meta-imx builds out-of-tree modules: `kernel-module-imx-gpu-viv`,
+  `kernel-module-isp-vvcam`, `kernel-module-nxp-wlan` (pulled in by the Wi-Fi
+  machine features), `kernel-module-dpdk-extras`, and `cryptodev-linux`
+  (`meta-imx-bsp/recipes-kernel/`) [S3]. Out-of-tree modules cannot be built
+  in, so `MODULES=n` means dropping them. The hardened image could keep
+  modules and force signatures instead.
+- **`MODULE_SIG_FORCE`.** In-tree modules are signed at `modules_install` with
+  `MODULE_SIG_ALL`. Whether the Yocto `module` class signs out-of-tree modules
+  with the same key is not confirmed (Q2). If it does not, those modules fail
+  to load. The signing key is created at kernel build time; where it is kept,
+  or whether it is thrown away after the build, is the owner's call (Q3).
+- **`DEVMEM=n`.** NXP test tools that poke registers (for example a
+  `memtool`-style utility in imx-test) need `/dev/mem`. I did not find them
+  in the image recipes I read, so this is unconfirmed. A production image
+  should not need them.
+- **Lockdown and debugfs.** The lockdown man page [S6] says lockdown stops
+  debugfs use, along with `/dev/mem`, `/dev/kcore`, kprobes, BPF access to
+  kernel memory, and module parameters that name hardware addresses. The BSP
+  enables `DEBUG_FS` [S1], and some vendor tools read it (GPU and power
+  profiling; unconfirmed). Which of these restrictions apply in integrity mode
+  and which only in confidentiality mode is set by `enum lockdown_reason` in
+  `include/linux/security.h` [S1]; this lane could not read that header, so
+  the split is unconfirmed (Q4).
+- **`KEXEC=n`, `CRASH_DUMP=n`.** No BSP dependency found; meta-imx does not
+  use kexec to boot.
+- **OP-TEE and the ELE driver.** `TEE`, `OPTEE` and `IMX_SEC_ENCLAVE` are
+  built in [S1]. None of the hardening options above removes them.
+- **`COMPAT=n`.** It drops 32-bit userspace. Some vendor binaries may be
+  32-bit; I did not check (Q2).
+- **Toolchain options** (SCS, kCFI) need clang. meta-imx has a `clang-layer`
+  dynamic layer [S3], but building `linux-imx` with clang is not confirmed.
 
 ## 7. Minimal userspace
 
