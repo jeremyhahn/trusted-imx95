@@ -1,0 +1,204 @@
+# releasability-template: v1 (trusted-imx95, after signatures-template v1) —
+# the private-pattern scan.
+#
+# Why a workflow of its own (security finding on #19, ci.yml's lint step): a
+# `pull_request` run executes the pull request's own ci.yml, so a step there
+# that names the private pattern secret hands it to whatever the pull request
+# writes into that step. This workflow runs on `pull_request_target`, so the
+# forge reads it from the BASE branch, never from the pull request (the same
+# reasoning as signatures.yml's header). It checks out the base only, fetches
+# the pull request's head as git objects, and greps that commit's tree with
+# `git grep <commit>`: nothing from the pull request is checked out, built or
+# run. Its token is `contents: read` and is not persisted in the clone.
+#
+# Where the secret lives (Codex finding on #19): a repository- or
+# organization-scope secret is readable by any same-repository
+# `pull_request` run, whose author can add a step naming it to their own
+# ci.yml. RELEASABILITY_PATTERNS is therefore an ENVIRONMENT secret of the
+# `releasability` environment, which this job declares, and that
+# environment's deployment branch policy allows `main` alone:
+# pull_request_target and push-to-main runs resolve to main and get it; a
+# `pull_request` run resolves to refs/pull/N/merge and is refused the
+# environment. The owner's repository settings (only the owner can change them):
+#   1. create the environment `releasability`;
+#   2. set its deployment branches to selected branches, `main` only;
+#   3. add RELEASABILITY_PATTERNS as a secret of that environment;
+#   4. delete the repository-scope RELEASABILITY_PATTERNS secret (and any
+#      organization-scope one this repository can see).
+# Until steps 1-3 are done the secret is absent here and the job fails
+# closed. test/ci_scripts_test.sh checks that every job naming the secret
+# declares the environment and that no pull_request workflow declares it.
+#
+# The rules are ci.yml v1.33.2's lint step, moved here unchanged: every
+# non-blank, non-`#` line of the secret is `class<TAB>regex`, the class one of
+# coord-host, internal-email, lab-address, lab-host or owner-path (optional
+# `/i`); a malformed line, an unknown class or a regex grep -E refuses fails
+# with its line number only; a match fails, printed as path and line, never
+# the value; a matched line carrying `lab-string-ok: <reason>` is listed as
+# waived (public-hygiene.md). Three changes:
+#   - It fails closed when the secret is absent, on every event (the lint
+#     step passed a pull request with a notice).
+#   - A pull request from a fork fails without a scan: its author could
+#     otherwise probe the private patterns one push at a time.
+#   - Each printed path carries a `match: ` or `waived: ` prefix and is
+#     escaped, so a file name can never be read as a workflow command.
+#   - The waiver is tested against the matched line's text only, parsed
+#     from `git grep -z`, never against the file name.
+#
+# ci.yml's `releasability` job reads this job's commit status on the pull
+# request's head (context `Releasability / Releasability (pull_request_target)`,
+# or `(push)` on main), and CI Gate requires that job as `always`. A pull
+# request can edit ci.yml, so the ruleset also requires the Releasability
+# context itself, beside Signatures (a ruleset change, made by its owner).
+# test/ci_scripts_test.sh runs this step against git fixtures.
+name: Releasability
+
+on:
+  pull_request_target:
+    branches: [main]
+    # No draft skip: a skipped required check reads as passed.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  releasability:
+    name: Releasability
+    runs-on: ubuntu-latest
+    # The secret lives only in this environment, whose deployment branch
+    # policy is main alone (see the header).
+    environment: releasability
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # pull_request_target checks out the base branch by default. The ref is
+      # named anyway so no edit can point it at the pull request.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.base.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Releasability (private patterns)
+        env:
+          RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          isrev() { [ -n "$1" ] && git cat-file -e "$1^{commit}" 2>/dev/null; }
+          if [ -z "${RELEASABILITY_PATTERNS:-}" ]; then
+            echo "::error::the private pattern secret is not set; the gate needs the private pattern file (public-hygiene.md)"
+            exit 1
+          fi
+          if [ "$EVENT" = pull_request_target ]; then
+            [ -n "$PR" ] && [ -n "$HEAD_SHA" ] || { echo "::error::a pull_request_target run without its number or head"; exit 1; }
+            if [ "$HEAD_REPO" != "$REPO" ]; then
+              echo "::error::a pull request from a fork is not scanned against the private patterns; a maintainer pushes its commits to a branch of this repository"
+              exit 1
+            fi
+            # The pull request's head, as objects only: nothing is checked
+            # out or run.
+            git -c protocol.version=2 fetch -q --no-tags --depth=1 origin "+refs/pull/${PR}/head:refs/remotes/pr/head" 2>/dev/null || true
+            isrev "$HEAD_SHA" || git fetch -q --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
+          fi
+          isrev "$HEAD_SHA" || { echo "::error::the head ${HEAD_SHA:0:12} cannot be read (moved on: the next synchronize run scans the new head)"; exit 1; }
+          pf=$(mktemp)
+          chmod 600 "$pf"
+          trap 'rm -f "$pf"' EXIT
+          tab=$(printf '\t')
+          n=0 bad=0 count=0
+          while IFS= read -r line || [ -n "$line" ]; do
+            n=$((n + 1))
+            line=${line%$'\r'}
+            trimmed=${line#"${line%%[![:space:]]*}"}
+            case $trimmed in ''|'#'*) continue ;; esac
+            case $line in
+              *"$tab"*) ;;
+              *) echo "::error::pattern line $n is not class<TAB>regex"; bad=1; continue ;;
+            esac
+            class=${line%%"$tab"*}
+            re=${line#*"$tab"}
+            case $class in
+              coord-host|internal-email|lab-address|lab-host|owner-path) ;;
+              coord-host/i|internal-email/i|lab-address/i|lab-host/i|owner-path/i) ;;
+              *) echo "::error::pattern line $n has an unknown class"; bad=1; continue ;;
+            esac
+            if [ -z "$re" ]; then
+              echo "::error::pattern line $n has an empty regex"; bad=1; continue
+            fi
+            rc=0
+            grep -E -e "$re" /dev/null > /dev/null 2>&1 || rc=$?
+            if [ "$rc" -ge 2 ]; then
+              echo "::error::pattern line $n has a regex grep -E refuses"; bad=1; continue
+            fi
+            printf '%s\n' "$re" >> "$pf"
+            count=$((count + 1))
+          done <<< "$RELEASABILITY_PATTERNS"
+          unset RELEASABILITY_PATTERNS
+          if [ "$bad" != 0 ]; then
+            echo "::error::the private pattern file is malformed (line numbers above; the values are not shown)"
+            exit 1
+          fi
+          if [ "$count" = 0 ]; then
+            echo "::error::the private pattern secret holds no class<TAB>regex line"
+            exit 1
+          fi
+          # git grep -z on a commit prints <commit>:<path> NUL <line> NUL
+          # <text> LF. The fields are split on the NULs, so a ':' or a
+          # waiver-shaped string in a file name never reaches the content,
+          # and the waiver is tested against the line's text only (Codex
+          # finding on #19: a file named `lab-string-ok: x.txt` waived every
+          # match in it). A text holds no LF, so the token after a line
+          # number is <text> LF <next commit:path>.
+          rc=0
+          git grep -z -n -I -i -E -f "$pf" "$HEAD_SHA" -- > "$pf.out" || rc=$?
+          trap 'rm -f "$pf" "$pf.out"' EXIT
+          case $rc in
+            0|1) ;;
+            *)
+              echo "::error::git grep failed (rc $rc)"
+              exit 1 ;;
+          esac
+          waiver='lab-string-ok:[[:space:]]*[[:alnum:]]'
+          # A path is shown escaped (%q), so a LF or '::' in a file name
+          # cannot start a workflow command.
+          show() { printf '%s %q:%s\n' "$1" "${2#"$HEAD_SHA":}" "$3"; }
+          nw=0 nh=0 hits='' waived='' path='' lno='' i=0
+          while IFS= read -r -d '' tok || [ -n "$tok" ]; do
+            if [ "$i" = 0 ]; then
+              path=$tok i=1
+            elif [ "$i" = 1 ]; then
+              lno=$tok i=2
+            else
+              text=${tok%%$'\n'*}
+              if printf '%s\n' "$text" | grep -q -E -e "$waiver"; then
+                waived+=$(show waived: "$path" "$lno")$'\n'; nw=$((nw + 1))
+              else
+                hits+=$(show match: "$path" "$lno")$'\n'; nh=$((nh + 1))
+              fi
+              path=${tok#*$'\n'} i=1
+            fi
+          done < "$pf.out"
+          rm -f "$pf.out"
+          unset text tok
+          if [ "$nw" != 0 ]; then
+            echo "::notice::$nw matched lines carry the lab-string-ok waiver (path:line; the values are not shown):"
+            printf '%s' "$waived"
+          fi
+          if [ "$nh" != 0 ]; then
+            echo "::error::internal names in the tree of ${HEAD_SHA:0:12} (path:line; the values are not shown):"
+            printf '%s' "$hits"
+            exit 1
+          fi
+          echo "releasability: ${HEAD_SHA:0:12}, $count private patterns, 0 matches, $nw waived"
