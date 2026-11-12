@@ -17,6 +17,11 @@ the short names in the first column.
 | SM-CONFIG | NXP i.MX System Manager, `sm/doc/config.md` (Configuration, configtool) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/config.md |
 | SM-MONITOR | NXP i.MX System Manager, `sm/doc/monitor.md` (debug monitor commands) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/monitor.md |
 | SM-DEV | NXP i.MX System Manager, `sm/doc/dev.md` (Developer's Guide, build options) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/dev.md |
+| SM-PORT | NXP i.MX System Manager, `sm/doc/port.md` (Porting Guide, board design and NXP board ports) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/port.md |
+| SM-RN | NXP i.MX System Manager, `sm/doc/rn_cl.md` (2026Q3 change list) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/rn_cl.md |
+| SM-DEBUG | NXP i.MX System Manager, `sm/doc/debug.md` (Debug Guide) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md |
+| OPTEE-PORT | OP-TEE documentation, `architecture/porting_guidelines.rst` ("Power Management / PSCI") | `optee_docs` master at commit `ae74963`, 2026-11-04 | https://github.com/OP-TEE/optee_docs/blob/ae74963fa4e296815d7e4382a39769ed87622f1a/architecture/porting_guidelines.rst |
+| TFA-IMX9 | Trusted Firmware-A documentation, `docs/plat/imx9.rst` (NXP i.MX 9 Series) | upstream master at commit `d70b52d`, 2026-11-12 | https://github.com/ARM-software/arm-trusted-firmware/blob/d70b52dedc4eba74386098a9033eec1e9cb522fa/docs/plat/imx9.rst |
 
 Everything below is a summary in this repository's own words. No vendor text is
 copied.
@@ -66,11 +71,87 @@ i.MX 95 and in the i.MX 95 Reference Manual; neither was read for this survey
 
 ## 3. Wake sources
 
-(to be filled)
+### 3.1 The hardware rule
+
+- Only a wake source whose IP stays powered can wake the system from a mode that
+  turns its mix off. GPIO1 is the only GPIO block in the always-on mix; GPIO2-5
+  are in the WAKEUP mix, so to turn the WAKEUP mix off every external wake signal
+  has to arrive through GPIO1 (SM-PORT, "Board design" notes before the board
+  ports).
+- NXP's board pattern is to route PMIC interrupts and other wake signals to an
+  I2C bus expander on the same always-on I2C bus as the PMIC, and the expander's
+  interrupt to GPIO1, which the SM owns (SM-PORT, same section).
+- Per-peripheral wake through the low-power interface (`PERLPI_*`: CAN, GPIO2-5,
+  LPUARTs, WDOG3/4 on the AP) is a separate path, configured through the CPU
+  protocol by the agent granted that resource (SM-CONFIG, SM-FRDM-CFG).
+
+### 3.2 Wake sources on the FRDM LPDDR5 board port
+
+The `mcimx95frdm` port (SM-PORT, "NXP i.MX95 FRDM") is for the i.MX 95 LPDDR5
+15x15 FRDM board. The SM owns LPI2C1, GPIO1 and LPUART2. On LPI2C1 sit the PF09
+and PF53 PMICs, a PCAL6408A bus expander and a PCA2131 RTC; their interrupts and
+the board wake lines go to the expander, and its interrupt to GPIO1 pin 10. The
+port exposes these board controls, each of which can notify on change and also
+wake the system:
+
+| Control | Wake line |
+|---|---|
+| `BRD_SM_CTRL_SD3_WAKE` | SD3 (expander pin 0) |
+| `BRD_SM_CTRL_PCIE1_WAKE` | PCIe 1 (pin 4) |
+| `BRD_SM_CTRL_UART_WAKE` | UART (pin 5) |
+| `BRD_SM_CTRL_PCIE2_WAKE` | PCIe 2 (pin 6) |
+| `BRD_SM_CTRL_BUTTON` | on/off button (pin 7) |
+| `BRD_SM_RTC_PCA2131` / `BRD_SM_CTRL_PCA2131` | external RTC alarm |
+
+Besides the board lines, the SM's own BBM protocol gives the on-chip BBNSM RTC
+alarm and the on/off button as wake events (SM-ARCH, "SM Framework"; SM-FRDM-CFG
+grants `RTC` and `BUTTON`).
+
+In the shipped configuration (SM-FRDM-CFG) the four board wake controls are
+granted to Linux (`AP-NS`) as notifications; the M7 gets the button notification
+and full control of the PCA2131 RTC; Linux gets the on-chip RTC in full and the
+PCA2131 RTC as privileged-only.
+
+The port also keeps its shutdown record (fault and reset reason) in BBNSM
+general-purpose registers GPR0-3 and advises that no agent be given access to
+them (SM-PORT, "NXP i.MX95 FRDM").
+
+**Not confirmed:** whether the owner's FRDM-IMX95-PRO is the LPDDR5 15x15 board
+that `mx95frdm` targets. The SM release notes say the LPDDR4 FRDM board must use
+the EVK configuration (`mx95evk`) because only the LPDDR5 board has the different
+PMICs (SM-RN, SM-444). The board's own user manual (UM12527, in the private
+references) would settle it; see question 1.
 
 ## 4. Secure state in each mode
 
-(to be filled)
+The public sources say much less here than about modes and wake sources. What
+they support, and what they leave open, per element:
+
+| Element | LM suspend / system sleep (DDR kept) | Mix power-down | LM shutdown or reset, SoC reset |
+|---|---|---|---|
+| TRDC isolation (memory and peripheral firewalls, incl. the secure DDR carve-outs) | Kept while its mix is powered. | Lost with the mix; the SM rewrites it from the static configuration, through the ELE, every time a TRDC's mix powers up (SM-ARCH, "Physical Architecture"; SM-DEBUG, "Hardware Access Issues"). | Rewritten at boot from the same static configuration. |
+| Other mix registers | Kept. | Lost; restored only by the per-mix sequences in `config_user.h` or by the owning client (SM-CONFIG, "User"). | Reset. |
+| EdgeLock Enclave key store and session state | **Not confirmed.** The SM does not route security services; clients talk to the ELE directly (SM-ARCH, "SCFW versus SM"), so what the ELE keeps across a system sleep is the ELE's behaviour, documented in the ELE API manual and the i.MX 95 Security Reference Manual, not in public sources. | **Not confirmed.** | **Not confirmed** whether volatile key slots survive; a reset is expected to clear them, but no public source read here states it. |
+| OP-TEE secure memory | Lives in DDR (the `AP-S` section of SM-FRDM-CFG grants the secure A55 world a DDR range); its content survives only if the system sleep mode keeps DDR in self-refresh, which is **not confirmed** for each i.MX 95 sleep mode. | Unaffected unless the DDR mix is powered down. | Lost. |
+| OP-TEE CPU and secure-IP state | OP-TEE's generic platform template stubs the CPU suspend, resume and system-off hooks; a production platform must itself save and restore CPU state, secure IP registers and memory-firewall settings (OPTEE-PORT, "Power Management / PSCI"). Whether OP-TEE's i.MX 95 platform does this was **not confirmed** (its source was not read). | — | — |
+| Cortex-M7 | Its LM suspends and wakes independently of the AP LM (SM-ARCH, "Logical Machines"). | `PD_M7` is the M7's own domain; powering it off loses TCM content. | The M7 LM can be reset or rebooted by the SM on its faults (`lm_reset` on lockup, reset and WDOG5 in SM-FRDM-CFG) or by any agent granted `LMM_1`. |
+
+**Re-authentication on wake.** No public source read here says that the device
+re-authenticates any image when it resumes from suspend; resume continues from
+the code already in memory. The SM architecture notes that the TRDC configuration
+can change depending on a client's state and on whether its code is being
+reloaded and authenticated (SM-ARCH, "Physical Architecture"), which suggests the
+LM boot path (not the resume path) runs through the ELE. That an LM *boot* after
+shutdown or reset re-authenticates the image from the boot container is a
+reasonable reading but is **not confirmed** by a public source. The SM's own
+debug guide leaves its suspend/resume section empty at this tag (SM-DEBUG,
+"Suspend/Resume Debug").
+
+Consequence for the design: anything that must not survive in DDR across a
+suspend (keys in OP-TEE or Linux memory, session secrets) is only protected by
+the TRDC carve-outs and by the fact that DDR is not readable while the SoC
+sleeps. Physical attacks on DDR during a long sleep are outside what these
+sources address.
 
 ## 5. What a secure deployment should allow
 
