@@ -138,10 +138,32 @@ would keep all of them inside the HSM:
 
 SPSDK as documented performs the ECDH, the key derivation, the wrap and
 the CMAC in host software [S9]. Keeping these steps inside the HSM therefore
-needs either an HSM that can do them itself (ECDH with the KDF the enclave
-uses, RFC 3394 wrap, CMAC, and the TLV layout), or a station that holds the
-derived keys in memory for the length of the ceremony. Whether go-xkms can do
-the first is **not confirmed** (its documentation was not reached).
+needs an HSM that can do them itself (ECDH with the KDF the enclave uses,
+RFC 3394 wrap, CMAC, and the TLV layout), or go-xkms producing the wrapped
+blob inside its own custody (the requirement in
+[provisioning-host-survey.md](provisioning-host-survey.md) §4 and §5).
+Whether go-xkms can do either is **not confirmed** (its documentation was
+not reached).
+
+A station that runs these steps in SPSDK holds the host ECDH private key,
+`OEM_IMPORT_MK_SK` and the derived wrap and CMAC keys in its own memory,
+even if only for the length of the ceremony. Those are fleet secrets
+(section 3.1): a compromised station could copy them from RAM and then
+decrypt any captured provisioning blob for the fleet or authenticate new
+imports. Holding them in host memory is the same exposure, for that
+window, as the clear key-wrapping key that the provisioning host must not
+hold (provisioning-host-survey §4). So, in this survey:
+
+- **Production prerequisite.** For any key that protects a fleet, the ECDH,
+  key derivation, wrap and CMAC run inside the HSM or inside go-xkms
+  custody, and the station receives only the wrapped blob. Until that is
+  confirmed, there is **no production import path**; production keys are
+  not imported.
+- **Software fallback, development only.** SPSDK with the keys in host
+  memory or in files (as in S9) is acceptable only with disposable
+  development keys: a throw-away host ECDH key and SRK set, on development
+  boards, whose import and wrapping keys never protect a fleet key and are
+  discarded after use.
 
 ## 4. What SPSDK expects from the station
 
@@ -276,8 +298,11 @@ Before the step, the station confirms and records:
 7. **Versions are recorded.** The enclave firmware version and status
    (`get-ele-fw-version`, `get-ele-fw-status`) [S7], the SPSDK version, and
    the digest of the signed boot image.
-8. **The step itself.** U-Boot's `ahab_close` [S10] or SPSDK's
-   `nxpele forward-lifecycle-update` [S7]. Afterwards, reboot and confirm
+8. **The step itself.** Named here for the record only; this repository
+   does not run or script it. The i.MX 93 guide uses U-Boot's
+   `ahab_close` [S10]; SPSDK lists `nxpele forward-lifecycle-update` [S7];
+   neither was run, and their behaviour on the i.MX 95 is not confirmed.
+   Afterwards, reboot and confirm
    that `ahab_status` shows OEM closed with no events [S10].
 
 Per-device record (proposed; no public NXP source defines one, see 3.2):
@@ -301,7 +326,9 @@ cycle before and after, date, station and the people present.
   and AN14544 [S11].
 - Whether SPSDK can sign signed messages and images through a PKCS#11 HSM,
   and whether go-xkms can perform the ECDH, key derivation, RFC 3394 wrap and
-  CMAC of section 3.3 inside the HSM.
+  CMAC of section 3.3 inside the HSM. Until it is confirmed, production
+  OEM key import has no path that this survey accepts (section 3.3,
+  question 2).
 - The i.MX 95 equivalents of U-Boot's `ahab_status` and `ahab_close` [S10],
   and whether fuses can be written after OEM closed.
 - Who should be present at a provisioning step and what to record: no NXP
@@ -317,24 +344,35 @@ cycle before and after, date, station and the people present.
    - (c) Both: EdgeLock 2GO for device credentials, (a) for the OEM's own
      keys.
 
-   Recommendation: (a). It is the only path in which the OEM keys never
-   leave the OEM's custody, and it needs no network link at the station
-   [S3, S9]. The i.MX 95 support is not confirmed (section 7).
+   Recommendation: (a). It is the only path in which the OEM keys can stay
+   in the OEM's custody, and it needs no link to NXP's service [S3, S9].
+   That holds only if the ECDH, key derivation and wrap run inside the HSM
+   or go-xkms custody (question 2); with SPSDK doing them on the station,
+   the fleet import keys sit in host memory (section 3.3). The i.MX 95
+   support is not confirmed (section 7).
 2. **Where do the ECDH, key derivation and wrap run?**
-   - (a) Inside the go-xkms HSM.
+   - (a) Inside the go-xkms HSM, or inside go-xkms custody with only the
+     wrapped blob returned to the station.
    - (b) In SPSDK on an off-line station, with the derived keys held in
      memory only for the ceremony.
    - (c) In SPSDK as in AN14861, with the keys in files [S9].
 
-   Recommendation: (a) if go-xkms can do it; otherwise (b) for production,
-   and (c) only with throw-away development keys on development boards.
+   Recommendation: (a) is a **production prerequisite**, not a preference.
+   (b) and (c) put the fleet import, wrapping and CMAC keys in host memory
+   or on disk (section 3.3), so they are for disposable development keys on
+   development boards only, never for keys that protect a fleet. If go-xkms
+   cannot do (a), production import is blocked until it can; there is no
+   production software fallback. Whether go-xkms can do (a) is not
+   confirmed (section 7).
 3. **Should the derived import keys be salted with the device SRKH?**
    - (a) Zero salt.
    - (b) SRKH salt [S9].
 
-   Recommendation: (b). It ties the wrap and CMAC keys to one SRK set, so a
-   leaked set of import keys is no use with a different SRK set. Sources
-   offer the option but give no guidance.
+   Recommendation: (b). In S9, written for the RT1180, it ties the wrap and
+   CMAC keys to one SRK set, so a leaked set of import keys is no use with
+   a different SRK set. That the i.MX 95 enclave mixes the SRKH in the same
+   way is **not confirmed** (section 3.1), and the keys stay shared by every
+   device with that SRK set. Sources offer the option but give no guidance.
 4. **How does the station reach the i.MX 95 enclave?**
    - (a) `nxpele` over U-Boot fastboot.
    - (b) `nxpele` over the U-Boot serial console.

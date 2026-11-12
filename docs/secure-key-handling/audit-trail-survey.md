@@ -74,7 +74,7 @@ The enclave's data storage service (S1 `hsm_data_storage.h`) stores small data o
 
 The enclave also reports an event list: the events the firmware has raised since the last power cycle, each with a command id and response code (S1 `hsm_get_event.h`). The list is cleared by a power cycle, so it cannot carry a trail, but the logger can read it at start-up and log it.
 
-The enclave's device attestation (S1 `hsm_dev_attest.h`) returns the SoC id and revision, the life cycle, the firmware hash, the OEM SRK hash and a nonce supplied by the caller, signed by the enclave. A verifier can use it to know that a signed chain head came from a board in a known state (§5).
+The enclave's device attestation (S1 `hsm_dev_attest.h`) returns the SoC id and revision, the life cycle, the firmware hash, the OEM SRK hash and a nonce supplied by the caller, signed by the enclave. A verifier can use it to know the board's enclave firmware, life cycle and OEM SRK hash. It does not tie a chain head to the attestation (the head is signed by a different key), and it says nothing about the Linux image, the IMA list or the logger, so it does not show which software wrote or signed the head (§4.4, §5).
 
 ### 4.3 Anchoring in the eMMC RPMB
 
@@ -100,7 +100,8 @@ What this means for the board:
 
 - IMA measures what the kernel loads or reads under policy, not application events. It is not a place to record key use or signing requests.
 - The measurement list lives in kernel memory and starts again on each boot. Without a TPM it has no hardware anchor. SPEC.md does not list a TPM on the board; it lists the enclave and an SE051 secure element. Whether the SE051 could serve as an anchor is an open question in SPEC.md and is not taken up here.
-- IMA's useful role is to measure the audit logger's binary and configuration, so that a verifier that trusts the boot chain also knows which logger wrote the trail. That needs an anchor; on this board the anchor would be the enclave's attestation (§4.2), not a PCR.
+- IMA can measure the audit logger's binary and configuration, but on this board that measurement is **not attested**. The enclave's device attestation (§4.2) covers the SoC id and revision, the life cycle, the enclave firmware hash, the OEM SRK hash and the caller's nonce. It does not cover the IMA list, the Linux image or the logger. A compromised kernel can present a substituted IMA list beside a perfectly valid attestation, and presenting the two together is not a TPM PCR quote: nothing binds the list to the signed evidence. So the logger's identity is not attested by any evidence surveyed here, and a verifier cannot learn from it which logger wrote the trail.
+- That guarantee is unavailable until an isolated measurement path cryptographically binds the measurements into authenticated evidence: for example a component outside Linux's control that extends a register or counter the enclave signs over, or an enclave attestation call that takes caller-supplied measurement data. No such mechanism is shown for the i.MX 95 in the sources read here; any such mechanism is **unconfirmed** (§8).
 
 ### 4.5 Linux-only sealing (journald FSS)
 
@@ -114,7 +115,7 @@ A transport-neutral export bundle could carry:
 
 1. the records after the sequence number the verifier last acknowledged;
 2. a signed head over the chain (or tree root, S3, S4): sequence number, head hash, boot counter, board time, and a nonce the verifier sent, signed by the enclave audit key;
-3. when the verifier asks, an enclave device attestation over the same nonce (S1 `hsm_dev_attest.h`), so the verifier knows the board's life cycle, firmware hash and SRK hash when the head was signed. In RATS terms (S10) the board is the attester, the bundle is the evidence, and go-trusted-platform or go-xkms is the verifier.
+3. when the verifier asks, an enclave device attestation over the same nonce (S1 `hsm_dev_attest.h`), so the verifier knows the board's life cycle, enclave firmware hash and SRK hash at the time of the nonce. It does not attest the Linux image, the IMA list or the logger, so it is not evidence of which logger produced the head (§4.4). In RATS terms (S10) the board is the attester, the bundle is the evidence, and go-trusted-platform or go-xkms is the verifier.
 
 The verifier keeps the newest head it has accepted. A later bundle must extend it: for a linear chain the verifier recomputes the chain from its stored head; for a tree, a consistency proof does the same with less data (S3, S4). A board that shows a shorter chain, or a head that does not extend the stored one, has lost or rewritten records. The check covers only history up to the stored head: if Linux root can use the audit key, a fabricated extension of the stored head passes it (§4.1).
 
@@ -147,7 +148,7 @@ What the enclave does on a tamper event on the i.MX 95, and what it erases, is i
 
 C costs nothing extra on the counter, because the strict updates it rides on happen anyway; it only adds the head to records that are written already.
 
-Recommendation, where the sources support one: start with A and C together, with a linear chain, and claim for it only what it gives with a logger on Linux: protection of history already committed to the verifier. Protection of records after the last accepted head needs an isolated logger with exclusive use of the audit key (Q2), which is unconfirmed on this device (§8). Add B when the RPMB question (#62) is settled. Use IMA only to measure the logger. Move to D if the trail grows large enough that sending the whole chain to the verifier is a problem.
+Recommendation, where the sources support one: start with A and C together, with a linear chain, and claim for it only what it gives with a logger on Linux: protection of history already committed to the verifier. Protection of records after the last accepted head needs an isolated logger with exclusive use of the audit key (Q2), which is unconfirmed on this device (§8). Add B when the RPMB question (#62) is settled. IMA may measure the logger locally, but no evidence surveyed attests that measurement, so no claim about the logger's identity is made to a verifier (§4.4). Move to D if the trail grows large enough that sending the whole chain to the verifier is a problem.
 
 ## 8. What could not be confirmed
 
@@ -159,11 +160,12 @@ Recommendation, where the sources support one: start with A and C together, with
 - RPMB write endurance and latency for the board's eMMC: the JEDEC eMMC specification is not public.
 - S2: the schneier.com archive page returned 404; the PDF was reachable but was not re-read in full for this survey.
 - Whether the i.MX 95 enclave can limit the use of a key to one caller, one key store session or one execution domain (for example OP-TEE or the Cortex-M7), so that an isolated logger has exclusive use of the audit key. S1's key usage flags restrict operations, not callers; no source read here shows such a mechanism.
+- Any mechanism on the i.MX 95 that cryptographically binds an IMA or logger measurement into authenticated evidence, outside Linux's control. The enclave's device attestation fields in S1 do not include such data (§4.2, §4.4).
 - Any intake for an audit trail in go-trusted-platform or go-xkms: their READMEs (S8, S9) describe none; their source was not searched.
 
 ## 9. Questions for the owner
 
-1. **Which audit design should the board use?** Options: A, A+C, A+B(+C), D, E (§7). Recommendation: A+C now, add B after #62 is settled; not E alone, not F.
+1. **Which audit design should the board use?** Options: A, A+C, A+B(+C), D, E (§7). Recommendation: A+C now, add B after #62 is settled; not E alone, not F (IMA's measurement of the logger is not attested on this board, §4.4).
 2. **Where does the logger run?** It must sit on the only path to the enclave's HSM API, so it follows SPEC.md's open question of which core calls that API. Options: (a) Cortex-A55 Linux, in the daemon that calls the HSM API; (b) the Cortex-M7, with the trail stored through Linux; (c) an OP-TEE trusted application. Recommendation: put the logger in the same component that holds the HSM session, whichever core the owner picks for it. With (a), the trail protects only history already committed to the verifier, because Linux root can use the audit key (§4.1); (b) or (c) protects later records only if that component has exclusive use of the audit key, which is unconfirmed on this device (§8).
 3. **How does the trail leave the board?** Options: (a) the verifier pulls, with a nonce; (b) the board pushes after each signing; (c) both. Recommendation: (c), a push after each signing and a pull with a nonce for freshness (§5). The transport is go-xkms's decision.
 4. **What does a signing record hold about the request?** Options: (a) the signed digest; (b) a hash of the signed digest; (c) only go-xkms's request identifier. Recommendation: (b) together with the request identifier when one is given, so that the trail does not hold the signed content but a verifier holding the request can still match it.
