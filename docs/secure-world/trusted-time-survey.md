@@ -13,7 +13,7 @@ Vendor text is summarised, not quoted. Anything the sources did not settle is in
 
 ### 2.1 Two real-time clocks, both behind the System Manager
 
-On the i.MX 95 neither real-time clock is reached by Linux directly. Both are owned by NXP's System Manager (SM) on the Cortex-M33 and offered to the other cores through the SM's NXP-specific SCMI Battery-Backed Module (BBM) protocol, protocol 0x81 [S1][S4].
+On the i.MX 95 neither real-time clock is reached by Linux directly. Both are owned by NXP's System Manager (SM) on the Cortex-M33 and offered to the other cores through the SM's NXP-specific SCMI Battery-Backed Module (BBM) protocol, protocol 0x81 [S1, S4].
 
 | RTC | Where | SM name and id | Width | Source |
 |---|---|---|---|---|
@@ -22,7 +22,7 @@ On the i.MX 95 neither real-time clock is reached by Linux directly. Both are ow
 
 - The SM's FRDM board code switches the PCA2131 into its battery switch-over power mode when the time is set or read, and reads back its time-valid and battery status [S1]. The PCA2131 therefore can keep time on a backup supply. Whether the FRDM-IMX95-PRO is shipped with a coin cell or backup capacitor fitted for it, and what supplies the BBNSM domain when the board is off, are **not confirmed** (§6).
 - The BBNSM is, by its name, the *non-secure* part of the battery-backed module [S1]. No public source surveyed describes a separate secure RTC on the i.MX 95 that the A55 secure world can read; the i.MX 95 Security Reference Manual, which would say, is not public (§6).
-- The upstream Linux driver `rtc-imx-sm-bbm` registers one RTC and reads, sets and arms an alarm on RTC id 0 only, the BBNSM [S4]. Linux does not see the PCA2131 through it. Both `imx95.dtsi` trees surveyed declare the BBM protocol node under the SCMI firmware node [S2][S3]; neither FRDM device tree declares an I2C RTC node of its own [S2][S3].
+- The upstream Linux driver `rtc-imx-sm-bbm` registers one RTC and reads, sets and arms an alarm on RTC id 0 only, the BBNSM [S4]. Linux does not see the PCA2131 through it. Both `imx95.dtsi` trees surveyed declare the BBM protocol node under the SCMI firmware node [S2, S3]; neither FRDM device tree declares an I2C RTC node of its own [S2, S3].
 
 ### 2.2 Who may set which clock
 

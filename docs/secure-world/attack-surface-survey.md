@@ -138,7 +138,7 @@ therefore **unverified for the PRO**.)
 So Linux has its own ELE MUs, separate from OP-TEE's. On the Linux side
 the NXP kernel carries an ELE driver set (`se_ctrl`, `ele_base_msg`,
 `ele_fw_api`, `ele_trng`, `ele_bbsm`, plus V2X files) that the upstream
-kernel does not have [S4][S5]. In the NXP BSP the `se_ctrl` driver exposes
+kernel does not have [S4, S5]. In the NXP BSP the `se_ctrl` driver exposes
 the MU to user space as a character device used by NXP's `imx-secure-enclave`
 library; this is from the file names and public BSP practice and is
 **not confirmed** from source in this lane.
@@ -189,7 +189,7 @@ programs from the same file [S1].
 
 Linux's side is the upstream `arm_scmi` driver plus NXP's vendor protocol
 extensions for the i.MX 95; the upstream and NXP trees both carry `sm-cpu`,
-`sm-lmm` and `sm-misc` client files [S4][S5] (a BBM extension is also
+`sm-lmm` and `sm-misc` client files [S4, S5] (a BBM extension is also
 expected, not confirmed in this lane). Each SCMI message
 Linux can send is an input the SM firmware parses.
 
@@ -312,7 +312,7 @@ compromised, and are listed for completeness.
    (c) OP-TEE with NXP's default TA set.
    Recommendation: (a) unless a row needs a secure-side service; it removes
    the whole §3.2 surface and the open §5.2 items. If one is needed, (b),
-   with OP-TEE at 4.11.0 or the §5.2 fixes carried [S3][S8].
+   with OP-TEE at 4.11.0 or the §5.2 fixes carried [S3, S8].
 2. **Who calls the ELE HSM API: Linux, OP-TEE or the M7?**
    (SPEC's `secure-key-handling` row asks the same.)
    Options: (a) Linux, through `MU_ELE3`/`MU_ELE4`; (b) the secure side only,
@@ -324,7 +324,7 @@ compromised, and are listed for completeness.
    Options: (a) yes, through remoteproc and the TF-A SiP calls; (b) no, the
    SM boots the M7 and the SiP M7/LM calls are left out of TF-A.
    Recommendation: (b) if the M7 runs fixed firmware; the SiP calls let
-   non-secure Linux do what the SM denies its own SCMI agent [S1][S2].
+   non-secure Linux do what the SM denies its own SCMI agent [S1, S2].
 4. **Should the board keep NXP's FRDM SM configuration or carry its own?**
    Options: (a) NXP's `mx95frdm.cfg` as is; (b) a board copy with test
    grants and unused resources removed from "AP-NS". (`mx95frdm.cfg` is
@@ -336,7 +336,7 @@ compromised, and are listed for completeness.
    Options: (a) `lf-6.18.37-2.1.0` / `lf_v2.14` / `rel_imx_sm_2026q3` as
    surveyed; (b) a later release once NXP rebases OP-TEE past 4.11.0.
    Recommendation: (a) for now, with the open §5.2 CVEs tracked, moving to
-   (b) when it exists [S3][S8].
+   (b) when it exists [S3, S8].
 6. **May a later lane read the C source (TF-A SiP table, OP-TEE `conf.mk`,
    Linux device tree) to close §6?**
    Options: (a) yes, in a lane allowed to read external code; (b) obtain the

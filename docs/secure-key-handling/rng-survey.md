@@ -27,10 +27,10 @@ Method: I read the public source trees at the tags in §2, fetched them on 2026-
 
 ## 3. The i.MX 95's random sources
 
-- **The enclave's TRNG and DRBG.** Every public software stack surveyed (Linux, OP-TEE, U-Boot) gets hardware randomness on the i.MX 95 from the EdgeLock secure enclave firmware, through the same three messages: start RNG, read TRNG state, get random. None of them touches an RNG peripheral register directly. [S1][S3][S5]
-- The TRNG state reply has two parts: the TRNG itself and the enclave's RNG context (its DRBG). Both must report ready before random data is served. [S3][S5]
+- **The enclave's TRNG and DRBG.** Every public software stack surveyed (Linux, OP-TEE, U-Boot) gets hardware randomness on the i.MX 95 from the EdgeLock secure enclave firmware, through the same three messages: start RNG, read TRNG state, get random. None of them touches an RNG peripheral register directly. [S1, S3, S5]
+- The TRNG state reply has two parts: the TRNG itself and the enclave's RNG context (its DRBG). Both must report ready before random data is served. [S3, S5]
 - The Linux driver's comment describes the enclave's output as a CTR_DRBG reseeded from the TRNG, used in the NIST SP 800-90C RBG3(RS) way (16-byte reads, a reseed per read) on other SoCs. Whether that per-read reseed happens on the i.MX 95, where the reseed flag is not sent, is **unconfirmed** (§4.1). [S1]
-- **No CAAM.** NXP's and upstream OP-TEE both force the CAAM driver off for the i.MX 95 flavour. So the CAAM RNG that older i.MX parts expose (and that the Linux `caam_rng` hwrng uses) does not apply here. [S3][S4]
+- **No CAAM.** NXP's and upstream OP-TEE both force the CAAM driver off for the i.MX 95 flavour. So the CAAM RNG that older i.MX parts expose (and that the Linux `caam_rng` hwrng uses) does not apply here. [S3, S4]
 - **No CPU RNG instruction.** The Cortex-A55 is an Armv8.2-A core. The `RNDR` instruction (FEAT_RNG) belongs to Armv8.5-A, so Linux's `arch_get_random` has no CPU source on this SoC. This comes from the architecture versions, not from an i.MX 95 document, and is **unconfirmed** for this part.
 - **The SE051** on the board (SPEC row secure-key-handling) is a secure element and presumably has its own RNG, but that is **unconfirmed**. Its documentation is not in the references and it was not surveyed; whether it is used is a question for the owner (§10).
 - The hardware entropy source inside the enclave is not named in any i.MX 95 source found. NXP has a NIST SP 800-90B entropy-source validation for "RNG4_ES i.MX93" (§6). Whether the i.MX 95 enclave uses the same RNG4 noise source is **unconfirmed**.
@@ -50,7 +50,7 @@ Method: I read the public source trees at the tags in §2, fetched them on 2026-
 ### 4.2 Mainline Linux
 
 - Mainline Linux (`torvalds/linux`, `master` at `v7.4-rc2`) has no EdgeLock Enclave driver in `drivers/firmware/imx/` and so no `ele-trng` hwrng; it carries only the SCU and System Manager drivers there. [S2] An image built on a mainline kernel would have no enclave hwrng unless the NXP driver is carried as a patch.
-- Mainline does have the generic OP-TEE hwrng (`drivers/char/hw_random/optee-rng.c`), which reads random bytes from a pseudo trusted application in OP-TEE (§5); NXP's tag carries the same driver. [S1][S2]
+- Mainline does have the generic OP-TEE hwrng (`drivers/char/hw_random/optee-rng.c`), which reads random bytes from a pseudo trusted application in OP-TEE (§5); NXP's tag carries the same driver. [S1, S2]
 
 ## 5. How OP-TEE reaches them
 
@@ -64,12 +64,12 @@ Method: I read the public source trees at the tags in §2, fetched them on 2026-
 ### 5.2 Upstream OP-TEE (`OP-TEE/optee_os`, tag `4.9.0`) [S4]
 
 - Upstream carries the same enclave driver (`core/drivers/crypto/ele/ele.c`) with the same `CFG_WITH_SOFTWARE_PRNG ?= y` default and the same comment about concurrent use by OP-TEE and Linux; the i.MX 95 flavour list there is also `mx95evk` only. [S4] (My first listing, through the GitHub contents API, missed the `crypto/ele` directory; the shallow clone of tag `4.9.0` shows it.)
-- OP-TEE offers randomness to the normal world through a hardware-RNG pseudo TA (`core/pta/hwrng.c`, built only with `CFG_HWRNG_PTA`), which Linux reads through the `optee-rng` hwrng (§4.2). The i.MX platform makefile does not mention `CFG_HWRNG_PTA` in either tree, so by default no `optee-rng` hwrng appears beside `ele-trng`; whether a global default turns it on was not checked and is **unconfirmed**. [S3][S4]
+- OP-TEE offers randomness to the normal world through a hardware-RNG pseudo TA (`core/pta/hwrng.c`, built only with `CFG_HWRNG_PTA`), which Linux reads through the `optee-rng` hwrng (§4.2). The i.MX platform makefile does not mention `CFG_HWRNG_PTA` in either tree, so by default no `optee-rng` hwrng appears beside `ele-trng`; whether a global default turns it on was not checked and is **unconfirmed**. [S3, S4]
 - Upstream's software PRNG is `core/crypto/rng_fortuna.c`; how it is seeded on the i.MX 95 when the enclave path is compiled out was not traced and is **unconfirmed**. [S4]
 
 ## 6. Health tests and certification claims
 
-- **Entropy-source validations (NIST ESV, SP 800-90B).** On 2026-11-12 the NIST ESV search lists five NXP certificates. Four are named "RNG4_ES": E106 (2023-12-11), E184 and E185 (2024-09-03), and E244 "RNG4_ES i.MX93", version B1 (2025-04-25, physical noise source, 0.827708 bits of entropy per 1-bit sample, lab EWA-Canada). The fifth is E148, for JCOP 4.5 on P71D600. [S6][S7] **None names the i.MX 95.**
+- **Entropy-source validations (NIST ESV, SP 800-90B).** On 2026-11-12 the NIST ESV search lists five NXP certificates. Four are named "RNG4_ES": E106 (2023-12-11), E184 and E185 (2024-09-03), and E244 "RNG4_ES i.MX93", version B1 (2025-04-25, physical noise source, 0.827708 bits of entropy per 1-bit sample, lab EWA-Canada). The fifth is E148, for JCOP 4.5 on P71D600. [S6, S7] **None names the i.MX 95.**
 - **Module validations (NIST CMVP, FIPS 140-3).** The active NXP certificates on 2026-11-12 are 5139 (SE052F), 4839 (i.MX8 DXL V2X), 4837 (i.MX8 DXL SECO HSM) and 4679 (JCOP 4.5 on P71D600). [S8] **None covers the i.MX 95 or its EdgeLock enclave.** In the modules-in-process list as fetched, no row names NXP. [S9] The list changes often, so this is a point-in-time reading.
 - **Health tests.** No public source found describes the i.MX 95 enclave's TRNG health tests (the SP 800-90B repetition-count and adaptive-proportion tests, or NXP's own). The software only shows their effect: a TRNG or RNG-context state other than ready, which callers treat as busy (§3). Health-test behaviour, and what the enclave does when a test fails, is **unconfirmed**. It is probably in the i.MX 95 Security Reference Manual, which SPEC lists as missing.
 - NXP's public i.MX 95 product pages could not be reached from the lane (HTTP 404 on two URLs tried), so NXP's marketing claims for the enclave (for example any SESIP, PSA or FIPS "designed for" claims) are **unconfirmed**.
