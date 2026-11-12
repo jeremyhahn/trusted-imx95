@@ -259,7 +259,11 @@ S4).
   verify the Cortex-M7 image as a signed container before it runs, the
   image must be in the boot image container (`flash_all`/`flash_m7`
   family), not loaded later by U-Boot or Linux. Signing applies to the boot
-  image container and the TF-A/U-Boot container separately. The hardware
+  image container and the TF-A/U-Boot container separately. The Linux
+  kernel and root filesystem are not in these containers, so AHAB does not
+  verify them; their verification is **unresolved**
+  ([verified-boot survey §3.5-§3.6](verified-boot-survey.md#35-u-boot-to-the-kernel-fit-signature-verification),
+  TH1 in the [threat model](../threat-model.md)). The hardware
   anti-rollback floor is each container's `fuse_version` and the ELE commit
   policy, which belong to the boot-container row. The `-sw_version` hook
   (section 3.2) only gives a software version, which needs its own,

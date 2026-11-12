@@ -70,8 +70,13 @@ is written to each device, its partition layout and the update path are not in a
 
 ## Trust boundaries
 
-- The image's boot chain is verified by AHAB secure boot through the signed boot container (docs/SPEC.md, Features,
-  `boot-container`).
+- AHAB secure boot authenticates the signed boot containers only. The guarantee docs/SPEC.md gives (Features,
+  `boot-container`) is that the Cortex-M7 image is verified as a signed container before it runs. Verification of
+  the kernel (an AHAB OS container or a signed FIT) and the integrity of the root filesystem (dm-verity) need
+  separately configured controls and are **unresolved**: see the
+  [verified-boot survey §3.3-§3.6](verified-boot-survey.md#33-u-boot-spl-and-u-boot-proper-ahab-authentication-of-later-images)
+  and TH1 in the [threat model](../threat-model.md). Boot-container authentication is not verification of the Linux
+  image.
 - The image is attested by go-trusted-platform; the evidence the device presents is an open question for the owner
   (docs/SPEC.md, Features, `device-lifecycle`).
 - Keys stay in the EdgeLock secure enclave's key store (RM00284 §2.4, §3.2, as cited in docs/SPEC.md, Features,
