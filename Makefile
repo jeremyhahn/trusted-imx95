@@ -162,10 +162,15 @@ docker-build: docker-build-toolchain ## Build both images, each only when the da
 # The CST extraction lives outside the checkout (scripts/cst-check.sh), so a
 # set CST_PATH is bind-mounted read-only at /cst and named there; unset, it
 # stays unset in the container and cst-check fails naming it.
-CST_MOUNT = $(if $(CST_PATH),-v "$$(cd "$$CST_PATH" && pwd):/cst:ro" -e CST_PATH=/cst)
+# The mount source is the canonical (pwd -P) path. A CST_PATH inside the
+# checkout is refused here, as scripts/cst-check.sh refuses it on the host:
+# once remapped to /cst, the container's cst-check can no longer tell.
+CST_MOUNT = $(if $(CST_PATH),-v "$$(cd "$$CST_PATH" && pwd -P):/cst:ro" -e CST_PATH=/cst)
 
 docker-run: docker-build-toolchain ## Run CMD in the toolchain image, the source and a set CST_PATH (read-only) bind-mounted
 	@[ -n "$(CMD)" ] || { echo "docker-run: set CMD, for example CMD='make test'"; exit 1; }
 	@[ -z "$${CST_PATH:-}" ] || [ -d "$$CST_PATH" ] || { echo "docker-run: CST_PATH=$$CST_PATH is not a directory"; exit 1; }
+	@[ -z "$${CST_PATH:-}" ] || { cst=$$(cd "$$CST_PATH" && pwd -P); repo=$$(cd "$(CURDIR)" && pwd -P); \
+		case "$$cst/" in "$$repo"/*) echo "docker-run: CST_PATH=$$CST_PATH ($$cst) is inside this checkout; the CST is never read from this tree. Extract it outside the repository."; exit 1;; esac; }
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp $(CST_MOUNT) \
 		-v "$(CURDIR):/src" -w /src --ulimit core=0 $(TOOLCHAIN_IMAGE) bash -c '$(CMD)'

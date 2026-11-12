@@ -329,5 +329,30 @@ log=$(<"$DOCKER_LOG")
 if [[ "$log" == *CST_PATH* || "$log" == *"/cst:ro"* ]]; then fail "docker-run: an unset CST_PATH is neither forwarded nor mounted" "$log"; else pass "docker-run: an unset CST_PATH is neither forwarded nor mounted"; fi
 run env PATH="$dstub:$PATH" CST_PATH="$TMP_ROOT/absent" make -s -C "$ROOT" docker-run CMD='make cst-check'
 check "docker-run: a CST_PATH that is not a directory is refused" nonzero "is not a directory"
+# Inside the container cst-check compares /cst with /src and would pass, so
+# docker-run refuses an in-checkout CST_PATH, canonically, before the remap.
+# An existing directory of the checkout stands in; nothing is written there.
+: >"$DOCKER_LOG"
+run env PATH="$dstub:$PATH" CST_PATH="$ROOT/scripts" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: a CST_PATH inside the checkout is refused" nonzero "is inside this checkout"
+expect "docker-run: an in-checkout CST_PATH never reaches docker" test ! -s "$DOCKER_LOG"
+ln -s "$ROOT/scripts" "$TMP_ROOT/cst-link"
+run env PATH="$dstub:$PATH" CST_PATH="$TMP_ROOT/cst-link" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: a symlink to a directory of the checkout is refused" nonzero "is inside this checkout"
+expect "docker-run: a symlinked in-checkout CST_PATH never reaches docker" test ! -s "$DOCKER_LOG"
+run env PATH="$dstub:$PATH" CST_PATH="$ROOT" make -s -C "$ROOT" docker-run CMD='make cst-check'
+check "docker-run: the checkout itself is refused as CST_PATH" nonzero "is inside this checkout"
+
+# --- .dockerignore: the vendor paths .gitignore excludes ----------------------
+#
+# The integration Dockerfile copies the whole context, and scripts/image-tag.sh
+# hashes only what git tracks, so every resources/ rule of .gitignore must also
+# keep the path out of the Docker context.
+missing=""
+while IFS= read -r rule; do
+	case "$rule" in resources/*) grep -qxF -- "$rule" "$ROOT/.dockerignore" || missing="$missing $rule" ;; esac
+done <"$ROOT/.gitignore"
+if [ -z "$missing" ]; then pass ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context"; else fail ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context" "missing:$missing"; fi
+expect ".gitignore: the resources/ vendor rules the check above reads exist" grep -q '^resources/' "$ROOT/.gitignore"
 
 finish

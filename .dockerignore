@@ -3,3 +3,8 @@
 **/cst-[0-9]*
 # The pinned tools make tools installs outside the image
 .tools/
+# The vendor images .gitignore keeps out of the tree (and so out of
+# scripts/image-tag.sh's hash) stay out of the image too; the test in
+# test/ci_scripts_test.sh holds every resources/ rule of .gitignore here.
+resources/*yocto*.zip
+resources/ucm-imx95:yocto-linux/
