@@ -28,7 +28,7 @@ copied from the cited configuration files and are physical addresses.
 
 | # | Source | Version surveyed | URL |
 |---|--------|------------------|-----|
-| S1 | NXP System Manager (imx-sm), FRDM i.MX 95 board configuration `configs/mx95frdm.cfg` | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm |
+| S1 | NXP System Manager (imx-sm), 15x15 FRDM i.MX 95 board configuration `configs/mx95frdm.cfg` (not the FRDM-IMX95-PRO's) | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm |
 | S2 | NXP fork of Trusted Firmware-A (imx-atf), `plat/imx/imx9/imx95/` and `plat/imx/imx9/common/` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/imx-atf |
 | S3 | Upstream Trusted Firmware-A, `plat/imx/imx9/` | tag `v2.15.0` | https://github.com/ARM-software/arm-trusted-firmware |
 | S4 | NXP fork of OP-TEE OS (imx-optee-os), `core/arch/arm/plat-imx/` | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/imx-optee-os |
@@ -67,7 +67,10 @@ In NXP's software the Cortex-M33 runs the System Manager, which boots first afte
 and writes the TRDC rules from the board configuration before it starts the A55 or the M7 (S1, `LM0` is
 `name="SM", boot=1`). The A55 software never programs the memory checkers itself; it asks the SM for
 services over SCMI. The FRDM configuration (S1, `configs/mx95frdm.cfg`) defines these logical machines and
-domains, with these DRAM rules (DRAM starts at `0x8000_0000`):
+domains, with these DRAM rules (DRAM starts at `0x8000_0000`). S1 is the configuration of the 15x15
+FRDM-IMX95 board, not the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`), whose SM configuration
+`mx95frdm-pro` has no confirmed source ([upstream-survey.md](upstream-survey.md)); the table and the
+conclusions drawn from it are **unverified for the PRO**:
 
 | Domain (S1 name, `did`) | Secure attribute | DRAM rules in S1 |
 |---|---|---|

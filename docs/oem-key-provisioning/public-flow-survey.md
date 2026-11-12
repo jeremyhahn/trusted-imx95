@@ -78,7 +78,7 @@ A claim marked **unconfirmed** could not be checked against a source that this l
 - `nxpele` reaches the ELE in three ways: through the ROM's mboot flashloader (which the guide gives for the RT1180), through the U-Boot serial console, or through U-Boot fastboot. The two U-Boot ways need U-Boot built with AHAB support and its `ele_message` command. Fastboot is described as the fastest (S4, `nxpele.rst`; S3).
 - SPSDK's anti-rollback example for i.MX95 uses the U-Boot serial way (S2).
 - Upstream U-Boot `v2026.10` has an `ele_ahab.c` in `arch/arm/mach-imx` (S7). Whether upstream U-Boot has the `ele_message` command SPSDK needs, or only NXP's U-Boot fork does, is **unconfirmed** (code not read).
-- The upstream U-Boot FRDM-i.MX95 page builds with the NXP ELE firmware package `firmware-ele-imx-2.0.2` and gives separate ELE containers for A0 and B0 silicon (S8).
+- The upstream U-Boot FRDM-i.MX95 page builds with the NXP ELE firmware package `firmware-ele-imx-2.0.2` and gives separate ELE containers for A0 and B0 silicon (S8). That page is for the 15x15 FRDM-IMX95 board, not the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`); which ELE firmware version and container the PRO's BSP uses is **unconfirmed**.
 
 ### F6. Where the enclave is used from at run time
 

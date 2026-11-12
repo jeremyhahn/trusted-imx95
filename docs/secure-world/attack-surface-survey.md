@@ -22,7 +22,7 @@ commit messages and file names and say so. Nothing was built or run.
 
 | Id | Title | Version | URL |
 |---|---|---|---|
-| S1 | NXP i.MX System Manager (`imx-sm`), FRDM-IMX95 configuration `configs/mx95frdm.cfg` and `sm/doc` | tag `rel_imx_sm_2026q3` (commit `eec2328`) | https://github.com/nxp-imx/imx-sm |
+| S1 | NXP i.MX System Manager (`imx-sm`), 15x15 FRDM-IMX95 configuration `configs/mx95frdm.cfg` (not the FRDM-IMX95-PRO's) and `sm/doc` | tag `rel_imx_sm_2026q3` (commit `eec2328`) | https://github.com/nxp-imx/imx-sm |
 | S2 | NXP TF-A (`imx-atf`), i.MX 95 platform and SiP service history | branch `lf_v2.14`, commit `af9eb2c` | https://github.com/nxp-imx/imx-atf |
 | S3 | NXP OP-TEE OS (`imx-optee-os`), i.MX and ELE driver history | tag `lf-6.18.37-2.1.0` (commit `99f4089`, upstream base 4.10.0) | https://github.com/nxp-imx/imx-optee-os |
 | S4 | NXP Linux kernel (`linux-imx`), `drivers/firmware/imx` file list | branch `lf-6.18.y`, read 2026-11-12 | https://github.com/nxp-imx/linux-imx/tree/lf-6.18.y/drivers/firmware/imx |
@@ -95,6 +95,9 @@ What the NXP history shows for the i.MX 9 family [S3]:
   the hardware unique key, random numbers, fuse reads, the device life
   cycle, and (recently) ELE-backed RSA and ECC keys.
 - Fuse reads through OP-TEE are refused once the life cycle is closed.
+  This rests on a commit message in the history only; the code was not
+  read and the behaviour was not tested on the i.MX 95, so it is
+  **unconfirmed**. No life-cycle close is run or proposed to test it.
 - Two robustness fixes in the ELE MU driver: a stale-response race after a
   timeout, which could let one request read another's answer (fixed with a
   "circuit breaker"), and oversized commands that hung the ELE on the
@@ -115,6 +118,11 @@ only) [S4]; upstream Linux `master` the same directory (file list only)
 The ELE is reached only through messaging units (MUs), and each MU is a
 resource the SM assigns to one domain and one security state. In the FRDM
 configuration [S1]:
+
+(`mx95frdm.cfg` is the configuration for the 15x15 FRDM-IMX95 board, not
+the FRDM-IMX95-PRO, whose SM configuration `mx95frdm-pro` was not read; see
+[upstream-survey.md](upstream-survey.md). The MU assignment below is
+therefore **unverified for the PRO**.)
 
 | MU | Assigned to | Security |
 |---|---|---|
@@ -138,7 +146,12 @@ it is **not confirmed** here.
 ### 3.4 SCMI to the System Manager (Cortex-M33)
 
 Source: NXP `imx-sm`, tag `rel_imx_sm_2026q3`, file `configs/mx95frdm.cfg`
-(the board's own SM configuration) [S1].
+[S1]. This is the SM configuration of the 15x15 FRDM-IMX95 board, not of
+the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`), which names a
+configuration `mx95frdm-pro` whose source is unconfirmed
+([upstream-survey.md](upstream-survey.md)). The logical machines, agents
+and grants below are **unverified for the PRO** until that configuration is
+read.
 
 The System Manager (SM) on the Cortex-M33 splits the SoC into logical
 machines (LMs). In the FRDM configuration [S1]:
@@ -309,7 +322,9 @@ compromised, and are listed for completeness.
    non-secure Linux do what the SM denies its own SCMI agent [S1][S2].
 4. **Should the board keep NXP's FRDM SM configuration or carry its own?**
    Options: (a) NXP's `mx95frdm.cfg` as is; (b) a board copy with test
-   grants and unused resources removed from "AP-NS".
+   grants and unused resources removed from "AP-NS". (`mx95frdm.cfg` is
+   the 15x15 board's file; the PRO's `mx95frdm-pro` source must be
+   confirmed first.)
    Recommendation: (b); the file is the single control point for SCMI and
    TRDC, and it changes only with an SM rebuild [S1].
 5. **Which NXP release line is the baseline?**

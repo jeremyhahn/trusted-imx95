@@ -177,7 +177,9 @@ KEK-CBC wrap mode [S2, `hsm_permitted_algo_t`].
 
 A key carries the device life-cycle states in which it may be used: open, closed, and
 closed-locked, as a bit mask [S2, `hsm_key_lifecycle_t`]. This is the attribute that binds a key's
-use to the device's life cycle.
+use to the device's life cycle. The source is a library header; that the enclave firmware refuses
+to use a key outside its mask is **unconfirmed** (the firmware API reference is not public) and
+was not tested. No life-cycle close is run or proposed to test it.
 
 ### 4.6 Import
 
@@ -204,7 +206,8 @@ Drawn from §3–§4; the choice of values for this board is §5.
 - One usage set and one permitted algorithm, the narrowest the key's role needs; no export usage on
   anything but the public half of a signing or agreement pair (§4.2, §4.3).
 - A key life-cycle mask of closed (and closed-locked if used), so a production key cannot be
-  exercised while the device is still open (§4.5).
+  exercised while the device is still open, provided the enclave enforces the mask (unconfirmed,
+  §4.5).
 - Permanent only for a key that must never be rotated, since the attribute is irreversible (§4.4).
 - Sessions opened in FIPS mode where the part reports FIPS-approved operation (§3.1, §3.5); whether
   the i.MX 95 part is FIPS certified is unconfirmed (§6).
@@ -234,8 +237,8 @@ Rules the proposal follows, each from §3–§4:
   is written once, client-key groups often.
 - No production key carries the permanent attribute unless the owner wants it irrevocable (§4.4).
 - Development keys are made with an open life-cycle mask and production keys with a closed one, so a
-  development key cannot sign once the device is closed and a production key cannot be used before
-  (§4.5).
+  development key cannot sign once the device is closed and a production key cannot be used before,
+  if the enclave enforces the mask as the header describes (unconfirmed, §4.5).
 - The key store blobs stay in the NVM manager's directory on the board (§3.2) and are device-bound;
   restoring an older copy is what the counter refuses (§3.3).
 

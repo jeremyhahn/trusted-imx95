@@ -154,7 +154,12 @@ question about the SM configuration chosen for the board, which belongs to
 the `system-manager-config` row.
 
 NXP's SM repository ships a configuration for the FRDM board,
-`configs/mx95frdm.cfg` [S5]. As published there:
+`configs/mx95frdm.cfg` [S5]. That file is for the 15x15 FRDM-IMX95 board, not
+the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`), which names an SM
+configuration `mx95frdm-pro` whose source is unconfirmed
+([upstream-survey.md](upstream-survey.md)). Everything in this section is
+therefore **unverified for the PRO** until that configuration is read. As
+published in `mx95frdm.cfg`:
 
 - The Cortex-A55 side is one logical machine, `LM2` "AP", holding two SCMI
   agents: `AP-S`, marked secure, on MU1 (the MU BL31 uses, section 2.4), and
@@ -176,7 +181,8 @@ The SM configuration guide [S6] notes that the resource-domain hardware can
 only split secure from non-secure, and that whatever the non-secure side can
 reach, the secure side can reach too. The design point that follows: the
 non-secure agent must not hold the CPU, PLL, MU1 or ELE MUs, or the secure
-DDR window. In `mx95frdm.cfg` it does not [S5]. This lane did not audit the
+DDR window. In the 15x15 board's `mx95frdm.cfg` it does not [S5]; for the PRO
+this is **unverified**. This lane did not audit the
 whole non-secure resource list line by line (see section 6).
 
 ## 5. Placement in the boot container and verification (input to #32, #55)
@@ -361,7 +367,8 @@ All reached from the lane on 2026-11-12 unless marked unreachable.
    survey's section 4.
    Recommendation: (b), in the `system-manager-config` row. TF-A's
    isolation rests entirely on that file: the secure DDR window, MU1, the ELE
-   MUs and the CPUs [S5, S6].
+   MUs and the CPUs [S5, S6]. The starting file for the PRO is the
+   unconfirmed `mx95frdm-pro`, not the 15x15 board's `mx95frdm.cfg`.
 
 6. **Container 2 authentication (for #32 and #55).**
    Options: (a) build SPL with `CONFIG_AHAB_BOOT` and sign container 2 with

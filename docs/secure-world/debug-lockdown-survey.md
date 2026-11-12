@@ -180,8 +180,12 @@ OEM Closed part will boot without complaint.
 ### 6.1 System Manager (Cortex-M33) debug monitor
 
 NXP's System Manager (SM) runs on the M33. It owns the TRDC set-up, power, clocks and
-resets of the whole SoC. The public imx-sm repository has a board port for this board
-(`boards/mcimx95frdm`, `configs/mx95frdm.cfg`). Its monitor document (S7) says:
+resets of the whole SoC. The public imx-sm repository has a board port for the 15x15
+FRDM-IMX95 board (`boards/mcimx95frdm`, `configs/mx95frdm.cfg`), not for the FRDM-IMX95-PRO
+(machine `imx95-19x19-lpddr5-frdm-pro`); the PRO's configuration `mx95frdm-pro` has no
+confirmed source ([upstream-survey.md](upstream-survey.md)), so which monitor setting the
+PRO's SM build uses is **unconfirmed**. The monitor document (S7) is generic to the SM and
+says:
 
 - The SM build option `M` selects a **debug monitor** on the SM debug UART. `M=1` drops
   into the monitor at boot and `M=2` enters it when a character arrives on the UART.

@@ -51,6 +51,15 @@ Not found: a device tree named for the FRDM-IMX95-PRO at `lf-6.12.49-2.2.0`.
 This survey uses the FRDM-IMX95 tree (S4); whether the PRO board uses it
 unchanged is in section 6.
 
+Board caveat: S1 (`mx95frdm.cfg`) and S4 (`imx95-15x15-frdm.dts`) describe
+the 15x15 FRDM-IMX95 board, not the FRDM-IMX95-PRO (machine
+`imx95-19x19-lpddr5-frdm-pro`). The PRO names an SM configuration
+`mx95frdm-pro` whose source is unconfirmed
+([upstream-survey.md](upstream-survey.md)). Every MU assignment, memory
+range and right in sections 3, 4 and 5 that cites S1 or S4 is therefore
+**unverified for the PRO** until its own configuration and device tree are
+read.
+
 ## 3. How the Cortex-M7 and the Cortex-A55 share memory and exchange messages
 
 NXP's public sources show three paths between the M7 and the rest of the
@@ -65,7 +74,8 @@ other. The SM gives every SCMI agent its own MU channel [S3]; the payloads
 live in shared memory, not in the MU [S1, S3]. The SM configuration assigns each MU side to one LM,
 so the TRDC lets only that LM's masters touch it [S1].
 
-In NXP's FRDM configuration [S1]:
+In NXP's FRDM configuration [S1] (15x15 board; unverified for the PRO, see
+the board caveat in section 2):
 
 - MU9, M7 to SM: the M7 is SCMI agent 0 of the SM, with three channels
   (requests, notifications, priority notifications). The shared-memory
@@ -139,8 +149,9 @@ always the SM itself and owns resources exclusively [S2].
 
 ### 4.2 What NXP's FRDM configuration gives the M7 and Linux
 
-Read from NXP's FRDM configuration [S1]; the addresses are NXP's defaults,
-not this board's decision:
+Read from NXP's FRDM configuration [S1]; the addresses are NXP's defaults
+for the 15x15 FRDM-IMX95 board, not this board's decision, and are
+**unverified for the FRDM-IMX95-PRO** (section 2 board caveat):
 
 | Logical machine | DID | Memory it is given |
 |---|---|---|
@@ -240,7 +251,9 @@ threat model for RPMsg.
 5. Whether the i.MX 95 has an IOMMU in front of Linux's DMA masters, and who
    programs it. If Linux programs it, it is no defence against Linux.
 6. Whether the FRDM-IMX95-PRO uses the FRDM-IMX95 device tree and SM
-   configuration unchanged.
+   configuration unchanged. S1 and S4 are the 15x15 board's files; the PRO's
+   `mx95frdm-pro` configuration has no confirmed source, so sections 3 to 5
+   are unverified for the PRO.
 7. The MU register model (side A and side B semantics) is described from the
    SM documentation's summary [S3]; the MU binding and the reference manual
    were not read.
