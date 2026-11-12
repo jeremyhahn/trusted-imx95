@@ -57,6 +57,50 @@ From S1 (`iMX95/soc.mak`, tag `lf-6.18.37-2.1.0`):
 
 ## 4. Which agent loads the M7 and starts it
 
+Sources: S1; S2 `sm/doc/arch.md`, `sm/doc/config.md` (section "Configtool Commands") and
+`configs/mx95frdm.cfg` (the FRDM-IMX95 configuration, the board of this repository), all at
+`rel_imx_sm_2026q3`.
+
+There are three agents, each with one job:
+
+1. **Boot ROM on the Cortex-M33, with the EdgeLock enclave (ELE).** In the lpboot flows of S1 the
+   M33 is the boot core. The ROM reads the first container (System Manager, optional OEI, M7, A55
+   SPL), runs the OEI first when one is present (it trains the DDR; S2 `arch.md` notes that the DDR
+   controller and PHY are first set up by a DDR firmware the M33 ROM calls), and copies each image
+   entry to the load address mkimage wrote for it. That the ROM copies **every** image entry of the
+   container, including the M7 one, before the System Manager runs, and that it asks the ELE to
+   authenticate them in the same pass, is how NXP's container format works on i.MX 8ULP/i.MX 93 and
+   what the `-m7 ... <alias>` argument implies, but the i.MX 95 Reference Manual's boot chapter
+   could not be read here: **unconfirmed** for the i.MX 95 (§9, U1).
+2. **System Manager on the Cortex-M33.** The SM does not copy images. It starts *logical machines*
+   (LMs) in a configured order once it has set up the TRDC isolation. In `mx95frdm.cfg` the M7 is
+   `LM1 name="M7"`, `boot=2` (started second, after the SM itself and before the A55 LM, which has
+   `boot=3`), `skip=1`, DID 4, safety type `seenv`. Its start sequence powers `PD_M7` and then
+   starts `CPU_M7P`. Per `config.md`, `skip` set to non-zero tells the SM to ignore the error when
+   the boot container holds no image for that LM, so the stock FRDM SM boots with or without an
+   M7 image in the container.
+3. **U-Boot (`bootaux`) or Linux (remoteproc).** These are the later, optional loaders (§7). In the
+   NXP default flow they are not involved: the M7 is running before the A55 SPL starts.
+
+The OEI is not an M7 loader: on B0 silicon `soc.mak` includes only the DDR OEI; the TCM-init OEI
+(`oei-m33-tcm.bin`) is used on A0/A1 silicon only, where the comment says it is needed to load an M7
+TCM image (S1, the `ifeq ($(LC_REVISION),a1)` blocks).
+
+Other facts of the FRDM M7 LM that matter to trusted-firmware (S2 `mx95frdm.cfg`):
+
+- The M7 talks SCMI to the SM over MU 9 (`SCMI_AGENT0 name="M7"`), with three SMT channels
+  (a2p, notify, priority), CRC32 checked.
+- It owns `MU_ELE5`, a messaging unit to the EdgeLock enclave of its own; S2 `arch.md` says security
+  functions do not go through the SM and that clients talk to the ELE directly.
+- It has `LMM_2 ALL`, i.e. the LMM protocol rights over LM 2 (the A55): the M7 can boot, reset and
+  shut down the A55 LM. The reverse right is narrower: the A55 secure agent (`AP-S`, TF-A) has no `LMM_1` entry and
+  the A55 non-secure agent (`AP-NS`, Linux) has `LMM_1 NOTIFY` only, so in the stock FRDM
+  configuration Linux is told of M7 LM state changes but cannot boot or reset the M7 LM through
+  the SM.
+- Its TRDC memory grants are the M7MIX TCM ranges and `DDR EXEC 0x80000000-0x89FFFFFF`.
+- Faults `FAULT_M7_LOCKUP`, `FAULT_M7_RESET`, `FAULT_WDOG5` have the reaction `lm_reset` (the SM
+  resets the M7 LM, not the SoC).
+
 ## 5. Where the M7 image runs: TCM or DDR
 
 ## 6. AHAB: when the M7 image's signature is checked
