@@ -87,7 +87,10 @@
 #   2. A push to main whose tree already has a green full-tier run (a run of
 #      this workflow whose Integration job succeeded) gets the schedule
 #      guard's `proven` verdict: its bigdisk jobs skip, the guard records the
-#      proving run id, and CI Gate reads the skips as passed. No hourly or
+#      proving run id, and CI Gate reads the skips as passed. The history
+#      secret scan (history-scan) is the exception: it runs on every push
+#      and pull request, proven or not, and the gate never accepts it
+#      skipped (trusted-imx95). No hourly or
 #      lane ci:full reruns; lint-sweeps run in nightly.yml only.
 #   3. lint-gates is path-scoped on a pull request (LINT_GATES_PATTERN, the
 #      changes job's `lint_gates` output). A pull request from a checkpoint
@@ -735,7 +738,8 @@ jobs:
   # workflow's last 20 successful runs whose head commit has this commit's tree
   # and whose Integration job succeeded (a ci:full PR run, a dispatch on main,
   # an earlier main run); the guard records its id as `proof`, every bigdisk
-  # job skips and CI Gate reads the skips as passed. A proof it cannot read
+  # job but history-scan skips and CI Gate reads the skips as passed. The
+  # proof compares trees, not commits, so history-scan runs on it anyway. A proof it cannot read
   # leaves `run`: the full tier runs. A schedule run never gets `proven`,
   # because its security stages read fresh vulnerability databases.
   # Architecture gate (v1.20, Company Agent m270 item 9; go-xkms arch-gates).
@@ -865,7 +869,7 @@ jobs:
             if { [ -n "$JOB_TOKEN" ] && proof "$JOB_TOKEN"; } || { [ -n "$BOT" ] && proof "$BOT"; }; then
               if [ -n "$PROOF" ]; then
                 verdict=proven
-                echo "::notice::this tree already has a green full tier in run $PROOF: the bigdisk jobs skip, and CI Gate passes on it"
+                echo "::notice::this tree already has a green full tier in run $PROOF: the bigdisk jobs but the history secret scan skip, and CI Gate passes on it"
               fi
             else
               echo "::warning::the tree proof could not be read: the full tier runs"
@@ -1169,6 +1173,74 @@ jobs:
         env:
           IN_IMAGE_NETWORK: bridge
         run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" make deps-check
+
+      - name: Tear down
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gomodauth.env"
+
+  # trusted-imx95 (from a Codex security review): the history secret scan
+  # runs on every push and pull request, whether or not the tree proof is
+  # reused. The proof compares trees only: two commits that add a credential
+  # and then remove it leave the tree of a run already proven green, and on
+  # that push the `proven` verdict skips the image job and its make security.
+  # This job runs `make secret-scan-history` (scripts/secret-scan.sh history)
+  # over the full history on the `run` and `proven` verdicts alike, and CI
+  # Gate checks it as `always`: a skip fails the gate on any verdict. On a
+  # pull request it scans the merge commit's history, so the commits a PR
+  # adds are scanned before they reach main, not only its final tree.
+  # A schedule run while main is busy skips it with the gate, and a draft or
+  # a refused run fails the gate anyway.
+  history-scan:
+    name: History secret scan [secret-scan history]
+    runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'bigdisk' }}
+    needs: preflight
+    if: ${{ !github.event.pull_request.draft && (needs.preflight.outputs.verdict == 'run' || needs.preflight.outputs.verdict == 'proven') }}
+    timeout-minutes: 30       # CUSTOMIZE: ceil(1.5 x this job's 72-hour p95), ci-standard.md §12
+    env:
+      CI_STACK_PREFIX: ${{ github.event.repository.name }}-ci-
+      CI_CACHE_CLASS: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'main' || 'pr' }}
+      CI_IMAGE_NAMESPACE: ${{ vars.CI_IMAGE_NAMESPACE }}
+    steps:
+      # The full history: a shallow checkout hides a credential committed and
+      # removed earlier, and the scan refuses one.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Mask the forge credentials before any other step (as in the lint job).
+      - name: Mask the forge credentials
+        run: |
+          for v in GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; do
+            val=${!v:-}
+            [ -n "$val" ] || continue
+            echo "::add-mask::$val"
+            case $val in *://*:*@*) t=${val#*://}; t=${t%%@*}; echo "::add-mask::${t#*:}" ;; esac
+          done
+
+      - name: Pull the toolchain image from the registry cache
+        run: scripts/ci-image-cache.sh pull || true
+
+      # The toolchain image alone, as in the lint job; on a proven push the
+      # registry cache normally holds it.
+      - name: Build the toolchain image
+        run: |
+          ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
+            for v in GOPRIVATE; do
+              if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
+            done )
+          bp=
+          if [ -n "${DEVCACHE_GOPROXY:-}" ] && curl -s -o /dev/null --max-time 5 "$DEVCACHE_GOPROXY/"; then
+            bp="GO_BUILD_PROXY=$DEVCACHE_GOPROXY|https://proxy.golang.org"
+          fi
+          make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
+          rm -f "$RUNNER_TEMP/gomodauth.env"
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
+
+      # No network: gitleaks reads the history the checkout streams in.
+      - name: make secret-scan-history
+        run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" make secret-scan-history
 
       - name: Tear down
         if: always()
@@ -1956,7 +2028,7 @@ jobs:
     # CUSTOMIZE: the repo's job list. Add every CUSTOMIZE job here AND as a
     # check line below; remove none of the template's jobs. v1.30: lint
     # joins; publish-images is the one job outside the gate (see its comment).
-    needs: [preflight, lint, image, lint-gates, integration, soak]   # v1.34; v1.35.2 signatures.yml
+    needs: [preflight, lint, history-scan, image, lint-gates, integration, soak]   # v1.34; v1.35.2 signatures.yml
     steps:
       - name: Fail closed on any non-success
         env:
@@ -1984,11 +2056,15 @@ jobs:
           fi
           BAD=0
           echo "full tier selected: ${FULL_TIER}; nightly selected: ${NIGHTLY}"
-          check() { # <job> <result> <pr|code|scoped|full|nightly>
+          # trusted-imx95: an `always` job is never accepted skipped, not even
+          # on a proven tree (the history secret scan).
+          check() { # <job> <result> <always|pr|code|scoped|full|nightly>
             case "$2" in
               success) echo "OK   $1";;
               skipped)
-                if [ "${SCHEDULE_GUARD}" = proven ] && [ -n "${PROOF}" ] && [ "$3" != nightly ]; then
+                if [ "$3" = always ]; then
+                  echo "FAIL $1 (skipped: it runs on every verdict, a proven tree included)"; BAD=1
+                elif [ "${SCHEDULE_GUARD}" = proven ] && [ -n "${PROOF}" ] && [ "$3" != nightly ]; then
                   echo "SKIP $1 (tree proven by run ${PROOF})"
                 elif [ "$3" = code ] && [ "${DOCS_ONLY}" = true ]; then
                   echo "SKIP $1 (docs-only pull request)"
@@ -2020,6 +2096,7 @@ jobs:
           # that skips on a docs-only PR is code, and lint-gates is scoped.
           check preflight   "${{ needs.preflight.result }}" pr
           check lint        "${{ needs.lint.result }}" pr
+          check history-scan "${{ needs.history-scan.result }}" always
           check image       "${{ needs.image.result }}" code
           check lint-gates  "${{ needs.lint-gates.result }}" scoped
           check integration "${{ needs.integration.result }}" full

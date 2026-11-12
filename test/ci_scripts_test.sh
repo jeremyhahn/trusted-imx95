@@ -77,6 +77,36 @@ else
 	git clone -q --depth 1 "file://$hist" "$TMP_ROOT/shallow"
 	run "$ROOT/scripts/secret-scan.sh" history "$TMP_ROOT/shallow"
 	check "secret-scan: a shallow clone, which hides the removed key, is refused" 1 "shallow clone"
+
+	# A proven main push (Codex security P1, the tree proof): after a green
+	# run, two commits add a credential and remove it, so the tree is the
+	# proven one. test/ci-proven-sim.py evaluates ci.yml's job and step `if:`
+	# for that push, runs the history scan where a running step scans the
+	# history, and writes CI Gate's script with the job results; the gate
+	# must fail. On a clean history it passes.
+	pv="$TMP_ROOT/proven"
+	mkdir -p "$pv"
+	pg() { git -C "$pv" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+	pg init -q
+	printf 'nothing here\n' >"$pv/ok.txt"
+	pg add -A && pg commit -qm "proven green"
+	green=$(pg rev-parse 'HEAD^{tree}')
+	run python3 "$ROOT/test/ci-proven-sim.py" "$ROOT/.github/workflows/ci.yml" "$pv" "$TMP_ROOT/gate-clean.sh"
+	check "tree proof: a proven push with a clean history runs the history scan" 0 "scan history-scan"
+	run env SCHEDULE_GUARD=proven PROOF=42 DRAFT=false FULL_TIER=true NIGHTLY=false SCHEDULE=false DOCS_ONLY=false LINT_GATES_SEL=true bash "$TMP_ROOT/gate-clean.sh"
+	check "tree proof: CI Gate passes a proven push whose history is clean" 0 "OK   history-scan"
+	printf 'aws_access_key_id = %s\n%s\n' "$key" "$secret" >"$pv/creds.ini"
+	pg add -A && pg commit -qm "add creds"
+	pg rm -q creds.ini && pg commit -qm "remove creds"
+	expect "tree proof: adding and removing a credential leaves the proven tree" test "$(pg rev-parse 'HEAD^{tree}')" = "$green"
+	run python3 "$ROOT/test/ci-proven-sim.py" "$ROOT/.github/workflows/ci.yml" "$pv" "$TMP_ROOT/gate.sh"
+	check "tree proof: the history scan runs on the proven push and finds the removed credential" 0 "scan history-scan failure"
+	run env SCHEDULE_GUARD=proven PROOF=42 DRAFT=false FULL_TIER=true NIGHTLY=false SCHEDULE=false DOCS_ONLY=false LINT_GATES_SEL=true bash "$TMP_ROOT/gate.sh"
+	check "tree proof: CI Gate fails the proven push of a credential added and removed" 1 "FAIL history-scan (failure)"
+	# A history scan skipped on a proven tree never passes the gate.
+	sed 's/^R_history_scan=.*/R_history_scan=skipped/' "$TMP_ROOT/gate-clean.sh" >"$TMP_ROOT/gate-skip.sh"
+	run env SCHEDULE_GUARD=proven PROOF=42 DRAFT=false FULL_TIER=true NIGHTLY=false SCHEDULE=false DOCS_ONLY=false LINT_GATES_SEL=true bash "$TMP_ROOT/gate-skip.sh"
+	check "tree proof: CI Gate fails a skipped history scan on a proven tree" 1 "FAIL history-scan (skipped"
 fi
 
 # --- a stub curl for deps-check and fetch-tools ----------------------------
@@ -962,8 +992,8 @@ run pub
 check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry holds $IMG_REMOTE; nothing to publish"
 cd "$here" || exit 1
 
-# ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref, and hands the
-# integration test the leased ID.
+# ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,
+# image, lint-gates), and hands the integration test the leased ID.
 ci=$(<"$ROOT/.github/workflows/ci.yml")
 # shellcheck disable=SC2016 # the patterns match ci.yml's literal shell text
 n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
@@ -971,7 +1001,7 @@ n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
 n_tag=$(grep -c 'TOOLCHAIN_IMAGE=$(make -s toolchain-image)' <<<"$ci" || true)
 # shellcheck disable=SC2016
 n_it=$(grep -cE 'make (integration-test|"\$SOAK_TARGET") .*IT_IMAGE_ID="\$IT_LEASE_ID"' <<<"$ci" || true)
-if [ "$n_ref" = 3 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
+if [ "$n_ref" = 4 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
 	pass "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID"
 else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
