@@ -1,20 +1,44 @@
 # secure-world — architecture
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `secure-world` · Last verified: 2026-11-12
+> **Status: NORMATIVE** · Scope: trusted-imx95 `secure-world` · Last verified: 2026-11-17
 > The detail of the `secure-world` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Every statement below cites a document and section listed in [references/README.md](../references/README.md).
 A fact the documents do not give is under [Missing](#missing); a choice the owner has not made is under
-[Open questions](#open-questions). This file decides nothing: it gathers what the references give about the cores
-and the enclave a secure world would run on, and names what they leave out.
+[Open questions](#open-questions). The scope below is the owner's ruling; the rest of this file gathers what the
+references give about the cores and the enclave the secure world runs beside, and names what they leave out.
 
-## Problem
+## Scope (owner ruling 771)
 
-The board's secure world lives in this repository ([SPEC.md](../SPEC.md), Purpose, `secure-world` row). Which cores
-and which TrustZone software it covers is not decided in this repository's documents or in trusted-firmware's
-rows ([SPEC.md](../SPEC.md), `secure-world` row). No document in the references gives the i.MX 95's TrustZone
-configuration; the one that does is missing ([SPEC.md](../SPEC.md), `secure-world` row;
-[references/README.md](../references/README.md), "Still missing").
+Owner ruling 771 (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
+row, Release criteria). The SPEC.md text that records it is proposed, pending the owner's approval of the file.
+
+- **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31) and OP-TEE OS from NXP's Linux BSP, at
+  the revisions one named NXP Linux BSP release carries. It is not this repository's own code: this repository
+  configures it, builds it reproducibly, and puts its images in the boot container that AHAB verifies
+  ([SPEC.md](../SPEC.md), `boot-container` row).
+- **Trusted applications.** OP-TEE runs the firmware TPM TA, which Linux sees as `/dev/tpmrm0`, and the PKCS#11
+  TA, which go-xkms's PKCS#11 backend uses. Any custom TA is reached through `/dev/tee0`.
+- **Linux.** go-trusted-platform and go-xkms run in Linux, on the Cortex-A55 cluster
+  ([SPEC.md](../SPEC.md), `platform-image` row), and use TrustZone only through OP-TEE.
+- **Cortex-M7.** trusted-firmware stays the Cortex-M (TrustZone-M) product; on the i.MX 95 that is the M7, with
+  the firmware and board profile of its `imx95` row ([SPEC.md](../SPEC.md), Boundaries).
+- **Cortex-M33.** The System Manager stays NXP's firmware; this repository holds only its configuration
+  ([SPEC.md](../SPEC.md), `system-manager-config` row).
+- **Enclave.** The EdgeLock secure enclave is the hardware root.
+
+What the ruling leaves in force or does not settle:
+
+- Keys the fTPM and PKCS#11 TAs hold sit in OP-TEE's storage, not in the enclave. The `secure-key-handling` row
+  still requires the board's keys to be generated and held in the enclave's key store and never to leave it in the
+  clear (RM00284 §2.4, §3.2), so those keys are not where the board's enclave-held keys go
+  ([ta-options-survey.md](ta-options-survey.md), question 1).
+- The NXP Linux BSP release, and with it the TF-A and OP-TEE revisions, are **to be pinned**. No version is named
+  here. Whether upstream TF-A boots on the FRDM-IMX95-PRO is not confirmed; the public trees surveyed have an i.MX
+  95 BL31 port but no board-specific build for the PRO ([upstream-survey.md](upstream-survey.md), TF-A).
+- Which side calls the enclave's HSM API is not settled by the ruling (see [Open questions](#open-questions)).
+- No document in the references gives the i.MX 95's TrustZone configuration; the one that does is missing
+  ([references/README.md](../references/README.md), "Still missing").
 
 ## The cores
 
@@ -64,8 +88,8 @@ world reaches it, is an open question for the owner ([SPEC.md](../SPEC.md), `sec
 trusted-firmware's `imx95` row states what its Cortex-M7 firmware assumes of the board's secure world and of the
 enclave key tier; that row is the authority and this file does not restate it. This repository records one
 consequence of it: the board's keys stay in the enclave's key store as that row requires of the key tier
-([SPEC.md](../SPEC.md), `secure-key-handling` row). The firmware split between this repository and that row is
-open for the owner ([SPEC.md](../SPEC.md), Boundaries, Release criteria).
+([SPEC.md](../SPEC.md), `secure-key-handling` row). Owner ruling 771 settles the firmware split
+between this repository and that row ([Scope](#scope-owner-ruling-771)).
 
 ## Boundaries
 
@@ -91,6 +115,9 @@ open for the owner ([SPEC.md](../SPEC.md), Boundaries, Release criteria).
   state, and how ([SPEC.md](../SPEC.md), `system-manager-config` row).
 - The NXP Linux BSP documentation: what secure-world software NXP's Linux BSP runs on the Cortex-A55, and the
   interface between it and Linux ([SPEC.md](../SPEC.md), `platform-image` row).
+- The NXP Linux BSP release the secure world builds from, and the TF-A and OP-TEE revisions it carries: **to be
+  pinned** ([ROADMAP.md](../../ROADMAP.md), `secure-world`), together with the OP-TEE configuration that enables the
+  firmware TPM and PKCS#11 TAs.
 - Which core and security state may open an enclave session, and whether the enclave distinguishes callers by
   core or security state: not in the RM00284 sections cited in [SPEC.md](../SPEC.md).
 - The SE051 documentation ([SPEC.md](../SPEC.md), `secure-key-handling` row).
@@ -102,11 +129,10 @@ open for the owner ([SPEC.md](../SPEC.md), Boundaries, Release criteria).
 
 ## Open questions
 
-- Which cores the secure world covers, and which TrustZone software it runs on them
-  ([SPEC.md](../SPEC.md), `secure-world` row, Release criteria).
+The secure world's scope and the firmware split are settled by owner ruling 771
+([Scope](#scope-owner-ruling-771)). These remain:
+
 - Which side calls the enclave's HSM API, the Cortex-A55 Linux side or the Cortex-M7
   ([SPEC.md](../SPEC.md), `secure-key-handling` row).
 - The SE051's role beside the enclave, and whether it holds any key ([SPEC.md](../SPEC.md),
   `secure-key-handling` row).
-- The firmware split between this repository and trusted-firmware's `imx95` row ([SPEC.md](../SPEC.md),
-  Release criteria).

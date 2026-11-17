@@ -442,9 +442,10 @@ answered, no RPMB key is written on the project's board.
      port belongs to this repository's secure-world work
      ([secure-world/](../secure-world/architecture.md)), not to
      trusted-firmware's `imx95` row, which holds the Cortex-M7 firmware. It is
-     noted here because RPMB storage depends on it. The owner's firmware
-     split ([SPEC.md](../SPEC.md) Release criteria) and the secure world's
-     scope are still open.
+     noted here because RPMB storage depends on it. Owner ruling 771
+     settles the split: OP-TEE from the NXP BSP on the A55, built here
+     ([SPEC.md](../SPEC.md), `secure-world` row); trusted-firmware keeps
+     the Cortex-M7. Which flavour, (a) or (b), is still open.
 8. **Who owns the RPMB partition?** (§7)
    - (a) OP-TEE alone. U-Boot's AVB rollback indexes and any other
      rollback state go through OP-TEE trusted applications; no raw RPMB

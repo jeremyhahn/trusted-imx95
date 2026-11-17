@@ -7,8 +7,9 @@ runs or scripts a fuse, life-cycle or provisioning step.
 
 The question: on the FRDM-IMX95-PRO, which memory belongs to the secure world, which mechanism keeps the
 other bus masters out of it, and which software sets that up. The `secure-world` row of
-[SPEC.md](../SPEC.md) leaves the secure world's scope open and notes that no document in
-[references/](../references/README.md) gives the i.MX 95's TrustZone configuration.
+[SPEC.md](../SPEC.md) notes that no document in [references/](../references/README.md) gives the i.MX 95's
+TrustZone configuration. Owner ruling 771 has since set the scope: upstream TF-A and the NXP BSP's OP-TEE on the
+A55 ([architecture.md](architecture.md#scope-owner-ruling-771)).
 
 Issue #63 asks for three things, each covered here:
 
