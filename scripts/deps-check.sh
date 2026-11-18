@@ -18,11 +18,39 @@ readonly WEEK=$((7 * 24 * 3600))
 now=$(date -u +%s)
 bad=0
 
-# latest_github <owner/repo>: prints "<tag> <published_at>".
+# latest_github <owner/repo>: prints "<tag> <published_at>". On failure it
+# prints the reason (the HTTP status, or curl's exit code) and returns 1.
+# With GITHUB_TOKEN or GH_TOKEN set, the request is authenticated, so CI is
+# not held to the unauthenticated rate limit. The token goes to curl on stdin
+# through --config, never on its command line, and xtrace is off while it is
+# in a command, so neither ps nor `set -x` shows it.
 latest_github() {
-	curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
-		"https://api.github.com/repos/$1/releases/latest" |
-		python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tag_name"], d["published_at"])'
+	local body code rc=0 xt=
+	body=$(mktemp)
+	case $- in *x*) xt=1 && set +x ;; esac
+	if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+		code=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN:-${GH_TOKEN:-}}" |
+			curl -fsSL --retry 2 --config - -H 'Accept: application/vnd.github+json' \
+				-o "$body" --write-out='%{http_code}' \
+				"https://api.github.com/repos/$1/releases/latest") || rc=$?
+	else
+		code=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+			-o "$body" --write-out='%{http_code}' \
+			"https://api.github.com/repos/$1/releases/latest") || rc=$?
+	fi
+	[ -z "$xt" ] || set -x
+	if [ "$rc" -ne 0 ]; then
+		rm -f "$body"
+		if [ -n "$code" ] && [ "$code" != 000 ]; then echo "HTTP $code"; else echo "curl exit $rc"; fi
+		return 1
+	fi
+	if ! python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tag_name"], d["published_at"])' \
+		<"$body" 2>/dev/null; then
+		rm -f "$body"
+		echo "HTTP ${code:-200}, a reply with no tag_name and published_at"
+		return 1
+	fi
+	rm -f "$body"
 }
 
 # latest_alpine: prints "<x.y.z> <pushed_at>" of the newest release tag.
@@ -66,8 +94,9 @@ for tool in "${tools[@]}"; do
 		bad=1
 		continue
 	fi
-	if ! read -r tag when < <(latest_github "$repo") || [ -z "${when:-}" ]; then
-		echo "deps-check: FAIL   $tool: the latest release of $repo cannot be read"
+	tag='' when=''
+	if ! got=$(latest_github "$repo") || ! read -r tag when <<<"$got" || [ -z "${when:-}" ]; then
+		echo "deps-check: FAIL   $tool: the latest release of $repo cannot be read (${got:-no reply})"
 		bad=1
 		continue
 	fi
