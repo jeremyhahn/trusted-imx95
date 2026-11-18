@@ -140,6 +140,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	-o) out=$2; shift 2 ;;
 	-H) shift 2 ;;
+	--config) if [ "$2" = - ]; then cat >"$STUB_DIR/.config"; fi; shift 2 ;;
 	-*) shift ;;
 	*) url=$1; shift ;;
 	esac
@@ -186,6 +187,25 @@ check "deps-check: a pin behind a release over 7 days old fails" 1 "FAIL   BBB 2
 printf "BBB_HOLD='waiting on a fix'\n" >>"$pins"
 run env PATH="$stub:$PATH" "$ROOT/scripts/deps-check.sh" "$pins"
 check "deps-check: a held pin with its reason is reported" 0 "HELD   BBB 2.0.0, latest 2.1.0: waiting on a fix"
+
+rel="$TMP_ROOT/releases"
+run env PATH="$stub:$PATH" GITHUB_TOKEN=stub-token "$ROOT/scripts/deps-check.sh" --fetch "$rel" "$pins"
+check "deps-check: --fetch writes each tool's release" 0 "FETCH  AAA v1.0.0" "FETCH  BBB v2.1.0"
+if [ "$(cat "$rel/BBB")" = "v2.1.0 $old" ] && grep -qx 'header = "Authorization: Bearer stub-token"' "$STUB_DIR/.config" &&
+	[[ "$OUT" != *stub-token* ]]; then
+	pass "deps-check: --fetch sends the token on curl's stdin, never prints it, and stores tag and date"
+else
+	fail "deps-check: --fetch sends the token on curl's stdin, never prints it, and stores tag and date" "$OUT"
+fi
+printf 'v1.1.0 %s\n' "$old" >"$rel/AAA"
+run env PATH="$stub:$PATH" DEPS_RELEASES_DIR="$rel" "$ROOT/scripts/deps-check.sh" "$pins"
+check "deps-check: DEPS_RELEASES_DIR is read instead of the API" 1 "FAIL   AAA 1.0.0 is behind 1.1.0"
+printf 'v1.1.0;id %s\n' "$old" >"$rel/AAA"
+run env PATH="$stub:$PATH" DEPS_RELEASES_DIR="$rel" "$ROOT/scripts/deps-check.sh" "$pins"
+check "deps-check: a release file that is not a version tag fails" 1 "AAA: $rel/AAA holds no release tag and date"
+rm "$rel/AAA"
+run env PATH="$stub:$PATH" DEPS_RELEASES_DIR="$rel" "$ROOT/scripts/deps-check.sh" "$pins"
+check "deps-check: a missing release file fails" 1 "AAA: $rel/AAA holds no release tag and date"
 
 rm "$STUB_DIR/$(printf '%s' https://api.github.com/repos/example/aaa/releases/latest | tr -c 'A-Za-z0-9.\n' '_')"
 run env PATH="$stub:$PATH" "$ROOT/scripts/deps-check.sh" "$pins"

@@ -30,9 +30,8 @@
 # credentials the runner injects (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and
 # GIT_CONFIG_VALUE_0, dependency-resolution.md §6) are never passed in: the
 # container runs a pull request's own scripts with a network, and this
-# repository has no private modules to fetch. Nor is any *TOKEN* variable,
-# except the job's read-only GITHUB_TOKEN on an explicit opt-in for
-# deps-check (below); test/ci_scripts_test.sh holds both.
+# repository has no private modules to fetch. Nor is any *TOKEN* variable;
+# test/ci_scripts_test.sh holds both.
 #
 # v2 (ci-template v1.22, Company Agent m616 item 2): the caches live in named
 # volumes on the daemon's host (ci-standard.md §6), never in the container's
@@ -215,12 +214,6 @@ if [ "$network" = bridge ]; then
   args+=(--env "GOPROXY=${DEVCACHE_GOPROXY:+$DEVCACHE_GOPROXY|}https://proxy.golang.org" --env "GOMODCACHE=$modcache")
   # GOPRIVATE only: no forge credential enters the container (above).
   if [ -n "${GOPRIVATE:-}" ]; then args+=(--env GOPRIVATE); fi
-  # The one exception to "no *TOKEN* variable" (above): with
-  # IN_IMAGE_GITHUB_API_TOKEN=1, which only ci.yml's deps-check step sets,
-  # GITHUB_TOKEN goes in by name, so its value is never on a command line.
-  # That step gives it the job's read-only token, for the GitHub releases API
-  # rate limit only.
-  if [ "${IN_IMAGE_GITHUB_API_TOKEN:-}" = 1 ] && [ -n "${GITHUB_TOKEN:-}" ]; then args+=(--env GITHUB_TOKEN); fi
 fi
 
 cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; }
