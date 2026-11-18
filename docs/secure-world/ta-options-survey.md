@@ -187,8 +187,9 @@ Owner ruling 771 (2026-11-17) enables both the firmware TPM TA (`/dev/tpmrm0`) a
 PKCS#11 backend, which is option (d) of question 1, and takes OP-TEE from NXP's Linux BSP, option (c) of question 4
 ([architecture.md](architecture.md#scope-owner-ruling-771)). The concern behind the (a) recommendation of question 1
 still holds: keys these TAs hold sit in A55 secure DRAM and OP-TEE storage, not in the enclave, so the board's keys
-that the `secure-key-handling` row puts in the enclave's key store must not be moved into them. The questions are
-kept below as surveyed.
+that the `secure-key-handling` row puts in the enclave's key store must not be moved into them. Owner ruling 927 (2026-11-18) answers
+question 3 with (b): the fTPM serves provisioning and device evidence through go-xkms's TPM 2.0 workflows, and gets
+its own row, `ftpm` ([../ftpm/README.md](../ftpm/README.md)). The questions are kept below as surveyed.
 
 1. **Does the secure world run any TA for key custody?**
    - (a) No TA for custody: keys stay in the enclave per secure-key-handling; OP-TEE, if present, serves other roles.

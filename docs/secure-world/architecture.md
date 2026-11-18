@@ -17,8 +17,10 @@ row, Release criteria). The SPEC.md text that records it is proposed, pending th
   the revisions one named NXP Linux BSP release carries. It is not this repository's own code: this repository
   configures it, builds it reproducibly, and puts its images in the boot container that AHAB verifies
   ([SPEC.md](../SPEC.md), `boot-container` row).
-- **Trusted applications.** OP-TEE runs the firmware TPM TA, which Linux sees as `/dev/tpmrm0`, and the PKCS#11
-  TA, which go-xkms's PKCS#11 backend uses. Any custom TA is reached through `/dev/tee0`.
+- **Trusted applications.** OP-TEE runs the PKCS#11 TA, which go-xkms's PKCS#11 backend uses, and hosts the
+  firmware TPM TA, which Linux sees as `/dev/tpmrm0`. Owner ruling 927 gives the firmware TPM its own row, `ftpm`:
+  the TA, the kernel driver, its NV storage, the EK and measured boot are designed in [ftpm/](../ftpm/README.md).
+  Any custom TA is reached through `/dev/tee0`.
 - **Linux.** go-trusted-platform and go-xkms run in Linux, on the Cortex-A55 cluster
   ([SPEC.md](../SPEC.md), `platform-image` row), and use TrustZone only through OP-TEE.
 - **Cortex-M7.** trusted-firmware stays the Cortex-M (TrustZone-M) product; on the i.MX 95 that is the M7, with
@@ -117,7 +119,7 @@ between this repository and that row ([Scope](#scope-owner-ruling-771)).
   interface between it and Linux ([SPEC.md](../SPEC.md), `platform-image` row).
 - The NXP Linux BSP release the secure world builds from, and the TF-A and OP-TEE revisions it carries: **to be
   pinned** ([ROADMAP.md](../../ROADMAP.md), `secure-world`), together with the OP-TEE configuration that enables the
-  firmware TPM and PKCS#11 TAs.
+  PKCS#11 TA; the firmware TPM TA's configuration and revision are the `ftpm` row's ([ftpm/](../ftpm/README.md)).
 - Which core and security state may open an enclave session, and whether the enclave distinguishes callers by
   core or security state: not in the RM00284 sections cited in [SPEC.md](../SPEC.md).
 - The SE051 documentation ([SPEC.md](../SPEC.md), `secure-key-handling` row).
