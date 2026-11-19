@@ -1081,11 +1081,20 @@ jobs:
       # release without devops.md §9's documented reason (ci-standard.md §1).
       # v1.28: a lint-class gate of seconds on the PR tier, every event, a
       # docs-only PR included (ruling 219(3)); it was full tier only from v1.23.
+      # The tools' latest releases are fetched here, on the runner, with the
+      # job's read-only token (the unauthenticated API answers 403 once rate
+      # limited); no token enters the toolchain image, which reads the tags as data.
+      - name: Fetch the tools' latest releases
+        if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/deps-check.sh --fetch .deps-releases scripts/tool-pins.sh
+
       - name: make deps-check
         if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != '' }}
         env:
           IN_IMAGE_NETWORK: bridge
-        run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" make deps-check
+        run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" make deps-check DEPS_RELEASES_DIR=.deps-releases
 
       - name: Tear down
         if: always()
