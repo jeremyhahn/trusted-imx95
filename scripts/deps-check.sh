@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # deps-check.sh [pin-file]
+# deps-check.sh --fetch <dir> [pin-file]
 #
 # The latest-version check (handbook ci-standard.md §1, devops.md §9): each
 # pinned tool of scripts/tool-pins.sh against its latest GitHub release, and
@@ -8,8 +9,22 @@
 # documented reason, which is reported. A release younger than 7 days is
 # reported, not failed. A release that cannot be read fails: no answer is
 # never a pass. Needs the network (CI runs it with IN_IMAGE_NETWORK=bridge).
+#
+# deps-check.sh --fetch <dir> [pin-file] only looks up each tool's latest
+# GitHub release and writes "<tag> <published_at>" to <dir>/<TOOL>. CI runs it
+# on the runner with the job's token, outside the toolchain container, which no
+# token enters. With DEPS_RELEASES_DIR set, the check reads the tools' releases
+# from that directory instead of the API, as data only: a value that is not a
+# version tag and a UTC timestamp fails. The Alpine lookup needs no token.
 set -euo pipefail
 
+fetch=
+if [ "${1:-}" = --fetch ]; then
+	[ -n "${2:-}" ] || { echo "usage: deps-check.sh --fetch <dir> [pin-file]" >&2; exit 2; }
+	fetch=$2
+	shift 2
+	mkdir -p "$fetch"
+fi
 pins=${1:-$(dirname "${BASH_SOURCE[0]}")/tool-pins.sh}
 # shellcheck disable=SC1090
 . "$pins"
@@ -18,11 +33,39 @@ readonly WEEK=$((7 * 24 * 3600))
 now=$(date -u +%s)
 bad=0
 
-# latest_github <owner/repo>: prints "<tag> <published_at>".
+# latest_github <owner/repo>: prints "<tag> <published_at>". On failure it
+# prints the reason (the HTTP status, or curl's exit code) and returns 1.
+# With GITHUB_TOKEN or GH_TOKEN set, the request is authenticated, so CI is
+# not held to the unauthenticated rate limit. The token goes to curl on stdin
+# through --config, never on its command line, and xtrace is off while it is
+# in a command, so neither ps nor `set -x` shows it.
 latest_github() {
-	curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
-		"https://api.github.com/repos/$1/releases/latest" |
-		python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tag_name"], d["published_at"])'
+	local body code rc=0 xt=
+	body=$(mktemp)
+	case $- in *x*) xt=1 && set +x ;; esac
+	if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+		code=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN:-${GH_TOKEN:-}}" |
+			curl -fsSL --retry 2 --config - -H 'Accept: application/vnd.github+json' \
+				-o "$body" --write-out='%{http_code}' \
+				"https://api.github.com/repos/$1/releases/latest") || rc=$?
+	else
+		code=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+			-o "$body" --write-out='%{http_code}' \
+			"https://api.github.com/repos/$1/releases/latest") || rc=$?
+	fi
+	[ -z "$xt" ] || set -x
+	if [ "$rc" -ne 0 ]; then
+		rm -f "$body"
+		if [ -n "$code" ] && [ "$code" != 000 ]; then echo "HTTP $code"; else echo "curl exit $rc"; fi
+		return 1
+	fi
+	if ! python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tag_name"], d["published_at"])' \
+		<"$body" 2>/dev/null; then
+		rm -f "$body"
+		echo "HTTP ${code:-200}, a reply with no tag_name and published_at"
+		return 1
+	fi
+	rm -f "$body"
 }
 
 # latest_alpine: prints "<x.y.z> <pushed_at>" of the newest release tag.
@@ -33,6 +76,12 @@ import json, re, sys
 tags = [t for t in json.load(sys.stdin)["results"] if re.fullmatch(r"\d+\.\d+\.\d+", t["name"])]
 t = max(tags, key=lambda t: tuple(int(x) for x in t["name"].split(".")))
 print(t["name"], t.get("tag_last_pushed") or t["last_updated"])'
+}
+
+# valid_release <tag> <published_at>: true for a version tag and a UTC timestamp.
+valid_release() {
+	[[ $1 =~ ^v?[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.-]+)?$ ]] &&
+		[[ $2 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
 }
 
 # judge <name> <pinned> <latest> <released-at> <hold-reason>
@@ -66,13 +115,26 @@ for tool in "${tools[@]}"; do
 		bad=1
 		continue
 	fi
-	if ! read -r tag when < <(latest_github "$repo") || [ -z "${when:-}" ]; then
-		echo "deps-check: FAIL   $tool: the latest release of $repo cannot be read"
+	tag='' when='' got=''
+	if [ -n "${DEPS_RELEASES_DIR:-}" ] && [ -z "$fetch" ]; then
+		if ! read -r tag when 2>/dev/null <"$DEPS_RELEASES_DIR/$tool" || ! valid_release "$tag" "$when"; then
+			echo "deps-check: FAIL   $tool: $DEPS_RELEASES_DIR/$tool holds no release tag and date"
+			bad=1
+			continue
+		fi
+	elif ! got=$(latest_github "$repo") || ! read -r tag when <<<"$got" || ! valid_release "$tag" "$when"; then
+		echo "deps-check: FAIL   $tool: the latest release of $repo cannot be read (${got:-no reply})"
 		bad=1
 		continue
 	fi
-	judge "$tool" "$version" "$tag" "$when" "$hold"
+	if [ -n "$fetch" ]; then
+		printf '%s %s\n' "$tag" "$when" >"$fetch/$tool"
+		echo "deps-check: FETCH  $tool $tag ($when)"
+	else
+		judge "$tool" "$version" "$tag" "$when" "$hold"
+	fi
 done
+[ -z "$fetch" ] || exit "$bad"
 
 if read -r tag when < <(latest_alpine) && [ -n "${when:-}" ]; then
 	judge ALPINE "$ALPINE_VERSION" "$tag" "$when" "${ALPINE_HOLD:-}"
