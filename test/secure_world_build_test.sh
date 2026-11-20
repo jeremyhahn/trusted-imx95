@@ -244,4 +244,38 @@ fullrun badhash "$oklock" STUB_CORRUPT_CP=1
 check "a wrong artefact hash stops the build" nonzero "differs from the build output" "nothing published"
 expect "a wrong artefact hash publishes nothing" nothing_published badhash
 
+# --- build.md records the script's OP-TEE configuration -----------------------
+# The artefact hashes in docs/secure-world/build.md hold for one OP-TEE make
+# configuration. build.md records the SHA-256 of that configuration (the
+# optee_flags array and the final OP-TEE make call, whitespace squeezed), and
+# this check recomputes it from the script, so a changed flag cannot leave old
+# hashes standing.
+optee_config_digest() {
+	local l on=0 acc=
+	while IFS= read -r l; do
+		if [[ "$l" == "optee_flags=("* ]]; then on=1; fi
+		if [[ "$l" == "step optee make"* ]]; then on=2; fi
+		if [ "$on" != 0 ]; then
+			l=${l//$'\t'/ }
+			while [[ "$l" == *"  "* ]]; do l=${l//  / }; done
+			acc+="$l"$'\n'
+		fi
+		if [ "$on" = 1 ] && [[ "$l" == ")" ]]; then on=0; fi
+		if [ "$on" = 2 ] && [[ "$l" != *"\\" ]]; then on=0; fi
+	done <"$sw"
+	printf '%s' "$acc" | sha256sum | cut -d' ' -f1
+}
+recorded_config_digest() {
+	local l
+	while IFS= read -r l; do
+		if [[ "$l" =~ ^OP-TEE\ configuration\ digest:\ \`([0-9a-f]{64})\`$ ]]; then
+			printf '%s\n' "${BASH_REMATCH[1]}"
+			return 0
+		fi
+	done <"$ROOT/docs/secure-world/build.md"
+	return 1
+}
+config_tied() { [ "$(recorded_config_digest)" = "$(optee_config_digest)" ]; }
+expect "build.md records the digest of the script's OP-TEE configuration" config_tied
+
 finish

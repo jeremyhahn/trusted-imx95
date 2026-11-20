@@ -35,7 +35,7 @@ The output directory holds:
 **Host.** x86_64 Linux with glibc, with `git`, `curl`, `make`, `tar`, `xz`, `sha256sum`, CPython 3.13 and `uv` on
 `PATH`, and network access to the pinned URLs only: github.com, developer.arm.com and PyPI. The script checks the
 architecture and each tool and stops, naming any that is missing. The project's devcontainer image is Alpine (musl)
-and cannot run Arm's glibc-hosted toolchain, so `make docker-run` does not build this. The recorded builds ran in a
+and cannot run Arm's glibc-hosted toolchain, so `make docker-run` does not build this. The earlier builds ran in a
 Debian 13 container on a build node with no Docker.
 
 ## The pins
@@ -102,20 +102,24 @@ loaded from the file system and the public key is trusted for nothing. No key is
 
 ## Reproducibility
 
-`SOURCE_DATE_EPOCH` defaults to the pinned OP-TEE commit's committer time (`1788777083`). Recorded on 2026-11-20:
+`SOURCE_DATE_EPOCH` defaults to the pinned OP-TEE commit's committer time (`1788777083`).
 
-| Build | Directory | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
-|---|---|---|---|
-| A | Work and cache in the checkout's `.secure-world/` (the first draft's default), `SOURCE_DATE_EPOCH` from the default | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `98dfa08b88a6f1bf5ec5374d41ce8611ee53b2204ffe94128fa3dcb1f29fc29d` |
-| B | A different directory outside the checkout, its own fresh cache, `SOURCE_DATE_EPOCH=1788777083` set | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `98dfa08b88a6f1bf5ec5374d41ce8611ee53b2204ffe94128fa3dcb1f29fc29d` |
+**No hash is recorded for the final configuration, and no reproducibility is claimed for it.** Two clean builds of
+`scripts/secure-world-build.sh` at b4f0e41 were run on 2026-11-20 (x86_64 Linux host, the pinned toolchain). The
+OP-TEE image does not link with `CFG_REE_FS_TA=n`: `core/pta/secstor_ta_mgmt.c` (`install_ta`) references
+`ree_fs_check_update_ta_version`, which that setting leaves out. No `bl31.bin` or `tee.bin` of this configuration
+exists. The hashes recorded earlier (two builds, equal) were of the configuration before `CFG_REE_FS_TA=n`, so they
+are withdrawn. The script needs a fix first (for example `CFG_SECSTOR_TA_MGMT_PTA=n`, not tried here); then two clean
+builds are to be run and their hashes recorded here.
 
-A third run, `make secure-world` with today's defaults (work and cache under `~/.cache`), gave the same two hashes.
-Both artefacts are identical, byte for byte. The build directory's path does not reach the binaries. Each build took
-about 110 seconds on a many-core build node: about 35 s fetching and unpacking the toolchain and about 70 s
-compiling.
+The configuration the hashes will belong to is pinned by a digest, which `test/secure_world_build_test.sh` recomputes
+from the script (its `optee_flags` array and its final OP-TEE make call, whitespace squeezed). The test fails when the
+script's OP-TEE configuration differs from the one recorded here, so hashes cannot outlive a flag change. Record the
+new digest together with the new hashes.
 
-Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`. With another
-`SOURCE_DATE_EPOCH` the hashes change, because TF-A's build message and OP-TEE's version string embed the date.
+OP-TEE configuration digest: `4d0805bed0428d1b9efce71a9c5507e0fb3c8f5257f78a7ab25a3d94bf116cc2`
+
+Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
 **Not in CI.** The build fetches about 150 MB, runs for about two minutes and needs the network. `make test`
 runs only the offline lock check and the script's unit tests.
@@ -142,7 +146,8 @@ The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md
 not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
-- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds were
-  identical. Not in CI. Nothing has run on the board.
+- `secure-world` (b): `make secure-world` is meant to build both artefacts with a SHA-256 manifest, but the OP-TEE
+  image does not link with `CFG_REE_FS_TA=n` (see [Reproducibility](#reproducibility)); no build of the final
+  configuration exists. Not in CI. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.
