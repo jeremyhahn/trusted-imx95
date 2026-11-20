@@ -36,7 +36,9 @@ FROM base AS toolchain
 # ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
 # Alpine's git package does not supply it. Like every package here, its
 # version is the pinned Alpine release's.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen
+# xz, perl: scripts/sm-build.sh unpacks a .tar.xz toolchain and requires perl
+# (imx-sm's build); test/sm_build_test.sh runs it here.
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen xz perl
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 
