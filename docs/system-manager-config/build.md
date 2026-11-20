@@ -1,0 +1,119 @@
+# System Manager build: pins, command and reproducibility
+
+Row: `system-manager-config` ([SPEC.md](../SPEC.md)). Issues #133, #13. Builds on
+[sm-build-survey.md](sm-build-survey.md) and [m7-resource-map-survey.md](m7-resource-map-survey.md).
+
+NXP's System Manager (SM), the Cortex-M33 firmware, stays NXP's code. This repository pins it, builds it, and will
+own its board configuration. Nothing here is flashed or signed: the image is a build output only.
+
+## 1. The command and the pins
+
+```sh
+make system-manager                          # = scripts/sm-build.sh system-manager/sm.lock
+make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 6)
+```
+
+The pins are in [`system-manager/sm.lock`](../../system-manager/sm.lock). They are **provisional**: they follow
+NXP's BSP release `imx-6.18.37-2.1.0`, the baseline [build-system-options.md](../platform-image/build-system-options.md)
+recommends (on #137), which the owner has not chosen yet (#14 Q2).
+
+| Pin | Value | Where it was read |
+|---|---|---|
+| Repository | `https://github.com/nxp-imx/imx-sm` | public |
+| Tag | `lf-6.18.37-2.1.0` (annotated; `rel_imx_sm_2026q3` names the same commit) | `git ls-remote` |
+| Commit | `eec232878ab7dd460f5a8f3767d39dc7e9412efa` | the tag, peeled |
+| Board configuration | `mx95frdm-pro`, file `configs/other/mx95frdm-pro.cfg` | meta-imx machine `imx95-19x19-lpddr5-frdm-pro` ([sm-build-survey.md](sm-build-survey.md) §5) |
+| Configuration SHA-256 | `37d8f4c2b324cdc8dafb1de3f3f741850c86ca2e842880b9fdbdc16db72c1d63` | the file at the commit |
+| Monitor mode | `M=2`, as meta-imx's recipe passes it; production's choice is open ([sm-build-survey.md](sm-build-survey.md) §10 Q4) | |
+| Toolchain | Arm GNU Toolchain `15.2.rel1`, x86_64 host, `arm-none-eabi` | imx-sm's `TC_VERSION` default |
+| Toolchain SHA-256 | `597893282ac8c6ab1a4073977f2362990184599643b4c5ee34870a8215783a16` | Arm's published `.sha256asc`, and the download |
+
+What the script does, in order:
+
+1. Parses the lock (never sources it): only the known keys, each once, each in its expected form (`--check` stops
+   here, offline).
+2. Downloads the toolchain tarball once into `out/system-manager/cache/`, checks its SHA-256 on every run and
+   extracts it fresh.
+3. Fetches the tag once into a bare cache and fails unless it names the pinned commit.
+4. Builds twice, each in its own fresh clone (`tree-1/`, `tree-2/`): checks the `.cfg` against its SHA-256, then
+   runs `make config=mx95frdm-pro cfg` and `make config=mx95frdm-pro M=2 all`, as meta-imx's recipe does, with
+   `SM_CROSS_COMPILE` set to the pinned toolchain and `SOURCE_DATE_EPOCH` set to the commit's time.
+5. Writes `m33_image.bin`, `SHA256SUMS` and `sm-manifest.txt` (every pin, both builds' digests, the verdict) to
+   `out/system-manager/` (gitignored), and fails unless the two images are byte-identical.
+
+[`test/sm_build_test.sh`](../../test/sm_build_test.sh) runs the script offline against a fake repository and
+toolchain: the good path, the cache, a non-reproducible build, a failing build, every pin mismatch and every
+malformed lock.
+
+## 2. The reproducibility result
+
+RESULT
+
+The image embeds the compiler's `__DATE__` and `__TIME__`. Without `SOURCE_DATE_EPOCH`, two builds a minute apart
+differed in exactly those bytes; with it set to the commit's time (`1788454215`, 2026-09-03), they do not. The
+second tree lives at another path, so the image does not depend on the build directory either.
+
+## 3. Where the configuration lives
+
+- The source of truth is NXP's `configs/other/mx95frdm-pro.cfg` at the pinned commit, used **unchanged**: the
+  lock pins its SHA-256 and the build fails if it differs. This repository holds no copy yet.
+- `make cfg` turns it into the C headers in `configs/mx95frdm-pro/` of the build tree; they are build output,
+  regenerated on every build, never carried.
+- The file names the 19x19 EVK board port (`board=mcimx95evk`); its header comment still says "MX95 EVK".
+
+## 4. How this repository will carry its own changes
+
+No change is made yet. When one is needed:
+
+1. Add `system-manager/mx95frdm-pro.cfg.patch`, a unified diff against the pinned upstream file, reviewed as a
+   diff in the pull request that adds it. The upstream file stays the base, so the reviewed change is the whole
+   change, and a new NXP release is a rebase of the patch.
+2. The lock gains the patch's SHA-256; the script applies it after the upstream SHA-256 check, before `make cfg`,
+   and writes both digests to the manifest.
+3. If the change grows past a patch, the alternative of [sm-build-survey.md](sm-build-survey.md) §8 item 2 applies:
+   a new `.cfg` under a new name in `configs/`, beside NXP's unmodified file. Either way imx-sm itself is not
+   forked.
+4. Every change rebuilds the image, and with it the boot container, which must be re-signed with the OEM key
+   ([sm-build-survey.md](sm-build-survey.md) §7). No key is used here.
+
+## 5. The Cortex-M7 resources against the configuration's sections
+
+The pinned `mx95frdm-pro.cfg` was read for the resources [m7-resource-map-survey.md](m7-resource-map-survey.md)
+names. This settles most of that survey's §8 item 1 for this device. The M7 is LM1 (`name="M7"`, SCMI agent 0);
+"the M7's section" below is that LM's block. A **finding** is a change this repository would need; none is made.
+
+| Resource (survey §6) | Section of the `.cfg` | State at the pinned commit |
+|---|---|---|
+| M7 CPU `CPU_M7P`, power `PD_M7` | M7 LM, start/stop lines for `msel` 0, 1, 2 | Granted: the SM powers `PD_M7` and starts the CPU at LM start; `PD_M7` is also an M7 `test` resource |
+| `M7P` (brings `PERF_M7`, `CLK_M7SYSTICK`) | M7 LM, Resources | Granted: the M7 owns `M7P` |
+| `CLK_M7`, `CLK_BUSM7`, `CLK_ENET` | SM LM (LM0), API, the group changed through the Performance protocol | SM-held; the M7 reaches `CLK_M7` only through `PERF_M7` |
+| `PERF_M7` explicit API line | M7 LM, API | **Not present.** Whether `M7P` ownership alone allows `PERFORMANCE_LEVEL_SET` (PRIV) is #107's; a `PERF_M7` line may be needed |
+| M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned as a `test` resource |
+| Pins `GPIO_IO36`, `GPIO_IO37` (also `GPIO_IO14`, `GPIO_IO15`) | M7 LM, Pins | Granted, all four. What they are wired to on the PRO is unconfirmed |
+| M7 timers, CAN, watchdog, mailboxes (`LPIT1`, `LPTMR1/2`, `LPTPM1`, `CAN_FD1`, `WDOG5`, `MU5_A`, `MU7_B`, `MU8_B`, `IRQSTEER_M7`, `TSTMR2`) | M7 LM, Resources | Granted |
+| EdgeLock mailbox `MU_ELE5` | M7 LM, Resources | Granted |
+| Memory: M7MIX TCMs, DDR `0x80000000`..`0x89FFFFFF` executable | M7 LM, Memory | Granted |
+| SCMI channel: MU 9 (test MU 8), three CRC32-checked SMT channels | M7 LM, RPC Interface | Present |
+| A55 LM control `LMM_2` | M7 LM, API | Granted, all rights |
+| System power `SYS` | M7 LM, API | Granted, all rights (survey §9 Q4: "keep") |
+| Fault reactions: M7 lock-up, M7 reset, `WDOG5`, `SW1` | M7 LM, Faults | Present, each `lm_reset`; `SW0` to the FuSa reaction. **Finding:** fail-open for the tamper responder; needs `sys_reset` or `sys_shutdown` ([fault-recovery-survey.md](fault-recovery-survey.md) §10 Q1) |
+| `PD_NETC`, `NETC*`, `NETC_EMDIO0`, `BLK_CTRL_NETCMIX`, `PIN_ENET1_*`/`PIN_ENET2_*` | A55 non-secure agent (`AP-NS`), Resources and Pins | Owned by `AP-NS`, not the M7. **Finding:** only if the owner picks survey §9 Q1 (b) or Q2 (c); option (a), `LMM_SHUTDOWN` of LM2, needs no change |
+| Reset domains, `PD_WAKEUP` | none for the M7 | Not granted; whether the M7 needs them is still unconfirmed (survey §8 items 4, 5) |
+
+Two further points the file shows: LM1 carries `skip=1` (as LM2 does), whose effect on when the SM boots the M7 is
+not documented in the sources read; and the SM's own debug UART is `LPUART2` (instance 2), owned by LM0.
+
+So the M7 firmware of trusted-firmware's `imx95` row can run on the pinned configuration as it stands, and the
+tamper response by `LMM_SHUTDOWN` or `SYSTEM_POWER_STATE_SET` is granted. The changes the findings point to are
+the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
+
+## 6. Not confirmed
+
+- The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
+  devcontainer image is Alpine (musl); whether Arm's glibc toolchain runs there is not checked, so
+  `make docker-run CMD='make system-manager'` is unproven.
+- Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
+  `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
+  checked.
+- The monitor mode for production images (`M=2` here), the BSP release (#14 Q2) and the boot container target
+  stay open.

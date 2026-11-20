@@ -7,3 +7,5 @@ cst-*/
 it-image.tar
 # The pinned tools `make tools` installs where there is no devcontainer image
 .tools/
+# make system-manager's downloads, build trees and image (scripts/sm-build.sh)
+/out/
