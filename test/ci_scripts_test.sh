@@ -539,6 +539,7 @@ while IFS= read -r rule; do
 	case "$rule" in resources/*) grep -qxF -- "$rule" "$ROOT/.dockerignore" || missing="$missing $rule" ;; esac
 done <"$ROOT/.gitignore"
 if [ -z "$missing" ]; then pass ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context"; else fail ".dockerignore: every resources/ rule of .gitignore is excluded from the Docker context" "missing:$missing"; fi
+expect ".dockerignore: the build output /out/ is excluded from the Docker context" grep -qxF -- '/out/' "$ROOT/.dockerignore"
 expect ".gitignore: the resources/ vendor rules the check above reads exist" grep -q '^resources/' "$ROOT/.gitignore"
 
 # --- .dockerignore: the Docker context, by Docker's matching rules -------------

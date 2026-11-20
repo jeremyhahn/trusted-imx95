@@ -95,7 +95,8 @@ not give.
 ## Open questions
 
 - CST 3.1.0 or SPSDK for signing AHAB containers: the owner's decision.
-- Whether the anti-rollback floor uses the enclave's monotonic counter, the AHAB version field, or both, once the
-  Security Reference Manual gives the version field: the owner's decision.
+- How the anti-rollback floor is implemented on each of the two mechanisms, the enclave's monotonic counter and the
+  AHAB version field, once the Security Reference Manual gives the version field. Both are required (SPEC.md,
+  `boot-container` and `secure-key-handling` rows); neither is offered alone.
 - When the life cycle is closed and where provisioning runs: the owner's, under `oem-key-provisioning`
   ([SPEC.md](../SPEC.md)).

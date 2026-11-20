@@ -74,17 +74,15 @@ Unconfirmed: the i.MX 95 fuse words and their capacity, the commit index bits, R
 
 ## 5. Questions for the owner
 
-1. **What enforces the anti-rollback floor for the boot container?**
-   - (a) The AHAB fuse version alone: hardware enforced and permanent, with a limited number of raises.
-   - (b) The SW version checked by SPL against RPMB alone: software enforced, needs eMMC RPMB, an RPMB key and NXP's Trusty or dual-bootloader build.
-   - (c) Both: the fuse version as a coarse "security epoch", raised only for security fixes, and the SW version as the per-release number.
-   - *Recommendation:* (c), with the fuse version left at 0 until the fuse capacity is confirmed from IMX95RM. The sources support the two-tier design: SPSDK describes the fuse version as the floor and the SW version as the selector between images within one floor **[S10]**, and NXP's SPL already checks the SW version **[S6] [S7]**. Whether (b) applies at all depends on the platform image decision.
+1. **How is the anti-rollback floor of the boot container implemented?** The SPEC rows `boot-container` and `secure-key-handling` require the floor to follow both the enclave's monotonic counter and the AHAB version field. Neither is offered alone; what stays open is how each is implemented:
+   - The AHAB fuse version: hardware enforced and permanent, with a limited number of raises. It is a coarse "security epoch", raised only for security fixes.
+   - The SW version and the monotonic counter: the SW version as the per-release number, checked by SPL against RPMB, which is software enforced and needs eMMC RPMB, an RPMB key and NXP's Trusty or dual-bootloader build; how the enclave's monotonic counter (RM00284 §3.24) joins it is open.
+   - *Recommendation:* both mechanisms together, with the fuse version left at 0 until the fuse capacity is confirmed from IMX95RM. The sources support the two-tier design: SPSDK describes the fuse version as the floor and the SW version as the selector between images within one floor **[S10]**, and NXP's SPL already checks the SW version **[S6] [S7]**. How the SW-version check is implemented depends on the platform image decision.
 
 2. **When, and by whom, is the fused floor raised (the ELE commit)?**
-   - (a) Never. The floor stays at 0 and the only protection is the SW version and the SRK.
-   - (b) A manual, owner-authorised step after a new image has booted and been confirmed good, run outside this repository's scripts.
-   - (c) Automatically by the boot firmware after a successful boot.
-   - *Recommendation:* (b). The commit burns fuses irreversibly **[S4]**, and this repository's rules forbid scripted fuse steps. Option (c) would brick a device whose recovery image is older than the new floor. The ROM fallback behaviour that would decide this is unconfirmed.
+   - (a) A manual, owner-authorised step after a new image has booted and been confirmed good, run outside this repository's scripts.
+   - (b) Automatically by the boot firmware after a successful boot.
+   - *Recommendation:* (a). The commit burns fuses irreversibly **[S4]**, and this repository's rules forbid scripted fuse steps. Option (b) would brick a device whose recovery image is older than the new floor. The ROM fallback behaviour that would decide this is unconfirmed.
 
 3. **What numbering scheme do the fields follow?**
    - (a) Fuse version = security epoch (0, 1, 2, ...), raised only for a vulnerability that rollback would expose. SW version = a monotonic build or release counter.

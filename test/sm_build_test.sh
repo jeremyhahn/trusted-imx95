@@ -142,4 +142,17 @@ check "a missing lock fails" nonzero "no lock file"
 run bash -c "awk '/^FROM base AS toolchain/{t=1;next} /^FROM /{t=0} t' '$ROOT/build/docker/devcontainer/Dockerfile' | grep -E '^RUN apk add .*[[:space:]]gcompat([[:space:]]|\$)'"
 check "the toolchain image provides a glibc loader (gcompat)" 0 "gcompat"
 
+# make sm-toolchain-check must hand the image one script, with no shell `$`
+# crossing Make twice (the inline find/$g form expanded to an empty check).
+run bash -c "make -n -C '$ROOT' sm-toolchain-check 2>&1 | grep -F 'bash -c '"
+check "sm-toolchain-check: the image runs scripts/sm-toolchain-check.sh" 0 "bash -c 'scripts/sm-toolchain-check.sh'"
+run bash -c "make -n -C '$ROOT' sm-toolchain-check 2>&1 | grep -c -F 'find out/system-manager' || true"
+expect "sm-toolchain-check: no inline find passes through Make" [ "$OUT" = 0 ]
+mkdir -p "$TMP_ROOT/fakebin" "$TMP_ROOT/smout"
+printf '#!/bin/sh\nexit 0\n' >"$TMP_ROOT/fakebin/make"
+chmod +x "$TMP_ROOT/fakebin/make"
+run env PATH="$TMP_ROOT/fakebin:$PATH" SM_OUT="$TMP_ROOT/smout" "$ROOT/scripts/sm-toolchain-check.sh"
+check "sm-toolchain-check.sh: a build with no compiler fails" 1 "no arm-none-eabi-gcc"
+expect "sm-toolchain-check.sh is executable" [ -x "$ROOT/scripts/sm-toolchain-check.sh" ]
+
 finish

@@ -157,7 +157,7 @@ system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in cle
 	@scripts/sm-build.sh system-manager/sm.lock
 
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
-	@$(MAKE) docker-run CMD='make system-manager && g=$$(find out/system-manager -type f -name arm-none-eabi-gcc | head -n 1) && [ -n "$$g" ] && "$$g" --version'
+	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
