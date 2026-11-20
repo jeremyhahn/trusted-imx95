@@ -1,0 +1,59 @@
+# secure-world/bsp.lock: the pinned sources of the Cortex-A secure world
+# (TF-A BL31 and OP-TEE OS with the fTPM and PKCS#11 TAs), read by
+# scripts/secure-world-build.sh. Documented in docs/secure-world/build.md.
+#
+# Format: one NAME=value per line; blank lines and lines starting with # are
+# ignored. The script parses this file, it never sources it: each name is
+# known to the script, each value is checked (a commit is 40 hex digits, a
+# digest 64), and every name but PYWHEEL appears exactly once. PYWHEEL
+# repeats, one line per wheel: <name>==<version>@sha256:<digest>.
+#
+# Every value was read from a public source named in the comment above it;
+# none is invented. A value that could not be read would be the word
+# UNREAD, which the script refuses.
+
+# The NXP Linux BSP release. PROVISIONAL: build-system-options.md (#137)
+# recommends it, the owner has not chosen the BSP baseline yet (#14 Q2).
+# The tag lf-6.18.37-2.1.0 of github.com/nxp-imx/imx-manifest, peeled.
+LF_RELEASE=lf-6.18.37-2.1.0
+MANIFEST_REPO=https://github.com/nxp-imx/imx-manifest.git
+MANIFEST_COMMIT=0c44ab18abe471b4326037b61893f4e69b6fc182
+# That manifest (imx-6.18.37-2.1.0.xml) pins meta-imx at the tag
+# rel_imx_6.18.37_2.1.0; the recipes there carry the two commits below.
+META_IMX_REPO=https://github.com/nxp-imx/meta-imx.git
+META_IMX_COMMIT=2eb758f42cfb96042344815b7dd7755b06ba1e3b
+
+# TF-A: meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb (branch lf_v2.14).
+TFA_REPO=https://github.com/nxp-imx/imx-atf.git
+TFA_COMMIT=af9eb2c1748ee3abc0ead7dc76e462f50c573036
+TFA_PLAT=imx95
+
+# OP-TEE OS 4.10: meta-imx-bsp/dynamic-layers/meta-arm/recipes-security/
+# optee/optee-os_4.10.0.imx.bb (branch lf-6.18.37_2.1.0). The i.MX 95 flavour
+# this tree supports is mx95evk only (core/arch/arm/plat-imx/conf.mk); there
+# is no FRDM-IMX95-PRO flavour.
+OPTEE_REPO=https://github.com/nxp-imx/imx-optee-os.git
+OPTEE_COMMIT=99f40897dd1fc28b4c792773b167e3db629db2ff
+OPTEE_PLATFORM=imx-mx95evk
+
+# The fTPM TA: OP-TEE's optee_ftpm at its tag 4.10.0 (peeled), matching the
+# OP-TEE 4.10 above; OP-TEE 4.10 carries no fTPM TA of its own. Its
+# README names the ms-tpm-20-ref commit it needs, pinned below.
+FTPM_REPO=https://github.com/OP-TEE/optee_ftpm.git
+FTPM_COMMIT=a09269b15de635e1816fe832e26adfbfb44c5455
+MSTPM_REPO=https://github.com/microsoft/ms-tpm-20-ref.git
+MSTPM_COMMIT=98b60a44aba79b15fcce1c0d1e46cf5918400f6a
+
+# The cross toolchain: Arm GNU Toolchain 15.2.Rel1 (GCC 15.2.1), x86_64 host,
+# aarch64-none-linux-gnu target. GCC 15 matches the release's Yocto
+# (GCCVERSION 15.%). The digest is Arm's published .sha256asc.
+TOOLCHAIN_VERSION=15.2.rel1
+TOOLCHAIN_URL=https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz
+TOOLCHAIN_SHA256=9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43
+
+# The Python modules OP-TEE's TA signing and early-TA scripts import, as
+# wheels for CPython 3.13 on x86_64 glibc; digests from PyPI.
+PYWHEEL=cryptography==50.0.2@sha256:4061c0079120205fb760c58acab6443e217307dcf05e3702cf970e0689972856
+PYWHEEL=cffi==2.1.1@sha256:a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2
+PYWHEEL=pycparser==3.12@sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+PYWHEEL=pyelftools==0.33@sha256:f215ad5f47d3f1373a21496a6c9e0707c622840d0622f23ff7ce08678b020036

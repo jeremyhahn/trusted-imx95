@@ -1,6 +1,6 @@
 # ftpm — design
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `ftpm` · Last verified: 2026-11-18
+> **Status: NORMATIVE** · Scope: trusted-imx95 `ftpm` · Last verified: 2026-11-20
 > The detail of the `ftpm` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Owner ruling 927 (2026-11-18) gives the board a firmware TPM 2.0, so that it is provisioned like any other system
@@ -17,9 +17,9 @@ text. Facts this repository's surveys already hold are linked, not restated. A v
 ## Starting point
 
 - Per the ruling, today's board image has no firmware TPM: the kernel's `CONFIG_TCG_FTPM_TEE` is off, and the
-  BSP's OP-TEE (4.10, as the ruling reports it) carries the PKCS#11 TA only. The BSP release itself is still to be
-  pinned under the `secure-world` row ([ROADMAP.md](../../ROADMAP.md), `secure-world` step (a)); the 4.10 figure is
-  the ruling's and was not checked here.
+  BSP's OP-TEE (4.10, as the ruling reports it) carries the PKCS#11 TA only. The BSP release is pinned, provisionally,
+  under the `secure-world` row (`secure-world` step (a), [secure-world/build.md](../secure-world/build.md#the-pins)):
+  `lf-6.18.37-2.1.0`, whose recipe builds OP-TEE 4.10.0 (`optee-os_4.10.0.imx.bb`).
 - `secure-world` provides TF-A BL31 and OP-TEE ([secure-world/architecture.md](../secure-world/architecture.md#scope-owner-ruling-771)).
   This row owns what the firmware TPM adds on top: the TA, the kernel driver, the TPM's NV storage, the EK and
   measured boot.
@@ -38,8 +38,9 @@ hands the A55 its first image is in the `boot-container` row and the missing IMX
 5. **OP-TEE OS with the fTPM as an early TA.** The fTPM TA is OP-TEE's `optee_ftpm` project, which runs
    Microsoft's TPM 2.0 reference implementation (`ms-tpm-20-ref`); it is not part of `optee_os` itself
    ([ta-options-survey.md](../secure-world/ta-options-survey.md#ftpm-ta), S7, S8). Built as an early TA, it is
-   linked into the OP-TEE image, so the TA itself needs no file system to load. Its source revision is **to be
-   pinned** ([question 2](#open-questions-for-the-owner)).
+   linked into the OP-TEE image, so the TA itself needs no file system to load. Its source revision is pinned,
+   pending [question 2](#open-questions-for-the-owner): `optee_ftpm` 4.10.0 on the `ms-tpm-20-ref` commit its
+   README names, built by `make secure-world` ([secure-world/build.md](../secure-world/build.md#the-flags)).
 6. **U-Boot proper.** Upstream U-Boot has a TEE-backed TPM 2.0 driver for the OP-TEE fTPM (`CONFIG_TPM2_FTPM_TEE`);
    whether the BSP's U-Boot builds it for this board is **unconfirmed**. Without it U-Boot cannot extend PCRs.
 7. **Linux with `tpm_ftpm_tee`.** The kernel's firmware-TPM driver (`CONFIG_TCG_FTPM_TEE`) finds the TA on the TEE
@@ -124,8 +125,9 @@ hardware runs happen on the lab's board host, one lane at a time. The boot media
    ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10). Is RPMB wanted for the TPM's NV, or is REE FS
    accepted at first, with no rollback protection and NV lost on a rootfs reflash?
 2. **fTPM TA source and revision.** The `ms-tpm-20-ref` TA in OP-TEE's `optee_ftpm`, or an fTPM carried in a newer
-   `optee_os`; which revision (to be pinned); and whether the BSP's OP-TEE (4.10 per the ruling) builds it
-   unchanged.
+   `optee_os`; which revision; and whether the BSP's OP-TEE 4.10 builds it unchanged. Proposed and built
+   ([secure-world/build.md](../secure-world/build.md#the-pins)): `optee_ftpm` 4.10.0, which the BSP's OP-TEE 4.10 builds
+   unchanged; OP-TEE 4.10 carries no fTPM of its own.
 3. **EK template.** RSA 2048 or ECC P-256, the default templates of the TCG EK Credential Profile, and whether the
    EK persists at that profile's default handle.
 4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a rootfs reflash under REE FS),

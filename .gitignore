@@ -7,3 +7,5 @@ cst-*/
 it-image.tar
 # The pinned tools `make tools` installs where there is no devcontainer image
 .tools/
+# `make secure-world`'s artefacts (docs/secure-world/build.md)
+.secure-world/
