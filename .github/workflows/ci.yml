@@ -1191,8 +1191,29 @@ jobs:
       - name: Pull the toolchain image from the registry cache
         run: scripts/ci-image-cache.sh pull || true
 
-      - name: make sm-toolchain-check
-        run: make sm-toolchain-check
+      # The toolchain image alone, as in the history-scan job.
+      - name: Build the toolchain image
+        run: |
+          ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
+            for v in GOPRIVATE; do
+              if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
+            done )
+          bp=
+          if [ -n "${DEVCACHE_GOPROXY:-}" ] && curl -s -o /dev/null --max-time 5 "$DEVCACHE_GOPROXY/"; then
+            bp="GO_BUILD_PROXY=$DEVCACHE_GOPROXY|https://proxy.golang.org"
+          fi
+          make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
+          rm -f "$RUNNER_TEMP/gomodauth.env"
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
+
+      # The checkout is copied into the container, never bind-mounted: the
+      # runner reaches its daemon through a socket (in-toolchain-image.sh).
+      - name: sm-toolchain-check
+        env:
+          IN_IMAGE_NETWORK: bridge
+        run: scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" scripts/sm-toolchain-check.sh
+
   # v1.21: every stage runs in the project's own devcontainer image and no
   # other (ci-standard.md §2, devcontainer.md §7). One image job (Company Agent
   # m601 (a)) builds the images once from build/docker/devcontainer/Dockerfile

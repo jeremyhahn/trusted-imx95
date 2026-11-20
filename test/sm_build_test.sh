@@ -155,4 +155,19 @@ run env PATH="$TMP_ROOT/fakebin:$PATH" SM_OUT="$TMP_ROOT/smout" "$ROOT/scripts/s
 check "sm-toolchain-check.sh: a build with no compiler fails" 1 "no arm-none-eabi-gcc"
 expect "sm-toolchain-check.sh is executable" [ -x "$ROOT/scripts/sm-toolchain-check.sh" ]
 
+# The CI job must not bind-mount the checkout (the daemon may not see it): it
+# runs the script through in-toolchain-image.sh, which copies the checkout in.
+job=$(awk '/^  system-manager-build:/{f=1;next} f&&/^  [a-z][a-z-]*:/{exit} f&&!/^ *#/' "$ROOT/.github/workflows/ci.yml")
+expect "ci: system-manager-build job exists" [ -n "$job" ]
+expect "ci: system-manager-build runs sm-toolchain-check.sh through in-toolchain-image.sh" \
+	grep -Eq 'scripts/in-toolchain-image\.sh .*scripts/sm-toolchain-check\.sh' <<<"$job"
+expect "ci: system-manager-build uses IN_IMAGE_NETWORK=bridge" \
+	grep -Eq 'IN_IMAGE_NETWORK: bridge' <<<"$job"
+# shellcheck disable=SC2016 # expands in the child shell
+expect "ci: system-manager-build does not call make sm-toolchain-check" \
+	bash -c '! grep -Eq "make +sm-toolchain-check" <<<"$1"' _ "$job"
+# shellcheck disable=SC2016 # expands in the child shell
+expect "ci: system-manager-build does not call docker-run" \
+	bash -c '! grep -Eq "docker-run" <<<"$1"' _ "$job"
+
 finish
