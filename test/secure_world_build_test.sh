@@ -107,4 +107,132 @@ run env PATH="$sp" bash "$sw" --work "$w/new" --out "$w/out" --cache "$w/cache"
 check "a work directory the script made is recreated" nonzero "toolchain failed"
 expect "the recreated work directory lost its stale file" test ! -e "$w/new/stale"
 
+# --- A whole offline build ----------------------------------------------------
+# Full stubs: curl serves a fixture toolchain tarball, git "fetches" the pinned
+# commit, uv makes a venv, and make writes the artefacts and logs its arguments.
+# Nothing is fetched and no key is used.
+fs=$TMP_ROOT/fullstubs
+mkdir -p "$fs" "$TMP_ROOT/fix/tc/bin"
+cp "$stubs/uname" "$fs/uname"
+printf '#!/bin/sh\necho "aarch64-none-linux-gnu-gcc (stub) 15.2.rel1"\n' >"$TMP_ROOT/fix/tc/bin/aarch64-none-linux-gnu-gcc"
+chmod +x "$TMP_ROOT/fix/tc/bin/aarch64-none-linux-gnu-gcc"
+tar -C "$TMP_ROOT/fix" -cJf "$TMP_ROOT/fix/toolchain.tar.xz" tc
+tcsum=$(sha256sum "$TMP_ROOT/fix/toolchain.tar.xz" | cut -d' ' -f1)
+
+cat >"$fs/curl" <<'EOF'
+#!/bin/bash
+out=
+while [ $# -gt 0 ]; do
+	case "$1" in -o) out=$2; shift 2 ;; *) shift ;; esac
+done
+cp "$STUB_TARBALL" "$out"
+EOF
+cat >"$fs/git" <<'EOF'
+#!/bin/bash
+dir=
+while [ $# -gt 0 ]; do
+	case "$1" in -C) dir=$2; shift 2 ;; -c) shift 2 ;; *) break ;; esac
+done
+cmd=$1
+shift
+case "$cmd" in
+init) mkdir -p "${!#}" ;;
+fetch) echo "${!#}" >"$dir/.stubhead" ;;
+checkout) ;;
+rev-parse)
+	if [ "${STUB_GIT_BAD:-}" = "${dir##*/}" ]; then echo 0000000000000000000000000000000000000000; else cat "$dir/.stubhead"; fi ;;
+log) echo 1788777083 ;;
+esac
+EOF
+cat >"$fs/uv" <<'EOF'
+#!/bin/bash
+[ "$1" != venv ] || mkdir -p "${!#}/bin"
+exit 0
+EOF
+cat >"$fs/make" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$STUB_LOG"
+dir= o= bb= plat= target=
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-C) dir=$2; shift 2; continue ;;
+	O=*) o=${1#O=} ;;
+	BUILD_BASE=*) bb=${1#BUILD_BASE=} ;;
+	PLAT=*) plat=${1#PLAT=} ;;
+	-j* | *=*) ;;
+	*) target=$1 ;;
+	esac
+	shift
+done
+key=${dir##*/}
+[ "$key" = optee ] && [ "$target" = ta_dev_kit ] && key=optee-devkit
+[ "${STUB_MAKE_FAIL:-}" != "$key" ] || { echo "make: *** $key stub failure" >&2; exit 2; }
+case "$key" in
+tfa) mkdir -p "$bb/$plat/release" && echo bl31 >"$bb/$plat/release/bl31.bin" ;;
+ftpm) mkdir -p "$o" && echo ta >"$o/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf" ;;
+optee) mkdir -p "$o/core" && echo tee >"$o/core/tee-raw.bin" ;;
+esac
+EOF
+cat >"$fs/cp" <<'EOF'
+#!/bin/bash
+/bin/cp "$@"
+last=${!#}
+if [ -n "${STUB_CORRUPT_CP:-}" ] && [[ "$last" == */stage/bl31.bin ]]; then echo corrupt >>"$last"; fi
+EOF
+chmod +x "$fs"/*
+fp=$fs:$PATH
+
+edit_tcsum() { [[ "$1" == TOOLCHAIN_SHA256=* ]] && echo "TOOLCHAIN_SHA256=$tcsum" || printf '%s\n' "$1"; }
+edit_badtcsum() { [[ "$1" == TOOLCHAIN_SHA256=* ]] && echo "TOOLCHAIN_SHA256=$(printf '0%.0s' {1..64})" || printf '%s\n' "$1"; }
+oklock=$(lockcopy oklock edit_tcsum)
+badlock=$(lockcopy badtclock edit_badtcsum)
+
+# fullrun <name> <lock> [VAR=value...]: one stubbed build in its own directories.
+fullrun() {
+	local n=$1 l=$2
+	shift 2
+	mkdir -p "$TMP_ROOT/$n"
+	: >"$TMP_ROOT/$n/make.log"
+	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" "$@" \
+		bash "$sw" --lock "$l" --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
+}
+nothing_published() { [ ! -e "$TMP_ROOT/$1/out/SHA256SUMS" ] && [ ! -e "$TMP_ROOT/$1/out/bl31.bin" ] && [ ! -e "$TMP_ROOT/$1/out/tee.bin" ]; }
+
+fullrun ok "$oklock"
+check "an offline build reaches publication" 0 "secure-world-build: OK" "bl31.bin" "tee.bin"
+expect "the artefacts are published" test -s "$TMP_ROOT/ok/out/bl31.bin" -a -s "$TMP_ROOT/ok/out/tee.bin" -a -s "$TMP_ROOT/ok/out/build-info.txt"
+sums_verify() { (cd "$1" && sha256sum -c --quiet SHA256SUMS); }
+expect "the published SHA256SUMS verifies" sums_verify "$TMP_ROOT/ok/out"
+
+mlog=$(<"$TMP_ROOT/ok/make.log")
+optee_line=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ "$l" == *"/optee "* && "$l" == *" all" ]] && echo "$l"; done || true)
+ftpm_line=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ "$l" == *"/ftpm "* ]] && echo "$l"; done || true)
+devkit_line=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ "$l" == *ta_dev_kit* ]] && echo "$l"; done || true)
+has() { [[ "$1" == *"$2"* ]]; }
+expect "OP-TEE rejects REE FS TAs" has "$optee_line" "CFG_REE_FS_TA=n"
+expect "the dev kit build rejects REE FS TAs too" has "$devkit_line" "CFG_REE_FS_TA=n"
+lacks() { [[ "$1" != *"$2"* ]]; }
+expect "no OP-TEE build allows REE FS TAs" lacks "$mlog" "CFG_REE_FS_TA=y"
+expect "early TAs are on" has "$optee_line" "CFG_EARLY_TA=y"
+expect "the fTPM TA is an early TA" has "$optee_line" "EARLY_TA_PATHS=$TMP_ROOT/ok/work/build/ftpm/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
+expect "the PKCS#11 TA is an early TA" has "$optee_line" "CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee"
+expect "the fTPM TA keeps its NV in REE FS storage" has "$ftpm_line" "CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE"
+expect "PKCS#11 is built" has "$optee_line" "CFG_PKCS11_TA=y"
+
+fullrun baddigest "$badlock"
+check "a wrong archive digest stops the build" nonzero "toolchain failed" "toolchain SHA-256"
+expect "a wrong archive digest publishes nothing" nothing_published baddigest
+
+fullrun badcommit "$oklock" STUB_GIT_BAD=optee
+check "a fetched commit that is not the pin stops the build" nonzero "src-optee failed" "pinned"
+expect "a wrong commit publishes nothing" nothing_published badcommit
+
+fullrun buildfail "$oklock" STUB_MAKE_FAIL=optee
+check "a build failure stops the build" nonzero "optee failed"
+expect "a build failure publishes nothing" nothing_published buildfail
+
+fullrun badhash "$oklock" STUB_CORRUPT_CP=1
+check "a wrong artefact hash stops the build" nonzero "differs from the build output" "nothing published"
+expect "a wrong artefact hash publishes nothing" nothing_published badhash
+
 finish

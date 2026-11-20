@@ -96,8 +96,8 @@ early instead. If an image also ships that file, which copy OP-TEE loads is to b
 
 **TA signing key.** The TAs are signed with the upstream OP-TEE default test key, `keys/default_ta.pem` in the
 fetched `optee_os` tree. Its private half is public, so the signature proves nothing. An early TA is part of `tee.bin`
-and is not loaded through the signature check, but a TA loaded from the file system would be accepted under this
-key. No key is in this repository and the build writes none to it. Replacing the key belongs to the
+and is not loaded through the signature check. The build sets `CFG_REE_FS_TA=n`, so OP-TEE rejects every TA
+loaded from the file system and the public key is trusted for nothing. No key is in this repository and the build writes none to it. Replacing the key belongs to the
 `secure-key-handling` and `boot-container` rows.
 
 ## Reproducibility

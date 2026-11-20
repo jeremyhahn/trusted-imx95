@@ -34,7 +34,7 @@ The vendor's flow has two steps, in this order ([SPEC.md](../SPEC.md), `oem-key-
   (RM00284 §2.4.2). The acknowledgement alone does not show that the monotonic counter advanced: past the store's
   update cap, or with no counter split written, the enclave accepts updates with only a warning and no rollback
   protection. Provisioning must treat every counter warning as a failure and confirm that the counter split is
-  configured and the counter advanced before it treats an import as committed
+  configured and that the enclave acknowledged both the strict-operation flag and the monotonic-counter flag for the same import before it treats an import as committed
   ([secure-key-handling/architecture.md](../secure-key-handling/architecture.md#key-store-rollback-protection)).
 - The message formats, key types, algorithms and the wrapping scheme of each step are in AN14861 §5.2, §5.3 and
   RM00284 §3.20, §3.2.6.3; this digest was written without read access to them and restates none (see

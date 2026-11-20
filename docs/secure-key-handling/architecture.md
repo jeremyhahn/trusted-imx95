@@ -31,10 +31,12 @@ The acknowledgement alone does not show that the monotonic counter advanced. The
 past a key store's `max_updates_number` the enclave still accepts updates, returning the `HSM_KEY_STORE_COUNTER`
 warning, without moving the counter, and that with no counter split written it returns warnings and gives no
 rollback protection ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). The rollback protection
-therefore holds only if the caller fails closed: it treats every counter warning as a failure, confirms that the
-counter split is configured, and confirms that the counter advanced (for example with the `MONOTONIC` sync flags or a
-`chip_monotonic_counter` read before and after) before it treats a persistent update as committed. Whether these
-checks are enough on the i.MX 95 is **unconfirmed** until tested on the board's firmware
+therefore holds only if the caller fails closed. For the same update or deletion it must send both the strict-operation
+flag and the monotonic-counter flag, and the enclave must acknowledge both, operation by operation. It treats every
+counter warning as a failure and confirms that the counter split is configured. A missing flag, a missing
+acknowledgement of either flag, or a counter warning means the update is not committed. A counter read before and
+after the operation (`chip_monotonic_counter`) is an extra diagnostic only and never a substitute for the two flags.
+Whether these checks are enough on the i.MX 95 is **unconfirmed** until tested on the board's firmware
 ([monotonic-counter-survey.md](monotonic-counter-survey.md) §6).
 
 The monotonic counter fuses are configured once, during provisioning; that belongs to the `oem-key-provisioning`

@@ -204,12 +204,15 @@ step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cro
 	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
 
 # OP-TEE's flags: the release recipe's log levels, REE FS secure storage
-# (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early.
+# (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early. Both
+# required TAs are early TAs, so loading TAs from the REE file system is off
+# (CFG_REE_FS_TA=n): the public default TA key then trusts nothing.
 optee_flags=(
 	PLATFORM="${pin[OPTEE_PLATFORM]}" CFG_ARM64_core=y
 	CROSS_COMPILE="$cross" CROSS_COMPILE64="$cross"
 	CFG_TEE_CORE_LOG_LEVEL=0 CFG_TEE_TA_LOG_LEVEL=0
 	CFG_REE_FS=y CFG_RPMB_FS=n
+	CFG_REE_FS_TA=n
 	CFG_PKCS11_TA=y
 )
 # The TA dev kit the fTPM TA builds against.
@@ -225,9 +228,19 @@ step optee make -C "$src/optee" -j"$jobs" O="$bld/optee" "${optee_flags[@]}" \
 
 # --- The artefacts -----------------------------------------------------------
 
-cp "$bld/tfa/${pin[TFA_PLAT]}/release/bl31.bin" "$out/bl31.bin"
-cp "$bld/optee/core/tee-raw.bin" "$out/tee.bin"
-(cd "$out" && sha256sum bl31.bin tee.bin >SHA256SUMS)
+# Staged and checked first: nothing reaches $out unless every copy hashes the
+# same as its build output.
+stage=$work/stage
+mkdir -p "$stage"
+cp "$bld/tfa/${pin[TFA_PLAT]}/release/bl31.bin" "$stage/bl31.bin"
+cp "$bld/optee/core/tee-raw.bin" "$stage/tee.bin"
+[ "$(sha256sum <"$stage/bl31.bin")" = "$(sha256sum <"$bld/tfa/${pin[TFA_PLAT]}/release/bl31.bin")" ] ||
+	die "bl31.bin: the staged artefact's SHA-256 differs from the build output; nothing published"
+[ "$(sha256sum <"$stage/tee.bin")" = "$(sha256sum <"$bld/optee/core/tee-raw.bin")" ] ||
+	die "tee.bin: the staged artefact's SHA-256 differs from the build output; nothing published"
+(cd "$stage" && sha256sum bl31.bin tee.bin >SHA256SUMS)
+(cd "$stage" && sha256sum -c --quiet SHA256SUMS) || die "SHA256SUMS does not verify; nothing published"
+cp "$stage/bl31.bin" "$stage/tee.bin" "$stage/SHA256SUMS" "$out/"
 {
 	echo "lock: $(sha256sum "$lock" | cut -d' ' -f1)"
 	echo "release: ${pin[LF_RELEASE]} (provisional, #14 Q2)"
@@ -235,7 +248,7 @@ cp "$bld/optee/core/tee-raw.bin" "$out/tee.bin"
 	echo "optee: ${pin[OPTEE_COMMIT]} ${optee_flags[*]//CROSS_COMPILE*=*/} CFG_EARLY_TA=y early TAs $ftpm_uuid (fTPM) $pkcs11_uuid (PKCS#11)"
 	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage TEE_STORAGE_PRIVATE_REE"
 	echo "toolchain: $("${cross}gcc" --version | head -n 1)"
-	echo "ta-signing: upstream OP-TEE default test key (keys/default_ta.pem in the fetched optee_os)"
+	echo "ta-signing: upstream OP-TEE default test key (keys/default_ta.pem in the fetched optee_os); REE FS TAs are rejected (CFG_REE_FS_TA=n)"
 	echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
 } >"$out/build-info.txt"
 echo "secure-world-build: OK in $(($(date +%s) - start)) s, $out:"

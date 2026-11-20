@@ -70,7 +70,7 @@ The enclave is the one secure-world element the references document. What they g
   (RM00284 §2.4.2). The acknowledgement alone does not show that the monotonic counter advanced: past the store's
   update cap, or with no counter split written, the enclave accepts updates with only a warning and no rollback
   protection. The caller must treat every counter warning as a failure and confirm that the counter split is
-  configured and the counter advanced before it treats an update as committed
+  configured and that the enclave acknowledged both the strict-operation flag and the monotonic-counter flag for the same update before it treats an update as committed
   ([secure-key-handling/architecture.md](../secure-key-handling/architecture.md#key-store-rollback-protection)).
 - Signing, data storage and attestation are services of the enclave's HSM API (RM00284 §3.4, §3.8, §3.12).
 - The Generic Crypto APIs are not available on the i.MX 95 (RM00284 §3.45).
