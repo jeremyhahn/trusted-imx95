@@ -216,8 +216,9 @@ flag that commits the imported key to NVM with the counter advanced [S2,
 Drawn from §3–§4; the choice of values for this board is §5.
 
 - Persistent lifetime, committed with the strict flag in a batch, so the key survives reset and its
-  blob is rollback-protected, provided the caller treats counter warnings as failures and confirms
-  that the counter advanced (§3.3, §4.4).
+  blob is rollback-protected, provided the caller treats counter warnings as failures and requires
+  the enclave's acknowledgement of both the strict-operation flag and the monotonic-counter flag for the
+  same operation (§3.3, §4.4). A counter check is only a diagnostic.
 - One usage set and one permitted algorithm, the narrowest the key's role needs; no export usage on
   anything but the public half of a signing or agreement pair (§4.2, §4.3).
 - A key life-cycle mask of closed (and closed-locked if used), so a production key cannot be
