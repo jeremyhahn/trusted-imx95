@@ -82,6 +82,7 @@ OP-TEE, set on each OP-TEE make:
 | `PLATFORM=imx-mx95evk CFG_ARM64_core=y` | The i.MX 95 flavour; a 64-bit core |
 | `CFG_TEE_CORE_LOG_LEVEL=0 CFG_TEE_TA_LOG_LEVEL=0` | The release recipe's log levels |
 | `CFG_REE_FS=y CFG_RPMB_FS=n` | Secure storage on the REE file system by default. RPMB needs its key programmed, once and irreversibly: the owner's decision ([ftpm/README.md](../ftpm/README.md#nv-storage)) |
+| `CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n` | No TA is loaded from the file system. The PTA that installs TAs into REE FS storage needs REE FS TA support and would not link |
 | `CFG_PKCS11_TA=y` | The PKCS#11 TA (already the default; stated) |
 | `CFG_EARLY_TA=y` | Early TAs, linked into `tee.bin` |
 | `EARLY_TA_PATHS=<fTPM TA's stripped ELF>` | The fTPM TA, UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`, as an early TA (ruling 927) |
@@ -104,20 +105,27 @@ loaded from the file system and the public key is trusted for nothing. No key is
 
 `SOURCE_DATE_EPOCH` defaults to the pinned OP-TEE commit's committer time (`1788777083`).
 
-**No hash is recorded for the final configuration, and no reproducibility is claimed for it.** Two clean builds of
-`scripts/secure-world-build.sh` at b4f0e41 were run on 2026-11-20 (x86_64 Linux host, the pinned toolchain). The
-OP-TEE image does not link with `CFG_REE_FS_TA=n`: `core/pta/secstor_ta_mgmt.c` (`install_ta`) references
-`ree_fs_check_update_ta_version`, which that setting leaves out. No `bl31.bin` or `tee.bin` of this configuration
-exists. The hashes recorded earlier (two builds, equal) were of the configuration before `CFG_REE_FS_TA=n`, so they
-are withdrawn. The script needs a fix first (for example `CFG_SECSTOR_TA_MGMT_PTA=n`, not tried here); then two clean
-builds are to be run and their hashes recorded here.
+The hashes below are of the final configuration: both OP-TEE builds set `CFG_REE_FS_TA=n` and
+`CFG_SECSTOR_TA_MGMT_PTA=n`. The second flag is needed because `core/pta/secstor_ta_mgmt.c` (`install_ta`) references
+`ree_fs_check_update_ta_version`, which `CFG_REE_FS_TA=n` leaves out, so the image did not link without it. The secure
+storage TA management PTA installs TAs into REE FS storage, which this build does not load from.
 
-The configuration the hashes will belong to is pinned by a digest, which `test/secure_world_build_test.sh` recomputes
+Verified on 2026-11-20: two clean `make secure-world` builds of this script (the commit after 58c02f8 that adds
+`CFG_SECSTOR_TA_MGMT_PTA=n`), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each with an empty work,
+output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' artefacts are identical byte for byte
+(`cmp`).
+
+| Build | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
+|---|---|---|
+| 1 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+| 2 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+
+The hashes belong to one OP-TEE configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes
 from the script (its `optee_flags` array and its final OP-TEE make call, whitespace squeezed). The test fails when the
 script's OP-TEE configuration differs from the one recorded here, so hashes cannot outlive a flag change. Record the
-new digest together with the new hashes.
+new digest together with new hashes.
 
-OP-TEE configuration digest: `4d0805bed0428d1b9efce71a9c5507e0fb3c8f5257f78a7ab25a3d94bf116cc2`
+OP-TEE configuration digest: `174db38e8d8fd72a1a4f023b410063c1c0b3710bd89d80fdc3878228957e0eea`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
@@ -146,8 +154,7 @@ The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md
 not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
-- `secure-world` (b): `make secure-world` is meant to build both artefacts with a SHA-256 manifest, but the OP-TEE
-  image does not link with `CFG_REE_FS_TA=n` (see [Reproducibility](#reproducibility)); no build of the final
-  configuration exists. Not in CI. Nothing has run on the board.
+- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds of the final
+  configuration were identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.

@@ -212,7 +212,7 @@ optee_flags=(
 	CROSS_COMPILE="$cross" CROSS_COMPILE64="$cross"
 	CFG_TEE_CORE_LOG_LEVEL=0 CFG_TEE_TA_LOG_LEVEL=0
 	CFG_REE_FS=y CFG_RPMB_FS=n
-	CFG_REE_FS_TA=n
+	CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n
 	CFG_PKCS11_TA=y
 )
 # The TA dev kit the fTPM TA builds against.

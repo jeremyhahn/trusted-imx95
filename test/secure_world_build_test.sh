@@ -222,6 +222,17 @@ all_optee_reject_reefs() {
 	[ "$n" -ge 2 ]
 }
 expect "every OP-TEE make call sets CFG_REE_FS_TA=n" all_optee_reject_reefs "$mlog"
+# without REE FS TAs the secure storage TA management PTA does not link
+all_optee_no_secstor_pta() {
+	local l n=0
+	while IFS= read -r l; do
+		[[ "$l" == *"/optee "* ]] || continue
+		n=$((n + 1))
+		[[ "$l" == *" CFG_SECSTOR_TA_MGMT_PTA=n "* && "$l" != *CFG_SECSTOR_TA_MGMT_PTA=y* ]] || return 1
+	done <<<"$1"
+	[ "$n" -ge 2 ]
+}
+expect "every OP-TEE make call sets CFG_SECSTOR_TA_MGMT_PTA=n" all_optee_no_secstor_pta "$mlog"
 expect "early TAs are on" has "$optee_line" "CFG_EARLY_TA=y"
 expect "the fTPM TA is an early TA" has "$optee_line" "EARLY_TA_PATHS=$TMP_ROOT/ok/work/build/ftpm/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
 expect "the PKCS#11 TA is an early TA" has "$optee_line" "CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee"
