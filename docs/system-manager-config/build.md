@@ -14,8 +14,8 @@ make docker-run CMD='make system-manager'    # the same, in the devcontainer ima
 ```
 
 The pins are in [`system-manager/sm.lock`](../../system-manager/sm.lock). They are **provisional**: they follow
-NXP's BSP release `imx-6.18.37-2.1.0`, the baseline [build-system-options.md](../platform-image/build-system-options.md)
-recommends (on #137), which the owner has not chosen yet (#14 Q2).
+NXP's BSP release `imx-6.18.37-2.1.0`, the baseline `docs/platform-image/build-system-options.md`
+recommends (on #137, not yet on this branch), which the owner has not chosen yet (#14 Q2).
 
 | Pin | Value | Where it was read |
 |---|---|---|
@@ -47,11 +47,27 @@ malformed lock.
 
 ## 2. The reproducibility result
 
-RESULT
+**Reproducible.** `make system-manager` was run twice on 2026-11-20 in the lane's Linux x86_64 container, each run
+building twice in clean trees. All four images are byte-identical, and the two runs wrote identical manifests:
 
-The image embeds the compiler's `__DATE__` and `__TIME__`. Without `SOURCE_DATE_EPOCH`, two builds a minute apart
-differed in exactly those bytes; with it set to the commit's time (`1788454215`, 2026-09-03), they do not. The
-second tree lives at another path, so the image does not depend on the build directory either.
+| | SHA-256 of `m33_image.bin` (188036 bytes) |
+|---|---|
+| Run 1, build 1 and build 2 | `10ec33fe9ff80cbbda962cb08c524dd58f1e2b67f29d0b55671e49fda723af96` |
+| Run 2, build 1 and build 2 | `10ec33fe9ff80cbbda962cb08c524dd58f1e2b67f29d0b55671e49fda723af96` |
+
+Build time: about 80 s a run (two builds) with the downloads cached; a first run also downloads the 155 MB
+toolchain and the tag, which took about 2 minutes on the lane's link.
+
+The first two clean builds differed in four bytes: the build date and time. imx-sm's `sm/makefiles/build_info.mak`
+writes them into the generated `build_info.h` with `date +FORMAT`, which ignores `SOURCE_DATE_EPOCH`. Rather than
+patch NXP's makefile, the script puts a small `date` first on the build's PATH that answers `date +FORMAT` with
+the commit's time in UTC (`1788454215`, 2026-09-03) and passes any other call to the real `date`. The second tree
+lives at another path, so the image does not depend on the build directory either.
+
+The same header also carries `SM_BRANCH`, `SM_BUILD` and `SM_COMMIT` from git. With the script's one-commit fetch
+of the tag they are `HEAD`, `1` and `0xeec23287`; `SM_BUILD` is the first-parent commit count, so a full
+clone gives another value. An image NXP's BSP build makes from the same commit may differ in it; that was not
+checked.
 
 ## 3. Where the configuration lives
 
