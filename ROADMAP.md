@@ -20,7 +20,7 @@ None yet.
 ## Now
 
 - **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — issue #12 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
-- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — blocked: owner approval; System Manager documentation missing
+- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — pinned, reproducible System Manager build exists (`make system-manager`, [build record](docs/system-manager-config/build.md)); imx-sm revision provisional until #14 Q2; board configuration unchanged, not flashed or signed — blocked: owner approval
 
 ## Next
 
