@@ -135,4 +135,11 @@ check "a plain-http repository fails" nonzero "sm_repo must be an https:// or fi
 run bash "$sm" --check "$TMP_ROOT/no-such.lock"
 check "a missing lock fails" nonzero "no lock file"
 
+# The pinned Arm toolchain is glibc-hosted, and the devcontainer image is musl:
+# the toolchain stage must add a glibc loader (gcompat), or the real compiler
+# cannot start there. The fake compiler above cannot see this; `make
+# sm-toolchain-check` runs the real one in the image.
+run bash -c "awk '/^FROM base AS toolchain/{t=1;next} /^FROM /{t=0} t' '$ROOT/build/docker/devcontainer/Dockerfile' | grep -E '^RUN apk add .*[[:space:]]gcompat([[:space:]]|\$)'"
+check "the toolchain image provides a glibc loader (gcompat)" 0 "gcompat"
+
 finish

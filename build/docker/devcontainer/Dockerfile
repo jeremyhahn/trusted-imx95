@@ -38,7 +38,9 @@ FROM base AS toolchain
 # version is the pinned Alpine release's.
 # xz, perl: scripts/sm-build.sh unpacks a .tar.xz toolchain and requires perl
 # (imx-sm's build); test/sm_build_test.sh runs it here.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen xz perl
+# gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
+# is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen xz perl gcompat
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 

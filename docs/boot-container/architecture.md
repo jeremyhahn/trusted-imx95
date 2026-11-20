@@ -58,8 +58,10 @@ not give.
   (see [Missing](#missing)).
 - The monotonic counter fuses are configured once (RM00284 §3.24); configuring them belongs to the
   `oem-key-provisioning` row of [SPEC.md](../SPEC.md).
-- A key store update counts only after an operation with the strict-operation flag is acknowledged, and that
-  operation also advances the monotonic counter that protects the key store from rollback (RM00284 §2.4.2).
+- A key update and a key deletion each count as rollback-protected only when the enclave acknowledges both the
+  strict-operation flag and the monotonic-counter flag for that operation. The two are independent requirements:
+  an acknowledgement of one does not imply the other, and an operation acknowledged with only one of them is not
+  rollback-protected (RM00284 §2.4.2; [SPEC.md](../SPEC.md), `secure-key-handling` row; owner decision 241).
 - The device's life cycle moves from OEM open to OEM closed through the enclave (RM00284 §3.23). What closing
   the life cycle changes for the verification of a container is not given (see [Missing](#missing)).
 

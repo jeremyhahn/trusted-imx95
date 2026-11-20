@@ -126,8 +126,12 @@ the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
 ## 6. Not confirmed
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
-  devcontainer image is Alpine (musl); whether Arm's glibc toolchain runs there is not checked, so
-  `make docker-run CMD='make system-manager'` is unproven.
+  devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
+  installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. **The real
+  `arm-none-eabi-gcc --version` was not run in the image**: the lane's node has no Docker, so it could not build
+  the image. `make sm-toolchain-check` runs it (it builds the System Manager in the image, then runs the real
+  compiler); CI or the owner must run it. If `gcompat` is not enough to start the compiler, the base image
+  would have to change, which is the owner's choice (#14).
 - Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
   `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
   checked.
