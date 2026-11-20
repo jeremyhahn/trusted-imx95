@@ -62,8 +62,5 @@ self-hosted-runner:
     - claude
     - code-review
     - batch
-    - bigdisk
-    - ci-gate
     - qwen
     - dells
-    - release
