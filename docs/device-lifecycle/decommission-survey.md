@@ -127,11 +127,12 @@ monotonic flag is a separate flag, and it is the one that advances the counter
 protecting the store from rollback. A copy of the pre-deletion blob, saved
 earlier or taken from the storage medium, could then be restored on the same
 device and reloaded with the keys still in it. Deleting the current storage
-directory does nothing to such copies. SPEC (row `secure-key-handling`) reads
-RM00284 §2.4.2 as the strict flag also advancing the counter. Which behaviour the
-chosen ELE release has is **unconfirmed**. Proposed, **pending owner approval**
-(SPEC is unchanged): until it is settled, a deletion counts as invalidating
-earlier blobs only if it is acknowledged with both strict/sync and monotonic.
+directory does nothing to such copies. SPEC (row `secure-key-handling`, owner
+decision 241, approved) requires both acknowledgements: a deletion counts as
+rollback-protected, and as invalidating earlier blobs, only when the enclave
+acknowledges both strict/sync and monotonic; either alone is not enough. What
+the chosen ELE release actually returns for each flag is **unconfirmed**, an
+open hardware-validation question.
 Even then, irreversibility is **unresolved**: no source read here
 shows the enclave rejecting a restored pre-deletion blob after a reset. That is
 an open validation item (section 7).
@@ -208,7 +209,7 @@ repository.
 |---|------|-------|-------------|-------|
 | 1 | Suspend the device (block its port, refuse boot credentials) | control plane | yes (Enable, then re-attest) | S4 §4.6, S5 |
 | 2 | Export or re-wrap any key that must outlive the device (if policy allows any) | board, ELE | n/a; impossible once step 3 runs | S3; key export policy is the secure-key-handling row's |
-| 3 | Delete every ELE key-store key with an acknowledged deletion that advances the monotonic counter (strict/sync together with the monotonic flag, for the chosen ELE release; proposed, pending owner approval, 4.1), close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | intended **no**; irreversibility **unresolved**. Strict/sync alone does not invalidate a saved pre-deletion blob, and removing the directory does not reach copies (4.1) | S3; rejection of a restored pre-deletion blob after reset **not yet validated** (4.1, section 7) |
+| 3 | Delete every ELE key-store key with an acknowledged deletion that advances the monotonic counter (the enclave acknowledges both strict/sync and the monotonic flag, as SPEC requires, owner decision 241; 4.1), close the store, remove the `nvm_daemon` storage directory | board, Linux + ELE | intended **no**; irreversibility **unresolved**. Strict/sync alone does not invalidate a saved pre-deletion blob, and removing the directory does not reach copies (4.1) | S3; rejection of a restored pre-deletion blob after reset **not yet validated** (4.1, section 7) |
 | 4 | Revoke the device's certificates at the platform CA; publish the CRL | control plane | **no**: a revoked serial stays revoked; a re-enrolled device gets new serials | S6 |
 | 5 | Move the device record to revoked | control plane | **no**: terminal state | S4 §4.3, §6 |
 | 6a | Decommission: wipe the rest of the board's storage (eMMC, RPMB) | board | intended **no**; the wipe method and its effect on the media were not surveyed and are **to be validated** | not surveyed here (RPMB row, #62) |
@@ -241,9 +242,9 @@ yet.
 5. Whether field return changes the device-unique keys, re-opens debug, or
    keeps signed boot (4.2).
 6. Whether deleting the `nvm_daemon` blob is a secure erase of the key store,
-   and how the monotonic counter treats a deleted store (4.1). Whether the
-   chosen ELE release advances the counter on strict/sync alone or only with
-   the monotonic flag (4.1). Open validation item: after a counter-advancing
+   and how the monotonic counter treats a deleted store (4.1). What the
+   chosen ELE release acknowledges for the strict/sync and monotonic flags on
+   the board (4.1; both are required, SPEC decision 241). Open validation item: after a counter-advancing
    deletion and a reset, a restored pre-deletion blob must be shown to be
    rejected. Until then, step 3 is not counted as irreversible (section 6).
 7. Which go-trusted-platform operation moves a device record to revoked (5).

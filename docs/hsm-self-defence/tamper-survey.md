@@ -114,11 +114,11 @@ From S4 (headers for the ELE user library on the Linux side):
   together with strict
   ([decommission survey §4.1](../device-lifecycle/decommission-survey.md)). With strict
   alone, an older key store blob saved before the deletion might still be restored on
-  the same device. SPEC.md reads RM00284 §2.4.2 as strict also advancing the counter.
-  Which of the two applies to the chosen ELE release is **unconfirmed**. Proposed,
-  **pending owner approval** (SPEC is unchanged): until it is settled, a deletion is
-  counted as rollback-protected only when it is acknowledged with both strict and
-  monotonic.
+  the same device. SPEC.md (row `secure-key-handling`, owner decision 241, approved)
+  requires both: a deletion is counted as rollback-protected only when the enclave
+  acknowledges both strict and monotonic; either alone is not enough. What the chosen
+  ELE release returns for each flag on the board is **unconfirmed**, an open
+  hardware-validation question.
 - Closing a key-store service removes the key store from the ELE's internal memory.
   Any change not yet saved to non-volatile storage is lost.
 - I found no command that erases every key or the whole enclave in one step.
@@ -200,8 +200,8 @@ no procedure that uses them.
    - (b) Close the key store and destroy its blob in non-volatile storage.
    - (c) An irreversible life-cycle or fuse action.
 
-   *Recommendation*: (a), then (b). Proposed, pending owner approval: use the strict
-   delete together with the monotonic flag. Strict on its own waits only for
+   *Recommendation*: (a), then (b). Approved (SPEC row `secure-key-handling`, owner decision 241): use the strict
+   delete together with the monotonic flag, and count it only when both are acknowledged. Strict on its own waits only for
    persistence, and in the library headers the counter that gives rollback protection
    is advanced by the monotonic flag (F5). Irreversibility stays unresolved until a
    restored pre-deletion blob is shown to be rejected (F5). Both need the key store's
