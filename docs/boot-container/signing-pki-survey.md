@@ -93,7 +93,7 @@ travels inside each signed container [S1 §1, §2.2].
   key in it [S1 §2.2].
 - The fuse words that hold the hash, the SRK revocation bits and the life-cycle effect of closing the device are
   in IMX95RM and the i.MX 95 Security Reference Manual, which this repository does not have
-  ([references](../references/README.md#still-missing)): **Unconfirmed**. This survey scripts no fuse step.
+  ([references](../references/README.md#missing-documents)): **Unconfirmed**. This survey scripts no fuse step.
 
 ## 4. The production layout the test PKI (#9) mirrors
 
