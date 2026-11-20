@@ -1222,6 +1222,26 @@ expect "Dockerfile: the toolchain stage installs openssh-keygen" \
 	python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"FROM base AS toolchain\n(.*?)\n(?:FROM|\Z)", t, re.S); sys.exit(0 if m and re.search(r"apk add [^\n]*\bopenssh-keygen\b", m.group(1)) else 1)' \
 	"$ROOT/build/docker/devcontainer/Dockerfile"
 
+# --- the image carries every tool secure-world-build.sh requires ---------------
+# (Codex round 3 P1: the build test runs tar -cJf, and the image had no xz.)
+# A tool is covered by an `apk add` package of the same name, or by coreutils
+# (sha256sum).
+expect "Dockerfile: every tool scripts/secure-world-build.sh requires is installed by an apk add line" \
+	python3 -I -c '
+import re, sys
+s = open(sys.argv[1]).read()
+d = open(sys.argv[2]).read()
+m = re.search(r"^for tool in ([^;\n]+); do$", s, re.M)
+tools = m.group(1).split() if m else []
+have = {"sha256sum"}
+for l in re.findall(r"apk add (?:--no-cache )?([^\n\\&]+)", d):
+    have.update(l.split())
+missing = [t for t in tools if t not in have]
+if not tools or missing:
+    print("missing:", missing or "no tool list found")
+    sys.exit(1)
+' "$ROOT/scripts/secure-world-build.sh" "$ROOT/build/docker/devcontainer/Dockerfile"
+
 # --- signatures.yml: the adoption push, against real SSH-signed git fixtures ---
 # (Codex P1: the adoption merge's push has a before with no registry.) The
 # step's script is taken from the workflow and run as written; it fetches

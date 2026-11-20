@@ -18,7 +18,7 @@ FROM ${ALPINE_IMAGE} AS base
 # tar: GNU tar, for scripts/in-toolchain-image.sh's --owner/--group/
 # --numeric-owner stream (BusyBox tar refuses those options).
 RUN apk upgrade --no-cache \
- && apk add --no-cache bash coreutils make git python3 tar \
+ && apk add --no-cache bash coreutils make git python3 tar xz \
  && git config --system --add safe.directory '*' \
  && adduser -D -u 10001 dev
 ENV HOME=/tmp
@@ -36,7 +36,9 @@ FROM base AS toolchain
 # ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
 # Alpine's git package does not supply it. Like every package here, its
 # version is the pinned Alpine release's.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen
+# uv: scripts/secure-world-build.sh's hash-checked wheel install. xz is in
+# base: that script and its test unpack .tar.xz.
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 
