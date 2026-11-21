@@ -169,5 +169,11 @@ expect "ci: system-manager-build does not call make sm-toolchain-check" \
 # shellcheck disable=SC2016 # expands in the child shell
 expect "ci: system-manager-build does not call docker-run" \
 	bash -c '! grep -Eq "docker-run" <<<"$1"' _ "$job"
+# The container's /src is root-owned (only the copied files are the image
+# user's), so the job must point SM_OUT under the container's $TMPDIR, quoted
+# so the container's shell expands it and not the runner's.
+# shellcheck disable=SC2016 # the pattern matches ci.yml's literal shell text
+expect "ci: system-manager-build sets SM_OUT under the container's \$TMPDIR, expanded by the container's shell" \
+	grep -Eq "sh -c '[^']*SM_OUT=\"\\\$TMPDIR/[^\"']+\"[^']*scripts/sm-toolchain-check\\.sh[^']*'" <<<"$job"
 
 finish
