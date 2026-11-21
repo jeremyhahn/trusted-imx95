@@ -16,6 +16,15 @@ check "help prints the usage" 0 "usage: secure-world-build.sh"
 run bash "$sw" --check-lock
 check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "toolchain 15.2.rel1"
 
+# Owner ruling 771 and docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
+tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
+case "$tfa_repo" in
+https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
+	tfa_ok=0 ;;
+*) tfa_ok=1 ;;
+esac
+expect "bsp.lock's TFA_REPO is upstream TF-A (ruling 771), not NXP's imx-atf: $tfa_repo" test "$tfa_ok" -eq 0
+
 run bash "$sw" --frobnicate
 check "an unknown argument fails" nonzero "unknown argument: --frobnicate"
 

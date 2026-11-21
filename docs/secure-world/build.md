@@ -48,7 +48,7 @@ every value below from the new release's manifest and recipes and editing the lo
 |---|---|---|
 | NXP Linux BSP release | `lf-6.18.37-2.1.0`; `imx-manifest` commit `0c44ab18abe471b4326037b61893f4e69b6fc182` | The tag, peeled |
 | meta-imx | `rel_imx_6.18.37_2.1.0`, commit `2eb758f42cfb96042344815b7dd7755b06ba1e3b` | `imx-6.18.37-2.1.0.xml` in that manifest |
-| TF-A | `nxp-imx/imx-atf`, branch `lf_v2.14`, commit `af9eb2c1748ee3abc0ead7dc76e462f50c573036` | `imx-atf_2.14.bb` in meta-imx |
+| TF-A | Upstream Arm TF-A, tag `v2.15.0`, peeled commit `da738d5eae93af342fdc4995dd3c05acb4c9d757`, fetched from the GitHub mirror `ARM-software/arm-trusted-firmware` | The newest release tag of `git.trustedfirmware.org/TF-A/trusted-firmware-a.git`; its tree has `plat/imx/imx9/imx95` |
 | OP-TEE OS 4.10 | `nxp-imx/imx-optee-os`, branch `lf-6.18.37_2.1.0`, commit `99f40897dd1fc28b4c792773b167e3db629db2ff` | `optee-os_4.10.0.imx.bb` in meta-imx |
 | fTPM TA | `OP-TEE/optee_ftpm`, tag `4.10.0`, commit `a09269b15de635e1816fe832e26adfbfb44c5455` | The tag, peeled |
 | TPM 2.0 reference | `microsoft/ms-tpm-20-ref`, commit `98b60a44aba79b15fcce1c0d1e46cf5918400f6a` | The commit `optee_ftpm`'s README names |
@@ -62,9 +62,15 @@ wheels.
 
 Two choices here differ from the wording elsewhere:
 
-- **TF-A is NXP's `imx-atf` fork**, the one the release carries, as the brief for this step directs. Owner ruling 771
-  says "upstream TF-A". Whether mainline TF-A builds an i.MX 95 BL31 that works with this OP-TEE was not checked. The
-  owner needs to confirm which of the two the ruling means.
+- **TF-A is upstream Arm TF-A**, as owner ruling 771 says, at the release tag `v2.15.0` with `PLAT=imx95 SPD=opteed`.
+  It is not the BSP release's `imx-atf` fork, whose revision the release carries. `make secure-world` builds this
+  BL31 with the pinned OP-TEE. That the BL31 boots and starts this OP-TEE on the board is not checked: upstream's
+  `BL32_BASE` (`0x8C000000`) and the OP-TEE flavour's secure memory start were read as the same address, not run.
+  **Known gap:** NXP's fork adds SiP services that upstream `v2.15.0` lacks on the i.MX 95: the Cortex-M7 (SRC) and
+  logical-machine (LMM) calls in `imx95_m7.c` and `imx95_lmm.c`. Linux's remoteproc for the M7 may depend on them, and
+  a System Manager SCMI path that starts or stops another logical machine from Linux needs them. Whether the
+  board needs them is open ([tfa-scmi-survey.md](tfa-scmi-survey.md), section 2.2 and the questions on NXP's SiP
+  services); until it is answered, those calls are absent from the build.
 - **The OP-TEE platform is `imx-mx95evk`.** This OP-TEE tree has no FRDM-IMX95-PRO flavour: `mx95evk` is the only
   i.MX 95 flavour in `core/arch/arm/plat-imx/conf.mk`, and the release's OP-TEE recipe maps the `mx95` machines to
   it. The FRDM-Pro machine is one of them through the shared `imx95-evk.inc`; that this mapping applies was not
