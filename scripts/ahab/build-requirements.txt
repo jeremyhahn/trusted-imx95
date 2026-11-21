@@ -1,0 +1,11 @@
+# The build backend for the sdists requirements.txt can install: installed
+# first, hash-checked, so they build with --no-build-isolation and pip fetches
+# nothing unpinned. hexdump is an sdist only. libuuu is installed from its sdist
+# where no wheel fits (musl, the toolchain image): its backend takes its
+# version from setuptools-scm. Pins shared with requirements.txt are equal.
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+setuptools==83.0.0 \
+    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
+setuptools-scm==9.2.2 \
+    --hash=sha256:30e8f84d2ab1ba7cb0e653429b179395d0c33775d54807fc5f1dd6671801aef7

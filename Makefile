@@ -38,7 +38,7 @@ export PATH := $(TOOLS_DIR):$(PATH)
 NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
 
 # Every shell script git tracks, and every Python script under scripts/.
-SH_SCRIPTS := $(sort $(wildcard scripts/*.sh test/*.sh test/integration/*.sh))
+SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/integration/*.sh))
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test
 
 help: ## List the targets
 	@echo "Targets:"
@@ -173,6 +173,11 @@ SW_CACHE ?= $(SW_BASE)/cache
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
 	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
+
+ahab-sign-test: ## Sign and verify a mimx9596 b0 AHAB container with a throwaway test PKI outside the tree (pinned SPSDK; AHAB_OUT_DIR gets the container)
+	@scripts/ahab/sign-test.sh
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
