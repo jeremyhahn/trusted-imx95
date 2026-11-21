@@ -1,0 +1,42 @@
+# nxpimage ahab export configuration for make ahab-sign-test (SPSDK 3.13.0).
+# One OEM container for the i.MX 95 B0 (SPSDK family mimx9596, revision b0)
+# around a random test payload, signed with a throwaway ECDSA P-384 test SRK.
+# scripts/ahab/sign-test.sh copies this file into its mktemp -d work
+# directory, where every relative path below (keys, payload, output) lives.
+# Nothing here describes a real device or a real key.
+#
+# MISSING (real device): the AHAB container version field that anti-rollback
+#   checks (fuse_version) and the container header version. Their values for
+#   a real device come from IMX95RM (AHAB container header) and the i.MX 95
+#   Security Reference Manual (anti-rollback fuses), neither of which is in
+#   docs/references (docs/boot-container/signing-tool-options.md, U3).
+#   fuse_version below is 0 for this test container only; container_version
+#   is left to SPSDK's mimx9596 b0 default.
+# MISSING (real device): the SRK hash fuse values (fuse words and digest) of
+#   a real device: the same two manuals. The pipeline prints the test PKI's
+#   SRK table hash only, and never maps it to fuses.
+family: mimx9596
+revision: b0
+target_memory: standard
+output: container.bin
+containers:
+  - container:
+      srk_set: oem
+      used_srk_id: 0
+      srk_revoke_mask: '0x00'
+      fuse_version: 0
+      sw_version: 0
+      signer: type=file;file_path=srk0.pem
+      images:
+        - image_path: payload.bin
+          load_address: '0x90000000'
+          entry_point: '0x90000000'
+          image_type: data
+          core_id: cortex-a55
+          hash_type: sha384
+      srk_table:
+        srk_array:
+          - srk0.pub
+          - srk1.pub
+          - srk2.pub
+          - srk3.pub
