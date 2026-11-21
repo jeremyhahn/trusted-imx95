@@ -14,11 +14,20 @@ sm_tag=lf-6.18.37-2.1.0
 sm_commit=eec232878ab7dd460f5a8f3767d39dc7e9412efa
 
 # The FRDM-IMX95-PRO's board configuration, as meta-imx's machine
-# imx95-19x19-lpddr5-frdm-pro names it (SYSTEM_MANAGER_CONFIG). Upstream and
-# unchanged: the build fails when the file's SHA-256 differs.
+# imx95-19x19-lpddr5-frdm-pro names it (SYSTEM_MANAGER_CONFIG). The upstream
+# file's SHA-256 is checked first; the build fails when it differs.
 sm_config=mx95frdm-pro
 sm_config_file=configs/other/mx95frdm-pro.cfg
 sm_config_sha256=37d8f4c2b324cdc8dafb1de3f3f741850c86ca2e842880b9fdbdc16db72c1d63
+
+# This repository's delta (system-manager/patches/, applied in name order):
+# the M7 LM's fault reactions fail closed. PROPOSED, pending owner approval
+# (#13). sm_patch_sha256 is the SHA-256 of the patches concatenated in name
+# order (one patch today: its own SHA-256); sm_patched_config_sha256 is the
+# SHA-256 of the configuration after they apply. The build fails when either
+# differs.
+sm_patch_sha256=6097602db98638e9c1bf5082f0a4a153a527f55b1859f441f584b2b9556652d3
+sm_patched_config_sha256=05ae8b66f9d7399df570064ab5c5ebb8754d8e1556b1473c92359cc946a940e9
 
 # The monitor mode meta-imx's recipe passes (SYSTEM_MANAGER_MONITOR_MODE ??= 2).
 # Production's choice is open (sm-build-survey.md section 10, question 4).

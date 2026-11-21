@@ -41,6 +41,17 @@ g tag -a v1 -m v1
 commit=$(git -C "$repo" rev-parse HEAD)
 cfg_sha=$(sha256sum "$repo/configs/other/fakepro.cfg" | cut -d' ' -f1)
 
+# The repository's patch, faked: one patch beside the lock, changing the fake
+# configuration. patched_sha is the configuration after it applies.
+mkdir -p "$TMP_ROOT/patches" "$TMP_ROOT/pa/configs/other" "$TMP_ROOT/pb/configs/other"
+echo "board=fake" >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
+echo "board=fake-closed" >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
+(cd "$TMP_ROOT" && diff -u pa/configs/other/fakepro.cfg pb/configs/other/fakepro.cfg |
+	{ read -r _; read -r _; echo "--- a/configs/other/fakepro.cfg"; echo "+++ b/configs/other/fakepro.cfg"; cat; }) \
+	>"$TMP_ROOT/patches/0001-fake.patch" || true
+patch_sha=$(sha256sum "$TMP_ROOT/patches/0001-fake.patch" | cut -d' ' -f1)
+patched_sha=$(sha256sum "$TMP_ROOT/pb/configs/other/fakepro.cfg" | cut -d' ' -f1)
+
 # lock [key=value...]: a good lock in $TMP_ROOT/lock, with the overrides.
 lock() {
 	local f="$TMP_ROOT/lock"
@@ -52,6 +63,8 @@ lock() {
 		echo "sm_config=fakepro"
 		echo "sm_config_file=configs/other/fakepro.cfg"
 		echo "sm_config_sha256=$cfg_sha"
+		echo "sm_patch_sha256=$patch_sha"
+		echo "sm_patched_config_sha256=$patched_sha"
 		echo "sm_monitor_mode=2"
 		echo "toolchain_version=9.9.rel1"
 		echo "toolchain_url=file://$TMP_ROOT/tc.tar.xz"
@@ -99,6 +112,46 @@ check "a tag on another commit fails" nonzero "v1 is commit $commit"
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
 check "a changed configuration fails" nonzero "configs/other/fakepro.cfg SHA-256 is $cfg_sha"
+
+lock sm_patch_sha256=0000000000000000000000000000000000000000000000000000000000000000
+run env SM_OUT="$TMP_ROOT/out3" bash "$sm" "$TMP_ROOT/lock"
+check "a patch of another digest fails" nonzero "patches SHA-256 is $patch_sha"
+lock sm_patched_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
+run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
+check "a patched configuration of another digest fails" nonzero "patched configs/other/fakepro.cfg SHA-256 is $patched_sha"
+expect "the patch reached the fake build" has_line "board=fake-closed" "$out/tree-1/configs/other/fakepro.cfg"
+lock
+printf '+x\n' >>"$TMP_ROOT/patches/0001-fake.patch"
+run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
+check "an edited patch fails" nonzero "patches SHA-256 is"
+head -n -1 "$TMP_ROOT/patches/0001-fake.patch" >"$TMP_ROOT/patches/x" && mv "$TMP_ROOT/patches/x" "$TMP_ROOT/patches/0001-fake.patch"
+
+# The committed patch, offline: it changes only the M7 LM's fault reactions
+# (build.md section 5), each lm_reset to sys_reset or sys_shutdown, and
+# matches the lock.
+patch_file="$ROOT/system-manager/patches/0001-m7-faults-fail-closed.patch"
+expect "the committed patch matches the lock's patch digest" \
+	has_line "sm_patch_sha256=$(sha256sum "$patch_file" | cut -d' ' -f1)" "$ROOT/system-manager/sm.lock"
+run python3 -I -c '
+import re, sys
+want = {"FAULT_M7_LOCKUP", "FAULT_M7_RESET", "FAULT_SW1", "FAULT_WDOG5"}
+old, new = {}, {}
+for l in open(sys.argv[1]).read().split("\n"):
+    if l.startswith(("---", "+++", "@@", " ")) or not l:
+        continue
+    m = re.match(r"^([-+])(FAULT_[A-Z0-9_]+) +OWNER, reaction=([a-z_]+)$", l)
+    if not m:
+        sys.exit("changed line is not a fault reaction: " + l)
+    (old if m[1] == "-" else new)[m[2]] = m[3]
+if set(old) != want or set(new) != want:
+    sys.exit("changed faults %s, want %s" % (sorted(old), sorted(want)))
+if any(v != "lm_reset" for v in old.values()):
+    sys.exit("a changed reaction was not lm_reset")
+if any(v not in ("sys_reset", "sys_shutdown") for v in new.values()):
+    sys.exit("a new reaction is not sys_reset or sys_shutdown")
+print("patch touches only M7 faults")
+' "$patch_file"
+check "the committed patch changes only the M7 LM's fault reactions" 0 "patch touches only M7 faults"
 
 lock toolchain_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$TMP_ROOT/out2" bash "$sm" "$TMP_ROOT/lock"

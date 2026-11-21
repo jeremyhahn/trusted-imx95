@@ -33,7 +33,7 @@ die() {
 [ -f "$lock" ] || die "no lock file: $lock"
 
 # Parse, never source: only the known keys, each once, each well formed.
-keys="sm_repo sm_tag sm_commit sm_config sm_config_file sm_config_sha256 sm_monitor_mode toolchain_version toolchain_url toolchain_sha256"
+keys="sm_repo sm_tag sm_commit sm_config sm_config_file sm_config_sha256 sm_patch_sha256 sm_patched_config_sha256 sm_monitor_mode toolchain_version toolchain_url toolchain_sha256"
 declare -A pin=()
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -56,6 +56,8 @@ want sm_commit '^[0-9a-f]{40}$' "a full 40-hex commit"
 want sm_config '^[A-Za-z0-9_-]+$' "a configuration name"
 want sm_config_file '^configs/([a-z]+/)?[A-Za-z0-9_-]+\.cfg$' "a .cfg path under configs/"
 want sm_config_sha256 '^[0-9a-f]{64}$' "a SHA-256"
+want sm_patch_sha256 '^[0-9a-f]{64}$' "a SHA-256"
+want sm_patched_config_sha256 '^[0-9a-f]{64}$' "a SHA-256"
 want sm_monitor_mode '^[0-2]$' "0, 1 or 2"
 want toolchain_version '^[0-9]+\.[0-9]+\.rel[0-9]+$' "an Arm GNU version such as 15.2.rel1"
 want toolchain_sha256 '^[0-9a-f]{64}$' "a SHA-256"
@@ -75,6 +77,15 @@ mkdir -p "$out/cache"
 out=$(cd "$out" && pwd -P)
 start=$SECONDS
 sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+# The repository's patches of the configuration, in name order: their
+# concatenation must match the lock before anything is downloaded.
+patches_dir=$(cd "$(dirname "$lock")" && pwd -P)/patches
+patches=("$patches_dir"/*.patch)
+[ -f "${patches[0]}" ] || die "no patch in $patches_dir"
+got=$(cat "${patches[@]}" | sha256sum | cut -d' ' -f1)
+[ "$got" = "${pin[sm_patch_sha256]}" ] ||
+	die "patches SHA-256 is $got, the lock pins ${pin[sm_patch_sha256]}"
 
 # The toolchain: downloaded once, checked on every run, extracted fresh.
 tarball="$out/cache/${pin[toolchain_url]##*/}"
@@ -130,6 +141,13 @@ build() {
 	got=$(sha "$tree/${pin[sm_config_file]}")
 	[ "$got" = "${pin[sm_config_sha256]}" ] ||
 		die "${pin[sm_config_file]} SHA-256 is $got, the lock pins ${pin[sm_config_sha256]}"
+	local p
+	for p in "${patches[@]}"; do
+		git -C "$tree" apply "$p" || die "patch ${p##*/} does not apply to ${pin[sm_config_file]}"
+	done
+	got=$(sha "$tree/${pin[sm_config_file]}")
+	[ "$got" = "${pin[sm_patched_config_sha256]}" ] ||
+		die "patched ${pin[sm_config_file]} SHA-256 is $got, the lock pins ${pin[sm_patched_config_sha256]}"
 	if ! (cd "$tree" && export SOURCE_DATE_EPOCH="$epoch" SM_CROSS_COMPILE="$cross" PATH="$out/shim:$PATH" &&
 		make config="${pin[sm_config]}" cfg &&
 		make -j"$jobs" config="${pin[sm_config]}" M="${pin[sm_monitor_mode]}" all) >"$log" 2>&1; then

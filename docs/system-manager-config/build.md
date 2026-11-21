@@ -10,7 +10,7 @@ own its board configuration. Nothing here is flashed or signed: the image is a b
 
 ```sh
 make system-manager                          # = scripts/sm-build.sh system-manager/sm.lock
-make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 6)
+make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 7)
 ```
 
 The pins are in [`system-manager/sm.lock`](../../system-manager/sm.lock). They are **provisional**: they follow
@@ -71,8 +71,9 @@ checked.
 
 ## 3. Where the configuration lives
 
-- The source of truth is NXP's `configs/other/mx95frdm-pro.cfg` at the pinned commit, used **unchanged**: the
-  lock pins its SHA-256 and the build fails if it differs. This repository holds no copy yet.
+- The source of truth is NXP's `configs/other/mx95frdm-pro.cfg` at the pinned commit, the base: the
+  lock pins its SHA-256 and the build fails if it differs. This repository holds no copy; its delta is the patch
+  of section 6 (proposed, pending the owner, #13).
 - `make cfg` turns it into the C headers in `configs/mx95frdm-pro/` of the build tree; they are build output,
   regenerated on every build, never carried.
 - The file names the 19x19 EVK board port (`board=mcimx95evk`); its header comment still says "MX95 EVK".
@@ -123,7 +124,40 @@ So the M7 firmware of trusted-firmware's `imx95` row can run on the pinned confi
 tamper response by `LMM_SHUTDOWN` or `SYSTEM_POWER_STATE_SET` is granted. The changes the findings point to are
 the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
 
-## 6. Not confirmed
+## 6. This repository's delta: the M7 fault reactions fail closed
+
+**Proposed, pending owner approval (#13).** The choice between `sys_reset` and `sys_shutdown` is the owner's. The
+fault-recovery survey recommends `sys_reset` ([fault-recovery-survey.md](fault-recovery-survey.md) §10 Q1, option (c),
+or (d) `sys_shutdown` if a restart loop is a concern), so the patch takes `sys_reset`. **Nothing was flashed, signed
+or run on a board.**
+
+The delta is [`system-manager/patches/0001-m7-faults-fail-closed.patch`](../../system-manager/patches/0001-m7-faults-fail-closed.patch),
+a unified diff against `configs/other/mx95frdm-pro.cfg` at the pinned commit. It changes four lines of the M7 LM
+(LM1) Faults block, and nothing else; `FAULT_SW0` (the FuSa reaction) and every other line are unchanged.
+
+| Line (upstream) | Before | After |
+|---|---|---|
+| 433 `FAULT_M7_LOCKUP` | `lm_reset` | `sys_reset` |
+| 434 `FAULT_M7_RESET` | `lm_reset` | `sys_reset` |
+| 436 `FAULT_SW1` | `lm_reset` | `sys_reset` |
+| 437 `FAULT_WDOG5` | `lm_reset` | `sys_reset` |
+
+Why: the M7 runs the trusted firmware and the tamper response. `lm_reset` restarts the M7 alone and leaves the A55
+running unsupervised, which is fail-open. `sys_reset` restarts the A55 with the M7. The survey section it rests on
+is [fault-recovery-survey.md](fault-recovery-survey.md) §9 (the M7 faults bullet) and §10 Q1. A restart loop on a
+persistent fault is the cost; `sys_shutdown` would avoid it and keep the board off until power is cycled.
+
+Mechanism: [`sm.lock`](../../system-manager/sm.lock) gains `sm_patch_sha256` (the patches concatenated in name order)
+and `sm_patched_config_sha256` (the file after they apply). `scripts/sm-build.sh` checks the patches' digest before
+downloading anything, then in each build checks the upstream file's SHA-256, applies each patch in order with
+`git apply`, checks the patched file's SHA-256, and builds. Either digest differing stops the build.
+`test/sm_build_test.sh` covers both checks offline, and checks that the committed patch changes only those four
+fault lines, each from `lm_reset` to `sys_reset` or `sys_shutdown`. Section 4's plan is thus followed, with the patch
+under `system-manager/patches/`. Any change rebuilds the image and the boot container, which must be re-signed.
+
+`make system-manager` with the patch: see the result recorded below once run (not yet run in this slice).
+
+## 7. Not confirmed
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
