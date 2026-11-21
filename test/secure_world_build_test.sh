@@ -292,7 +292,7 @@ optee_config_digest() {
 recorded_config_digest() {
 	local l
 	while IFS= read -r l; do
-		if [[ "$l" =~ ^Build\\ configuration\\ digest:\ \`([0-9a-f]{64})\`$ ]]; then
+		if [[ "$l" =~ ^Build\ configuration\ digest:\ \`([0-9a-f]{64})\`$ ]]; then
 			printf '%s\n' "${BASH_REMATCH[1]}"
 			return 0
 		fi
