@@ -121,3 +121,5 @@ These are the owner's. This document answers none of them.
 2. The firmware split between this repository and trusted-firmware's `imx95` row (docs/SPEC.md, Release criteria).
 3. What evidence the device presents when go-trusted-platform attests the image, and the root it chains to
    (docs/SPEC.md, Features, `device-lifecycle`).
+
+The provisional default build configuration is in [build.md](build.md).

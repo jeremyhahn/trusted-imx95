@@ -1,0 +1,103 @@
+# platform-image/manifest.lock: the pins `make platform-image-fetch` checks
+# out (scripts/platform-image-fetch.sh; docs/platform-image/build.md).
+#
+# Provisional default, pending the owner's answer on #14 (Q2 a): NXP's BSP
+# manifest imx-6.18.37-2.1.0.xml, every layer at the commit the manifest
+# gives, the same BSP release system-manager/sm.lock and secure-world/bsp.lock
+# pin. key=value lines; the script and the test parse them, never source them.
+# Every hash below was read from its source on 2026-11-21 (the manifest file,
+# and git ls-remote for the layers the manifest names by tag, peeled to the
+# commit); none is typed by hand. A layer that could not be read would carry
+# the commit MISSING and a reason; none does.
+
+# The manifest repository, the tag lf-6.18.37-2.1.0 (peeled) and its file.
+manifest_repo=https://github.com/nxp-imx/imx-manifest
+manifest_tag=lf-6.18.37-2.1.0
+manifest_commit=0c44ab18abe471b4326037b61893f4e69b6fc182
+manifest_file=imx-6.18.37-2.1.0.xml
+
+# The machine, as meta-imx-bsp's conf/machine/imx95-19x19-lpddr5-frdm-pro.conf
+# and system-manager/sm.lock name it.
+machine=imx95-19x19-lpddr5-frdm-pro
+
+# One block per project of the manifest: layer_<name>_repo, _path (relative to
+# the fetch directory, as the manifest's path), _ref (only where the manifest
+# names a tag rather than a commit) and _commit.
+layer_bitbake_repo=https://github.com/openembedded/bitbake
+layer_bitbake_path=sources/bitbake
+layer_bitbake_commit=acfe02fa38b5da9e6a36c6cedcf91d4fcbefbfbd
+
+layer_openembedded_core_repo=https://github.com/openembedded/openembedded-core
+layer_openembedded_core_path=sources/openembedded-core
+layer_openembedded_core_commit=5d1aa5c806c061a2994f4decb59016610f093213
+
+layer_meta_yocto_repo=https://git.yoctoproject.org/meta-yocto
+layer_meta_yocto_path=sources/meta-yocto
+layer_meta_yocto_commit=24c24cef5d1523fefe43a3e3d34667b37ae551f3
+
+layer_meta_clang_repo=https://github.com/kraj/meta-clang
+layer_meta_clang_path=sources/meta-clang
+layer_meta_clang_commit=ef0d22f21910a0c30c967eeb17d8f209806e2d81
+
+layer_meta_openembedded_repo=https://github.com/openembedded/meta-openembedded
+layer_meta_openembedded_path=sources/meta-openembedded
+layer_meta_openembedded_commit=6bf0d8ad57b33950bab4c7f6c037e1ccb6f6e2eb
+
+layer_fsl_community_bsp_base_repo=https://github.com/Freescale/fsl-community-bsp-base
+layer_fsl_community_bsp_base_path=sources/base
+layer_fsl_community_bsp_base_commit=1d8c41be87979d063b34a98044cc5f8e1279eb2c
+
+layer_meta_freescale_repo=https://github.com/Freescale/meta-freescale
+layer_meta_freescale_path=sources/meta-freescale
+layer_meta_freescale_commit=ca31f33c5b5e433939c5f8442d2de56925d638bd
+
+layer_meta_freescale_3rdparty_repo=https://github.com/Freescale/meta-freescale-3rdparty
+layer_meta_freescale_3rdparty_path=sources/meta-freescale-3rdparty
+layer_meta_freescale_3rdparty_commit=26d8b36a72acf1458a2520e4e9f4d654a4ba77e4
+
+layer_meta_freescale_distro_repo=https://github.com/Freescale/meta-freescale-distro
+layer_meta_freescale_distro_path=sources/meta-freescale-distro
+layer_meta_freescale_distro_commit=4464f38b4aa618b5942f5e35dd25cff590f410a6
+
+layer_meta_freescale_ml_repo=https://github.com/Freescale/meta-freescale-ml
+layer_meta_freescale_ml_path=sources/meta-freescale-ml
+layer_meta_freescale_ml_commit=1330790bc6cdd3808260a16383d928e05a0e0eeb
+
+layer_meta_arm_repo=https://git.yoctoproject.org/meta-arm
+layer_meta_arm_path=sources/meta-arm
+layer_meta_arm_commit=0979b80429099f1a42dc0026c8c466cee780bc74
+
+layer_meta_qt6_repo=https://github.com/YoeDistro/meta-qt6
+layer_meta_qt6_path=sources/meta-qt6
+layer_meta_qt6_commit=302c4fab8d230f5cb7b21e4304c728831a0658cb
+
+layer_meta_browser_repo=https://github.com/OSSystems/meta-browser
+layer_meta_browser_path=sources/meta-browser
+layer_meta_browser_commit=407e3ac990f5ed466cb76e5002f918860503799c
+
+layer_meta_security_repo=https://git.yoctoproject.org/meta-security
+layer_meta_security_path=sources/meta-security
+layer_meta_security_commit=c0d1d6200e7a84c39fb940cb1f22aad4b0b3d808
+
+layer_meta_timesys_repo=https://github.com/TimesysGit/meta-timesys
+layer_meta_timesys_path=sources/meta-timesys
+layer_meta_timesys_commit=bf4ff1bb4c85bb7a1c65bc6f2cc6188ff5b76ef2
+
+layer_meta_virtualization_repo=https://git.yoctoproject.org/meta-virtualization
+layer_meta_virtualization_path=sources/meta-virtualization
+layer_meta_virtualization_commit=30f1a9d7e5ef1b41c64ff4c3c40951133d548ed8
+
+layer_meta_imx_repo=https://github.com/nxp-imx/meta-imx
+layer_meta_imx_path=sources/meta-imx
+layer_meta_imx_ref=refs/tags/rel_imx_6.18.37_2.1.0
+layer_meta_imx_commit=2eb758f42cfb96042344815b7dd7755b06ba1e3b
+
+layer_meta_nxp_connectivity_repo=https://github.com/nxp-imx/meta-nxp-connectivity
+layer_meta_nxp_connectivity_path=sources/meta-nxp-connectivity
+layer_meta_nxp_connectivity_ref=refs/tags/rel_imx_6.18.37_2.1.0
+layer_meta_nxp_connectivity_commit=12e139aa362660e2a7545b2924076038958e5144
+
+layer_meta_nxp_demo_experience_repo=https://github.com/nxp-imx-support/meta-nxp-demo-experience
+layer_meta_nxp_demo_experience_path=sources/meta-nxp-demo-experience
+layer_meta_nxp_demo_experience_ref=refs/tags/rel_imx_6.18.37_2.1.0
+layer_meta_nxp_demo_experience_commit=dd4e742a339c51f90dec8ea59c62add1f7f157fa

@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager ahab-sign-test
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager ahab-sign-test platform-image-fetch
 
 help: ## List the targets
 	@echo "Targets:"
@@ -158,6 +158,11 @@ system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in cle
 
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
 	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
+
+## --- The platform image (docs/platform-image/build.md) ---
+
+platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
+	@scripts/platform-image-fetch.sh platform-image/manifest.lock
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
