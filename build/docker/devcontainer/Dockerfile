@@ -36,9 +36,12 @@ FROM base AS toolchain
 # ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
 # Alpine's git package does not supply it. Like every package here, its
 # version is the pinned Alpine release's.
-# uv: scripts/secure-world-build.sh's hash-checked wheel install. xz is in
-# base: that script and its test unpack .tar.xz.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv
+# uv: scripts/secure-world-build.sh's hash-checked wheel install.
+# xz, perl: scripts/sm-build.sh and scripts/secure-world-build.sh unpack .tar.xz;
+# imx-sm's build requires perl. test/sm_build_test.sh runs it here.
+# gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
+# is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 

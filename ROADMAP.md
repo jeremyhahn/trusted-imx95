@@ -19,7 +19,8 @@ None yet.
 
 ## Now
 
-None yet.
+- **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — issue #12 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
+- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — pinned, reproducible System Manager build exists (`make system-manager`, [build record](docs/system-manager-config/build.md)); imx-sm revision provisional until #14 Q2; board configuration unchanged, not flashed or signed — blocked: owner approval
 
 ## Next
 
@@ -30,8 +31,6 @@ None yet.
 Planned, undated. No issue is filed yet; each line gets its issue once the owner approves this file.
 
 - **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — no issue yet — blocked: owner approval; image build open
-- **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
-- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — no issue yet — blocked: owner approval; System Manager documentation missing
 - **secure-world** — the Cortex-A55 secure world of owner ruling 771: upstream TF-A (BL31) and the NXP BSP's OP-TEE with the PKCS#11 TA, hosting the `ftpm` entry's firmware TPM TA, configured and built here — no issue yet — blocked: owner approval; needs platform-image, and boot-container to sign the BL31 and OP-TEE images; go-xkms's PKCS#11 backend and go-trusted-platform consume it
   - (a) Pin the BSP: the NXP Linux BSP release tag, and the TF-A, OP-TEE and `imx-optee-os` revisions it carries (to be pinned). State: pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
   - (b) Reproducible build: pinned sources, toolchain and build command; a byte-for-byte rebuild check; the OP-TEE configuration flags that enable the PKCS#11 TA (the fTPM TA's flags are the `ftpm` entry's). State: `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds were identical. Not in CI. Nothing has run on the board.

@@ -9,3 +9,5 @@ it-image.tar
 .tools/
 # `make secure-world`'s artefacts (docs/secure-world/build.md)
 .secure-world/
+# make system-manager's downloads, build trees and image (scripts/sm-build.sh)
+/out/

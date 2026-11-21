@@ -8,6 +8,8 @@
 **/cst-*.tgz
 # The pinned tools make tools installs outside the image
 .tools/
+# Build output (make system-manager writes out/, gitignored): never in the context
+/out/
 # The vendor images .gitignore keeps out of the tree (and so out of
 # scripts/image-tag.sh's hash) stay out of the image too; the test in
 # test/ci_scripts_test.sh holds every resources/ rule of .gitignore here.
