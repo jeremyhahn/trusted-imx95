@@ -77,6 +77,21 @@ Two choices here differ from the wording elsewhere:
   checked further. Whether its DDR size and console UART suit the FRDM-IMX95-PRO is checked on the board in
   step (c).
 
+### BSP-only TF-A services
+
+What NXP's `imx-atf` carries that upstream `v2.15.0` lacks on the i.MX 95, from the public sources in
+[tfa-scmi-survey.md](tfa-scmi-survey.md) section 2.2, each with its consumer:
+
+| Service | Consumer | State |
+|---|---|---|
+| SRC SiP call for the Cortex-M7 (`imx95_m7.c`: set reset address, prepare, start, stop, query) | Linux remoteproc for the M7, on NXP's BSP (by the fork's code comments; not checked against the kernel) | **Open** |
+| LMM SiP call (`imx95_lmm.c`: boot or force-shutdown a logical machine) | A Linux-side start or stop of another logical machine over the secure SCMI agent; no consumer found in this repository | **Open** |
+| SCMI base protocol compiled in | Agent discovery for the M7 code; no other consumer found | **Open** (follows the M7 call) |
+| FF-A shared-memory helper with `SPD=trusty` | none found: this build uses `SPD=opteed` | Not needed |
+
+The three open rows are one question for the owner (survey question 3): whether the M7 is driven from Linux. Until it
+is answered, the build omits them.
+
 ## The flags
 
 TF-A: `PLAT=imx95 SPD=opteed bl31`, the upstream TF-A imx95 platform build arguments this repository uses.
