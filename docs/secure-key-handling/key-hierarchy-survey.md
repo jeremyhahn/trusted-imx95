@@ -197,7 +197,8 @@ was not tested. No life-cycle close is run or proposed to test it.
 
 Import accepts either an EdgeLock 2GO TLV object or a signed message, chosen by a flag, and a strict
 flag that commits the imported key to NVM with the counter advanced [S2,
-`HSM_OP_IMPORT_KEY_INPUT_*`, `HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION`].
+`HSM_OP_IMPORT_KEY_INPUT_*`, `HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION`]. That is the vendor API's
+behaviour, not the commit rule: an import is committed only on the two-flag acknowledgement of §3.3.
 
 ### 4.7 Data storage
 

@@ -122,7 +122,7 @@ What follows from this: none of the three counters carries over to a replacement
 - How the i.MX 95 compares and encodes `fuse_version`, and whether the ELE firmware and the OEM containers share a fuse field (§3.2).
 - Which component checks `sw_version` on the i.MX 95 boot path (§3.2).
 - Whether the enclave's strict operation is atomic across a power cut (§5).
-- Whether the i.MX 95 enclave reliably reports an unconfigured counter split or a reached `max_updates_number` to the caller, and how a caller confirms that a given strict operation advanced the counter (§3.1, §4, §7 question 2).
+- Whether the i.MX 95 enclave reliably reports an unconfigured counter split or a reached `max_updates_number` to the caller, and how a caller confirms that the enclave acknowledged both flags for a given operation; a counter read is a diagnostic only, never commit evidence (§3.1, §4, §7 question 2).
 - Where the hardware unique key comes from in upstream OP-TEE 4.8.0 for `mx95` (§3.3).
 - The board's eMMC part, its RPMB size and its endurance. The JEDEC eMMC standard [S5] (needs a login).
 - The NXP SE051 on the board: SE05x applets offer counter objects, but the SE051 documentation is missing (see [SPEC.md](../SPEC.md)), so it was not surveyed.

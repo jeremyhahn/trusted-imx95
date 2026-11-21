@@ -109,8 +109,9 @@ under [Missing](#missing).
 This section proposes a change to the `secure-key-handling` row of [SPEC.md](../SPEC.md). It is not a requirement
 until the owner approves it, and the row's text is unchanged.
 
-- Proposed wording: a key store update counts as committed only when the strict operation is acknowledged with no
-  counter warning, the counter split is configured, and the counter is confirmed to have advanced.
+- Proposed wording: a key store update counts as committed only when both the strict-operation flag and the
+  monotonic-counter flag are acknowledged for that same operation, with no counter warning and the counter split
+  configured. A counter read is a diagnostic only, never evidence of a commit.
 - Reason: past a key store's update cap, or with no counter split written, the enclave accepts updates without
   rollback protection ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). The row's current
   wording, that an acknowledged strict operation also advances the counter, does not hold in those cases.
