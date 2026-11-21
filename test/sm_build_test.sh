@@ -170,10 +170,36 @@ expect "ci: system-manager-build does not call make sm-toolchain-check" \
 expect "ci: system-manager-build does not call docker-run" \
 	bash -c '! grep -Eq "docker-run" <<<"$1"' _ "$job"
 # The container's /src is root-owned (only the copied files are the image
-# user's), so the job must point SM_OUT under the container's $TMPDIR, quoted
-# so the container's shell expands it and not the runner's.
-# shellcheck disable=SC2016 # the pattern matches ci.yml's literal shell text
-expect "ci: system-manager-build sets SM_OUT under the container's \$TMPDIR, expanded by the container's shell" \
-	grep -Eq "sh -c '[^']*SM_OUT=\"\\\$TMPDIR/[^\"']+\"[^']*scripts/sm-toolchain-check\\.sh[^']*'" <<<"$job"
+# user's), so the job must point SM_OUT under the container's $TMPDIR, and the
+# container's shell, not the runner's, must expand it. Behavioural: take the
+# arguments the step hands in-toolchain-image.sh, compose them as the wrapper
+# does (`sh -c "$guard; $*"`), and run them where sm-toolchain-check.sh is a
+# stub that records SM_OUT and fails. The old `sh -c 'SM_OUT=...' script` form
+# ran only the assignment, exited 0 and never ran the script.
+step_line=$(grep -F 'scripts/in-toolchain-image.sh' <<<"$job" | head -n1)
+expect "ci: system-manager-build has one in-toolchain-image.sh call" [ -n "$step_line" ]
+wrapper_guard=$(awk '/^guard=/' "$ROOT/scripts/in-toolchain-image.sh")
+# shellcheck disable=SC2016 # the literal text of the wrapper
+expect "in-toolchain-image.sh composes sh -c \"\$guard; \$*\"" \
+	grep -Fq 'sh -c "$guard; $*"' "$ROOT/scripts/in-toolchain-image.sh"
+cap="$TMP_ROOT/cap"
+croot="$TMP_ROOT/croot"
+mkdir -p "$cap/scripts" "$croot/scripts" "$TMP_ROOT/ctmp"
+# shellcheck disable=SC2016 # the stub's own text
+printf '#!/bin/bash\nprintf "%%s\\0" "$@" >"$ARGS_OUT"\n' >"$cap/scripts/in-toolchain-image.sh"
+# shellcheck disable=SC2016 # the stub's own text
+printf '#!/bin/sh\necho "stub sm-toolchain-check ran SM_OUT=$SM_OUT"\nexit 1\n' >"$croot/scripts/sm-toolchain-check.sh"
+chmod +x "$cap/scripts/in-toolchain-image.sh" "$croot/scripts/sm-toolchain-check.sh"
+# shellcheck disable=SC2016 # expands in the child shell
+run bash -c 'cd "$1" && ARGS_OUT="$2" TOOLCHAIN_IMAGE=img bash -c "$3"' _ "$cap" "$TMP_ROOT/args" "$step_line"
+check "ci: the system-manager-build step line runs" 0 ""
+# shellcheck disable=SC2016 # expands in the child shell
+run bash -c '
+	mapfile -d "" -t a <"$1"
+	eval "$2"
+	shift_args=("${a[@]:1}")
+	cd "$3" && TMPDIR="$4" sh -c "$guard; ${shift_args[*]}"
+' _ "$TMP_ROOT/args" "$wrapper_guard" "$croot" "$TMP_ROOT/ctmp"
+check "ci: system-manager-build runs sm-toolchain-check.sh and its failure reaches the step" nonzero "stub sm-toolchain-check ran SM_OUT=$TMP_ROOT/ctmp/system-manager"
 
 finish
