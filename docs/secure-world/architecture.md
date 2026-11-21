@@ -11,7 +11,7 @@ references give about the cores and the enclave the secure world runs beside, an
 ## Scope (owner ruling 771)
 
 Owner ruling 771 (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
-row, Release criteria). The SPEC.md text that records it is proposed, pending the owner's approval of the file.
+row, Release criteria). The SPEC.md text that records it was approved by the owner on 2026-11-21 (PR #138).
 
 - **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31) and OP-TEE OS from NXP's Linux BSP, at
   the revisions one named NXP Linux BSP release carries. It is not this repository's own code: this repository

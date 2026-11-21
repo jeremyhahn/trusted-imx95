@@ -5,7 +5,7 @@
 
 Owner ruling 927 (2026-11-18) gives the board a firmware TPM 2.0, so that it is provisioned like any other system
 through go-xkms's existing TPM 2.0 workflows: endorse-01, then enroll-01, then device-attest-01 in the `tpm`
-format. Issue #140. The SPEC.md row this file details is proposed, pending the owner's approval of the file.
+format. Issue #140. The SPEC.md row this file details was approved by the owner on 2026-11-21 (PR #138).
 
 Documentation only: nothing here is run, scripted or provisioned. In particular, no RPMB key is programmed and no
 fuse is touched; both are the owner's decision alone ([question 1](#open-questions-for-the-owner)).
