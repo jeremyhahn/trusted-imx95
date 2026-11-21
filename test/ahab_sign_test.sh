@@ -60,6 +60,40 @@ else
 	fail "(a) the run handed back no container in AHAB_OUT_DIR"
 fi
 
+# (e) make ahab-m7-test (issue #12): the container's one image entry targets the
+# Cortex-M7; the parsed core, load and entry address match m7-container.yaml;
+# a flipped payload byte is rejected.
+# yaml_val <key>: the value of the image entry's <key> in m7-container.yaml.
+yaml_val() {
+	local l
+	while IFS= read -r l; do
+		case "$l" in
+		*"$1:"*) l=${l#*"$1:"}; l=${l//[\' ]/}; echo "${l,,}"; return ;;
+		esac
+	done <"$ROOT/scripts/ahab/m7-container.yaml"
+}
+m7out="$TMP_ROOT/m7out"
+mkdir -p "$m7out"
+run env AHAB_OUT_DIR="$m7out" make -C "$ROOT" --no-print-directory ahab-m7-test
+check "(e) make ahab-m7-test builds, signs and verifies a Cortex-M7 container" 0 \
+	"verify: OK" "M7 image entry (nxpimage ahab parse):" "ahab-m7-test: OK"
+m7bin="$m7out/m7-container.bin"
+if [ -s "$m7bin" ]; then
+	for k in core_id load_address entry_point; do
+		want=$(yaml_val "$k")
+		# Compare numerically for addresses: SPSDK prints 0x0 for 0x00000000.
+		case "$k" in core_id) wantv=$want ;; *) wantv=$(printf '0x%x' "$want") ;; esac
+		check "(e) the parsed $k is $wantv, as in m7-container.yaml" 0 "  $k: $wantv"
+	done
+	run "$SIGN" verify "$m7bin"
+	check "(e) the handed-back M7 container passes nxpimage ahab verify" 0 "verify: OK"
+	flip "$m7bin" "$TMP_ROOT/m7-payload.bin" $(($(stat -c %s "$m7bin") - 1))
+	run "$SIGN" verify "$TMP_ROOT/m7-payload.bin"
+	check "(e) an M7 container with one payload byte flipped is rejected" nonzero "verify: FAILED"
+else
+	fail "(e) the M7 run handed back no container in AHAB_OUT_DIR"
+fi
+
 # (c) nothing in the clone is new or changed, and no file git would track
 # (tracked, or untracked and not ignored) holds a private key in text form.
 # Ignored tool directories such as .tools/ hold binaries whose strings

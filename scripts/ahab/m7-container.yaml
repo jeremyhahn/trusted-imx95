@@ -1,0 +1,59 @@
+# nxpimage ahab export configuration for make ahab-m7-test (SPSDK 3.13.0).
+# One OEM container for the i.MX 95 B0 (SPSDK family mimx9596, revision b0)
+# whose single image entry is laid out for the Cortex-M7, signed with a
+# throwaway ECDSA P-384 test SRK. scripts/ahab/sign-test.sh m7 copies this file
+# into its mktemp -d work directory, where every relative path below lives.
+# Nothing here describes a real device or a real key.
+#
+# Sources (docs/boot-container/):
+#   core_id        cortex-m7-1: m7-load-path-survey.md §3 (the -m7 option of
+#                  imx-mkimage adds the M7 image as an image entry). The name
+#                  is SPSDK 3.13.0's only accepted Cortex-M7 core id for
+#                  mimx9596; the numeric AHAB core id is MISSING (U1).
+#   load_address   0x00000000: m7-load-path-survey.md §3 and §5, TCM row
+#                  (M7_TCM_ADDR, the M7's own view of its TCM), the first
+#                  address argument of mkimage's -m7 option.
+#   entry_point    0x303C0000: m7-load-path-survey.md §3 (M7_TCM_ADDR_ALIAS, the
+#                  same TCM seen from the system bus), the second address
+#                  argument of -m7. Which of the two addresses the ROM or ELE
+#                  treats as load and which as entry is not stated in the
+#                  survey: MISSING (U1), needs IMX95RM.
+#                  The TCM is inside the M7MIX ranges the System Manager grants
+#                  the M7 (system-manager-config/build.md §5, memory row).
+#                  The DDR alternative (0x80000000, survey §5, DDR row) is not
+#                  used: the survey's owner question 10.1 is open.
+#   image_type     executable: m7_image.bin is firmware the core runs
+#                  (m7-load-path-survey.md §8). SPSDK's name for the AHAB
+#                  image type code is not in the surveys: MISSING (U1).
+#   hash_type      sha384: the algorithm of the P-384 test PKI
+#                  (signing-pipeline.md); the real device's choice is MISSING.
+#
+# MISSING (real device): TCM sizes and the ITCM/DTCM split (survey U2), the
+#   boot ROM's order of copy and authenticate (U1), the container version,
+#   fuse_version and the SRK hash fuse values (as in container.yaml, U3).
+#   sw_version and fuse_version are 0 for this test container only.
+family: mimx9596
+revision: b0
+target_memory: standard
+output: m7-container.bin
+containers:
+  - container:
+      srk_set: oem
+      used_srk_id: 0
+      srk_revoke_mask: '0x00'
+      fuse_version: 0
+      sw_version: 0
+      signer: type=file;file_path=srk0.pem
+      images:
+        - image_path: payload.bin
+          load_address: '0x00000000'
+          entry_point: '0x303C0000'
+          image_type: executable
+          core_id: cortex-m7-1
+          hash_type: sha384
+      srk_table:
+        srk_array:
+          - srk0.pub
+          - srk1.pub
+          - srk2.pub
+          - srk3.pub

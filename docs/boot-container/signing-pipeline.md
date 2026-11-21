@@ -49,6 +49,35 @@ NXP's prebuilt glibc `libuuu.so`, which `nxpimage ahab export` and `verify` neve
 pipeline runs on musl. Board flashing through `nxpuuu` would load that library and is not part of
 this pipeline.
 
+## M7 container
+
+`make ahab-m7-test` (`scripts/ahab/sign-test.sh m7 [<payload file>]`, or `M7_PAYLOAD=<file> make
+ahab-m7-test`) builds, with the same test PKI and steps as above, one OEM container whose single image
+entry is laid out for the Cortex-M7 of trusted-firmware's `imx95` row, from
+[scripts/ahab/m7-container.yaml](../../scripts/ahab/m7-container.yaml). The default payload is a
+generated 4 KiB random stand-in (not an ELF). After `nxpimage ahab verify` the run prints the entry's
+fields from `nxpimage ahab parse` (the parse output and the `.bcf` fuse script stay in the work
+directory or are deleted unread). `test/ahab_sign_test.sh` checks that it verifies, that the parsed core,
+load and entry address match the yaml, and that a flipped payload byte is rejected. The board step
+(boot it, read the ELE events) is out of scope.
+
+| Field | Value | Source |
+|---|---|---|
+| `core_id` | `cortex-m7-1` | [m7-load-path-survey.md](m7-load-path-survey.md) §3 (the `-m7` image entry); the only M7 name SPSDK 3.13.0 accepts for `mimx9596` |
+| `load_address` | `0x0` | survey §3 and §5, TCM row: the M7's own view of its TCM (first address of mkimage's `-m7`) |
+| `entry_point` | `0x303C0000` | survey §3: the TCM seen from the system bus (second address of `-m7`) |
+| `image_type` | `executable` | survey §8 (`m7_image.bin` is firmware the core runs) |
+| `hash_type` | `sha384` | the test PKI's P-384 (this page) |
+
+The TCM lies in the M7MIX ranges the System Manager grants the M7
+([system-manager-config/build.md](../system-manager-config/build.md) §5). The DDR window
+(`0x80000000`, survey §5) is not used: the survey's owner question 10.1 (TCM or DDR) is open.
+
+Stays MISSING, never guessed: which of the two addresses the ROM or ELE treats as load and which as
+entry (survey U1, needs IMX95RM); the numeric AHAB core id and image type codes behind SPSDK's names
+(U1); the TCM sizes and ITCM/DTCM split (U2); the container version, `fuse_version` and SRK hash fuse
+values for a real device (U3, as above).
+
 ## MISSING
 
 - The container's anti-rollback `fuse_version` and header version for a real device, and a real
