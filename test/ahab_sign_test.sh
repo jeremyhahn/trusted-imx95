@@ -60,12 +60,14 @@ else
 	fail "(a) the run handed back no container in AHAB_OUT_DIR"
 fi
 
-# (c) nothing in the clone is new or changed, and no untracked or ignored
-# file holds a private key.
+# (c) nothing in the clone is new or changed, and no file git would track
+# (tracked, or untracked and not ignored) holds a private key in text form.
+# Ignored tool directories such as .tools/ hold binaries whose strings
+# include the PEM markers.
 changed=$(find "$ROOT" -path "$ROOT/.git" -prune -o -newer "$stamp" -print)
 if [ -z "$changed" ]; then pass "(c) the run wrote nothing inside the clone"; else
 	fail "(c) the run wrote inside the clone" "$changed"; fi
-keys=$(git -C "$ROOT" ls-files -z --others | xargs -0 -r -I{} grep -l -E 'BEGIN (EC |ENCRYPTED )?PRIVATE KEY' "$ROOT/{}" 2>/dev/null || true)
+keys=$(git -C "$ROOT" ls-files -z --cached --others --exclude-standard | xargs -0 -r -I{} grep -l -I -E 'BEGIN (EC |ENCRYPTED )?PRIVATE KEY' "$ROOT/{}" 2>/dev/null || true)
 if [ -z "$keys" ]; then pass "(c) no private key under the clone"; else
 	fail "(c) private key material under the clone" "$keys"; fi
 
