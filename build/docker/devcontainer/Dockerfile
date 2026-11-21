@@ -42,6 +42,16 @@ FROM base AS toolchain
 # is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
 RUN apk add --no-cache curl jq ca-certificates openssh-keygen xz perl gcompat
 COPY --from=fetch /out/bin/ /usr/local/bin/
+# SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
+# scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
+# SHA-256 in scripts/ahab, into /opt/spsdk. CI stages run without network, so
+# the venv is built here. py3-pip is needed for the install only.
+COPY scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt /pins/ahab/
+RUN apk add --no-cache --virtual .spsdk-build py3-pip \
+ && SPSDK_VENV=/opt/spsdk bash /pins/ahab/spsdk-venv.sh \
+ && apk del --no-cache .spsdk-build \
+ && rm -rf /tmp/.cache /pins/ahab
+ENV SPSDK_VENV=/opt/spsdk
 USER 10001
 
 FROM base AS integration

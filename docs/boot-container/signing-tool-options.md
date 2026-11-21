@@ -4,6 +4,10 @@ Status: survey and recommendation for the owner. Nothing is decided until the ow
 questions at the end. This is the decision record for issue #30, in the `boot-container` row of
 [docs/SPEC.md](../SPEC.md), which unblocks #9.
 
+Decision (owner, 2026-11-21): SPSDK 3.13.0, ECDSA P-384, for board silicon i.MX 95 B0 (revision
+2.0, SPSDK family `mimx9596` revision `b0`). The test-PKI pipeline that uses it is
+[signing-pipeline.md](signing-pipeline.md). The other questions at the end stay open.
+
 Scope: the tool that builds and signs the AHAB containers of the platform image, with the signing
 key held in an HSM (go-xkms custody, per the SPEC row). This record says nothing about fuses,
 life-cycle changes or provisioning, and it contains no such steps.
