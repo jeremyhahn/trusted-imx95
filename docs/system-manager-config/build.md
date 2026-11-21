@@ -155,7 +155,9 @@ downloading anything, then in each build checks the upstream file's SHA-256, app
 fault lines, each from `lm_reset` to `sys_reset` or `sys_shutdown`. Section 4's plan is thus followed, with the patch
 under `system-manager/patches/`. Any change rebuilds the image and the boot container, which must be re-signed.
 
-`make system-manager` with the patch: see the result recorded below once run (not yet run in this slice).
+`make system-manager` with the patch ran on 2026-11-21 in the lane's container: both builds are byte-identical,
+`m33_image.bin` SHA-256 `3ef1c54c829a8bd775dfc3d4f263eb06d8a61e565a3f4f74025d51d9a82f6e85`. The image is a build
+output only.
 
 ## 7. Not confirmed
 
