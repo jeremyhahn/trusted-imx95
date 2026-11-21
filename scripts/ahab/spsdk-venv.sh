@@ -30,10 +30,6 @@ case "$venv/" in "$root"/*) die "SPSDK_VENV=$SPSDK_VENV is inside the clone; it 
 if [ ! -x "$venv/bin/nxpimage" ]; then
 	[ ! -e "$venv" ] || [ -z "$(ls -A "$venv")" ] ||
 		die "$venv exists but holds no nxpimage; remove it or point SPSDK_VENV elsewhere"
-	# libuuu, which nxpimage imports, publishes glibc (manylinux) wheels only.
-	libc=$(python3 -I -c 'import platform; print(platform.libc_ver()[0] or "not glibc")')
-	[ "$libc" = glibc ] ||
-		die "SPSDK $SPSDK_PIN needs libuuu, which has no musllinux wheel; this python3 runs on $libc. Run on a glibc host (docs/boot-container/signing-pipeline.md)"
 	python3 -m pip --version >/dev/null 2>&1 || die "python3 -m pip is not available; it installs the pinned closure"
 	mkdir -p "$venv"
 	trap 'rm -rf "$venv"' EXIT

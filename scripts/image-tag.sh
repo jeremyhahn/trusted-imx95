@@ -15,7 +15,8 @@ cd "$root"
 
 case "$family" in
 toolchain)
-	hash=$(cat build/docker/devcontainer/Dockerfile scripts/tool-pins.sh scripts/fetch-tools.sh | sha256sum)
+	hash=$(cat build/docker/devcontainer/Dockerfile scripts/tool-pins.sh scripts/fetch-tools.sh \
+		scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt | sha256sum)
 	echo "${name}-toolchain:${hash:0:16}"
 	;;
 integration)
