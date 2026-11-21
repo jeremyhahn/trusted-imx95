@@ -79,7 +79,7 @@ Two choices here differ from the wording elsewhere:
 
 ## The flags
 
-TF-A: `PLAT=imx95 SPD=opteed bl31`, the release recipe's arguments for a machine with the `optee` feature.
+TF-A: `PLAT=imx95 SPD=opteed bl31`, the upstream TF-A imx95 platform build arguments this repository uses.
 
 OP-TEE, set on each OP-TEE make:
 
@@ -126,12 +126,13 @@ output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' 
 | 1 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
 | 2 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
 
-The hashes belong to one OP-TEE configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes
-from the script (its `optee_flags` array and its final OP-TEE make call, whitespace squeezed). The test fails when the
-script's OP-TEE configuration differs from the one recorded here, so hashes cannot outlive a flag change. Record the
-new digest together with new hashes.
+The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
+`TFA_REPO` and `TFA_COMMIT` from `secure-world/bsp.lock`, the script's `bl31` make call, its `optee_flags` array and
+its final OP-TEE make call, whitespace squeezed. The test fails when the TF-A pin, the bl31 arguments or the OP-TEE
+flags differ from the configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new
+digest together with new hashes.
 
-OP-TEE configuration digest: `174db38e8d8fd72a1a4f023b410063c1c0b3710bd89d80fdc3878228957e0eea`
+Build configuration digest: `85e2abd683b958a150324c100369b90d65cc971622e9029dc008c4eb1b84960e`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
