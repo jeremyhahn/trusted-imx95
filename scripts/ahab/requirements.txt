@@ -5,8 +5,9 @@
 # pure Python). scripts/ahab/spsdk-venv.sh installs it with
 # `pip install --require-hashes` into a venv outside the tree.
 #
-# libuuu publishes manylinux wheels only, and SPSDK 3.13.0 imports it in
-# nxpimage: the closure does not install on musl (the Alpine devcontainer).
+# libuuu publishes manylinux wheels only; on musl (the Alpine devcontainer)
+# pip installs its pinned sdist, which compiles nothing: it packages NXP's
+# prebuilt glibc libuuu.so, which nxpimage ahab export and verify never load.
 # See docs/boot-container/signing-pipeline.md.
 #
 # Upgrade by a reviewed PR that re-resolves the closure (pip download
