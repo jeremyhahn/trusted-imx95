@@ -72,8 +72,11 @@ not sought. Where SPEC.md relies on them, this file says so and does not restate
 - So the flag is not fail-closed on its own. The enclave still accepts updates past the counter
   cap, and with no counter split written it gives warnings and no rollback protection
   ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1). The caller has to reject every
-  counter warning, confirm that the counter split is configured, and confirm that the counter
-  advanced, before it treats a persistent update (above all a deletion or rotation) as committed.
+  counter warning, confirm that the counter split is configured, and require the enclave's
+  acknowledgement of both the strict-operation flag and the monotonic-counter flag for that same
+  operation, before it treats a persistent update (above all a deletion or rotation) as committed. An
+  operation acknowledged with only one flag is not rollback-protected. A counter read is a
+  diagnostic only and is never evidence of a commit.
 - This agrees with the row's statement in [SPEC.md](../SPEC.md) (`secure-key-handling`), which cites
   RM00284 §2.4.2.
 
@@ -250,8 +253,9 @@ Rules the proposal follows, each from §3–§4:
   public-key export call (§3.1).
 - Every persistent change is committed with the strict flag in batches per group, so the one-way
   counter lasts the product's life (§3.3). Groups are laid out by write frequency: the identity group
-  is written once, client-key groups often. A commit counts only once it is acknowledged with no
-  counter warning and the counter is confirmed to have advanced. Once the counter or the store's cap
+  is written once, client-key groups often. A commit counts only once the enclave acknowledged both
+  the strict-operation flag and the monotonic-counter flag for that operation, with no counter
+  warning. A counter read is a diagnostic only, not evidence of a commit. Once the counter or the store's cap
   is used up, persistent changes are refused rather than accepted unprotected (§3.3).
 - No production key carries the permanent attribute unless the owner wants it irrevocable (§4.4).
 - Development keys are made with an open life-cycle mask and production keys with a closed one, so a
