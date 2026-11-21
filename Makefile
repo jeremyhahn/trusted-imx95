@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager
 
 help: ## List the targets
 	@echo "Targets:"
@@ -150,6 +150,14 @@ tools: ## Install the pinned, digest-checked tools of scripts/tool-pins.sh into 
 		{ echo "tools: the pins are Linux x86_64 releases, this is $$(uname -s)-$$(uname -m)"; exit 1; }
 	@sh scripts/fetch-tools.sh scripts/tool-pins.sh $(TOOLS_DIR)
 	@echo "tools: OK ($(PINNED_TOOLS) in .tools/bin)"
+
+## --- NXP's System Manager (docs/system-manager-config/build.md) ---
+
+system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in clean trees; fail unless identical
+	@scripts/sm-build.sh system-manager/sm.lock
+
+sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
+	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 

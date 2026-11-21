@@ -19,7 +19,8 @@ None yet.
 
 ## Now
 
-None yet.
+- **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — issue #12 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
+- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — pinned, reproducible System Manager build exists (`make system-manager`, [build record](docs/system-manager-config/build.md)); imx-sm revision provisional until #14 Q2; board configuration unchanged, not flashed or signed — blocked: owner approval
 
 ## Next
 
@@ -30,8 +31,6 @@ None yet.
 Planned, undated. No issue is filed yet; each line gets its issue once the owner approves this file.
 
 - **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — no issue yet — blocked: owner approval; image build open
-- **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
-- **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — no issue yet — blocked: owner approval; System Manager documentation missing
 - **secure-world** — the board's secure world — no issue yet — blocked: owner approval; scope open
 - **secure-key-handling** — keys held in the EdgeLock key store, never in the clear — no issue yet — blocked: owner approval; calling side and SE051 role open
 - **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing

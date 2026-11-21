@@ -1,0 +1,31 @@
+# system-manager/sm.lock: the pins `make system-manager` builds from
+# (scripts/sm-build.sh; docs/system-manager-config/build.md).
+#
+# key=value lines; the script parses them, it never sources this file.
+# Provisional: imx-sm as NXP's BSP release lf-6.18.37-2.1.0 ships it, the
+# baseline docs/platform-image/build-system-options.md recommends; the owner
+# has not chosen the BSP yet (#14 Q2). Every hash below was read from its
+# source on 2026-11-20, none is typed by hand.
+
+# NXP's System Manager. The tag lf-6.18.37-2.1.0 is an annotated tag on this
+# commit; rel_imx_sm_2026q3 names the same commit (git ls-remote).
+sm_repo=https://github.com/nxp-imx/imx-sm
+sm_tag=lf-6.18.37-2.1.0
+sm_commit=eec232878ab7dd460f5a8f3767d39dc7e9412efa
+
+# The FRDM-IMX95-PRO's board configuration, as meta-imx's machine
+# imx95-19x19-lpddr5-frdm-pro names it (SYSTEM_MANAGER_CONFIG). Upstream and
+# unchanged: the build fails when the file's SHA-256 differs.
+sm_config=mx95frdm-pro
+sm_config_file=configs/other/mx95frdm-pro.cfg
+sm_config_sha256=37d8f4c2b324cdc8dafb1de3f3f741850c86ca2e842880b9fdbdc16db72c1d63
+
+# The monitor mode meta-imx's recipe passes (SYSTEM_MANAGER_MONITOR_MODE ??= 2).
+# Production's choice is open (sm-build-survey.md section 10, question 4).
+sm_monitor_mode=2
+
+# Arm GNU Toolchain, the version imx-sm's makefiles default to (TC_VERSION).
+# The digest is the one Arm publishes beside the tarball (.sha256asc).
+toolchain_version=15.2.rel1
+toolchain_url=https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi.tar.xz
+toolchain_sha256=597893282ac8c6ab1a4073977f2362990184599643b4c5ee34870a8215783a16

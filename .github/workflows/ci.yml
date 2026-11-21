@@ -1168,6 +1168,55 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/gomodauth.env"
 
+
+  # The real pinned Arm toolchain, in the supported container: builds the
+  # toolchain image, runs `make system-manager` in it (downloads the pinned
+  # toolchain and imx-sm, compiles and links twice, fails unless identical) and
+  # checks the compiler runs and the artefacts exist (scripts/sm-toolchain-check.sh).
+  system-manager-build:
+    name: System Manager build with the pinned Arm toolchain
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: ${{ !github.event.pull_request.draft && (needs.preflight.outputs.verdict == 'run' || needs.preflight.outputs.verdict == 'proven') }}
+    timeout-minutes: 45
+    env:
+      CI_STACK_PREFIX: ${{ github.event.repository.name }}-ci-
+      CI_CACHE_CLASS: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'main' || 'pr' }}
+      CI_IMAGE_NAMESPACE: ${{ vars.CI_IMAGE_NAMESPACE }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Pull the toolchain image from the registry cache
+        run: scripts/ci-image-cache.sh pull || true
+
+      # The toolchain image alone, as in the history-scan job.
+      - name: Build the toolchain image
+        run: |
+          ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
+            for v in GOPRIVATE; do
+              if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
+            done )
+          bp=
+          if [ -n "${DEVCACHE_GOPROXY:-}" ] && curl -s -o /dev/null --max-time 5 "$DEVCACHE_GOPROXY/"; then
+            bp="GO_BUILD_PROXY=$DEVCACHE_GOPROXY|https://proxy.golang.org"
+          fi
+          make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
+          rm -f "$RUNNER_TEMP/gomodauth.env"
+          ref=$(make -s toolchain-ref)
+          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
+
+      # The checkout is copied into the container, never bind-mounted: the
+      # runner reaches its daemon through a socket (in-toolchain-image.sh).
+      - name: sm-toolchain-check
+        env:
+          IN_IMAGE_NETWORK: bridge
+        # /src is root's in the container: build under its writable $TMPDIR.
+        run: |
+          # shellcheck disable=SC2016 # the container's shell expands $TMPDIR
+          scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" 'SM_OUT="$TMPDIR/system-manager" scripts/sm-toolchain-check.sh'
+
   # v1.21: every stage runs in the project's own devcontainer image and no
   # other (ci-standard.md §2, devcontainer.md §7). One image job (Company Agent
   # m601 (a)) builds the images once from build/docker/devcontainer/Dockerfile
@@ -2042,7 +2091,7 @@ jobs:
     # CUSTOMIZE: the repo's job list. Add every CUSTOMIZE job here AND as a
     # check line below; remove none of the template's jobs. v1.30: lint
     # joins; publish-images is the one job outside the gate (see its comment).
-    needs: [preflight, lint, history-scan, releasability, image, lint-gates, integration, soak]   # v1.34; v1.35.2 signatures.yml
+    needs: [preflight, lint, history-scan, system-manager-build, releasability, image, lint-gates, integration, soak]   # v1.34; v1.35.2 signatures.yml
     steps:
       - name: Fail closed on any non-success
         env:
@@ -2111,6 +2160,7 @@ jobs:
           check preflight   "${{ needs.preflight.result }}" pr
           check lint        "${{ needs.lint.result }}" pr
           check history-scan "${{ needs.history-scan.result }}" always
+          check system-manager-build "${{ needs.system-manager-build.result }}" pr
           check releasability "${{ needs.releasability.result }}" always
           check image       "${{ needs.image.result }}" code
           check lint-gates  "${{ needs.lint-gates.result }}" scoped
