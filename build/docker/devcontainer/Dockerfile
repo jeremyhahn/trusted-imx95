@@ -18,7 +18,7 @@ FROM ${ALPINE_IMAGE} AS base
 # tar: GNU tar, for scripts/in-toolchain-image.sh's --owner/--group/
 # --numeric-owner stream (BusyBox tar refuses those options).
 RUN apk upgrade --no-cache \
- && apk add --no-cache bash coreutils make git python3 tar \
+ && apk add --no-cache bash coreutils make git python3 tar xz \
  && git config --system --add safe.directory '*' \
  && adduser -D -u 10001 dev
 ENV HOME=/tmp
@@ -36,11 +36,12 @@ FROM base AS toolchain
 # ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
 # Alpine's git package does not supply it. Like every package here, its
 # version is the pinned Alpine release's.
-# xz, perl: scripts/sm-build.sh unpacks a .tar.xz toolchain and requires perl
-# (imx-sm's build); test/sm_build_test.sh runs it here.
+# uv: scripts/secure-world-build.sh's hash-checked wheel install.
+# xz, perl: scripts/sm-build.sh and scripts/secure-world-build.sh unpack .tar.xz;
+# imx-sm's build requires perl. test/sm_build_test.sh runs it here.
 # gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
 # is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen xz perl gcompat
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat
 COPY --from=fetch /out/bin/ /usr/local/bin/
 USER 10001
 
