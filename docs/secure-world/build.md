@@ -116,15 +116,15 @@ The hashes below are of the final configuration: both OP-TEE builds set `CFG_REE
 `ree_fs_check_update_ta_version`, which `CFG_REE_FS_TA=n` leaves out, so the image did not link without it. The secure
 storage TA management PTA installs TAs into REE FS storage, which this build does not load from.
 
-Verified on 2026-11-20: two clean `make secure-world` builds of this script (the commit after 58c02f8 that adds
-`CFG_SECSTOR_TA_MGMT_PTA=n`), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each with an empty work,
+Verified on 2026-11-21: two clean `make secure-world` builds of this script at the upstream TF-A v2.15.0 pin
+(`da738d5e`; the earlier hashes were of the imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each with an empty work,
 output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' artefacts are identical byte for byte
 (`cmp`).
 
 | Build | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
 |---|---|---|
-| 1 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
-| 2 | `434ebe4a29c090456064eb5c3ea7a0d56d4582d013d36d1e613f54891c920f4b` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+| 1 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+| 2 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
 
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
 `TFA_REPO` and `TFA_COMMIT` from `secure-world/bsp.lock`, the script's `bl31` make call, its `optee_flags` array and
@@ -161,7 +161,7 @@ The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md
 not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
-- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds of the final
-  configuration were identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
+- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds at the upstream TF-A v2.15.0 pin
+  and the final OP-TEE configuration were identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.
