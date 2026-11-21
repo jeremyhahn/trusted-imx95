@@ -45,7 +45,8 @@ if [ ! -x "$venv/bin/nxpimage" ]; then
 	trap - EXIT
 fi
 
-got=$("$venv/bin/nxpimage" --version 2>&1 || true)
+# stdout only: SPSDK logs cache warnings to stderr on a first run.
+got=$("$venv/bin/nxpimage" --version 2>/dev/null || true)
 [ "$got" = "nxpimage, version $SPSDK_PIN" ] ||
 	die "$venv/bin/nxpimage reports '$got'; the pin is SPSDK $SPSDK_PIN ($req)"
 echo "$venv"

@@ -88,7 +88,8 @@ libusb-package==1.0.30.1 \
 libusbsio==2.2.1 \
     --hash=sha256:7374a0b5754adb2ab9701e33e0a30ab64819d192bee972fd1f5a0ce3fc54380c
 libuuu==1.5.243 \
-    --hash=sha256:9e23ad9107f66fb36e7bce9d4657b7f674853c121f7e5b8cf7b433fd3d1c3119
+    --hash=sha256:9e23ad9107f66fb36e7bce9d4657b7f674853c121f7e5b8cf7b433fd3d1c3119 \
+    --hash=sha256:93b0c556baa41f33cb8d931d5b22dd7dac32392c3e2fb062e2845d789a3a971c
 oscrypto==1.3.0 \
     --hash=sha256:2b2f1d2d42ec152ca90ccb5682f3e051fb55986e1b170ebde472b133713e7085
 packaging==26.3 \
