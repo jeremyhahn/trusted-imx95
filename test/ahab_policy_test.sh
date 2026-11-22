@@ -25,15 +25,16 @@ mkman() {
 		for p in "$@"; do
 			case "$p" in
 			nxp) printf '  - role: nxp\n    sha256: policy\n' ;;
-			m7) printf '  - role: oem\n    images:\n      - core_id: cortex-m7-1\n        image_type: executable\n' ;;
-			a55) printf '  - role: oem\n    images:\n      - core_id: cortex-a55\n        image_type: data\n' ;;
+			m7) printf '  - role: oem\n    images:\n      - core_id: cortex-m7-1\n        image_type: executable\n        sha256: %s\n        load_address: "%s"\n        entry_point: "%s"\n' "$M7_SHA" "$M7_LOAD" "$M7_ENTRY" ;;
+			a55) printf '  - role: oem\n    images:\n      - core_id: cortex-a55\n        image_type: data\n        sha256: %s\n        load_address: "%s"\n' "$A55_SHA" "$A55_LOAD" ;;
 			esac
 		done
 	} >"$f"
 }
 # The field tests below run policy-check.sh on A55-only images: POLICY is the
-# real script with PC_MANIFEST (default: one OEM A55 container) as its manifest.
-mkman "$TMP_ROOT/single.yaml" a55
+# real script with PC_MANIFEST (default: one OEM A55 container) as its manifest;
+# single.yaml is written once the container exists (its image values are read
+# from the container below).
 # shellcheck disable=SC2016 # the wrapper's own $# and $@ stay literal
 printf '#!/usr/bin/env bash\n[ $# -eq 2 ] && set -- "$@" "${PC_MANIFEST:-%s}"\nexec "%s" "$@"\n' "$TMP_ROOT/single.yaml" "$REAL" >"$TMP_ROOT/pc"
 chmod +x "$TMP_ROOT/pc"
@@ -74,7 +75,39 @@ if [[ ! "$hash" =~ ^[0-9A-Fa-f]{16,}$ || ! "$id" =~ ^[0-9]+$ || ! "$mask" =~ ^(0
 	exit 1
 fi
 
-# mkpol <file> <hash> <id> <mask> <min>: a complete policy file.
+# imgrec <bin>: "<sha256 of the first image's bytes> <load address> <entry point>"
+# as SPSDK parses the first container's first image entry.
+imgrec() {
+	"$venv/bin/python" -I -c '
+import hashlib, sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+d = open(sys.argv[1], "rb").read()
+o = AHABImage.find_offset_of_ahab(d, True)
+i = AHABImage.parse(d[o:], FamilyRevision("mimx9596", "b0")).ahab_containers[0].image_array[0]
+print(hashlib.sha256(d[o + i.image_offset:o + i.image_offset + i.image_size]).hexdigest(), "0x%x" % i.load_address, "0x%x" % i.entry_point)
+' "$1"
+}
+# nxprec <bin>: "<hash> <id> <mask> <fuse>" of the first container's own record.
+nxprec() {
+	"$venv/bin/python" -I -c '
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+d = open(sys.argv[1], "rb").read()
+o = AHABImage.find_offset_of_ahab(d, True)
+c = AHABImage.parse(d[o:], FamilyRevision("mimx9596", "b0")).ahab_containers[0]
+print(c.signature_block.srk_assets.compute_srk_hash().hex().upper(), int(str(c.flag_used_srk_id), 0), int(str(c.flag_srk_revoke_mask), 0), int(str(c.fuse_version), 0))
+' "$1"
+}
+read -r A55_SHA A55_LOAD _ <<<"$(imgrec "$bin")"
+M7_SHA=$A55_SHA M7_LOAD=0x00000000 M7_ENTRY=0x303C0000
+mkman "$TMP_ROOT/single.yaml" a55
+
+# mkpol <file> <hash> <id> <mask> <min>: a complete policy file; the vendor
+# record is a placeholder (VREC) unless a test sets it: an image with no nxp
+# container never compares it, but the file must carry it.
+VREC=(NXP_SRK_TABLE_HASH=00 NXP_USED_SRK_ID=0 NXP_SRK_REVOKE_MASK=0 NXP_FUSE_VERSION=0)
 mkpol() {
 	{
 		echo "# test policy, written from the container's own values"
@@ -83,6 +116,7 @@ mkpol() {
 		echo "USED_SRK_ID=$3"
 		echo "SRK_REVOKE_MASK=$4"
 		echo "FUSE_VERSION_MIN=$5"
+		printf '%s\n' "${VREC[@]}"
 	} >"$1"
 }
 
@@ -219,6 +253,12 @@ for i in 0 1 2 3 4 5 6 7; do
 		{ tail -n 3 "$pki/keygen.log"; fail "nxpcrypto key generate failed for srk$i"; finish; exit 1; }
 done
 head -c 4096 /dev/urandom >"$pki/payload.bin"
+head -c 4096 /dev/urandom >"$pki/payload2.bin"
+PAY_SHA=$(sha256sum "$pki/payload.bin")
+PAY_SHA=${PAY_SHA%% *}
+# The images built from here carry payload.bin: the default manifest binds its digest.
+A55_SHA=$PAY_SHA A55_LOAD=0x90000000 M7_SHA=$PAY_SHA
+mkman "$TMP_ROOT/single.yaml" a55
 
 # ymlc <fuse_version> <first SRK of the table, 0 or 4> [srk_set]: one container
 # block (srk_set oem, nxp or none; default oem).
@@ -227,6 +267,7 @@ ymlc() {
 	if [ "${4:-a55}" = m7 ]; then
 		core=cortex-m7-1 type=executable load=0x00000000 entry=0x303C0000
 	fi
+	[ -z "${6:-}" ] || load=$6
 	echo "  - container:"
 	echo "      srk_set: ${3:-oem}"
 	echo "      used_srk_id: 0"
@@ -235,7 +276,7 @@ ymlc() {
 	echo "      sw_version: 0"
 	echo "      signer: type=file;file_path=srk$2.pem"
 	echo "      images:"
-	echo "        - image_path: payload.bin"
+	echo "        - image_path: ${5:-payload.bin}"
 	echo "          load_address: '$load'"
 	echo "          entry_point: '$entry'"
 	echo "          image_type: $type"
@@ -249,12 +290,12 @@ ymlc() {
 	echo "          - srk$(($2 + 3)).pub"
 }
 # mkbin <name> <container spec>...: builds $pki/<name>.bin, one
-# "<fuse>:<srk base>[:<srk_set>[:<m7|a55>]]" per container; the first container's SRK table hash goes to $pki/<name>.hash.
+# "<fuse>:<srk base>[:<srk_set>[:<m7|a55>[:<payload file>[:<load address>]]]]" per container; the first container's SRK table hash goes to $pki/<name>.hash.
 mkbin() {
-	local name=$1 spec sf sb ss sk
+	local name=$1 spec sf sb ss sk sp sl
 	shift
 	mkdir "$pki/$name.d"
-	cp "$pki"/*.pem "$pki"/payload.bin "$pki/$name.d/"
+	cp "$pki"/*.pem "$pki"/payload.bin "$pki"/payload2.bin "$pki/$name.d/"
 	for i in 0 1 2 3 4 5 6 7; do cp "$pki/srk$i.pub" "$pki/$name.d/" 2>/dev/null || true; done
 	{
 		echo "family: mimx9596"
@@ -263,8 +304,8 @@ mkbin() {
 		echo "output: $name.bin"
 		echo "containers:"
 		for spec in "$@"; do
-			IFS=: read -r sf sb ss sk <<<"$spec"
-			ymlc "$sf" "$sb" "${ss:-oem}" "${sk:-a55}"
+			IFS=: read -r sf sb ss sk sp sl <<<"$spec"
+			ymlc "$sf" "$sb" "${ss:-oem}" "${sk:-a55}" "${sp:-payload.bin}" "${sl:-}"
 		done
 	} >"$pki/$name.d/c.yaml"
 	(cd "$pki/$name.d" && "$venv/bin/nxpimage" ahab export -c c.yaml) >"$pki/$name.log" 2>&1 ||
@@ -292,6 +333,7 @@ if mkbin f3 3:0; then
 	check "C4: a container with fuse_version 3 is rejected at floor 4" 1 "policy: fuse_version MISMATCH (container 3, policy >= 4)" "policy: FAILED"
 fi
 
+# From here the images are built from payload.bin: the manifests bind its digest.
 # Several containers: each is checked, not only the first. Two OEM A55 containers.
 mkman "$pki/two.yaml" a55 a55
 if mkbin two-ok 3:0 3:0; then
@@ -333,31 +375,104 @@ nxpdigest() {
 	s=$(sha256sum "$d/ahab_nxp_containers_0.bin")
 	echo "${s%% *}"
 }
-# mixpol <file> <oem hash> <nxp digest>
+# mixpol <file> <oem hash> <nxp digest> [<image name>]: with a name, the vendor
+# record is that image's first container's own record.
 mixpol() {
+	local rec
+	if [ -n "${4:-}" ]; then
+		read -r -a rec <<<"$(nxprec "$pki/$4.bin")"
+		VREC=("NXP_SRK_TABLE_HASH=${rec[0]}" "NXP_USED_SRK_ID=${rec[1]}" "NXP_SRK_REVOKE_MASK=${rec[2]}" "NXP_FUSE_VERSION=${rec[3]}")
+	fi
 	mkpol "$1" "$2" 0 0 0
 	echo "NXP_CONTAINER_SHA256=$3" >>"$1"
+	VREC=(NXP_SRK_TABLE_HASH=00 NXP_USED_SRK_ID=0 NXP_SRK_REVOKE_MASK=0 NXP_FUSE_VERSION=0)
+}
+# dropkey <src> <dst> <KEY>: <src> without the line for KEY.
+dropkey() {
+	local l
+	while IFS= read -r l; do
+		case "$l" in "$3="*) ;; *) echo "$l" ;; esac
+	done <"$1" >"$2"
 }
 mkman "$pki/mix.yaml" nxp m7 a55
 if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dg=$(nxpdigest full); then
 	h=$(<"$pki/full.hash")
-	mixpol "$pki/full.policy" "$h" "$dg"
+	mixpol "$pki/full.policy" "$h" "$dg" full
 	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/mix.yaml"
 	check "a complete mixed-signer image (nxp, OEM M7, OEM A55) passes" 0 \
 		"policy: position 0 nxp container sha256 OK" "policy: position 1 oem image entries OK" "policy: position 2 oem image entries OK" \
 		"policy: 3 container(s) to check" "policy: srk_table_hash [container 2] OK" "policy: OK"
-	mkpol "$pki/full-env.policy" "$h" 0 0 0
+	dropkey "$pki/full.policy" "$pki/full-env.policy" NXP_CONTAINER_SHA256
 	run env NXP_CONTAINER_SHA256="$dg" "$REAL" "$pki/full.bin" "$pki/full-env.policy" "$pki/mix.yaml"
 	check "the nxp pin comes from the environment when the policy file has none" 0 "policy: position 0 nxp container sha256 OK" "policy: OK"
 	run "$REAL" "$pki/full.bin" "$pki/full-env.policy" "$pki/mix.yaml"
 	check "no nxp pin anywhere fails" 1 "no 64-hex sha256 pin" "policy: FAILED"
-	# The OEM policy is not applied to the nxp container: a different used_srk_id there is no mismatch.
-	{ cat "$pki/full.policy"; echo "NXP_USED_SRK_ID=1"; } >"$pki/full-vid.policy"
+	# The vendor record is compared against the nxp container only, and is exact.
+	dropkey "$pki/full.policy" "$pki/full-vid.policy" NXP_USED_SRK_ID
+	echo "NXP_USED_SRK_ID=1" >>"$pki/full-vid.policy"
 	run "$REAL" "$pki/full.bin" "$pki/full-vid.policy" "$pki/mix.yaml"
 	check "a vendor record is compared against the nxp container only" 1 "policy: nxp_used_srk_id [container 0] MISMATCH" "policy: FAILED"
-	{ cat "$pki/full.policy"; echo "NXP_FUSE_VERSION_MIN=0"; echo "NXP_USED_SRK_ID=0"; echo "NXP_SRK_REVOKE_MASK=0"; } >"$pki/full-vok.policy"
-	run "$REAL" "$pki/full.bin" "$pki/full-vok.policy" "$pki/mix.yaml"
-	check "a matching vendor record passes" 0 "policy: nxp_fuse_version [container 0] OK" "policy: OK"
+	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/mix.yaml"
+	check "a complete matching vendor record passes" 0 "policy: nxp_srk_table_hash [container 0] OK" "policy: nxp_used_srk_id [container 0] OK" "policy: nxp_srk_revoke_mask [container 0] OK" "policy: nxp_fuse_version [container 0] OK" "policy: OK"
+	# Each vendor key is mandatory: absent fails closed, naming the key.
+	for k in NXP_SRK_TABLE_HASH NXP_USED_SRK_ID NXP_SRK_REVOKE_MASK NXP_FUSE_VERSION; do
+		dropkey "$pki/full.policy" "$pki/full-no-$k.policy" "$k"
+		run "$REAL" "$pki/full.bin" "$pki/full-no-$k.policy" "$pki/mix.yaml"
+		check "a policy file without $k fails" 1 "missing policy key: $k" "policy: FAILED"
+	done
+	# The old floor key is not a vendor key any more.
+	{ cat "$pki/full.policy"; echo "NXP_FUSE_VERSION_MIN=0"; } >"$pki/full-min.policy"
+	run "$REAL" "$pki/full.bin" "$pki/full-min.policy" "$pki/mix.yaml"
+	check "NXP_FUSE_VERSION_MIN is an unknown key" 1 "unknown policy key: NXP_FUSE_VERSION_MIN" "policy: FAILED"
+	# Malformed vendor values fail.
+	for kv in NXP_SRK_TABLE_HASH=zz NXP_USED_SRK_ID=4 NXP_SRK_REVOKE_MASK=0x10 NXP_FUSE_VERSION=256; do
+		dropkey "$pki/full.policy" "$pki/full-bad.policy" "${kv%%=*}"
+		echo "$kv" >>"$pki/full-bad.policy"
+		run "$REAL" "$pki/full.bin" "$pki/full-bad.policy" "$pki/mix.yaml"
+		check "a malformed ${kv%%=*} fails" 1 "policy-check: ${kv%%=*} is not" "policy: FAILED"
+	done
+	# An OEM payload substituted (its own header matches it) fails the manifest digest.
+	if mkbin subst 0:4:nxp:a55 0:0:oem:m7:payload2.bin 0:0:oem:a55 && dg2=$(nxpdigest subst); then
+		mixpol "$pki/subst.policy" "$(<"$pki/subst.hash")" "$dg2" subst
+		run "$REAL" "$pki/subst.bin" "$pki/subst.policy" "$pki/mix.yaml"
+		check "a substituted M7 payload with a matching header fails" 1 "position 1 image 0: sha256" "policy: FAILED"
+	fi
+	# An image at a changed load address fails.
+	if mkbin moved 0:4:nxp:a55 0:0:oem:m7:payload.bin:0x00001000 0:0:oem:a55 && dg2=$(nxpdigest moved); then
+		mixpol "$pki/moved.policy" "$(<"$pki/moved.hash")" "$dg2" moved
+		run "$REAL" "$pki/moved.bin" "$pki/moved.policy" "$pki/mix.yaml"
+		check "an M7 image at a changed load address fails" 1 "position 1 image 0: load_address" "policy: FAILED"
+	fi
+	# An entry point that differs from the manifest fails; one the manifest omits is not checked.
+	M7_ENTRY=0x303C0004 mkman "$pki/entry.yaml" nxp m7 a55
+	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/entry.yaml"
+	check "an M7 image at a changed entry point fails" 1 "position 1 image 0: entry_point" "policy: FAILED"
+	# The nxp vendor fuse version is exact, not a floor: 2 in the image, 1 and 3 in the policy.
+	if mkbin fullf 2:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dgf=$(nxpdigest fullf); then
+		mixpol "$pki/fullf.policy" "$(<"$pki/fullf.hash")" "$dgf" fullf
+		run "$REAL" "$pki/fullf.bin" "$pki/fullf.policy" "$pki/mix.yaml"
+		check "a vendor fuse version equal to the pin passes" 0 "policy: nxp_fuse_version [container 0] OK" "policy: OK"
+		for fv in 1 3; do
+			dropkey "$pki/fullf.policy" "$pki/fullf-$fv.policy" NXP_FUSE_VERSION
+			echo "NXP_FUSE_VERSION=$fv" >>"$pki/fullf-$fv.policy"
+			run "$REAL" "$pki/fullf.bin" "$pki/fullf-$fv.policy" "$pki/mix.yaml"
+			check "a vendor fuse version of 2 against a pin of $fv fails" 1 "policy: nxp_fuse_version [container 0] MISMATCH (container 2, policy $fv)" "policy: FAILED"
+		done
+	fi
+	# A manifest naming policy:<KEY> takes the values from the policy file, else the environment.
+	printf 'containers:\n  - role: nxp\n    sha256: policy\n  - role: oem\n    images:\n      - core_id: cortex-m7-1\n        image_type: executable\n        sha256: policy:M7_IMAGE_SHA256\n        load_address: policy:M7_LOAD_ADDRESS\n        entry_point: policy:M7_ENTRY_POINT\n  - role: oem\n    images:\n      - core_id: cortex-a55\n        image_type: data\n        sha256: %s\n        load_address: "0x90000000"\n' "$PAY_SHA" >"$pki/ref.yaml"
+	{ cat "$pki/full.policy"; echo "M7_IMAGE_SHA256=${PAY_SHA^^}"; echo "M7_LOAD_ADDRESS=0x0"; } >"$pki/ref.policy"
+	run env M7_ENTRY_POINT=0x303c0000 "$REAL" "$pki/full.bin" "$pki/ref.policy" "$pki/ref.yaml"
+	check "image values named policy:<KEY> come from the policy file and the environment" 0 "policy: position 1 oem image entries OK" "policy: OK"
+	run "$REAL" "$pki/full.bin" "$pki/ref.policy" "$pki/ref.yaml"
+	check "a policy:<KEY> value found nowhere fails" 1 "no value for M7_ENTRY_POINT" "policy: FAILED"
+	dropkey "$pki/ref.policy" "$pki/ref2.policy" M7_LOAD_ADDRESS
+	echo "M7_LOAD_ADDRESS=0x1" >>"$pki/ref2.policy"
+	run env M7_ENTRY_POINT=0x303c0000 "$REAL" "$pki/full.bin" "$pki/ref2.policy" "$pki/ref.yaml"
+	check "a policy:<KEY> load address that differs fails" 1 "position 1 image 0: load_address" "policy: FAILED"
+	printf 'containers:\n  - role: oem\n    images:\n      - core_id: cortex-a55\n        image_type: data\n        sha256: policy:evil\n        load_address: "0x0"\n' >"$pki/badkey.yaml"
+	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/badkey.yaml"
+	check "a policy: reference to an unusable key fails" 1 "unusable policy key" "policy: FAILED"
 	# An nxp container whose digest differs from the pin.
 	mixpol "$pki/full-pin.policy" "$h" "$(printf '%064d' 1)"
 	run "$REAL" "$pki/full.bin" "$pki/full-pin.policy" "$pki/mix.yaml"
@@ -392,12 +507,12 @@ fi
 if mkbin nom7 0:4:nxp:a55 0:0:oem:a55 0:0:oem:a55 && dg=$(nxpdigest nom7); then
 	mixpol "$pki/nom7.policy" "$(<"$pki/nom7.hash")" "$dg"
 	run "$REAL" "$pki/nom7.bin" "$pki/nom7.policy" "$pki/mix.yaml"
-	check "an image without the M7 image fails" 1 "image entries" "policy: FAILED"
+	check "an image without the M7 image fails" 1 "differs from the manifest" "policy: FAILED"
 fi
 if mkbin swapped 0:4:nxp:a55 0:0:oem:a55 0:0:oem:m7 && dg=$(nxpdigest swapped); then
 	mixpol "$pki/swapped.policy" "$(<"$pki/swapped.hash")" "$dg"
 	run "$REAL" "$pki/swapped.bin" "$pki/swapped.policy" "$pki/mix.yaml"
-	check "an image with the two OEM containers swapped fails" 1 "image entries" "policy: FAILED"
+	check "an image with the two OEM containers swapped fails" 1 "differs from the manifest" "policy: FAILED"
 fi
 # Two OEM containers with distinct SRK tables, the second off-policy: each
 # container's own table is hashed, so the shared-hash-file shortcut cannot hide it.
@@ -422,7 +537,32 @@ run "$REAL" "$bin" "$good" "$TMP_ROOT/badrole.yaml"
 check "a manifest position with an unknown role fails" 1 "role must be nxp or oem" "policy: FAILED"
 printf 'containers:\n  - role: oem\n    images:\n      - core_id: cortex-a55\n' >"$TMP_ROOT/badimg.yaml"
 run "$REAL" "$bin" "$good" "$TMP_ROOT/badimg.yaml"
-check "an image entry without image_type fails" 1 "an image entry takes exactly" "policy: FAILED"
+check "an image entry without image_type fails" 1 "an image entry takes core_id" "policy: FAILED"
+# imgman <file> <extra lines>: an A55 image entry with the given binding fields.
+imgman() {
+	printf 'containers:\n  - role: oem\n    images:\n      - core_id: cortex-a55\n        image_type: data\n%b' "$2" >"$1"
+}
+imgman "$TMP_ROOT/nosha.yaml" '        load_address: "0x90000000"\n'
+run "$REAL" "$bin" "$good" "$TMP_ROOT/nosha.yaml"
+check "an image entry without sha256 fails" 1 "an image entry takes core_id" "policy: FAILED"
+imgman "$TMP_ROOT/noload.yaml" "        sha256: $PAY_SHA\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/noload.yaml"
+check "an image entry without load_address fails" 1 "an image entry takes core_id" "policy: FAILED"
+imgman "$TMP_ROOT/shortsha.yaml" "        sha256: ${PAY_SHA:0:63}\n        load_address: \"0x90000000\"\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/shortsha.yaml"
+check "an image entry with a 63-digit sha256 fails" 1 "sha256 is not 64 hex digits" "policy: FAILED"
+imgman "$TMP_ROOT/nothexsha.yaml" "        sha256: ${PAY_SHA:0:63}g\n        load_address: \"0x90000000\"\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/nothexsha.yaml"
+check "an image entry with a non-hex sha256 fails" 1 "sha256 is not 64 hex digits" "policy: FAILED"
+imgman "$TMP_ROOT/baddr.yaml" "        sha256: $PAY_SHA\n        load_address: \"90000000\"\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/baddr.yaml"
+check "an image entry with a load address that is not 0x hex fails" 1 "load_address is not a hex address" "policy: FAILED"
+imgman "$TMP_ROOT/bentry.yaml" "        sha256: $PAY_SHA\n        load_address: \"0x90000000\"\n        entry_point: \"0xzz\"\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/bentry.yaml"
+check "an image entry with a malformed entry_point fails" 1 "entry_point is not a hex address" "policy: FAILED"
+imgman "$TMP_ROOT/numaddr.yaml" "        sha256: $PAY_SHA\n        load_address: 2415919104\n"
+run "$REAL" "$bin" "$good" "$TMP_ROOT/numaddr.yaml"
+check "an image entry with a numeric (non-string) load address fails" 1 "all strings" "policy: FAILED"
 printf 'containers:\n  - role: oem\n' >"$TMP_ROOT/noimg.yaml"
 run "$REAL" "$bin" "$good" "$TMP_ROOT/noimg.yaml"
 check "an oem position without images fails" 1 "non-empty images list" "policy: FAILED"
@@ -440,7 +580,7 @@ run "$REAL" "$bin" "$good"
 check "an A55-only container fails under the repository manifest (no nxp pin given)" 1 "no 64-hex sha256 pin" "policy: FAILED"
 mixpol "$TMP_ROOT/a55-pin.policy" "$hash" "$(printf '%064d' 1)"
 run "$REAL" "$bin" "$TMP_ROOT/a55-pin.policy"
-check "an A55-only container fails under the repository manifest (nxp and M7 positions missing)" 1 "the manifest lists" "policy: FAILED"
+check "an A55-only container fails under the repository manifest (no image values given)" 1 "no value for M7_IMAGE_SHA256" "policy: FAILED"
 
 # A policy file that is missing, empty, or malformed fails; never a skip.
 run "$POLICY" "$bin" "$TMP_ROOT/no-such.policy"

@@ -19,7 +19,16 @@
 #                 srk_revoke_mask, fuse_version floor).
 #     images      the image entries the container must carry, exactly and in
 #                 order, each named by the fields SPSDK parses: core_id and
-#                 image_type (as in container.yaml and m7-container.yaml).
+#                 image_type (as in container.yaml and m7-container.yaml),
+#                 sha256 (of the image bytes the header references, offset
+#                 and size as SPSDK parses them: 64 hex digits), load_address
+#                 (0x... hex) and, optional, entry_point (0x... hex). Each of
+#                 sha256, load_address and entry_point is a literal or
+#                 policy:<KEY>, taken at release from KEY in the release
+#                 policy file, else the environment (KEY ends in
+#                 _IMAGE_SHA256, _LOAD_ADDRESS or _ENTRY_POINT). A missing,
+#                 empty or malformed value, or any difference, FAILS. No
+#                 image digest or address value is committed here.
 #
 # The OEM boot container carries the Cortex-M7 image (test plan section 7,
 # item 2; m7-load-path-survey.md section 3: core id cortex-m7-1, an
@@ -31,7 +40,12 @@ containers:
     images:
       - core_id: cortex-m7-1
         image_type: executable
+        sha256: policy:M7_IMAGE_SHA256
+        load_address: policy:M7_LOAD_ADDRESS
+        entry_point: policy:M7_ENTRY_POINT
   - role: oem
     images:
       - core_id: cortex-a55
         image_type: data
+        sha256: policy:A55_IMAGE_SHA256
+        load_address: policy:A55_LOAD_ADDRESS

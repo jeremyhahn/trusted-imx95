@@ -15,8 +15,10 @@
 # Parses the image with the pinned SPSDK (nxpimage ahab parse and SPSDK's own
 # AHAB parser). Each OEM container is checked against the policy file: the hash
 # of its own SRK table, used_srk_id, srk_revoke_mask and fuse_version. The nxp
-# container is checked against its pinned digest only (and the vendor record
-# keys below, if the policy file gives them). A missing, empty or unreadable
+# container is checked against its pinned digest and the complete vendor
+# record (NXP_* keys below, all mandatory, all exact). Each OEM image entry
+# is checked for core_id, image_type, the sha256 of the image bytes its header
+# references, load_address and (if listed) entry_point. A missing, empty or unreadable
 # policy file, or a missing field in either input, FAILS: nothing is skipped.
 # Every non-zero byte of the image and of each nxp binary container must lie
 # inside a parsed container's header, signature block or referenced image;
@@ -30,9 +32,13 @@
 #   NXP_CONTAINER_SHA256=<hex>  the pin an nxp manifest position says "policy"
 #                               for (else the environment variable of that name)
 #   NXP_SRK_TABLE_HASH, NXP_USED_SRK_ID, NXP_SRK_REVOKE_MASK,
-#   NXP_FUSE_VERSION_MIN        optional vendor record, same meaning as above
+#   NXP_FUSE_VERSION            the vendor record, mandatory; every value is
+#                               compared exactly (no floor for the vendor)
+#   <NAME>_IMAGE_SHA256, <NAME>_LOAD_ADDRESS, <NAME>_ENTRY_POINT
+#                               values a manifest image entry names as
+#                               policy:<KEY> (else the environment)
 # Comments (#) and blank lines are allowed; an unknown, repeated or missing
-# key (the NXP_* keys excepted) is an error.
+# key is an error.
 #
 # Never touches a board, a fuse or a key. The .bcf fuse scripts nxpimage
 # writes are deleted unread. Exit 0 ("policy: OK") or 1 ("policy: FAILED").
@@ -107,7 +113,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 	v=$(trim "${line#*=}")
 	case "$k" in
 	SRK_TABLE_HASH | USED_SRK_ID | SRK_REVOKE_MASK | FUSE_VERSION_MIN) ;;
-	NXP_CONTAINER_SHA256 | NXP_SRK_TABLE_HASH | NXP_USED_SRK_ID | NXP_SRK_REVOKE_MASK | NXP_FUSE_VERSION_MIN) ;;
+	NXP_CONTAINER_SHA256 | NXP_SRK_TABLE_HASH | NXP_USED_SRK_ID | NXP_SRK_REVOKE_MASK | NXP_FUSE_VERSION) ;;
+	[A-Z0-9_]*_IMAGE_SHA256 | [A-Z0-9_]*_LOAD_ADDRESS | [A-Z0-9_]*_ENTRY_POINT) ;;
 	*) fail "unknown policy key: $k" ;;
 	esac
 	[ -z "${pol[$k]+x}" ] || fail "repeated policy key: $k"
@@ -121,11 +128,14 @@ done
 num "${pol[USED_SRK_ID]}" "$MAX_ID" >/dev/null || fail "USED_SRK_ID is not an integer in 0..$MAX_ID"
 num "${pol[SRK_REVOKE_MASK]}" "$MAX_MASK" >/dev/null || fail "SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
 num "${pol[FUSE_VERSION_MIN]}" "$MAX_FUSE" >/dev/null || fail "FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
-# The optional vendor record for the nxp container.
-[ -z "${pol[NXP_SRK_TABLE_HASH]+x}" ] || [[ "${pol[NXP_SRK_TABLE_HASH]}" =~ ^[0-9a-fA-F]+$ ]] || fail "NXP_SRK_TABLE_HASH is not hex"
-[ -z "${pol[NXP_USED_SRK_ID]+x}" ] || num "${pol[NXP_USED_SRK_ID]}" "$MAX_ID" >/dev/null || fail "NXP_USED_SRK_ID is not an integer in 0..$MAX_ID"
-[ -z "${pol[NXP_SRK_REVOKE_MASK]+x}" ] || num "${pol[NXP_SRK_REVOKE_MASK]}" "$MAX_MASK" >/dev/null || fail "NXP_SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
-[ -z "${pol[NXP_FUSE_VERSION_MIN]+x}" ] || num "${pol[NXP_FUSE_VERSION_MIN]}" "$MAX_FUSE" >/dev/null || fail "NXP_FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
+# The vendor record for the nxp container: mandatory and compared exactly.
+for k in NXP_SRK_TABLE_HASH NXP_USED_SRK_ID NXP_SRK_REVOKE_MASK NXP_FUSE_VERSION; do
+	[ -n "${pol[$k]+x}" ] || fail "missing policy key: $k"
+done
+[[ "${pol[NXP_SRK_TABLE_HASH]}" =~ ^[0-9a-fA-F]+$ ]] || fail "NXP_SRK_TABLE_HASH is not hex"
+num "${pol[NXP_USED_SRK_ID]}" "$MAX_ID" >/dev/null || fail "NXP_USED_SRK_ID is not an integer in 0..$MAX_ID"
+num "${pol[NXP_SRK_REVOKE_MASK]}" "$MAX_MASK" >/dev/null || fail "NXP_SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
+num "${pol[NXP_FUSE_VERSION]}" "$MAX_FUSE" >/dev/null || fail "NXP_FUSE_VERSION is not an integer in 0..$MAX_FUSE"
 nxp_pin=${pol[NXP_CONTAINER_SHA256]:-${NXP_CONTAINER_SHA256:-}}
 
 # --- The container, through the pinned SPSDK.
@@ -140,6 +150,11 @@ mkdir "$work/parsed"
 "$nxpimage" ahab parse -f "$FAMILY" -r "$REVISION" -b "$bin" -o "$work/parsed" >"$work/parse.log" 2>&1 ||
 	{ tail -n 5 "$work/parse.log" >&2; fail "nxpimage ahab parse failed for $bin"; }
 rm -f "$work"/parsed/*.bcf
+# The image-binding values the manifest may name (policy:<KEY>), for the parser.
+: >"$work/extras"
+for k in "${!pol[@]}"; do
+	case "$k" in *_IMAGE_SHA256 | *_LOAD_ADDRESS | *_ENTRY_POINT) printf '%s=%s\n' "$k" "${pol[$k]}" >>"$work/extras" ;; esac
+done
 
 # Every container the image holds is accounted for, and none is skipped. SPSDK's
 # own parser reads the whole image: the containers in file order, grouped by
@@ -157,8 +172,26 @@ import yaml
 from spsdk.image.ahab.ahab_image import AHABImage
 from spsdk.utils.family import FamilyRevision
 
-family, revision, image_path, manifest_path, parsed_dir, pin = sys.argv[1:7]
+family, revision, image_path, manifest_path, parsed_dir, pin, extras_path = sys.argv[1:8]
 fam = FamilyRevision(family, revision)
+extras = {}
+for l in open(extras_path).read().splitlines():
+    k, _, v = l.partition("=")
+    extras[k] = v
+
+
+def resolve(v, n, j, k):
+    # "policy:<KEY>" takes the value at release from the policy file, else
+    # the environment; anything else is a literal.
+    if not v.startswith("policy:"):
+        return v
+    key = v[7:]
+    if not re.fullmatch(r"[A-Z0-9_]+_(IMAGE_SHA256|LOAD_ADDRESS|ENTRY_POINT)", key):
+        sys.exit("manifest position %d image %d: %s names an unusable policy key %r" % (n, j, k, key))
+    got = extras.get(key) or os.environ.get(key, "")
+    if not got:
+        sys.exit("manifest position %d image %d: %s: no value for %s in the policy file or environment" % (n, j, k, key))
+    return got.strip()
 
 
 def norm(s):
@@ -187,10 +220,18 @@ for n, e in enumerate(man["containers"]):
         if set(e) != {"role", "images"} or not isinstance(e["images"], list) or not e["images"]:
             sys.exit("manifest position %d: an oem position takes exactly role and a non-empty images list" % n)
         imgs = []
-        for m in e["images"]:
-            if not isinstance(m, dict) or set(m) != {"core_id", "image_type"} or not all(isinstance(v, str) for v in m.values()):
-                sys.exit("manifest position %d: an image entry takes exactly core_id and image_type" % n)
-            imgs.append((norm(m["core_id"]), norm(m["image_type"])))
+        for j, m in enumerate(e["images"]):
+            ok = isinstance(m, dict) and {"core_id", "image_type", "sha256", "load_address"} <= set(m) <= {"core_id", "image_type", "sha256", "load_address", "entry_point"}
+            if not ok or not all(isinstance(v, str) for v in m.values()):
+                sys.exit("manifest position %d image %d: an image entry takes core_id, image_type, sha256, load_address and optionally entry_point, all strings" % (n, j))
+            vals = {k: resolve(m[k], n, j, k) for k in m if k in ("sha256", "load_address", "entry_point")}
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", vals["sha256"]):
+                sys.exit("manifest position %d image %d: sha256 is not 64 hex digits" % (n, j))
+            for k in ("load_address", "entry_point"):
+                if k in vals and not re.fullmatch(r"0[xX][0-9a-fA-F]{1,16}", vals[k]):
+                    sys.exit("manifest position %d image %d: %s is not a hex address (0x...)" % (n, j, k))
+            imgs.append((norm(m["core_id"]), norm(m["image_type"]), vals["sha256"].lower(),
+                         int(vals["load_address"], 16), int(vals["entry_point"], 16) if "entry_point" in vals else None))
         want.append(("oem", imgs))
 
 
@@ -250,14 +291,24 @@ for pos, ((role, members), w) in enumerate(zip(groups, want)):
         print("I position %d nxp container sha256 OK" % pos)
     else:
         c = members[0][1]
-        have = [(norm(i.flags_core_id_name), norm(i.flags_image_type_name)) for i in c.image_array]
-        if have != w[1]:
-            sys.exit("position %d (container %d): image entries %s differ from the role required %s" % (pos, members[0][0], have, w[1]))
+        have = []
+        for i in c.image_array:
+            seg = data[off + i.image_offset:off + i.image_offset + i.image_size]
+            have.append((norm(i.flags_core_id_name), norm(i.flags_image_type_name), hashlib.sha256(seg).hexdigest(),
+                         int(i.load_address), int(i.entry_point)))
+        if len(have) != len(w[1]):
+            sys.exit("position %d (container %d): %d image entries, the manifest lists %d" % (pos, members[0][0], len(have), len(w[1])))
+        for j, (hv, wv) in enumerate(zip(have, w[1])):
+            for what, a, b in zip(("core_id", "image_type", "sha256", "load_address"), hv, wv):
+                if a != b:
+                    sys.exit("position %d image %d: %s %s differs from the manifest %s" % (pos, j, what, a, b))
+            if wv[4] is not None and hv[4] != wv[4]:
+                sys.exit("position %d image %d: entry_point 0x%x differs from the manifest 0x%x" % (pos, j, hv[4], wv[4]))
         print("I position %d oem image entries OK" % pos)
     for k, c in members:
         h = c.signature_block.srk_assets.compute_srk_hash().hex().upper()
         print("R %d %s %d %d %d %s" % (k, role, int(str(c.flag_used_srk_id), 0), int(str(c.flag_srk_revoke_mask), 0), int(str(c.fuse_version), 0), h))
-' "$FAMILY" "$REVISION" "$bin" "$manifest" "$work/parsed" "$nxp_pin" 2>"$work/inspect.log") ||
+' "$FAMILY" "$REVISION" "$bin" "$manifest" "$work/parsed" "$nxp_pin" "$work/extras" 2>"$work/inspect.log") ||
 	{ tail -n 3 "$work/inspect.log" >&2; fail "the image does not satisfy the container manifest $manifest"; }
 
 declare -a r_role=() r_id=() r_mask=() r_fuse=() r_hash=()
@@ -311,17 +362,29 @@ echo "policy: $count container(s) to check"
 # cmp_role <index> <suffix> <hash> <id> <mask> <min> <label prefix>: the four values.
 cmp_role() {
 	local i=$1 sfx=$2 ph=${3^^} pid pmask pmin pre=$7 r
-	[ -z "$3" ] || { [ "${r_hash[$i]}" = "$ph" ] && r=0 || r=1; report "${pre}srk_table_hash$sfx" "$r" "${r_hash[$i]}" "$ph"; }
-	[ -z "$4" ] || { pid=$(num "$4" "$MAX_ID"); [ "${r_id[$i]}" -eq "$pid" ] && r=0 || r=1; report "${pre}used_srk_id$sfx" "$r" "${r_id[$i]}" "$pid"; }
-	[ -z "$5" ] || { pmask=$(num "$5" "$MAX_MASK"); [ "${r_mask[$i]}" -eq "$pmask" ] && r=0 || r=1; report "${pre}srk_revoke_mask$sfx" "$r" "${r_mask[$i]}" "$pmask"; }
-	[ -z "$6" ] || { pmin=$(num "$6" "$MAX_FUSE"); [ "${r_fuse[$i]}" -ge "$pmin" ] && r=0 || r=1; report "${pre}fuse_version$sfx" "$r" "${r_fuse[$i]}" ">= $pmin"; }
+	[ "${r_hash[$i]}" = "$ph" ] && r=0 || r=1
+	report "${pre}srk_table_hash$sfx" "$r" "${r_hash[$i]}" "$ph"
+	pid=$(num "$4" "$MAX_ID")
+	[ "${r_id[$i]}" -eq "$pid" ] && r=0 || r=1
+	report "${pre}used_srk_id$sfx" "$r" "${r_id[$i]}" "$pid"
+	pmask=$(num "$5" "$MAX_MASK")
+	[ "${r_mask[$i]}" -eq "$pmask" ] && r=0 || r=1
+	report "${pre}srk_revoke_mask$sfx" "$r" "${r_mask[$i]}" "$pmask"
+	pmin=$(num "$6" "$MAX_FUSE")
+	if [ "$7" = nxp_ ]; then
+		[ "${r_fuse[$i]}" -eq "$pmin" ] && r=0 || r=1
+		report "${pre}fuse_version$sfx" "$r" "${r_fuse[$i]}" "$pmin"
+	else
+		[ "${r_fuse[$i]}" -ge "$pmin" ] && r=0 || r=1
+		report "${pre}fuse_version$sfx" "$r" "${r_fuse[$i]}" ">= $pmin"
+	fi
 }
 for ((i = 0; i < count; i++)); do
 	[ "$count" -eq 1 ] && sfx= || sfx=" [container $i]"
 	if [ "${r_role[$i]}" = oem ]; then
 		cmp_role "$i" "$sfx" "${pol[SRK_TABLE_HASH]}" "${pol[USED_SRK_ID]}" "${pol[SRK_REVOKE_MASK]}" "${pol[FUSE_VERSION_MIN]}" ""
 	else
-		cmp_role "$i" "$sfx" "${pol[NXP_SRK_TABLE_HASH]-}" "${pol[NXP_USED_SRK_ID]-}" "${pol[NXP_SRK_REVOKE_MASK]-}" "${pol[NXP_FUSE_VERSION_MIN]-}" "nxp_"
+		cmp_role "$i" "$sfx" "${pol[NXP_SRK_TABLE_HASH]}" "${pol[NXP_USED_SRK_ID]}" "${pol[NXP_SRK_REVOKE_MASK]}" "${pol[NXP_FUSE_VERSION]}" "nxp_"
 	fi
 done
 
