@@ -87,6 +87,7 @@ expect "optee-os: the PKCS#11 TA is an in-tree early TA (as secure-world-build.s
 nv=$odir/trusted-imx95-tee-nv_1.0.bb
 nvf=$odir/trusted-imx95-tee-nv
 wks=$ROOT/platform-image/files/wic/trusted-imx95.wks
+
 expect "image installs the OP-TEE client (tee-supplicant)" nc "$img" 'IMAGE_INSTALL:append = ".* optee-client( |")'
 expect "image installs the NV recipe" nc "$img" 'IMAGE_INSTALL:append = ".* trusted-imx95-tee-nv( |")'
 expect "the NV recipe enables tee-supplicant at boot" ncstr "$nv" 'basic.target.wants/tee-supplicant@teepriv0.service'
@@ -148,6 +149,7 @@ expect "resolver: no mount on / is refused" test "$(resolve "$fk/mi-none")" -ne 
 printf 'DEVNAME=mmcblk0p3\nPARTNAME=tee-data x\n' >"$fk/sys/devices/mmcblk0/mmcblk0p3/uevent"
 expect "resolver: a name that is not exactly tee-data is refused" test "$(resolve "$fk/mi-emmc")" -ne 0
 expect "the wks has a writable tee-data partition" ncstr "$wks" '--part-name tee-data'
+expect "the wks tee-data line writes no fstab entry (only tee-data-mount.service mounts /data)" nc "$wks" '^part /data .*--part-name tee-data .*--no-fstab-update'
 expect "the image uses that wks" ncstr "$img" 'WKS_FILE = "trusted-imx95.wks"'
 expect "the root file system stays read-only" ncstr "$img" 'IMAGE_FEATURES += "read-only-rootfs"'
 expect "the wks keeps the BSP boot partition (kernel, DTBs)" ncstr "$wks" 'part /boot --source bootimg-partition'

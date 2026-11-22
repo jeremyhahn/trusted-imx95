@@ -14,7 +14,7 @@ part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot
 # Root: the BSP's line, with a fixed 1024 MiB. MISSING: no survey sizes the root; provisional.
 part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --part-name root --align 8192 --fixed-size 1024M
 # tee-data, after the root partition. MISSING: no survey sizes it; 64 MiB is provisional.
-part /data --ondisk mmcblk --fstype=ext4 --label tee-data --part-name tee-data --fixed-size 64M
+part /data --ondisk mmcblk --fstype=ext4 --label tee-data --part-name tee-data --no-fstab-update --fixed-size 64M
 
 # The BSP takes the table type from IMX_BOOTLOADER_PTABLE; GPT is kept here for the partition names
 # (the kernel's PARTNAME, which tee-data-mount reads on the root's own disk, and flash-rootfs.sh).
