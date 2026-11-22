@@ -46,7 +46,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
+	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
 	@echo "Targets:"
@@ -173,6 +174,20 @@ SW_CACHE ?= $(SW_BASE)/cache
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
 	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+## --- The platform image (docs/platform-image/build.md) ---
+
+platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
+	@scripts/platform-image-fetch.sh platform-image/manifest.lock
+
+platform-image-hosttools: ## Set up a non-root build host: Yocto buildtools-extended (sha256-checked) and apt-fetched tools in a cache dir (HOSTTOOLS_DIR); then source its env.sh (needs network; not in CI)
+	@scripts/platform-image-hosttools.sh $(HOSTTOOLS_DIR)
+
+platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake -p, bitbake -e for trusted-imx95-image and trusted-imx95-image-debug (needs bitbake and network; not in CI)
+	@scripts/platform-image-parse.sh
+
+platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
+	@scripts/platform-image-kernel-config.sh
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
