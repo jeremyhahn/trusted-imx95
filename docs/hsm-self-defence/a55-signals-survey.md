@@ -13,7 +13,8 @@ the [fault and SCA survey](fault-sca-survey.md). The firmware TPM is in
 [docs/ftpm/](../ftpm/README.md).
 
 All text is a summary in my own words. Vendor text is not quoted. Source ids are local
-to this survey.
+to this survey. What the A55 side should do with these signals is in the
+[A55 self-defence design note](a55-self-defence-design.md).
 
 ## Sources
 

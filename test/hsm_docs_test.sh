@@ -77,4 +77,82 @@ NEG=$(c_status "$TMPD/neg.md")
 if [ -n "$NEG" ]; then pass "negative: missing Status detected"; else fail "negative: missing Status detected"; fi
 rm -rf "$TMPD"
 
+# ---- Block 2: docs/hsm-self-defence/a55-self-defence-design.md (issue #26) ----
+DESIGN_REL=docs/hsm-self-defence/a55-self-defence-design.md
+SURVEY_DIR=docs/hsm-self-defence
+
+d_headings() {
+	local h
+	grep -q '^\(## \)\?Scope' "$1" || echo "missing Scope"
+	for h in "## Principle: the A55 is a witness" "## Inputs the A55 can use" \
+		"## What the A55 cannot do" "## What the SM and M7 carry" \
+		"## Response ladder (provisional)" "## Provisional defaults" \
+		"## Board validation list" "## Questions for the owner" \
+		"## Proposed SPEC changes (proposed, pending owner approval)"; do
+		grep -qxF "$h" "$1" || echo "missing heading $h"
+	done
+}
+
+d_words() {
+	grep -qi 'provisional' "$1" || echo "no provisional"
+	grep -q '^>' "$1" && echo "quoted block"
+	grep -qi 'closes' "$1" && echo "claims Closes"
+	local q r
+	q=$(grep -cE '^[0-9]+\. \*\*' "$1")
+	r=$(grep -c '^   Recommendation:' "$1")
+	[ "$q" -gt 0 ] && [ "$q" = "$r" ] || echo "questions $q, recommendations $r"
+}
+
+# Every finding id must carry a survey prefix and resolve to a heading there.
+d_ids() {
+	local pre n file all pref
+	all=$(grep -oE '\bF[0-9]+\b' "$1" | wc -l)
+	pref=$(grep -oE '\b(a55|tamper|fault-sca) F[0-9]+\b' "$1" | wc -l)
+	[ "$all" = "$pref" ] || echo "finding ids without a survey prefix: $all ids, $pref prefixed"
+	grep -oE '\b(a55|tamper|fault-sca) F[0-9]+\b' "$1" | sort -u | while read -r pre n; do
+		case "$pre" in
+		a55) file=a55-signals-survey.md ;;
+		tamper) file=tamper-survey.md ;;
+		*) file=fault-sca-survey.md ;;
+		esac
+		grep -q "^### $n\\." "$ROOT/$SURVEY_DIR/$file" || echo "$pre $n not a heading in $file"
+	done
+}
+
+d_links() {
+	local t dir
+	dir=$(dirname "$1")
+	grep -oE '\]\([^)]+\)' "$1" | sed 's/^](//; s/)$//; s/#.*//' | sort -u | while read -r t; do
+		case "$t" in "" | http*) continue ;; esac
+		[ -e "$dir/$t" ] || echo "broken link $t"
+	done
+}
+
+d_private() {
+	grep -qE '/home/|\b[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b' "$1" && echo "host, IP or /home path"
+}
+
+d_all() {
+	{ d_headings "$1"; d_words "$1"; d_ids "$1"; d_links "$1"; d_private "$1"; } 2>&1
+}
+
+DESIGN="$ROOT/$DESIGN_REL"
+if [ -f "$DESIGN" ]; then pass "design note exists"; else fail "design note exists"; finish; fi
+
+OUT=$(d_all "$DESIGN")
+if [ -z "$OUT" ]; then pass "design note structure"; else fail "design note structure: $OUT"; fi
+
+if grep -q 'a55-self-defence-design.md' "$ROOT/$DOC_REL"; then
+	pass "A55 survey links the design note"
+else
+	fail "A55 survey links the design note"
+fi
+
+# Negative: drop the first Recommendation line on a temp copy, the checker must fail.
+TMPD=$(mktemp -d)
+awk '/^   Recommendation:/ && !d { d=1; next } { print }' "$DESIGN" >"$TMPD/neg.md"
+NEG=$(d_words "$TMPD/neg.md")
+if [ -n "$NEG" ]; then pass "negative: missing Recommendation detected"; else fail "negative: missing Recommendation detected"; fi
+rm -rf "$TMPD"
+
 finish
