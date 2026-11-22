@@ -311,11 +311,14 @@ mkbin() {
 	(cd "$pki/$name.d" && "$venv/bin/nxpimage" ahab export -c c.yaml) >"$pki/$name.log" 2>&1 ||
 		{ tail -n 5 "$pki/$name.log"; fail "nxpimage ahab export failed for $name"; return 1; }
 	cp "$pki/$name.d/$name.bin" "$pki/$name.bin"
-	local hf
+	local hf found=0
 	for hf in "$pki/$name.d"/ahab_*_hash.txt; do
+		[ -f "$hf" ] || continue
 		tr -d '[:space:]' <"$hf" >"$pki/$name.hash"
+		found=1
 		break
 	done
+	[ "$found" -eq 1 ] || { fail "nxpimage ahab export wrote no ahab_*_hash.txt for $name"; return 1; }
 }
 
 # Above the floor: a container with fuse_version 3 is accepted at floors 1 and
@@ -390,6 +393,7 @@ nxpdigest() {
 	DG=${s%% *}
 }
 MIXED_RAN=0
+RAN_subst=0 RAN_moved=0 RAN_fullf=0 RAN_nom7=0 RAN_swapped=0 RAN_distinct=0
 # mixpol <file> <oem hash> <nxp digest> [<image name>]: with a name, the vendor
 # record is that image's first container's own record.
 mixpol() {
@@ -449,12 +453,14 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest full && dg=$DG; th
 	done
 	# An OEM payload substituted (its own header matches it) fails the manifest digest.
 	if mkbin subst 0:4:nxp:a55 0:0:oem:m7:payload2.bin 0:0:oem:a55 && nxpdigest subst && dg2=$DG; then
+		RAN_subst=1
 		mixpol "$pki/subst.policy" "$(<"$pki/subst.hash")" "$dg2" subst
 		run "$REAL" "$pki/subst.bin" "$pki/subst.policy" "$pki/mix.yaml"
 		check "a substituted M7 payload with a matching header fails" 1 "position 1 image 0: sha256" "policy: FAILED"
 	fi
 	# An image at a changed load address fails.
 	if mkbin moved 0:4:nxp:a55 0:0:oem:m7:payload.bin:0x00001000 0:0:oem:a55 && nxpdigest moved && dg2=$DG; then
+		RAN_moved=1
 		mixpol "$pki/moved.policy" "$(<"$pki/moved.hash")" "$dg2" moved
 		run "$REAL" "$pki/moved.bin" "$pki/moved.policy" "$pki/mix.yaml"
 		check "an M7 image at a changed load address fails" 1 "position 1 image 0: load_address" "policy: FAILED"
@@ -465,6 +471,7 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest full && dg=$DG; th
 	check "an M7 image at a changed entry point fails" 1 "position 1 image 0: entry_point" "policy: FAILED"
 	# The nxp vendor fuse version is exact, not a floor: 2 in the image, 1 and 3 in the policy.
 	if mkbin fullf 2:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest fullf && dgf=$DG; then
+		RAN_fullf=1
 		mixpol "$pki/fullf.policy" "$(<"$pki/fullf.hash")" "$dgf" fullf
 		run "$REAL" "$pki/fullf.bin" "$pki/fullf.policy" "$pki/mix.yaml"
 		check "a vendor fuse version equal to the pin passes" 0 "policy: nxp_fuse_version [container 0] OK" "policy: OK"
@@ -521,11 +528,13 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest full && dg=$DG; th
 fi
 # The OEM boot container must carry the M7 image; the OEM containers must not be swapped.
 if mkbin nom7 0:4:nxp:a55 0:0:oem:a55 0:0:oem:a55 && nxpdigest nom7 && dg=$DG; then
+	RAN_nom7=1
 	mixpol "$pki/nom7.policy" "$(<"$pki/nom7.hash")" "$dg"
 	run "$REAL" "$pki/nom7.bin" "$pki/nom7.policy" "$pki/mix.yaml"
 	check "an image without the M7 image fails" 1 "differs from the manifest" "policy: FAILED"
 fi
 if mkbin swapped 0:4:nxp:a55 0:0:oem:a55 0:0:oem:m7 && nxpdigest swapped && dg=$DG; then
+	RAN_swapped=1
 	mixpol "$pki/swapped.policy" "$(<"$pki/swapped.hash")" "$dg"
 	run "$REAL" "$pki/swapped.bin" "$pki/swapped.policy" "$pki/mix.yaml"
 	check "an image with the two OEM containers swapped fails" 1 "differs from the manifest" "policy: FAILED"
@@ -533,6 +542,7 @@ fi
 # Two OEM containers with distinct SRK tables, the second off-policy: each
 # container's own table is hashed, so the shared-hash-file shortcut cannot hide it.
 if mkbin distinct 0:4:nxp:a55 0:0:oem:m7 0:4:oem:a55 && nxpdigest distinct && dg=$DG; then
+	RAN_distinct=1
 	mixpol "$pki/distinct.policy" "$(<"$pki/distinct.hash")" "$dg"
 	run "$REAL" "$pki/distinct.bin" "$pki/distinct.policy" "$pki/mix.yaml"
 	check "two OEM containers with distinct SRK tables, the second off-policy, fails" 1 \
@@ -625,6 +635,12 @@ check "a call without a policy file fails" 1 "usage" "policy: FAILED"
 
 # The mixed-signer control must have run: a skipped block is a failure.
 expect "the complete mixed-signer control ran" test "$MIXED_RAN" -eq 1
+expect "the mixed-signer block subst ran" test "$RAN_subst" -eq 1
+expect "the mixed-signer block moved ran" test "$RAN_moved" -eq 1
+expect "the mixed-signer block fullf ran" test "$RAN_fullf" -eq 1
+expect "the mixed-signer block nom7 ran" test "$RAN_nom7" -eq 1
+expect "the mixed-signer block swapped ran" test "$RAN_swapped" -eq 1
+expect "the mixed-signer block distinct ran" test "$RAN_distinct" -eq 1
 
 # The checks leave nothing in the clone.
 expect "the clone is clean after the checks" test -z "$(git -C "$ROOT" status --porcelain)"
