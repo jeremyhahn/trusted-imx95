@@ -1,0 +1,31 @@
+# bblayers.conf template. Provisional default, pending the owner's answer on
+# #14. Not built yet: the layer set is a proposal, no bitbake run has parsed
+# it. Replace ##FETCH_DIR## with the directory scripts/platform-image-fetch.sh
+# checked the layers out into (paths as manifest.lock gives them).
+# meta-poky is listed because the distro requires poky.conf. meta-perl is
+# listed because meta-imx-sdk's layer.conf depends on perl-layer.
+# meta-multimedia is listed only because meta-imx's wireplumber and dvb-apps
+# bbappends need the recipes it provides; the image ships no multimedia.
+
+POKY_BBLAYERS_CONF_VERSION = "2"
+BBPATH = "${TOPDIR}"
+BBFILES ?= ""
+
+BBLAYERS ?= " \
+  ##FETCH_DIR##/sources/openembedded-core/meta \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-oe \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-python \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-perl \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-multimedia \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-networking \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-filesystems \
+  ##FETCH_DIR##/sources/meta-yocto/meta-poky \
+  ##FETCH_DIR##/sources/meta-arm/meta-arm \
+  ##FETCH_DIR##/sources/meta-arm/meta-arm-toolchain \
+  ##FETCH_DIR##/sources/meta-freescale \
+  ##FETCH_DIR##/sources/meta-freescale-3rdparty \
+  ##FETCH_DIR##/sources/meta-freescale-distro \
+  ##FETCH_DIR##/sources/meta-imx/meta-imx-bsp \
+  ##FETCH_DIR##/sources/meta-imx/meta-imx-sdk \
+  ##REPO_DIR##/platform-image \
+"
