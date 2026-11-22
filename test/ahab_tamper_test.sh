@@ -113,7 +113,48 @@ else
 	rejects "C5b-ii (payload and hash both changed)" "$t"
 fi
 
-# C2b: used SRK index, in the SRK data record after the SRK table.
+# parsed_srk_id FILE: used_srk_id as SPSDK parses it (AHABImage.parse, as the policy
+# check does; nxpimage's config export crashes on a header with another selector). On
+# a parse failure the parser's last lines are printed and the case records a failure.
+parsed_srk_id() {
+	local v
+	v=$("$ROOT/scripts/ahab/spsdk-venv.sh")
+	"$v/bin/python" -I -c '
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+d = open(sys.argv[1], "rb").read()
+o = AHABImage.find_offset_of_ahab(d, True)
+c = AHABImage.parse(d[o:], FamilyRevision("mimx9596", "b0")).ahab_containers[0]
+print(int(str(c.flag_used_srk_id), 0))
+' "$1" 2>&1 | tail -n 5
+	return "${PIPESTATUS[0]}"
+}
+
+# C2b (header selector): the container header's key selector, flags bits 4-5 (byte 4
+# of the little-endian flags word at byte 4), set to a different SRK index. The SRK
+# data record is left as built (index 0). The signature is NOT redone: the header is
+# signed content, so this case tests that a header selecting another SRK than the
+# SRK data record names is rejected. It is asserted parsed first, so the case cannot
+# pass on a header that never changed.
+oldflags=$(u8 "$good" 4)
+oldsel=$(((oldflags >> 4) & 3))
+newsel=$(((oldsel + 1) & 3))
+cp "$good" "$t"
+setbyte "$t" 4 $(((oldflags & ~0x30) | (newsel << 4)))
+if got=$(parsed_srk_id "$t"); then
+	if [ "$got" = "$newsel" ]; then
+		pass "C2b (header selector): SPSDK parses used_srk_id $got from the changed header"
+		rejects "C2b (header selector $oldsel -> $newsel, SRK data record unchanged)" "$t"
+	else
+		fail "C2b (header selector): parsed used_srk_id is '$got', want $newsel"
+	fi
+else
+	fail "C2b (header selector): the fixture does not parse" "$got"
+fi
+
+# C2b (SRK data record): used SRK index, in the SRK data record after the SRK table;
+# the header selector is unchanged.
 tab=$((sb + 16 + 8))
 sd=$((tab + $(u16 "$good" $((tab + 1)))))
 want=$(u8 "$good" $((sd + 3)))
@@ -122,7 +163,7 @@ if [ "$want" -ne 93 ]; then
 else
 	cp "$good" "$t"
 	setbyte "$t" $((sd + 4)) 1
-	rejects "C2b (used_srk_id 0 -> 1)" "$t"
+	rejects "C2b (SRK data record index 0 -> 1, header selector unchanged)" "$t"
 fi
 
 # SRK table: one byte inside the first SRK record's key material.
