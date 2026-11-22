@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test ahab-m7-test ahab-policy-test
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test ahab-m7-test ahab-policy-test ahab-tamper-test
 
 help: ## List the targets
 	@echo "Targets:"
@@ -186,6 +186,9 @@ ahab-m7-test: ## Sign and verify an AHAB container whose one image entry targets
 
 ahab-policy-test: ## Check a test-PKI container against a policy file written from its own values (scripts/ahab/policy-check.sh; no board, no fuse)
 	@test/ahab_policy_test.sh
+
+ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
+	@test/ahab_tamper_test.sh
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
