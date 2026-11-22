@@ -19,11 +19,18 @@ cp "$ROOT/test/testdata/ci-mask-lan-tests.py" \
 run python3 -I "$lay/testdata/ci-mask-lan-tests.py"
 check "ci-mask-lan: the template's tests pass" 0
 # The ci-image-history wiring cases parse ci.yml with PyYAML (py3-yaml in the
-# toolchain image). A missing PyYAML fails here; it is never skipped.
-run python3 -I -c 'import yaml'
-check "ci-image-history: PyYAML is installed" 0
-run python3 -I "$lay/testdata/ci-image-history-tests.py"
-check "ci-image-history: the tests pass" 0 "0 failure(s)"
+# toolchain image). In CI (CI or GITHUB_ACTIONS is true) a missing PyYAML
+# fails; elsewhere, outside the toolchain image, the suite is skipped with a
+# named line. With PyYAML present the suite always runs and must pass.
+if python3 -I -c 'import yaml' 2>/dev/null; then
+  run python3 -I "$lay/testdata/ci-image-history-tests.py"
+  check "ci-image-history: the tests pass" 0 "0 failure(s)"
+elif [ "${CI:-}" = true ] || [ "${GITHUB_ACTIONS:-}" = true ]; then
+  run python3 -I -c 'import yaml'
+  check "ci-image-history: PyYAML is installed" 0
+else
+  echo "skip ci-image-history: PyYAML is not installed (required when CI is true)"
+fi
 
 # The scripts themselves, run through bash and sh on PATH (check-script-tests
 # counts a script tested only so). docker and go are stubs.
