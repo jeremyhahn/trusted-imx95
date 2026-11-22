@@ -82,11 +82,7 @@ wiped whenever the root file system is reflashed. The image enforces it: the roo
 `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
 `tee-supplicant` from starting. That boot-time check is the second barrier: it catches a different build, but a reflash of the very same build
 carries the same identity and is not told apart. The first barrier is the flashing operation itself.
-`scripts/flash-rootfs.sh TARGET ROOTFS_IMAGE` is the only supported way to rewrite the root partition. It finds the
-partitions named `root` and `tee-data` (the wks `--part-name`s) in the target's GPT, erases `tee-data` (zeroed whole,
-file system made again), then writes the rootfs. It refuses, with nothing written, if either partition is missing or
-not unique, the image does not fit, or `mkfs.ext4` is absent; a block device also needs `FLASH_ROOTFS_YES=1`. A raw
-write of the root partition outside this script is unsupported and would keep the NV. A full-image flash recreates
+`scripts/flash-rootfs.sh TARGET WIC` is the only supported way to rewrite the root partition. It does not trust the\ntarget's partition table: one reader checks the GPT of the target and of the built `.wic` (header and entry-array\nCRC32s, usable-LBA range, no overlaps, exact names), and the script refuses unless the two tables are equal. It then\nerases `tee-data` (zeroed whole, file system made again) and copies the root partition's byte range from the `.wic`,\nboth ranges taken from the validated `.wic` table; paths are resolved (a symlink is followed, not measured). It\nrefuses, with nothing written, on any difference or if `mkfs.ext4` is absent; a block device also needs\n`FLASH_ROOTFS_YES=1`. A blank target has no table to match and takes the whole `.wic` first. `/data` is mounted by\n`tee-data-mount.service`, which picks the `tee-data` partition on the same disk as `/` (never a global partition\nlabel, which could name another medium's NV) and fails closed if there is none or more than one. A raw\nwrite of the root partition outside this script is unsupported and would keep the NV. A full-image flash recreates
 `tee-data` empty. It is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle

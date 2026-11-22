@@ -91,9 +91,62 @@ expect "image installs the OP-TEE client (tee-supplicant)" nc "$img" 'IMAGE_INST
 expect "image installs the NV recipe" nc "$img" 'IMAGE_INSTALL:append = ".* trusted-imx95-tee-nv( |")'
 expect "the NV recipe enables tee-supplicant at boot" ncstr "$nv" 'basic.target.wants/tee-supplicant@teepriv0.service'
 expect "the supplicant stores under /data/tee" ncstr "$nvf/tee-supplicant" '--fs-parent-path=/data/tee'
-expect "data.mount mounts on /data" ncstr "$nvf/data.mount" 'Where=/data'
-expect "data.mount names the tee-data partition" ncstr "$nvf/data.mount" 'What=/dev/disk/by-partlabel/tee-data'
-expect "tee-supplicant waits for the /data mount" ncstr "$nvf/10-nv.conf" 'RequiresMountsFor=/data'
+# /data is the tee-data partition of the root's own disk, never a global by-partlabel path
+# (Codex P1: with an eMMC and a microSD image that can mount the other medium's NV).
+mnt=$nvf/tee-data-mount
+expect "no data.mount unit (it named a global partlabel)" test ! -e "$nvf/data.mount"
+expect "no by-partlabel path in the NV files" none 'by-partlabel' "$nvf/tee-data-mount" "$nvf/tee-data-mount.service" "$nvf/tee-nv-wipe.service" "$nvf/10-nv.conf"
+expect "the mount service runs the resolver" ncstr "$nvf/tee-data-mount.service" 'ExecStart=/usr/sbin/tee-data-mount'
+expect "the mount service has no default dependencies" ncstr "$nvf/tee-data-mount.service" 'DefaultDependencies=no'
+expect "the mount service is before the wipe" ncstr "$nvf/tee-data-mount.service" 'Before=tee-nv-wipe.service'
+expect "the wipe unit requires the mount service" ncstr "$nvf/tee-nv-wipe.service" 'Requires=tee-data-mount.service'
+expect "tee-supplicant requires the mount service" ncstr "$nvf/10-nv.conf" 'Requires=tee-data-mount.service tee-nv-wipe.service'
+# The resolver, on a fake sysfs and mountinfo with two disks that each carry tee-data.
+fk=$(mktemp -d)
+mkdir -p "$fk/dev" "$fk/sys/dev/block"
+# fakedisk DISK MAJOR: a disk with partitions p1 boot, p2 root, p3 tee-data (names via PARTNAME)
+fakedisk() {
+	local d=$fk/sys/devices/$1 i n
+	mkdir -p "$d"
+	for i in 1 2 3; do
+		case $i in 1) n=boot ;; 2) n=root ;; 3) n=tee-data ;; esac
+		mkdir -p "$d/$1p$i"
+		: >"$d/$1p$i/partition"
+		printf 'MAJOR=%s\nMINOR=%s\nDEVNAME=%sp%s\nPARTNAME=%s\n' "$2" "$i" "$1" "$i" "$n" >"$d/$1p$i/uevent"
+		ln -sfn "../../devices/$1/$1p$i" "$fk/sys/dev/block/$2:$i"
+		: >"$fk/dev/$1p$i"
+	done
+}
+fakedisk mmcblk0 179
+fakedisk mmcblk1 180
+printf '1 0 0:1 / /proc rw - proc proc rw\n20 1 179:2 / / ro - ext4 /dev/root ro\n' >"$fk/mi-emmc"
+printf '20 1 180:2 / / ro - ext4 /dev/root ro\n' >"$fk/mi-sd"
+printf '#!/bin/sh\necho "$@" >"%s/mounted"\n' "$fk" >"$fk/mountstub"
+chmod +x "$fk/mountstub"
+resolve() { # MOUNTINFO: prints the exit status; the stub records its arguments
+	local r=0
+	rm -f "$fk/mounted"
+	TEE_NV_MOUNTINFO=$1 TEE_NV_SYS=$fk/sys TEE_NV_DEV=$fk/dev TEE_NV_DATA=/data TEE_NV_MOUNT=$fk/mountstub sh "$mnt" 2>/dev/null || r=$?
+	echo "$r"
+}
+expect "resolver: root on the eMMC mounts the eMMC's tee-data" test "$(resolve "$fk/mi-emmc")$(<"$fk/mounted")" = "0-t ext4 -o rw,nosuid,nodev,noexec $fk/dev/mmcblk0p3 /data"
+expect "resolver: root on the microSD mounts the microSD's tee-data" test "$(resolve "$fk/mi-sd")$(<"$fk/mounted")" = "0-t ext4 -o rw,nosuid,nodev,noexec $fk/dev/mmcblk1p3 /data"
+# Ambiguous: a second tee-data on the root's disk.
+mkdir -p "$fk/sys/devices/mmcblk1/mmcblk1p4"
+: >"$fk/sys/devices/mmcblk1/mmcblk1p4/partition"
+printf 'DEVNAME=mmcblk1p4\nPARTNAME=tee-data\n' >"$fk/sys/devices/mmcblk1/mmcblk1p4/uevent"
+: >"$fk/dev/mmcblk1p4"
+expect "resolver: two tee-data on the root's disk is refused" test "$(resolve "$fk/mi-sd")" -ne 0
+expect "resolver: nothing was mounted when ambiguous" test ! -e "$fk/mounted"
+expect "resolver: the other disk is still resolved on its own" test "$(resolve "$fk/mi-emmc")" -eq 0
+# Missing: rename the root disk's tee-data away; the other disk's tee-data must not be used.
+printf 'DEVNAME=mmcblk0p3\nPARTNAME=other\n' >"$fk/sys/devices/mmcblk0/mmcblk0p3/uevent"
+expect "resolver: no tee-data on the root's disk is refused" test "$(resolve "$fk/mi-emmc")" -ne 0
+expect "resolver: nothing was mounted when missing" test ! -e "$fk/mounted"
+printf '1 0 0:1 / /proc rw - proc proc rw\n' >"$fk/mi-none"
+expect "resolver: no mount on / is refused" test "$(resolve "$fk/mi-none")" -ne 0
+printf 'DEVNAME=mmcblk0p3\nPARTNAME=tee-data x\n' >"$fk/sys/devices/mmcblk0/mmcblk0p3/uevent"
+expect "resolver: a name that is not exactly tee-data is refused" test "$(resolve "$fk/mi-emmc")" -ne 0
 expect "the wks has a writable tee-data partition" ncstr "$wks" '--part-name tee-data'
 expect "the image uses that wks" ncstr "$img" 'WKS_FILE = "trusted-imx95.wks"'
 expect "the root file system stays read-only" ncstr "$img" 'IMAGE_FEATURES += "read-only-rootfs"'
@@ -105,7 +158,7 @@ expect "the NV recipe packages /data" ncstr "$nv" '+= "/data '
 wipe=$nvf/tee-nv-wipe
 unit=$nvf/tee-nv-wipe.service
 wt=$(mktemp -d)
-trap 'rm -rf "$wt"' EXIT
+trap 'rm -rf "$wt" "$fk"' EXIT
 mkdir -p "$wt/data/tee/sub"
 printf 'seed\n' >"$wt/data/tee/sub/obj"
 printf 'id-A\n' >"$wt/rootfs-id"
@@ -143,15 +196,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
 expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
-expect "unit: runs after the /data mount" ncstr "$unit" 'After=data.mount'
+expect "unit: runs after the /data mount service" ncstr "$unit" 'After=tee-data-mount.service'
 expect "unit: oneshot" ncstr "$unit" 'Type=oneshot'
 # The BSP supplicant is DefaultDependencies=no, Before=sysinit.target; default
 # dependencies here would make an ordering cycle (Codex P1).
 expect "unit: no default dependencies" ncstr "$unit" 'DefaultDependencies=no'
-expect "unit: requires the /data mount" ncstr "$unit" 'RequiresMountsFor=/data'
 expect "unit: stopped before shutdown" ncstr "$unit" 'Conflicts=shutdown.target'
 expect "unit: ordered before shutdown" ncstr "$unit" 'Before=shutdown.target'
-expect "supplicant drop-in: hard dependency on the wipe" ncstr "$nvf/10-nv.conf" 'Requires=tee-nv-wipe.service'
+expect "supplicant drop-in: hard dependency on the wipe" ncstr "$nvf/10-nv.conf" ' tee-nv-wipe.service'
+expect "supplicant drop-in: Requires= names the wipe unit" nc "$nvf/10-nv.conf" '^Requires=.*tee-nv-wipe\.service'
 expect "supplicant drop-in: ordered after the wipe" ncstr "$nvf/10-nv.conf" 'tee-nv-wipe.service'
 expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplicant@teepriv0.service.requires'
 expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'

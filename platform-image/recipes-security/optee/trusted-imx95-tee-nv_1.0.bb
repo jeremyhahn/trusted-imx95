@@ -7,7 +7,8 @@ SUMMARY = "Persistent storage and start-up of tee-supplicant for the fTPM NV (pr
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"
 
-SRC_URI = "file://data.mount \
+SRC_URI = "file://tee-data-mount \
+           file://tee-data-mount.service \
            file://10-nv.conf \
            file://tee-supplicant \
            file://tee-nv-wipe \
@@ -19,10 +20,14 @@ inherit systemd
 RDEPENDS:${PN} = "optee-client"
 
 do_install() {
-    # Mountpoint of data.mount; the root file system is read-only.
+    # Mountpoint of /data; the root file system is read-only. The tee-data partition of
+    # the disk holding / is mounted there by tee-data-mount.service (not by a global
+    # by-partlabel path, which can name another medium's partition).
     install -d ${D}/data
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${UNPACKDIR}/data.mount ${D}${systemd_system_unitdir}/data.mount
+    install -d ${D}${sbindir}
+    install -m 0755 ${UNPACKDIR}/tee-data-mount ${D}${sbindir}/tee-data-mount
+    install -m 0644 ${UNPACKDIR}/tee-data-mount.service ${D}${systemd_system_unitdir}/tee-data-mount.service
     install -d ${D}${systemd_system_unitdir}/tee-supplicant@.service.d
     install -m 0644 ${UNPACKDIR}/10-nv.conf ${D}${systemd_system_unitdir}/tee-supplicant@.service.d/10-nv.conf
     # NV erasure tied to the rootfs identity (/etc/trusted-imx95-rootfs-id, written
@@ -41,4 +46,4 @@ do_install() {
         ${D}${sysconfdir}/systemd/system/basic.target.wants/tee-supplicant@teepriv0.service
 }
 
-FILES:${PN} += "/data ${sbindir}/tee-nv-wipe ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"
+FILES:${PN} += "/data ${sbindir}/tee-nv-wipe ${sbindir}/tee-data-mount ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"

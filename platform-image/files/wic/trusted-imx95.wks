@@ -16,5 +16,6 @@ part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --part-name ro
 # tee-data, after the root partition. MISSING: no survey sizes it; 64 MiB is provisional.
 part /data --ondisk mmcblk --fstype=ext4 --label tee-data --part-name tee-data --fixed-size 64M
 
-# The BSP takes the table type from IMX_BOOTLOADER_PTABLE; GPT is kept here for the by-partlabel mount.
+# The BSP takes the table type from IMX_BOOTLOADER_PTABLE; GPT is kept here for the partition names
+# (the kernel's PARTNAME, which tee-data-mount reads on the root's own disk, and flash-rootfs.sh).
 bootloader --ptable gpt

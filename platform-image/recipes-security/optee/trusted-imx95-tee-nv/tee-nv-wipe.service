@@ -3,10 +3,11 @@ Description=Wipe the fTPM NV when the root file system is not the one it was wri
 # The BSP's tee-supplicant@.service is DefaultDependencies=no and runs Before=sysinit.target.
 # With the default dependencies this unit would sit After=sysinit.target and, being
 # before the supplicant, close an ordering cycle. So it carries none of them: the /data
-# mount is required explicitly, and it is stopped ahead of shutdown like the supplicant.
+# /data is mounted by tee-data-mount.service (the tee-data partition of the root's own
+# disk), which is required explicitly; this unit is stopped ahead of shutdown like the supplicant.
 DefaultDependencies=no
-RequiresMountsFor=/data
-After=data.mount
+Requires=tee-data-mount.service
+After=tee-data-mount.service
 Before=tee-supplicant@teepriv0.service
 Conflicts=shutdown.target
 Before=shutdown.target
