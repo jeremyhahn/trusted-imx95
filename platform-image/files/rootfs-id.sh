@@ -1,15 +1,20 @@
 #!/bin/sh
-# Print the rootfs identity of the tree in $1: a SHA-256 over every file's content hash and
-# every entry's path, type, mode, numeric UID, numeric GID and symlink target. It reads the
-# tree only, never the clock, so identical inputs give identical bytes. The caller removes
-# the identity file from the tree first. Numeric ownership is what pseudo/fakeroot reports
-# at do_rootfs time. ROOTFS_ID_FIND names the find command (the test substitutes a fake
-# ownership source, since changing an owner needs root).
+# Print the rootfs identity of the tree in $1: 32 bytes from /dev/urandom, hex encoded (64
+# lowercase hex characters). It is drawn once per build, so every build of the image, even
+# one with identical inputs, gets a new identity and the NV is wiped; no list of
+# security-relevant attributes (ownership, xattrs, ACLs, capabilities, ...) can be
+# incomplete. A tree that already carries a valid identity (etc/trusted-imx95-rootfs-id)
+# keeps it: the same image bytes give the same identity, so this is not regenerated.
 set -eu
 [ $# -eq 1 ] && [ -d "$1" ] || { echo "usage: rootfs-id.sh TREE" >&2; exit 1; }
-find_cmd=${ROOTFS_ID_FIND:-find}
-cd "$1"
-{
-	find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-	"$find_cmd" . -printf '%p %y %m %U %G %l\n' | LC_ALL=C sort
-} | sha256sum | cut -d' ' -f1
+idf=$1/etc/trusted-imx95-rootfs-id
+if [ -f "$idf" ] && [ ! -L "$idf" ]; then
+	cur=$(cat "$idf")
+	case $cur in
+	*[!0-9a-f]*) ;;
+	????????????????????????????????????????????????????????????????) printf '%s\n' "$cur"; exit 0 ;;
+	esac
+fi
+id=$(od -An -v -tx1 -N32 /dev/urandom | tr -d ' \n')
+[ ${#id} -eq 64 ] || { echo "rootfs-id.sh: could not read /dev/urandom" >&2; exit 1; }
+printf '%s\n' "$id"

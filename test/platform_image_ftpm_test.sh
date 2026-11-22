@@ -210,11 +210,10 @@ expect "supplicant drop-in: Requires= names the wipe unit" nc "$nvf/10-nv.conf" 
 expect "supplicant drop-in: ordered after the wipe" ncstr "$nvf/10-nv.conf" 'tee-nv-wipe.service'
 expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplicant@teepriv0.service.requires'
 expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'
-expect "the rootfs identity is a hash of the rootfs tree" ncstr "$ROOT/platform-image/files/rootfs-id.sh" '| sha256sum | cut -d'
-expect "the rootfs identity hashes numeric UID and GID" ncstr "$ROOT/platform-image/files/rootfs-id.sh" '%p %y %m %U %G %l'
+expect "the rootfs identity is random per build" ncstr "$ROOT/platform-image/files/rootfs-id.sh" '/dev/urandom'
 expect "the image runs the identity script" ncstr "$img" 'rootfs-id.sh $'"{IMAGE_ROOTFS}"
 expect "the identity script is a do_rootfs checksum input" ncstr "$img" 'do_rootfs[file-checksums] += "$'"{THISDIR}/../../files/rootfs-id.sh:True\""
-expect "the rootfs identity names its input (the rootfs tree)" has "$img" 'derived from the rootfs tree itself'
+expect "the rootfs identity is documented as random per build" has "$img" 'The identity is random, drawn once per build'
 idfn=$(awk '/^trusted_imx95_rootfs_id \(\)/,/^}/' "$img")
 expect "the rootfs identity function was found" test -n "$idfn"
 expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' "$idfn" | tr -c 'A-Za-z_' '\n' | grep -cxE 'DATETIME|DATE|TIME|SOURCE_DATE_EPOCH')" -eq 0

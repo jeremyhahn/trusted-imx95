@@ -60,10 +60,10 @@ IMAGE_BOOT_FILES:remove = "mcore-demos/imx95-19x19-frdm_m7_TCM_hello_world.bin m
 # rootfs carries a build identity; trusted-imx95-tee-nv's tee-nv-wipe unit wipes
 # /data/tee when /data/tee-rootfs-id differs from it (docs/ftpm/README.md).
 # A reflash of the very same build is not told apart; a full .wic flash is.
-# The identity is derived from the rootfs tree itself (paths, types, modes, numeric
-# UID and GID, link targets and file contents, less the identity file), never from
-# the clock, so identical inputs give identical bytes (reproducible builds). The
-# hashing is platform-image/files/rootfs-id.sh, which test/rootfs_id_test.sh runs.
+# The identity is random, drawn once per build (platform-image/files/rootfs-id.sh,
+# which test/rootfs_id_test.sh runs), so every build wipes the NV even if only
+# metadata (ownership, xattrs, ACLs, capabilities) changed. The image is therefore
+# not byte-reproducible; the identity is the one deliberate exception.
 trusted_imx95_rootfs_id () {
     idf=${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id
     rm -f $idf

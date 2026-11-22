@@ -1,8 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Behavioural test of platform-image/files/rootfs-id.sh (the fTPM NV wipe's rootfs identity,
-# SPEC row ftpm, issue #140): content, mode, link target and numeric ownership each change
-# the identity; identical trees give equal identities. Changing a real owner needs root, so
-# the ownership cases use a fake find (ROOTFS_ID_FIND) that rewrites the owner column.
+# SPEC row ftpm, issue #140): the identity is random per build, 64 lowercase hex characters,
+# and a tree that already carries one keeps it.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -11,45 +10,34 @@ idsh=$ROOT/platform-image/files/rootfs-id.sh
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 
-mktree() { # DIR: a small tree
-	mkdir -p "$1/etc" "$1/bin"
-	printf 'one\n' >"$1/etc/a"
-	printf 'two\n' >"$1/bin/b"
-	chmod 0644 "$1/etc/a"
-	ln -s a "$1/etc/link"
-}
-mktree "$w/t1"
-mktree "$w/t2"
-
-# A find that reports another owner for ./bin/b (or all, when FAKE_ALL is set).
-cat >"$w/fakefind" <<'EOF'
-#!/bin/sh
-find "$@" | awk -v u="${FAKE_UID:-}" -v g="${FAKE_GID:-}" '
-	$1 == "./bin/b" { if (u != "") $4 = u; if (g != "") $5 = g }
-	{ print }'
-EOF
-chmod +x "$w/fakefind"
+mkdir -p "$w/t1/etc" "$w/t2/etc"
+printf 'one\n' >"$w/t1/etc/a"
+cp "$w/t1/etc/a" "$w/t2/etc/a"
 
 id() { sh "$idsh" "$1"; }
-idf() { ROOTFS_ID_FIND="$w/fakefind" sh "$idsh" "$1"; }
+hex64() { printf '%s' "$1" | grep -Eqx '[0-9a-f]{64}'; }
 
-expect "identical trees give equal identities" test "$(id "$w/t1")" = "$(id "$w/t2")"
-expect "identical trees give equal identities with the fake source" test "$(idf "$w/t1")" = "$(idf "$w/t2")"
-expect "the fake source with no override equals the real one" test "$(idf "$w/t1")" = "$(id "$w/t1")"
-expect "the identity is a SHA-256 hex digest" test "$(id "$w/t1" | tr -d '0-9a-f' | wc -c)" -eq 1
-expect "a different UID changes the identity" test "$(FAKE_UID=1234 idf "$w/t1")" != "$(idf "$w/t2")"
-expect "a different GID changes the identity" test "$(FAKE_GID=1234 idf "$w/t1")" != "$(idf "$w/t2")"
-expect "an ownership change on one side only differs, same on both is equal" \
-	test "$(FAKE_UID=7 idf "$w/t1")" = "$(FAKE_UID=7 idf "$w/t2")"
+a=$(id "$w/t1")
+b=$(id "$w/t1")
+c=$(id "$w/t2")
+expect "the identity is 64 lowercase hex characters" hex64 "$a"
+expect "two runs on the same tree give different identities" test "$a" != "$b"
+expect "identical trees give different identities" test "$a" != "$c"
 
-printf 'three\n' >"$w/t2/etc/a"
-expect "a content change changes the identity" test "$(id "$w/t1")" != "$(id "$w/t2")"
-mktree "$w/t3"
-chmod 0600 "$w/t3/etc/a"
-expect "a mode change changes the identity" test "$(id "$w/t1")" != "$(id "$w/t3")"
-mktree "$w/t4"
-ln -sf b "$w/t4/etc/link"
-expect "a link target change changes the identity" test "$(id "$w/t1")" != "$(id "$w/t4")"
+# A metadata-only change cannot keep the identity: every run is new anyway.
+chmod 0600 "$w/t2/etc/a"
+expect "a mode-only change gives a different identity" test "$(id "$w/t2")" != "$c"
+
+# A tree carrying an identity keeps it.
+printf '%s\n' "$a" >"$w/t1/etc/trusted-imx95-rootfs-id"
+expect "a tree carrying an identity gives it back" test "$(id "$w/t1")" = "$a"
+expect "a second read gives it back again" test "$(id "$w/t1")" = "$a"
+printf 'not-hex\n' >"$w/t2/etc/trusted-imx95-rootfs-id"
+d=$(id "$w/t2")
+expect "an invalid carried identity is replaced by a valid one" hex64 "$d"
+printf 'ABCDEF%058d\n' 0 >"$w/t2/etc/trusted-imx95-rootfs-id"
+expect "an uppercase carried identity is replaced" test "$(id "$w/t2")" != "ABCDEF$(printf '%058d' 0)"
+expect "the script writes nothing into the tree" test "$(find "$w/t1" -type f | wc -l)" -eq 2
 expect "no tree argument fails" test "$(sh "$idsh" >/dev/null 2>&1 && echo 0 || echo 1)" -eq 1
 
 finish
