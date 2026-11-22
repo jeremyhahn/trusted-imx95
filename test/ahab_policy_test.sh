@@ -368,13 +368,28 @@ fi
 # container (its own SRK table, srk4..7), the OEM M7 container, the OEM A55
 # container. The nxp container is held to its pinned sha256 only.
 # nxpdigest <name>: sha256 of the nxp binary container SPSDK extracts from <name>.bin.
+#
+# The digest is left in DG (not echoed: a command substitution would run in a
+# subshell and lose the failure count). A parse failure, or a missing extracted
+# container, is a recorded test failure with the parser log, never a silent skip.
 nxpdigest() {
 	local d="$pki/$1.parsed" s
-	mkdir "$d"
-	"$venv/bin/nxpimage" ahab parse -f mimx9596 -r b0 -b "$pki/$1.bin" -o "$d" >"$pki/$1.plog" 2>&1 || return 1
+	DG=
+	mkdir -p "$d"
+	if ! "$venv/bin/nxpimage" ahab parse -f mimx9596 -r b0 -b "$pki/$1.bin" -o "$d" >"$pki/$1.plog" 2>&1; then
+		tail -n 5 "$pki/$1.plog"
+		fail "nxpimage ahab parse failed for $1"
+		return 1
+	fi
+	if [ ! -f "$d/ahab_nxp_containers_0.bin" ]; then
+		tail -n 5 "$pki/$1.plog"
+		fail "nxpimage ahab parse of $1 extracted no nxp container"
+		return 1
+	fi
 	s=$(sha256sum "$d/ahab_nxp_containers_0.bin")
-	echo "${s%% *}"
+	DG=${s%% *}
 }
+MIXED_RAN=0
 # mixpol <file> <oem hash> <nxp digest> [<image name>]: with a name, the vendor
 # record is that image's first container's own record.
 mixpol() {
@@ -395,7 +410,8 @@ dropkey() {
 	done <"$1" >"$2"
 }
 mkman "$pki/mix.yaml" nxp m7 a55
-if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dg=$(nxpdigest full); then
+if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest full && dg=$DG; then
+	MIXED_RAN=1
 	h=$(<"$pki/full.hash")
 	mixpol "$pki/full.policy" "$h" "$dg" full
 	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/mix.yaml"
@@ -432,13 +448,13 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dg=$(nxpdigest full); then
 		check "a malformed ${kv%%=*} fails" 1 "policy-check: ${kv%%=*} is not" "policy: FAILED"
 	done
 	# An OEM payload substituted (its own header matches it) fails the manifest digest.
-	if mkbin subst 0:4:nxp:a55 0:0:oem:m7:payload2.bin 0:0:oem:a55 && dg2=$(nxpdigest subst); then
+	if mkbin subst 0:4:nxp:a55 0:0:oem:m7:payload2.bin 0:0:oem:a55 && nxpdigest subst && dg2=$DG; then
 		mixpol "$pki/subst.policy" "$(<"$pki/subst.hash")" "$dg2" subst
 		run "$REAL" "$pki/subst.bin" "$pki/subst.policy" "$pki/mix.yaml"
 		check "a substituted M7 payload with a matching header fails" 1 "position 1 image 0: sha256" "policy: FAILED"
 	fi
 	# An image at a changed load address fails.
-	if mkbin moved 0:4:nxp:a55 0:0:oem:m7:payload.bin:0x00001000 0:0:oem:a55 && dg2=$(nxpdigest moved); then
+	if mkbin moved 0:4:nxp:a55 0:0:oem:m7:payload.bin:0x00001000 0:0:oem:a55 && nxpdigest moved && dg2=$DG; then
 		mixpol "$pki/moved.policy" "$(<"$pki/moved.hash")" "$dg2" moved
 		run "$REAL" "$pki/moved.bin" "$pki/moved.policy" "$pki/mix.yaml"
 		check "an M7 image at a changed load address fails" 1 "position 1 image 0: load_address" "policy: FAILED"
@@ -448,7 +464,7 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dg=$(nxpdigest full); then
 	run "$REAL" "$pki/full.bin" "$pki/full.policy" "$pki/entry.yaml"
 	check "an M7 image at a changed entry point fails" 1 "position 1 image 0: entry_point" "policy: FAILED"
 	# The nxp vendor fuse version is exact, not a floor: 2 in the image, 1 and 3 in the policy.
-	if mkbin fullf 2:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dgf=$(nxpdigest fullf); then
+	if mkbin fullf 2:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && nxpdigest fullf && dgf=$DG; then
 		mixpol "$pki/fullf.policy" "$(<"$pki/fullf.hash")" "$dgf" fullf
 		run "$REAL" "$pki/fullf.bin" "$pki/fullf.policy" "$pki/mix.yaml"
 		check "a vendor fuse version equal to the pin passes" 0 "policy: nxp_fuse_version [container 0] OK" "policy: OK"
@@ -504,19 +520,19 @@ if mkbin full 0:4:nxp:a55 0:0:oem:m7 0:0:oem:a55 && dg=$(nxpdigest full); then
 	check "an image whose container order differs from the manifest fails" 1 "the manifest lists" "policy: FAILED"
 fi
 # The OEM boot container must carry the M7 image; the OEM containers must not be swapped.
-if mkbin nom7 0:4:nxp:a55 0:0:oem:a55 0:0:oem:a55 && dg=$(nxpdigest nom7); then
+if mkbin nom7 0:4:nxp:a55 0:0:oem:a55 0:0:oem:a55 && nxpdigest nom7 && dg=$DG; then
 	mixpol "$pki/nom7.policy" "$(<"$pki/nom7.hash")" "$dg"
 	run "$REAL" "$pki/nom7.bin" "$pki/nom7.policy" "$pki/mix.yaml"
 	check "an image without the M7 image fails" 1 "differs from the manifest" "policy: FAILED"
 fi
-if mkbin swapped 0:4:nxp:a55 0:0:oem:a55 0:0:oem:m7 && dg=$(nxpdigest swapped); then
+if mkbin swapped 0:4:nxp:a55 0:0:oem:a55 0:0:oem:m7 && nxpdigest swapped && dg=$DG; then
 	mixpol "$pki/swapped.policy" "$(<"$pki/swapped.hash")" "$dg"
 	run "$REAL" "$pki/swapped.bin" "$pki/swapped.policy" "$pki/mix.yaml"
 	check "an image with the two OEM containers swapped fails" 1 "differs from the manifest" "policy: FAILED"
 fi
 # Two OEM containers with distinct SRK tables, the second off-policy: each
 # container's own table is hashed, so the shared-hash-file shortcut cannot hide it.
-if mkbin distinct 0:4:nxp:a55 0:0:oem:m7 0:4:oem:a55 && dg=$(nxpdigest distinct); then
+if mkbin distinct 0:4:nxp:a55 0:0:oem:m7 0:4:oem:a55 && nxpdigest distinct && dg=$DG; then
 	mixpol "$pki/distinct.policy" "$(<"$pki/distinct.hash")" "$dg"
 	run "$REAL" "$pki/distinct.bin" "$pki/distinct.policy" "$pki/mix.yaml"
 	check "two OEM containers with distinct SRK tables, the second off-policy, fails" 1 \
@@ -606,6 +622,9 @@ run "$POLICY" "$TMP_ROOT/junk.bin" "$good"
 check "a file that is not a container fails" 1 "policy: FAILED"
 run "$POLICY" "$bin"
 check "a call without a policy file fails" 1 "usage" "policy: FAILED"
+
+# The mixed-signer control must have run: a skipped block is a failure.
+expect "the complete mixed-signer control ran" test "$MIXED_RAN" -eq 1
 
 # The checks leave nothing in the clone.
 expect "the clone is clean after the checks" test -z "$(git -C "$ROOT" status --porcelain)"
