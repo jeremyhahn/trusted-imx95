@@ -85,6 +85,8 @@ has_line() {
 	return 1
 }
 
+# The M7 grants allowlist sits beside the lock; the fake patched block is one line.
+printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
 lock
 out="$TMP_ROOT/out"
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
@@ -108,6 +110,13 @@ check "a failing build fails by name" nonzero "build 1 failed"
 lock sm_commit=0123456789abcdef0123456789abcdef01234567
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
 check "a tag on another commit fails" nonzero "v1 is commit $commit"
+
+# A patched file that widens the M7 block (the allowlist lacks its line) stops the build.
+printf 'board=fake\n' >"$TMP_ROOT/m7-grants.txt"
+lock
+run env SM_OUT="$TMP_ROOT/out4" bash "$sm" "$TMP_ROOT/lock"
+check "sm-build.sh stops a build whose patched file widens the M7 block" nonzero "grants: UNLISTED board=fake-closed" "differ from system-manager/m7-grants.txt"
+printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
 
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
@@ -209,6 +218,41 @@ for c in bad1 bad2 bad3; do
 done
 run m7run none
 check "sm-build.sh refuses a configuration with no M7 block" nonzero "no M7 LM block"
+
+# sm-grants-check.sh: the M7 block's grants equal the reviewed list.
+gc="$ROOT/scripts/sm-grants-check.sh"
+g="$TMP_ROOT/g"
+mkdir -p "$g"
+printf 'LM0 name="SM"\nSYS ALL\nLM1 name="M7"\n# c\nB OWNER\n\nA ALL, \\\n   x=1\nC  READONLY # t\nLM2 name="AP"\nZ ALL\n' >"$g/cfg"
+printf '# list\nA ALL, x=1\nB OWNER\nC READONLY\n' >"$g/ok.txt"
+printf 'C READONLY\nB OWNER\nA ALL, x=1\n' >"$g/reorder.txt"
+printf 'A ALL, x=1\nB OWNER\nC READONLY\nD ALL\n' >"$g/stale.txt"
+printf 'A ALL, x=1\nB OWNER\n' >"$g/unlisted.txt"
+printf '# only a comment\n\n' >"$g/empty.txt"
+printf 'LM2 name="AP"\nZ ALL\n' >"$g/nom7.cfg"
+run "$gc" "$g/cfg" "$g/ok.txt"
+check "grants: a block matching the allowlist passes" 0 "grants: OK (3 lines)"
+run "$gc" "$g/cfg" "$g/reorder.txt"
+check "grants: a reordered list passes" 0 "grants: OK (3 lines)"
+run "$gc" "$g/cfg" "$g/unlisted.txt"
+check "grants: an extra grant line fails with UNLISTED" 1 "grants: UNLISTED C READONLY" "grants: FAILED"
+run "$gc" "$g/cfg" "$g/stale.txt"
+check "grants: a missing line fails with STALE" 1 "grants: STALE D ALL" "grants: FAILED"
+run "$gc" "$g/nom7.cfg" "$g/ok.txt"
+check "grants: a missing M7 block fails" 1 "no M7 LM block"
+run "$gc" "$g/cfg" "$g/empty.txt"
+check "grants: an empty allowlist fails" 1 "is empty"
+run "$gc" "$g/cfg" "$g/none.txt"
+check "grants: a missing allowlist fails" 1 "no allowlist"
+run "$gc" "$g/none.cfg" "$g/ok.txt"
+check "grants: an unreadable cfg fails" 1 "cannot read"
+run "$gc" --print "$g/cfg"
+check "grants: --print shows the normalised sorted grants" 0 "A ALL, x=1"
+# shellcheck disable=SC2016 # expands in the child shell
+expect "grants: --print output is the allowlist's lines" \
+	bash -c '[ "$("$1" --print "$2")" = "$(tail -n 3 "$3")" ]' _ "$gc" "$g/cfg" "$g/ok.txt"
+expect "grants: the committed allowlist is non-empty" \
+	[ -s "$ROOT/system-manager/m7-grants.txt" ]
 
 lock toolchain_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$TMP_ROOT/out2" bash "$sm" "$TMP_ROOT/lock"

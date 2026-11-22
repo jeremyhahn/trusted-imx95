@@ -175,6 +175,8 @@ build() {
 	[ "$got" = "${pin[sm_patched_config_sha256]}" ] ||
 		die "patched ${pin[sm_config_file]} SHA-256 is $got, the lock pins ${pin[sm_patched_config_sha256]}"
 	m7_clean "$tree/${pin[sm_config_file]}"
+	"$root/scripts/sm-grants-check.sh" "$tree/${pin[sm_config_file]}" "$patches_dir/../m7-grants.txt" >&2 ||
+		die "the M7 LM's grants differ from system-manager/m7-grants.txt"
 	if ! (cd "$tree" && export SOURCE_DATE_EPOCH="$epoch" SM_CROSS_COMPILE="$cross" PATH="$out/shim:$PATH" &&
 		make config="${pin[sm_config]}" cfg &&
 		make -j"$jobs" config="${pin[sm_config]}" M="${pin[sm_monitor_mode]}" all) >"$log" 2>&1; then

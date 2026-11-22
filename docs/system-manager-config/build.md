@@ -207,6 +207,23 @@ with identical output (rc=0, 134 s). `m33_image.bin` SHA-256
 `65bc223faa0c5762679a201c4d2f1bd1e243f34cefe19debb4446b9f79234bc9`, reproducible. The image is a build result only:
 it is not signed and not yet booted.
 
+## 7a. The M7 LM's grants are an allowlist
+
+**Proposed, pending owner approval (#13).** This is the "minimal grants" half of the row: the M7 gets what it needs
+and nothing else. [`scripts/sm-grants-check.sh`](../../scripts/sm-grants-check.sh) `<patched cfg> <allowlist>` extracts every
+grant line of the M7 LM block (comments and blanks dropped, backslash continuations joined, whitespace collapsed,
+sorted) and fails on a line the list lacks (`grants: UNLISTED`) and on a listed line the file lacks (`grants: STALE`).
+A missing M7 block, an unreadable file and a missing or empty list each fail too. `scripts/sm-build.sh` runs it on the
+patched file in every build, after the `test` key check, so an imx-sm bump or a new patch that widens the M7's grants
+stops the build.
+
+The list is [`system-manager/m7-grants.txt`](../../system-manager/m7-grants.txt) (60 lines), a record of the file after
+0001 and 0002. Regenerate it with `scripts/sm-grants-check.sh --print <patched cfg>`
+(`out/system-manager/tree-1/configs/other/mx95frdm-pro.cfg` after `make system-manager`). Any change to it is a reviewed
+diff, proposed and pending owner approval; it is not digest-pinned in `sm.lock`. **It was produced from, and checked
+against, the real pinned file** patched by 0001 and 0002 (`grants: OK (60 lines)`). `test/sm_build_test.sh` covers the
+check offline, and a fake build whose patched file widens the M7 block.
+
 ## 8. Not confirmed
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The

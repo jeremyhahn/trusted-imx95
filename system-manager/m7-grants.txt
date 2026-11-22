@@ -1,0 +1,63 @@
+# M7 LM (name="M7") grants of the patched mx95frdm-pro.cfg: pinned imx-sm after patches 0001 and 0002. Verified against the real file.
+# Proposed, pending owner approval. Checked by scripts/sm-grants-check.sh in every scripts/sm-build.sh build.
+# Regenerate: scripts/sm-grants-check.sh --print <patched cfg>. Any change is a reviewed diff.
+BRD_SM_CTRL_BUTTON NOTIFY
+BRD_SM_CTRL_PCA2131 ALL
+BRD_SM_RTC_PCA2131 ALL
+BRD_SM_SENSOR_TEMP_PF09 SET
+BRD_SM_SENSOR_TEMP_PF5301 SET
+BRD_SM_SENSOR_TEMP_PF5302 SET
+BUTTON NOTIFY
+CAN_FD1 OWNER
+CHANNEL db=0, xport=smt, check=crc32, rpc=scmi, type=a2p, test=default
+CHANNEL db=1, xport=smt, check=crc32, rpc=scmi, type=p2a_notify, notify=24
+CHANNEL db=2, xport=smt, check=crc32, rpc=scmi, type=p2a_priority
+CPU_M7P msel=1, start=2, stop=1
+CPU_M7P msel=2, start=2, stop=1
+CPU_M7P start=2, stop=1
+DATA: perm=rw
+DDR EXEC, begin=0x080000000, end=0x089FFFFFF
+DFMT0: sa=secure
+DFMT1: sa=secure, pa=privileged
+EXEC: perm=full
+FAULT_M7_LOCKUP OWNER, reaction=sys_reset
+FAULT_M7_RESET OWNER, reaction=sys_reset
+FAULT_SW0 OWNER, reaction=fusa
+FAULT_SW1 OWNER, reaction=sys_reset
+FAULT_WDOG5 OWNER, reaction=sys_reset
+FSB READONLY
+FUSA ALL
+IRQSTEER_M7 OWNER
+LMM_2 ALL
+LPIT1 OWNER
+LPTMR1 OWNER
+LPTMR2 OWNER
+LPTPM1 OWNER
+LPUART7 OWNER
+M7MIX DATA, begin=0x020380000, end=0x02047FFFF
+M7MIX DATA, begin=0x04A060000, end=0x04A09FFFF
+M7P OWNER
+MAILBOX type=mu, mu=9, priority=high
+MODE msel=1, boot=2
+MSGINTR1 OWNER
+MSGINTR2 OWNER
+MU5_A OWNER
+MU7_B OWNER
+MU8_B OWNER
+MU_ELE5 OWNER
+OWNER: perm=rw, api=all
+PD_M7 msel=1, start=1, stop=2
+PD_M7 msel=2, start=1, stop=2
+PD_M7 start=1, stop=2
+PIN_GPIO_IO14 OWNER
+PIN_GPIO_IO15 OWNER
+PIN_GPIO_IO36 OWNER
+PIN_GPIO_IO37 OWNER
+RTC PRIV
+SCMI_AGENT0 name="M7"
+SENSOR_TEMP_ANA ALL
+SYS ALL
+SYSCTR_RD READONLY
+TSTMR2 OWNER
+V2X_SHE1 OWNER
+WDOG5 OWNER
