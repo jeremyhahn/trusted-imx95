@@ -304,9 +304,27 @@ if mkbin oem-nxp 0:0 0:4:nxp; then
 	run "$POLICY" "$pki/oem-nxp.bin" "$pki/oem-nxp-1.policy"
 	check "NXP_CONTAINERS_ALLOWED=1 passes one nxp container" 0 "policy: nxp_containers OK" "policy: srk_table_hash OK" "policy: OK"
 fi
-# TODO (#12, next slice): SPSDK merges two srk_set nxp entries into ONE
-# binary_container (ahab_nxp_containers_1.bin); the check must count the
-# containers inside that binary so "allowed=1 with two nxp containers" fails.
+# SPSDK merges two srk_set nxp entries into ONE binary_container, so the
+# containers inside that binary are counted with SPSDK's own parser.
+if mkbin oem-nxp2 0:0 0:4:nxp 0:4:nxp; then
+	h=$(<"$pki/oem-nxp2.hash")
+	nxpol "$pki/oem-nxp2-1.policy" "$h" 1
+	run "$POLICY" "$pki/oem-nxp2.bin" "$pki/oem-nxp2-1.policy"
+	check "NXP_CONTAINERS_ALLOWED=1 fails two nxp containers merged in one binary" 1 \
+		"policy: nxp_containers MISMATCH (container 2, policy 1 allowed)" "policy: FAILED"
+	nxpol "$pki/oem-nxp2-2.policy" "$h" 2
+	run "$POLICY" "$pki/oem-nxp2.bin" "$pki/oem-nxp2-2.policy"
+	check "NXP_CONTAINERS_ALLOWED=2 passes two nxp containers" 0 "policy: nxp_containers OK" "policy: OK"
+	# A truncated image: the nxp binary inside it is cut short; never a pass.
+	head -c $(($(stat -c %s "$pki/oem-nxp2.bin") - 6000)) "$pki/oem-nxp2.bin" >"$pki/oem-nxp2-cut.bin"
+	run "$POLICY" "$pki/oem-nxp2-cut.bin" "$pki/oem-nxp2-2.policy"
+	check "a truncated image with an nxp binary fails" 1 "policy: FAILED"
+	# A corrupted nxp container header (its length field, at 0x4001) inside the image.
+	cp "$pki/oem-nxp2.bin" "$pki/oem-nxp2-bad.bin"
+	printf '\xff\xff' | dd of="$pki/oem-nxp2-bad.bin" bs=1 seek=$((0x4001)) conv=notrunc 2>/dev/null
+	run "$POLICY" "$pki/oem-nxp2-bad.bin" "$pki/oem-nxp2-2.policy"
+	check "a corrupted image with an nxp binary fails" 1 "policy: FAILED"
+fi
 nxpol "$pki/bad-nxp.policy" "$hash" 9
 run "$POLICY" "$bin" "$pki/bad-nxp.policy"
 check "NXP_CONTAINERS_ALLOWED above the maximum is a policy error" 1 "policy-check: NXP_CONTAINERS_ALLOWED is not" "policy: FAILED"

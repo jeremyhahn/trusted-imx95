@@ -142,7 +142,7 @@ rm -f "$work"/parsed/*.bcf
 # removed; comment lines never match).
 pcfg=$work/parsed/parsed_config.yaml
 [ -f "$pcfg" ] || fail "nxpimage ahab parse wrote no parsed_config.yaml"
-declare -a c_types=() c_sets=() c_ids=() c_masks=() c_fuses=()
+declare -a c_paths=() c_types=() c_sets=() c_ids=() c_masks=() c_fuses=()
 n=-1
 while IFS= read -r l || [ -n "$l" ]; do
 	l=${l%$'\r'}
@@ -156,6 +156,11 @@ while IFS= read -r l || [ -n "$l" ]; do
 	case "$l" in
 	container:) [ "${c_types[$n]}" != unknown ] || c_types[n]=container ;;
 	binary_container:) [ "${c_types[$n]}" != unknown ] || c_types[n]=binary ;;
+	path:*)
+		v=$(trim "${l#*:}")
+		v=${v//[\'\"]/}
+		[ -n "${c_paths[$n]+x}" ] || c_paths[n]=$v
+		;;
 	srk_set:* | used_srk_id:* | srk_revoke_mask:* | fuse_version:*)
 		k=${l%%:*}
 		v=$(trim "${l#*:}")
@@ -179,7 +184,37 @@ n_oem=0
 n_nxp=0
 for ((i = 0; i < count; i++)); do
 	case "${c_types[$i]}" in
-	binary) n_nxp=$((n_nxp + 1)) ;;
+	binary)
+		# SPSDK merges every nxp container into one binary, so the entry
+		# says nothing about how many it holds: ask SPSDK's own parser. A
+		# missing path, a parse error or zero containers fails.
+		[ -n "${c_paths[$i]-}" ] || fail "container $i: the binary container names no path"
+		[[ "${c_paths[$i]}" != */* && "${c_paths[$i]}" != .* ]] || fail "container $i: unexpected binary container path: ${c_paths[$i]}"
+		[ -f "$work/parsed/${c_paths[$i]}" ] || fail "container $i: the binary container file ${c_paths[$i]} was not written"
+		inner=$("$venv/bin/python" -I -c '
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+data = open(sys.argv[3], "rb").read()
+off = AHABImage.find_offset_of_ahab(data, True)
+image = AHABImage.parse(data[off:], FamilyRevision(sys.argv[1], sys.argv[2]))
+# Independent count: container headers at every 0x400 from the first. A
+# header SPSDK did not parse is an inconsistent count: exit non-zero.
+seen = 0
+for pos in range(off, len(data), 0x400):
+    try:
+        AHABImage.find_offset_of_ahab(data[pos : pos + 0x400])
+        seen += 1
+    except Exception:
+        pass
+if seen != len(image.ahab_containers):
+    sys.exit("container count mismatch: %d headers, %d parsed" % (seen, len(image.ahab_containers)))
+print(len(image.ahab_containers))
+' "$FAMILY" "$REVISION" "$work/parsed/${c_paths[$i]}" 2>"$work/inner.log") ||
+			{ tail -n 3 "$work/inner.log" >&2; fail "container $i: cannot parse the binary container ${c_paths[$i]}"; }
+		[[ "$inner" =~ ^[0-9]+$ && "$inner" -ge 1 ]] || fail "container $i: the binary container ${c_paths[$i]} holds no AHAB container"
+		n_nxp=$((n_nxp + inner))
+		;;
 	container)
 		case "${c_sets[$i]-}" in
 		oem) c_oem[i]=1; n_oem=$((n_oem + 1)) ;;

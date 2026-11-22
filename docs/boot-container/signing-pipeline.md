@@ -101,9 +101,17 @@ blank lines are allowed. An unknown key, a repeated key or a missing key is an e
 | `SRK_TABLE_HASH` | hex | equal to the container's SRK table hash (case-insensitive, full length) |
 | `USED_SRK_ID` | integer | equal to `used_srk_id` |
 | `SRK_REVOKE_MASK` | hex or integer | equal to `srk_revoke_mask`, compared numerically |
-| `FUSE_VERSION_MIN` | integer | the container's `fuse_version` is at or above it |
+| `FUSE_VERSION_MIN` | integer | every OEM container's `fuse_version` is at or above it |
+| `NXP_CONTAINERS_ALLOWED` | integer, optional, default 0 | at most this many NXP containers (`srk_set: nxp`, or inside a binary container) in the image |
 
-Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255.
+Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255, `NXP_CONTAINERS_ALLOWED` 0..8.
+
+Every container the image holds is accounted for, and the check fails closed (provisional, pending #12):
+
+- An `srk_set: none` container fails; so does an entry or `srk_set` the check cannot classify.
+- NXP containers are counted and capped by `NXP_CONTAINERS_ALLOWED`. SPSDK merges them into one binary container, so the containers inside it are counted with SPSDK's own AHAB parser. A binary that cannot be parsed, holds no container, or whose header count differs from the parsed count fails. An i.MX95 boot image begins with NXP's signed ELE container, so a real policy may allow one.
+- OEM containers: the number of SRK hash files equals the number of OEM containers, or is exactly one shared file (every OEM table identical). Every hash file equals `SRK_TABLE_HASH`; `used_srk_id`, `srk_revoke_mask` and `fuse_version` are checked per OEM container.
+- An image with no OEM container fails.
 
 SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
 the SRK table hash as `ahab_oem0_srk0_hash.txt` in the same output directory (the same file name
