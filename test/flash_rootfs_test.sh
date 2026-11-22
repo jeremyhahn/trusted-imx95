@@ -209,4 +209,12 @@ printf '%s\n' "$w/elsewhere.img" >"$w/sys/block/loop0/loop/backing_file"
 expect "an unrelated loop backing file does not stop the flash" \
 	test "$(FLASH_ROOTFS_SYSFS=$w/sys run "$w/busy" "$w/wic-busy")" -eq 0
 
+# Names with trailing blanks, a tab or a newline are refused whatever the loop state.
+for nm in "sp " $'tab\t' $'nl\n'; do
+	cp "$w/busy" "$w/$nm"
+	printf '%s\n' "$w/$nm" >"$w/sys/block/loop0/loop/backing_file"
+	FLASH_ROOTFS_SYSFS=$w/sys refused "target name $(printf '%q' "$nm")" "$w/$nm" "$w/wic-busy"
+	FLASH_ROOTFS_SYSFS=$w/sys refused "WIC name $(printf '%q' "$nm")" "$w/busy" "$w/$nm"
+done
+
 finish

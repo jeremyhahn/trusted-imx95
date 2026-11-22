@@ -35,6 +35,11 @@ target=$(realpath -e -- "$1") || die "$1 does not exist"
 wic=$(realpath -e -- "$2") || die "$2 does not exist"
 { [ -b "$target" ] || [ -f "$target" ]; } || die "$target is neither a block device nor a regular file"
 { [ -b "$wic" ] || [ -f "$wic" ]; } || die "$wic is neither a block device nor a regular file"
+for p in "$target" "$wic"; do
+	if [[ $p =~ [[:space:][:cntrl:]] ]]; then
+		die "$(printf '%q' "$p") contains whitespace or a control character; nothing written"
+	fi
+done
 if [ "$target" -ef "$wic" ]; then die "target and WIC are the same file"; fi
 if [ -b "$target" ] && [ "${FLASH_ROOTFS_YES:-}" != 1 ]; then
 	die "$target is a block device: set FLASH_ROOTFS_YES=1 to write it"
@@ -80,7 +85,7 @@ done <"$mountinfo"
 if [ -f "$target" ]; then
 	for bf in "$sysfs"/block/loop*/loop/backing_file; do
 		[ -e "$bf" ] || continue
-		read -r backing <"$bf" || backing=
+		IFS= read -r backing <"$bf" || backing=
 		[ -n "$backing" ] || continue
 		if [ "$(realpath -m -- "$backing")" = "$target" ] || [ "$backing" -ef "$target" ]; then
 			lp=${bf%/loop/backing_file}
