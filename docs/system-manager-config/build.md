@@ -167,7 +167,8 @@ a board.**
 
 The delta is [`system-manager/patches/0002-m7-no-test-grants.patch`](../../system-manager/patches/0002-m7-no-test-grants.patch),
 applied after 0001 to `configs/other/mx95frdm-pro.cfg`. It reads only the M7 LM (LM1) block of the file at the pinned
-commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` and `LMM_2` are as 0001 leaves them.
+commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` and `LMM_2` are as 0001 leaves them. Its requirement, acceptance criteria and revert are in
+[architecture.md, "M7 grant delta (patch 0002)"](architecture.md#m7-grant-delta-patch-0002).
 
 | Line (0001's output) | Before | After | Survey |
 |---|---|---|---|
