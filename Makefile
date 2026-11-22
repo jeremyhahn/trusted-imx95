@@ -46,7 +46,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager ahab-sign-test platform-image-fetch
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
+	platform-image-fetch
 
 help: ## List the targets
 	@echo "Targets:"
@@ -158,6 +159,21 @@ system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in cle
 
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
 	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
+
+## --- The Cortex-A secure world (docs/secure-world/build.md) ---
+
+# Not a CI stage and not in `make test`: it fetches the pinned sources, the
+# toolchain (about 150 MB) and the Python wheels, and builds for about two
+# minutes. SW_WORK is recreated on each run; SW_OUT receives the artefacts.
+# The work and cache directories stay outside the checkout: the tree secret
+# scan reads every file under it, and the fetched sources carry test keys.
+SW_BASE  ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/secure-world
+SW_WORK  ?= $(SW_BASE)/work
+SW_OUT   ?= $(CURDIR)/.secure-world/out
+SW_CACHE ?= $(SW_BASE)/cache
+
+secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
+	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
