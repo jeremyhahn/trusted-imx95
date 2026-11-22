@@ -4,6 +4,7 @@
 # the identity; identical trees give equal identities. Changing a real owner needs root, so
 # the ownership cases use a fake find (ROOTFS_ID_FIND) that rewrites the owner column.
 set -euo pipefail
+# shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 idsh=$ROOT/platform-image/files/rootfs-id.sh

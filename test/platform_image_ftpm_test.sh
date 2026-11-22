@@ -212,8 +212,8 @@ expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplica
 expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'
 expect "the rootfs identity is a hash of the rootfs tree" ncstr "$ROOT/platform-image/files/rootfs-id.sh" '| sha256sum | cut -d'
 expect "the rootfs identity hashes numeric UID and GID" ncstr "$ROOT/platform-image/files/rootfs-id.sh" '%p %y %m %U %G %l'
-expect "the image runs the identity script" ncstr "$img" 'rootfs-id.sh ${IMAGE_ROOTFS}'
-expect "the identity script is a do_rootfs checksum input" ncstr "$img" 'do_rootfs[file-checksums] += "${THISDIR}/../../files/rootfs-id.sh:True"'
+expect "the image runs the identity script" ncstr "$img" 'rootfs-id.sh $'"{IMAGE_ROOTFS}"
+expect "the identity script is a do_rootfs checksum input" ncstr "$img" 'do_rootfs[file-checksums] += "$'"{THISDIR}/../../files/rootfs-id.sh:True\""
 expect "the rootfs identity names its input (the rootfs tree)" has "$img" 'derived from the rootfs tree itself'
 idfn=$(awk '/^trusted_imx95_rootfs_id \(\)/,/^}/' "$img")
 expect "the rootfs identity function was found" test -n "$idfn"
