@@ -7,8 +7,10 @@ SUMMARY = "OP-TEE firmware TPM 2.0 TA (optee_ftpm 4.10.0 on ms-tpm-20-ref), buil
 # names. Nothing here fetches an unpinned revision. ms-tpm-20-ref's wolfssl
 # submodule is not fetched: the TA uses OP-TEE's crypto and libmbedtls.
 LICENSE = "MIT"
-# MISSING: the license file's checksum is read on the first parse on the build
-# host; a wrong value fails loudly there. LICENSE is the project's stated one.
+# MISSING: the checksum below is a zero placeholder. The pinned optee_ftpm source
+# was not fetched in the lane that wrote this, so its license file's md5 was not
+# read. The first parse on the build host fails with the real value; set it then
+# (listed in docs/ftpm/build.md, "Left for the build host").
 LIC_FILES_CHKSUM = "file://LICENSE;md5=00000000000000000000000000000000"
 
 SRCREV_FORMAT = "ftpm_mstpm"

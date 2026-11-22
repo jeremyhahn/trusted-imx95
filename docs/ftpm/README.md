@@ -113,7 +113,7 @@ Each "unconfirmed" above is a gap until the board shows otherwise. The depth dev
 
 ## Later steps, not this design
 
-The image build and the board test ([ROADMAP.md](../../ROADMAP.md), `ftpm`) come after the owner approves this
+The image configuration is in [build.md](build.md) (provisional). The board test ([ROADMAP.md](../../ROADMAP.md), `ftpm`) come after the owner approves this
 row. The redeploy is coordinated with Infra together with the xkmsd web-console build and the barrier re-init;
 hardware runs happen on the lab's board host, one lane at a time. The boot media does not change (owner ruling
 769).

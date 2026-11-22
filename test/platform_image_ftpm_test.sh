@@ -1,8 +1,10 @@
+#!/usr/bin/env bash
 # Offline checks of the firmware TPM image configuration (proposed, pending owner
 # approval, SPEC row ftpm, issue #140): the revision pins match
 # docs/secure-world/build.md, NV is on REE FS with RPMB off, and the debug image
 # alone carries tpm2-tools.
 set -euo pipefail
+# shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 odir=$ROOT/platform-image/recipes-security/optee

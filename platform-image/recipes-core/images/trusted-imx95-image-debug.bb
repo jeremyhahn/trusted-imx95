@@ -20,3 +20,8 @@ IMAGE_FEATURES += "tools-debug package-management"
 # hardening-survey section 7: the shells and debug tools the production image
 # leaves out (bash, gdb, strace, imx-test).
 IMAGE_INSTALL:append = " bash gdb strace imx-test"
+
+# SPEC row ftpm, issue #140 (provisional; the ta-options-survey and the fTPM
+# design, docs/ftpm/build.md): tpm2-tools to talk to /dev/tpmrm0 during
+# bring-up. Debug image only; the production image does not carry it.
+IMAGE_INSTALL:append = " tpm2-tools"

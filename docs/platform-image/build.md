@@ -110,6 +110,12 @@ line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, h
 package (go-xkms has no recipe yet; hardening-survey question 7), and any
 login-policy image feature in the production image.
 
+## Firmware TPM
+
+The image carries a firmware TPM (SPEC row `ftpm`, provisional): the kernel driver fragment `ftpm.cfg`, OP-TEE
+with the fTPM as an early TA, and tpm2-tools in the debug image only. What is built, each default and what is left
+for the build host: [ftpm/build.md](../ftpm/build.md).
+
 ## Kernel hardening fragment
 
 Proposed, pending owner approval (hardening-survey question 1 (c) and question
