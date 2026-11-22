@@ -119,6 +119,35 @@ plan stay the owner's.
 
 ## MISSING
 
+## Tamper matrix
+
+```sh
+make ahab-tamper-test
+```
+
+`test/ahab_tamper_test.sh` (also in `make test`) builds one M7 test-PKI container in a temp
+directory, writes a tampered copy per case and runs `scripts/ahab/sign-test.sh verify`
+(`nxpimage ahab verify`, SPSDK 3.13.0) on it. It covers C2b, C5b and C6 of
+[secure-boot-test-plan.md](secure-boot-test-plan.md) (§4, §7 item 1); C1 and a payload byte are in
+`test/ahab_sign_test.sh`. Offsets are derived from the container: the signature block offset is the
+u16 at byte 12, the SRK table array starts 16 bytes after it, the image entry's hash is found by
+searching the entry for the `sha384sum` of the payload. Nothing is committed: no key, container or
+policy.
+
+| Case | Change | SPSDK 3.13.0 `verify` |
+|---|---|---|
+| C6a | truncated to half its size | rejected (exit 1), no traceback |
+| C6b | truncated by one byte | rejected, no traceback |
+| C6c | truncated to 0 bytes; to the header only | rejected, no traceback |
+| C5b | one byte of the image entry's hash | rejected |
+| C5b-ii | payload changed, entry hash recomputed, signature untouched | rejected |
+| C2b | used SRK index in the SRK data record 0 to 1, signature untouched | rejected |
+| SRK table | one byte of the SRK table | rejected |
+
+Not detected by verify: none observed in these cases. A rejection says only that verify failed, not
+which check caught it. Verify checks the container against its own SRK table, so it does not stand in
+for the fuse and policy checks (`scripts/ahab/policy-check.sh`).
+
 - The container's anti-rollback `fuse_version` and header version for a real device, and a real
   device's SRK hash fuse values. Their sources (IMX95RM, the i.MX 95 Security Reference Manual)
   are not in `docs/references`. See the comments in `container.yaml`.
