@@ -17,6 +17,8 @@ inherit systemd
 RDEPENDS:${PN} = "optee-client"
 
 do_install() {
+    # Mountpoint of data.mount; the root file system is read-only.
+    install -d ${D}/data
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/data.mount ${D}${systemd_system_unitdir}/data.mount
     install -d ${D}${systemd_system_unitdir}/tee-supplicant@.service.d
@@ -29,4 +31,4 @@ do_install() {
         ${D}${sysconfdir}/systemd/system/basic.target.wants/tee-supplicant@teepriv0.service
 }
 
-FILES:${PN} += "${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"
+FILES:${PN} += "/data ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"
