@@ -30,16 +30,19 @@ EXTRA_OEMAKE = "TA_DEV_KIT_DIR=${STAGING_INCDIR}/optee/export-user_ta \
                 CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE \
                 CFG_TEE_TA_LOG_LEVEL=0 \
                 CROSS_COMPILE=${HOST_PREFIX} \
+                LIBGCC_LOCATE_CFLAGS=--sysroot=${STAGING_DIR_HOST} \
                 O=${B}"
 
 do_compile() {
-    oe_runmake -C ${S}
+    # Only the stripped ELF: an early TA is linked into tee.bin and needs no
+    # signature, so the .ta target (which signs) is not built and no key is used.
+    oe_runmake -C ${S} ${S}/${FTPM_TA_UUID}.stripped.elf
 }
 
 do_install[noexec] = "1"
 
 do_deploy() {
     install -d ${DEPLOYDIR}/optee-ftpm
-    install -m 0644 ${B}/${FTPM_TA_UUID}.stripped.elf ${DEPLOYDIR}/optee-ftpm/
+    install -m 0644 ${S}/${FTPM_TA_UUID}.stripped.elf ${DEPLOYDIR}/optee-ftpm/
 }
 addtask deploy after do_compile before do_build
