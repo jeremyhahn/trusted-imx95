@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test ahab-m7-test
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test ahab-m7-test ahab-policy-test
 
 help: ## List the targets
 	@echo "Targets:"
@@ -183,6 +183,9 @@ export M7_PAYLOAD
 
 ahab-m7-test: ## Sign and verify an AHAB container whose one image entry targets the Cortex-M7 (test PKI; M7_PAYLOAD=<file>, AHAB_OUT_DIR gets the container)
 	@scripts/ahab/sign-test.sh m7 "$$M7_PAYLOAD"
+
+ahab-policy-test: ## Check a test-PKI container against a policy file written from its own values (scripts/ahab/policy-check.sh; no board, no fuse)
+	@test/ahab_policy_test.sh
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 

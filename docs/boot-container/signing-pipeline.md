@@ -78,6 +78,45 @@ entry (survey U1, needs IMX95RM); the numeric AHAB core id and image type codes 
 (U1); the TCM sizes and ITCM/DTCM split (U2); the container version, `fuse_version` and SRK hash fuse
 values for a real device (U3, as above).
 
+## Policy check
+
+```sh
+scripts/ahab/policy-check.sh <container.bin> <policy file>
+```
+
+This is the host side of cases C2, C3 and C4 of
+[secure-boot-test-plan.md](secure-boot-test-plan.md) (§4, §5, §7 item 2). It parses the container
+with `nxpimage ahab parse` (pinned SPSDK) and fails unless the container's SRK table hash,
+`used_srk_id`, `srk_revoke_mask` and `fuse_version` agree with the policy file. It prints one
+`policy: <field> OK` or `policy: <field> MISMATCH (container X, policy Y)` line per field, then
+`policy: OK` (exit 0) or `policy: FAILED` (exit 1). A missing, empty or unreadable policy file, a
+missing field in either input, or a container that does not parse FAILS; nothing is skipped. It
+touches no board, fuse or key, and deletes the `.bcf` files unread.
+
+The policy file is plain `KEY=VALUE` lines, parsed by the script and never sourced. `#` comments and
+blank lines are allowed. An unknown key, a repeated key or a missing key is an error.
+
+| Key | Value | Check |
+|---|---|---|
+| `SRK_TABLE_HASH` | hex | equal to the container's SRK table hash (case-insensitive, full length) |
+| `USED_SRK_ID` | integer | equal to `used_srk_id` |
+| `SRK_REVOKE_MASK` | hex or integer | equal to `srk_revoke_mask`, compared numerically |
+| `FUSE_VERSION_MIN` | integer | the container's `fuse_version` is at or above it |
+
+SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
+the SRK table hash as `ahab_oem0_srk0_hash.txt` in the same output directory (the same file name
+`nxpimage ahab export` writes), so no hash algorithm is chosen here.
+
+No policy values are committed. The real values need IMX95RM and the Security Reference Manual
+(not in `docs/references`) and `oem-key-provisioning`: they stay MISSING (test plan §9 Q3).
+`test/ahab_policy_test.sh` (`make ahab-policy-test`, also in `make test`) writes a policy file from
+a test-PKI container's own parsed values in a temp directory, and checks the passing and each
+failing case.
+
+This is a proposal, pending the owner's approval of where the real policy file lives (recommendation
+(a) of test plan §9 Q3: a reviewed policy file, whose absence fails the check). SPEC and the test
+plan stay the owner's.
+
 ## MISSING
 
 - The container's anti-rollback `fuse_version` and header version for a real device, and a real
