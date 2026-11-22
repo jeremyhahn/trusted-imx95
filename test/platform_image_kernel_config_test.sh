@@ -23,6 +23,9 @@ done
 # Stub bitbake: logs its arguments; `-e linux-imx` prints B="$BB_B".
 cat >"$tmp/stub/bitbake" <<'EOF'
 #!/bin/sh
+case $1 in
+-m) echo kill >>"$BB_KILL_LOG"; exit 0 ;;
+esac
 echo "$*" >>"$BB_LOG"
 case $1 in
 -e) echo "B=\"$BB_B\"" ;;
@@ -46,9 +49,9 @@ fixture() {
 }
 
 runk() { # sets rc and out; the stub's .config is $tmp/kb/.config
-	rm -f "$tmp/log"
+	rm -f "$tmp/log" "$tmp/kill"
 	rc=0
-	out=$(PATH=$tmp/stub:$tools BB_LOG=$tmp/log BB_B=$tmp/kb "$real_bash" "$script" "${1:-$tmp/d}" 2>&1) || rc=$?
+	out=$(PATH=$tmp/stub:$tools BB_LOG=$tmp/log BB_KILL_LOG=$tmp/kill BB_B=$tmp/kb "$real_bash" "$script" "${1:-$tmp/d}" 2>&1) || rc=$?
 }
 
 expect "the shared required table exists" test -s "$req"
@@ -91,6 +94,21 @@ rm -f "$tmp/kb/.config"
 runk
 expect "no generated .config fails" test "$rc" -ne 0
 expect "no generated .config: it says it was not generated" test "${out##*was not generated*}" != "$out"
+
+fixture "$tmp/kb/.config"
+runk
+expect "a good run stops its BitBake server once" test "$(cat "$tmp/kill")" = kill
+rm -f "$tmp/kb/.config"
+runk
+expect "a failing run (no .config) still stops the server" test "$(cat "$tmp/kill")" = kill
+fixture "$tmp/kb/.config"
+: >"$tmp/d/build/bitbake.sock"
+runk
+expect "a stale server socket: the script passes" test "$rc" -eq 0
+expect "a stale server socket: it says so" test "${out##*holds*bitbake.sock; stopping it*}" != "$out"
+expect "a stale server socket: the stale server and the run's own are both stopped" test "$(cat "$tmp/kill")" = "kill
+kill"
+rm -f "$tmp/d/build/bitbake.sock"
 
 runk "$tmp/no-such-dir"
 expect "no build directory fails" test "$rc" -ne 0

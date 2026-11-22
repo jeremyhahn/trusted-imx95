@@ -52,6 +52,13 @@ mkdir -p "$conf"
 printf '%s\n' "$want_local" >"$conf/local.conf"
 printf '%s\n' "$want_bbl" >"$conf/bblayers.conf"
 
+# Cap the load: BitBake threads and make jobs from nproc (at most 16; 6 if
+# nproc is not there), passed through the filtered task environment.
+cpus=$(nproc 2>/dev/null || echo 6)
+[ "$cpus" -le 16 ] || cpus=16
+export BB_NUMBER_THREADS=${BB_NUMBER_THREADS:-$cpus} PARALLEL_MAKE=${PARALLEL_MAKE:--j $cpus}
+export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} BB_NUMBER_THREADS PARALLEL_MAKE"
+
 # oe-init-build-env reads unset variables and may return nonzero: source it
 # with -u off, then restore -u. It takes the build dir and the bitbake dir.
 export BITBAKEDIR=$dir/sources/bitbake
@@ -62,6 +69,14 @@ set +u
 . "$dir/sources/openembedded-core/oe-init-build-env" "$build" "$BITBAKEDIR" >/dev/null
 [ "$restore_u" -eq 0 ] || set -u
 command -v bitbake >/dev/null 2>&1 || { echo "platform-image-parse: bitbake is not on PATH; run this on a Yocto build host" >&2; exit 1; }
+# A BitBake server this script started must not outlive it: it would keep the
+# socket and make the next client time out. Stop it on every exit; stop a
+# stale one a crashed earlier run left in this build directory first.
+if [ -e "$build/bitbake.sock" ]; then
+	echo "platform-image-parse: a BitBake server from an earlier run holds $build/bitbake.sock; stopping it" >&2
+	bitbake -m >/dev/null 2>&1 || true
+fi
+trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 bitbake -p
 
 # bbval ENV KEY: the value of KEY in `bitbake -e` output (a value may span lines).

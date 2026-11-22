@@ -19,6 +19,13 @@ req=$root/platform-image/kernel-required.txt
 dir=$(cd "$dir" && pwd -P)
 build=$dir/build
 
+# Cap the load: BitBake threads and make jobs from nproc (at most 16; 6 if
+# nproc is not there), passed through the filtered task environment.
+cpus=$(nproc 2>/dev/null || echo 6)
+[ "$cpus" -le 16 ] || cpus=16
+export BB_NUMBER_THREADS=${BB_NUMBER_THREADS:-$cpus} PARALLEL_MAKE=${PARALLEL_MAKE:--j $cpus}
+export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} BB_NUMBER_THREADS PARALLEL_MAKE"
+
 export BITBAKEDIR=$dir/sources/bitbake
 restore_u=0
 case $- in *u*) restore_u=1 ;; esac
@@ -28,6 +35,14 @@ set +u
 [ "$restore_u" -eq 0 ] || set -u
 command -v bitbake >/dev/null 2>&1 || { echo "platform-image-kernel-config: bitbake is not on PATH; run this on a Yocto build host" >&2; exit 1; }
 
+# A BitBake server this script started must not outlive it: it would keep the
+# socket and make the next client time out. Stop it on every exit; stop a
+# stale one a crashed earlier run left in this build directory first.
+if [ -e "$build/bitbake.sock" ]; then
+	echo "platform-image-kernel-config: a BitBake server from an earlier run holds $build/bitbake.sock; stopping it" >&2
+	bitbake -m >/dev/null 2>&1 || true
+fi
+trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 bitbake linux-imx -c configure
 b=$(bitbake -e linux-imx | sed -n 's/^B="\(.*\)"$/\1/p')
 [ -n "$b" ] || { echo "platform-image-kernel-config: no B in bitbake -e linux-imx" >&2; exit 1; }

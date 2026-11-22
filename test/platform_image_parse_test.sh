@@ -38,7 +38,11 @@ chmod +x "$tmp/fetch"
 cat >"$tmp/stub/bitbake" <<'EOF'
 #!/bin/sh
 case $1 in
--p) exit "${BB_P_RC:-0}" ;;
+-m) echo kill >>"$BB_KILL_LOG" ;;
+-p)
+	echo "$BB_NUMBER_THREADS|$PARALLEL_MAKE" >"$BB_KILL_LOG.env"
+	exit "${BB_P_RC:-0}"
+	;;
 -e)
 	echo "$2" >>"$BB_LOG"
 	echo "MACHINE=\"$BB_MACHINE\""
@@ -51,9 +55,9 @@ EOF
 chmod +x "$tmp/stub/bitbake"
 
 run2() { # PATH-dir MACHINE [P-RC]: runs the script into $tmp/d as it is; sets rc and out
-	rm -f "$tmp/log"
+	rm -f "$tmp/log" "$tmp/kill"
 	rc=0
-	out=$(PATH=$1 PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_INIT_LOG=$tmp/init.log \
+	out=$(PATH=$1 PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_KILL_LOG=$tmp/kill BB_INIT_LOG=$tmp/init.log \
 		BB_MACHINE=$2 BB_P_RC=${3:-0} "$real_bash" "$script" "$tmp/d" 2>&1) || rc=$?
 }
 run() { # PATH-dir MACHINE [P-RC]: the same into a fresh dir
@@ -137,5 +141,21 @@ mkdir -p "$tmp/d/sources/bitbake/lib/bb/pysh"
 run2 "$tmp/stub:$tools" "$want"
 expect "a repeat run passes" test "$rc" -eq 0
 expect "bitbake's generated pyshtables.py is removed before the fetch" test ! -e "$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py"
+
+# The BitBake server is stopped on every exit, errors included; a stale one is stopped first.
+run "$tmp/stub:$tools" "$want"
+expect "a good run stops its BitBake server once" test "$(cat "$tmp/kill")" = kill
+run "$tmp/stub:$tools" "$want" 1
+expect "a failing bitbake -p still stops the server" test "$(cat "$tmp/kill")" = kill
+BB_DISTRO=other run "$tmp/stub:$tools" "$want"
+expect "a failing value check still stops the server" test "$(cat "$tmp/kill")" = kill
+run "$tmp/stub:$tools" "$want"
+: >"$tmp/d/build/bitbake.sock"
+run2 "$tmp/stub:$tools" "$want"
+expect "a stale server socket: the script passes" test "$rc" -eq 0
+expect "a stale server socket: it says so" test "${out##*holds*bitbake.sock; stopping it*}" != "$out"
+expect "a stale server socket: the stale server and the run's own are both stopped" test "$(cat "$tmp/kill")" = "kill
+kill"
+expect "with no nproc, BitBake gets 6 threads and make -j 6" test "$(cat "$tmp/kill.env")" = "6|-j 6"
 
 finish
