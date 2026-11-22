@@ -127,8 +127,12 @@ checker_ok() {
 # negative <name> <checker> <sed-expr>: the checker must report a problem on
 # a copy of the survey edited by the sed expression.
 negative() {
-	local name=$1 c=$2 copy="$TMP_ROOT/neg-$1.md"
-	sed -e "$3" "$SURVEY" >"$copy"
+	local name=$1 c=$2 copy
+	# A fresh temp copy per case, edited with POSIX sed only (no GNU "0,/re/"
+	# address, no empty-regex reuse), so the result does not depend on the
+	# sed flavour or on an earlier case.
+	copy=$(mktemp "$TMP_ROOT/neg.XXXXXX") || { fail "negative: $name" "mktemp failed"; return; }
+	LC_ALL=C sed -e "$3" "$SURVEY" >"$copy"
 	if cmp -s "$SURVEY" "$copy"; then
 		fail "negative: $name" "the edit changed nothing"
 	elif [ -n "$("$c" "$copy")" ]; then
@@ -150,7 +154,7 @@ negative "status line dropped" c_status '/^> \*\*Status:/d'
 negative "device shall do X" c_words '$a the device shall do X'
 negative "Sources heading dropped" c_headings '/^## Sources$/d'
 negative "provisional default dropped" c_questions \
-	'0,/\*Provisional default:\*/s///'
+	'/^1\. \*\*/s/\*Provisional default:\*//'
 negative "cited source row removed" c_sources '/^| S3 |/d'
 
 finish
