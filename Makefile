@@ -47,12 +47,13 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
+	ahab-m7-test ahab-policy-test ahab-tamper-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
 	@echo "Targets:"
 	@while IFS= read -r line; do \
-		if [[ "$$line" =~ ^([a-z-]+):.*\#\#\ (.*)$$ ]]; then \
+		if [[ "$$line" =~ ^([a-z0-9-]+):.*\#\#\ (.*)$$ ]]; then \
 			printf '  %-24s %s\n' "$${BASH_REMATCH[1]}" "$${BASH_REMATCH[2]}"; \
 		fi; \
 	done < $(firstword $(MAKEFILE_LIST))
@@ -193,6 +194,17 @@ platform-image-kernel-config: ## Kernel config check on a build host: bitbake li
 
 ahab-sign-test: ## Sign and verify a mimx9596 b0 AHAB container with a throwaway test PKI outside the tree (pinned SPSDK; AHAB_OUT_DIR gets the container)
 	@scripts/ahab/sign-test.sh
+
+export M7_PAYLOAD
+
+ahab-m7-test: ## Sign and verify an AHAB container whose one image entry targets the Cortex-M7 (test PKI; M7_PAYLOAD=<file>, AHAB_OUT_DIR gets the container)
+	@scripts/ahab/sign-test.sh m7 "$$M7_PAYLOAD"
+
+ahab-policy-test: ## Check a test-PKI container against a policy file written from its own values (scripts/ahab/policy-check.sh; no board, no fuse)
+	@test/ahab_policy_test.sh
+
+ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
+	@test/ahab_tamper_test.sh
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
