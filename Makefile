@@ -164,8 +164,10 @@ sm-toolchain-check: ## In the devcontainer image: build the System Manager with 
 ahab-sign-test: ## Sign and verify a mimx9596 b0 AHAB container with a throwaway test PKI outside the tree (pinned SPSDK; AHAB_OUT_DIR gets the container)
 	@scripts/ahab/sign-test.sh
 
+export M7_PAYLOAD
+
 ahab-m7-test: ## Sign and verify an AHAB container whose one image entry targets the Cortex-M7 (test PKI; M7_PAYLOAD=<file>, AHAB_OUT_DIR gets the container)
-	@scripts/ahab/sign-test.sh m7 $(M7_PAYLOAD)
+	@scripts/ahab/sign-test.sh m7 "$$M7_PAYLOAD"
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 

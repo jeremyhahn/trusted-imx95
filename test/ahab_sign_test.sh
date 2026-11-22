@@ -94,6 +94,27 @@ else
 	fail "(e) the M7 run handed back no container in AHAB_OUT_DIR"
 fi
 
+# (e2) M7_PAYLOAD reaches the script as one argument, with no shell
+# interpretation: spaces, a semicolon, $(...) and a wildcard in the file name.
+qdir="$TMP_ROOT/quote dir"
+mkdir -p "$qdir" "$TMP_ROOT/m7qout"
+qpayload="$qdir/a b;\$(touch PWNED)*.bin"
+{ printf 'M7-QUOTE-MARKER-%s' "$$"; head -c 4000 /dev/urandom; } >"$qpayload"
+qmarker="M7-QUOTE-MARKER-$$"
+run env AHAB_OUT_DIR="$TMP_ROOT/m7qout" M7_PAYLOAD="$qpayload" make -C "$ROOT" --no-print-directory ahab-m7-test
+check "(e2) make ahab-m7-test accepts a payload path with spaces and shell characters" 0 \
+	"verify: OK" "ahab-m7-test: OK"
+if [ -s "$TMP_ROOT/m7qout/m7-container.bin" ] && grep -q -a -F "$qmarker" "$TMP_ROOT/m7qout/m7-container.bin"; then
+	pass "(e2) the container is built from that exact file"
+else
+	fail "(e2) the container does not carry the supplied payload"
+fi
+if [ -e "$qdir/PWNED" ] || [ -e "$ROOT/PWNED" ] || [ -e "$TMP_ROOT/PWNED" ] || [ -e PWNED ]; then
+	fail "(e2) an injected command ran from M7_PAYLOAD"
+else
+	pass "(e2) no command injected through M7_PAYLOAD ran"
+fi
+
 # (c) nothing in the clone is new or changed, and no file git would track
 # (tracked, or untracked and not ignored) holds a private key in text form.
 # Ignored tool directories such as .tools/ hold binaries whose strings
