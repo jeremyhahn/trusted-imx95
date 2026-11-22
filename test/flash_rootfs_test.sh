@@ -79,7 +79,7 @@ region() { dd if="$1" of="$4" bs=$MiB skip="$2" count="$3" status=none; }
 # run DISK WIC: run the script, print its exit status (output is not shown).
 run() {
 	local r=0
-	MKFS_TARGET=$1 PATH="$w/bin:$PATH" bash "$flash" "$1" "$2" >"$w/out" 2>&1 || r=$?
+	FLASH_ROOTFS_MOUNTINFO=${MI:-/dev/null} MKFS_TARGET=$1 PATH="$w/bin:$PATH" bash "$flash" "$1" "$2" >"$w/out" 2>&1 || r=$?
 	echo "$r"
 }
 
@@ -188,5 +188,16 @@ expect "refused: a character device is not a disk" test "$(run /dev/null "$w/wic
 wkstext=$(<"$wks")
 expect "the wks names the root partition" test "${wkstext#*--part-name root}" != "$wkstext"
 expect "the wks names the tee-data partition" test "${wkstext#*--part-name tee-data}" != "$wkstext"
+
+# A target (or a partition of it) that is a mount source is refused, nothing written.
+mkdisk "$w/busy" "boot root tee-data"
+mkwic "$w/wic-busy" "" "boot root tee-data"
+for src in "$w/busy" "$w/busy2" "$w/busyp3"; do
+	printf '36 1 8:3 / /data rw - ext4 %s rw\n' "$src" >"$w/mi"
+	MI=$w/mi refused "a mount whose source is $(basename "$src") of the target" "$w/busy" "$w/wic-busy"
+done
+printf '36 1 8:3 / /data rw - ext4 %s rw\n' "$w/other" >"$w/mi"
+expect "an unrelated mount does not stop the flash" test "$(MI=$w/mi run "$w/busy" "$w/wic-busy")" -eq 0
+expect "an unreadable mountinfo refuses" test "$(MI=$w/nonexistent run "$w/busy" "$w/wic-busy")" -ne 0
 
 finish

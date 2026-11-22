@@ -40,6 +40,41 @@ if [ -b "$target" ] && [ "${FLASH_ROOTFS_YES:-}" != 1 ]; then
 	die "$target is a block device: set FLASH_ROOTFS_YES=1 to write it"
 fi
 
+# Never write a target that is in use: the target or one of its partitions is the source of
+# a mount in mountinfo (by name or by device number), or something holds it (sysfs holders:
+# device-mapper, md, loop). FLASH_ROOTFS_MOUNTINFO and FLASH_ROOTFS_SYSFS exist for the test.
+mountinfo=${FLASH_ROOTFS_MOUNTINFO:-/proc/self/mountinfo}
+sysfs=${FLASH_ROOTFS_SYSFS:-/sys}
+[ -r "$mountinfo" ] || die "cannot read $mountinfo; nothing written"
+devnos=" "
+if [ -b "$target" ]; then
+	hex=$(stat -L -c '%t:%T' "$target") || die "cannot stat $target; nothing written"
+	node=$(cd -P "$sysfs/dev/block/$((16#${hex%:*})):$((16#${hex#*:}))" 2>/dev/null && pwd -P) ||
+		die "cannot find $target in sysfs; nothing written"
+	if [ -e "$node/partition" ]; then node=${node%/*}; fi
+	for d in "$node" "$node"/*/; do
+		d=${d%/}
+		[ -e "$d/dev" ] || continue
+		if [ -n "$(ls -A "$d/holders" 2>/dev/null)" ]; then
+			die "$target (or a partition of it) is held by another device; nothing written"
+		fi
+		devnos="$devnos$(<"$d/dev") "
+	done
+fi
+while read -r -a mi; do
+	for i in "${!mi[@]}"; do
+		[ "${mi[$i]}" = - ] && break
+	done
+	src=${mi[$((i + 2))]:-}
+	case $src in
+	"$target" | "$target"[0-9]* | "$target"p[0-9]*)
+		die "$src is mounted (mountinfo); nothing written" ;;
+	esac
+	case $devnos in
+	*" ${mi[2]} "*) die "$target (or a partition of it) is mounted (device ${mi[2]}); nothing written" ;;
+	esac
+done <"$mountinfo"
+
 nums=$(python3 -I - "$target" "$wic" <<'PY'
 import struct, sys, zlib
 
