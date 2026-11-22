@@ -10,7 +10,7 @@ own its board configuration. Nothing here is flashed or signed: the image is a b
 
 ```sh
 make system-manager                          # = scripts/sm-build.sh system-manager/sm.lock
-make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 7)
+make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 8)
 ```
 
 The pins are in [`system-manager/sm.lock`](../../system-manager/sm.lock). They are **provisional**: they follow
@@ -159,7 +159,51 @@ under `system-manager/patches/`. Any change rebuilds the image and the boot cont
 `m33_image.bin` SHA-256 `3ef1c54c829a8bd775dfc3d4f263eb06d8a61e565a3f4f74025d51d9a82f6e85`. The image is a build
 output only.
 
-## 7. Not confirmed
+## 7. This repository's second delta: the M7 LM's test-only grants dropped
+
+**Proposed, provisional, pending owner approval (#13).** Whether the dev/production split of System Manager images
+exists is not decided, so this delta may belong to a production image only. **Nothing was flashed, signed or run on
+a board.**
+
+The delta is [`system-manager/patches/0002-m7-no-test-grants.patch`](../../system-manager/patches/0002-m7-no-test-grants.patch),
+applied after 0001 to `configs/other/mx95frdm-pro.cfg`. It reads only the M7 LM (LM1) block of the file at the pinned
+commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` and `LMM_2` are as 0001 leaves them.
+
+| Line (0001's output) | Before | After | Survey |
+|---|---|---|---|
+| 369 `MAILBOX` | `type=mu, mu=9, test=8, priority=high` | `type=mu, mu=9, priority=high` | [scmi-permissions-survey.md](scmi-permissions-survey.md) §3.1 (`test` keys) |
+| 370-371 `CHANNEL db=0` | `..., type=a2p, \` then `test=default` | `..., type=a2p` | §3.1 |
+| 381-382 | `BRD_SM_CTRL_TEST ALL`, `BRD_SM_CTRL_TEST_A ALL` | removed | §3.1, §3.2 (drop) |
+| 404 | `LPUART3             OWNER, test` | removed | §3.2 (test key on the M7 UART drops) |
+| 412 | `PD_M7               test` | removed | §3.2 (`PD_M7 test` drops) |
+
+What stays, and why:
+
+- `LPUART7` (the M7 console, [m7-resource-map-survey.md](m7-resource-map-survey.md) §6) and every other owned
+  resource. `LPUART3` is not the M7 console on this device, and its only reason in LM1 was the `test` key, so the
+  whole line goes, not only the key. If the owner prefers the narrower edit, the line becomes `LPUART3 OWNER`.
+- `PD_M7` power: the start/stop lines for `msel` 0, 1, 2 are untouched, so the SM still powers and starts the M7.
+- `MU8_B` stays owned: it is an M7 mailbox resource, not a `test` key. The SCMI channel's test MU (8) was expressed
+  as `test=8` on the `MAILBOX` line, so it is covered by §3.1 and dropped there. Whether `MU8_B` is needed by the
+  M7 firmware is not confirmed.
+- `SYS`, `LMM_2`, `FUSA`, `RTC`, the sensors and the button, as survey §3.2 says.
+
+Mechanism: [`sm.lock`](../../system-manager/sm.lock) carries the new `sm_patch_sha256` (0001 then 0002) and
+`sm_patched_config_sha256`, both computed from the files. After the patched-file hash check, `scripts/sm-build.sh`
+refuses to build when the M7 LM block of the patched file holds a `test` key or a `BRD_SM_CTRL_TEST*` grant, or when
+it finds no M7 block. `test/sm_build_test.sh` checks offline that 0002 touches only M7 block lines, that each removed
+line carries `test` or `BRD_SM_CTRL_TEST`, that each added line is a removed one without the key, that no `Faults`,
+`SYS` or `LMM_2` line is touched, and that the new check fails on a fake M7 block with a `test` key and passes without
+one. The image and the boot container must be rebuilt and re-signed after any change.
+
+Unconfirmed: whether a `test` key widens access in a release build ([scmi-permissions-survey.md](scmi-permissions-survey.md)
+§6); whether the SM's configuration tool accepts the file without `test` keys is checked only by the build below.
+MISSING from the survey: the `CHANNEL db=0` `test=default` key (§3.1 names `test` keys in general but not a channel
+key); it is dropped under the general rule and is the owner's to confirm.
+
+SM build run: see the end of this section.
+
+## 8. Not confirmed
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
