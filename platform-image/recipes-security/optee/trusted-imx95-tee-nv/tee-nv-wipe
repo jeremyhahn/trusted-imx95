@@ -3,7 +3,7 @@
 # wiped with the root file system). The read-only rootfs carries an identity
 # fixed at image build time; /data/tee-rootfs-id remembers the identity the NV
 # was written under. A missing or different id wipes /data/tee. It fails
-# closed: any error exits non-zero, and tee-supplicant, which requires this
+# closed: any error (an unreadable saved id included) exits non-zero, and tee-supplicant, which requires this
 # unit, then does not start.
 # TEE_NV_DATA and TEE_NV_ROOTFS_ID exist for the test (test/platform_image_ftpm_test.sh).
 set -eu
@@ -15,7 +15,18 @@ cur=$(cat "$idfile")
 [ -n "$cur" ] || { echo "tee-nv-wipe: $idfile is empty" >&2; exit 1; }
 [ -d "$data" ] || { echo "tee-nv-wipe: $data is not a directory" >&2; exit 1; }
 
-if [ -f "$data/tee-rootfs-id" ] && [ "$(cat "$data/tee-rootfs-id")" = "$cur" ]; then
+# The saved marker is read in its own checked assignment, outside any condition.
+# Absent: the NV is of unknown origin, wipe. Present but unreadable (a directory,
+# no permission, an I/O error): its content is unknown, so exit non-zero and touch
+# nothing; an I/O error must not destroy the NV.
+saved=
+if [ -e "$data/tee-rootfs-id" ] || [ -L "$data/tee-rootfs-id" ]; then
+	if ! saved=$(cat "$data/tee-rootfs-id"); then
+		echo "tee-nv-wipe: $data/tee-rootfs-id exists but cannot be read; leaving $data/tee alone" >&2
+		exit 1
+	fi
+fi
+if [ "$saved" = "$cur" ]; then
 	exit 0
 fi
 
