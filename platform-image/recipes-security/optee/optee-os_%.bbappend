@@ -11,4 +11,7 @@ FTPM_TA_UUID = "bc50d971-d4c9-42c4-82cb-343fb7f37896"
 # tee.bin, so the TA needs no file system to load.
 do_compile[depends] += "optee-ftpm:do_deploy"
 EXTRA_OEMAKE += "CFG_EARLY_TA=y"
+# The PKCS#11 TA is an early TA as well, in tree, as scripts/secure-world-build.sh
+# embeds it next to the fTPM one (docs/secure-world/build.md).
+EXTRA_OEMAKE += "CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee"
 EXTRA_OEMAKE += "EARLY_TA_PATHS=${DEPLOY_DIR_IMAGE}/optee-ftpm/${FTPM_TA_UUID}.stripped.elf"
