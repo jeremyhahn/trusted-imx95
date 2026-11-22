@@ -104,6 +104,53 @@ if [ "$fuse" -gt 0 ]; then
 	check "C4: a FUSE_VERSION_MIN below the container's fuse_version passes" 0 "policy: OK"
 fi
 
+# Integer range: every policy integer is held to its field width (id 0..3,
+# mask 0..0xF, fuse 0..255) before any arithmetic; out of range is a policy
+# error, never a pass.
+mkpol "$TMP_ROOT/codex.policy" "$hash" "$id" "$mask" 0xffffffffffffffff
+run "$POLICY" "$bin" "$TMP_ROOT/codex.policy"
+check "FUSE_VERSION_MIN=0xffffffffffffffff is a policy error" 1 "policy-check: FUSE_VERSION_MIN is not" "policy: FAILED"
+mkpol "$TMP_ROOT/hex17.policy" "$hash" "$id" "$mask" 0x10000000000000000
+run "$POLICY" "$bin" "$TMP_ROOT/hex17.policy"
+check "a 17-digit hex FUSE_VERSION_MIN is a policy error" 1 "policy-check: FUSE_VERSION_MIN is not" "policy: FAILED"
+mkpol "$TMP_ROOT/neg.policy" "$hash" "$id" "$mask" -1
+run "$POLICY" "$bin" "$TMP_ROOT/neg.policy"
+check "a negative FUSE_VERSION_MIN is a policy error" 1 "policy-check: FUSE_VERSION_MIN is not" "policy: FAILED"
+mkpol "$TMP_ROOT/over-id.policy" "$hash" 4 "$mask" "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/over-id.policy"
+check "USED_SRK_ID above 3 is a policy error" 1 "policy-check: USED_SRK_ID is not" "policy: FAILED"
+mkpol "$TMP_ROOT/over-mask.policy" "$hash" "$id" 0x10 "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/over-mask.policy"
+check "SRK_REVOKE_MASK above 0xF is a policy error" 1 "policy-check: SRK_REVOKE_MASK is not" "policy: FAILED"
+mkpol "$TMP_ROOT/over-fuse.policy" "$hash" "$id" "$mask" 256
+run "$POLICY" "$bin" "$TMP_ROOT/over-fuse.policy"
+check "FUSE_VERSION_MIN above 255 is a policy error" 1 "policy-check: FUSE_VERSION_MIN is not" "policy: FAILED"
+mkpol "$TMP_ROOT/hex-id17.policy" "$hash" 0x00000000000000000 "$mask" "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/hex-id17.policy"
+check "leading zeros do not widen a field: 17 digits of 0 are still the value 0" 0 "policy: used_srk_id OK" "policy: OK"
+# At the maximum: accepted as a value, then compared normally.
+mkpol "$TMP_ROOT/max-id.policy" "$hash" 3 "$mask" "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/max-id.policy"
+if [ "$id" = 3 ]; then
+	check "USED_SRK_ID at its maximum is accepted and compared" 0 "policy: used_srk_id OK"
+else
+	check "USED_SRK_ID at its maximum is accepted and compared" 1 "policy: used_srk_id MISMATCH (container $id, policy 3)"
+fi
+mkpol "$TMP_ROOT/max-mask.policy" "$hash" "$id" 0xF "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/max-mask.policy"
+if [ "$((mask))" = 15 ]; then
+	check "SRK_REVOKE_MASK at its maximum is accepted and compared" 0 "policy: srk_revoke_mask OK"
+else
+	check "SRK_REVOKE_MASK at its maximum is accepted and compared" 1 "policy: srk_revoke_mask MISMATCH"
+fi
+mkpol "$TMP_ROOT/max-fuse.policy" "$hash" "$id" "$mask" 255
+run "$POLICY" "$bin" "$TMP_ROOT/max-fuse.policy"
+if [ "$fuse" = 255 ]; then
+	check "FUSE_VERSION_MIN at its maximum is accepted and compared" 0 "policy: fuse_version OK"
+else
+	check "FUSE_VERSION_MIN at its maximum is accepted and compared" 1 "policy: fuse_version MISMATCH (container $fuse, policy >= 255)"
+fi
+
 # A policy file that is missing, empty, or malformed fails; never a skip.
 run "$POLICY" "$bin" "$TMP_ROOT/no-such.policy"
 check "a missing policy file fails" 1 "no such" "policy: FAILED"

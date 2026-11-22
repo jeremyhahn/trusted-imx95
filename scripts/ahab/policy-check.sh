@@ -42,15 +42,35 @@ policy=$2
 bin=$(realpath "$bin")
 
 # num <text>: prints the numeric value of 0x<hex> or <decimal>, else fails.
-num() {
-	if [[ "$1" =~ ^0[xX]([0-9a-fA-F]{1,16})$ ]]; then
-		echo $((16#${BASH_REMATCH[1]}))
-	elif [[ "$1" =~ ^[0-9]{1,18}$ ]]; then
-		echo $((10#$1))
+num() { # <text> <max>
+	local d
+	# Bash arithmetic is signed 64-bit, so range is settled on the string
+	# first: leading zeros are stripped and anything longer than 4 digits
+	# (far above every field maximum) is rejected before any $(( )).
+	if [[ "$1" =~ ^0[xX]([0-9a-fA-F]+)$ ]]; then
+		d=${BASH_REMATCH[1]}
+		d=${d#"${d%%[!0]*}"}
+		[ ${#d} -le 4 ] || return 1
+		d=$((16#${d:-0}))
+	elif [[ "$1" =~ ^[0-9]+$ ]]; then
+		d=$1
+		d=${d#"${d%%[!0]*}"}
+		[ ${#d} -le 4 ] || return 1
+		d=$((10#${d:-0}))
 	else
 		return 1
 	fi
+	[ "$d" -le "$2" ] || return 1
+	echo "$d"
 }
+
+# Field widths. The script states none, so each is the narrowest width the
+# container header holds as nxpimage ahab parse reports it: used_srk_id is a
+# 2-bit selector (0..3), srk_revoke_mask a 4-bit mask (0..0xF), fuse_version
+# one byte (0..255). The policy and the container are held to the same range.
+MAX_ID=3
+MAX_MASK=15
+MAX_FUSE=255
 
 # trim <text>: prints <text> without leading and trailing whitespace.
 trim() {
@@ -80,9 +100,9 @@ for k in SRK_TABLE_HASH USED_SRK_ID SRK_REVOKE_MASK FUSE_VERSION_MIN; do
 	[ -n "${pol[$k]+x}" ] || fail "missing policy key: $k"
 done
 [[ "${pol[SRK_TABLE_HASH]}" =~ ^[0-9a-fA-F]+$ ]] || fail "SRK_TABLE_HASH is not hex"
-p_id=$(num "${pol[USED_SRK_ID]}") || fail "USED_SRK_ID is not an integer"
-p_mask=$(num "${pol[SRK_REVOKE_MASK]}") || fail "SRK_REVOKE_MASK is not hex or an integer"
-p_min=$(num "${pol[FUSE_VERSION_MIN]}") || fail "FUSE_VERSION_MIN is not an integer"
+p_id=$(num "${pol[USED_SRK_ID]}" "$MAX_ID") || fail "USED_SRK_ID is not an integer in 0..$MAX_ID"
+p_mask=$(num "${pol[SRK_REVOKE_MASK]}" "$MAX_MASK") || fail "SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
+p_min=$(num "${pol[FUSE_VERSION_MIN]}" "$MAX_FUSE") || fail "FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
 p_hash=${pol[SRK_TABLE_HASH]^^}
 
 # --- The container, through the pinned SPSDK.
@@ -125,11 +145,11 @@ c_hash=$(tr -d '[:space:]' <"$hash_file")
 c_hash=${c_hash^^}
 [[ "$c_hash" =~ ^[0-9A-F]+$ ]] || fail "the container's SRK table hash is not hex"
 c_id=$(cfg_val used_srk_id) || fail "the parsed container reports no used_srk_id"
-c_id=$(num "$c_id") || fail "the parsed used_srk_id is not an integer"
+c_id=$(num "$c_id" "$MAX_ID") || fail "the parsed used_srk_id is not an integer in 0..$MAX_ID"
 c_mask=$(cfg_val srk_revoke_mask) || fail "the parsed container reports no srk_revoke_mask"
-c_mask=$(num "$c_mask") || fail "the parsed srk_revoke_mask is not a number"
+c_mask=$(num "$c_mask" "$MAX_MASK") || fail "the parsed srk_revoke_mask is not a number in 0..$MAX_MASK"
 c_fuse=$(cfg_val fuse_version) || fail "the parsed container reports no fuse_version"
-c_fuse=$(num "$c_fuse") || fail "the parsed fuse_version is not an integer"
+c_fuse=$(num "$c_fuse" "$MAX_FUSE") || fail "the parsed fuse_version is not an integer in 0..$MAX_FUSE"
 
 # --- Compare, one line per field.
 bad=0

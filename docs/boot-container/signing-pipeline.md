@@ -103,6 +103,8 @@ blank lines are allowed. An unknown key, a repeated key or a missing key is an e
 | `SRK_REVOKE_MASK` | hex or integer | equal to `srk_revoke_mask`, compared numerically |
 | `FUSE_VERSION_MIN` | integer | the container's `fuse_version` is at or above it |
 
+Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255.
+
 SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
 the SRK table hash as `ahab_oem0_srk0_hash.txt` in the same output directory (the same file name
 `nxpimage ahab export` writes), so no hash algorithm is chosen here.
