@@ -75,6 +75,20 @@ while read -r -a mi; do
 	esac
 done <"$mountinfo"
 
+# A regular-file image that backs an attached loop device is in use (mountinfo names the
+# loop device, not the file): refuse whether or not a loop partition is mounted.
+if [ -f "$target" ]; then
+	for bf in "$sysfs"/block/loop*/loop/backing_file; do
+		[ -e "$bf" ] || continue
+		read -r backing <"$bf" || backing=
+		[ -n "$backing" ] || continue
+		if [ "$(realpath -m -- "$backing")" = "$target" ] || [ "$backing" -ef "$target" ]; then
+			lp=${bf%/loop/backing_file}
+			die "$target backs the loop device ${lp##*/}; nothing written"
+		fi
+	done
+fi
+
 nums=$(python3 -I - "$target" "$wic" <<'PY'
 import struct, sys, zlib
 

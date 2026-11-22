@@ -200,4 +200,13 @@ printf '36 1 8:3 / /data rw - ext4 %s rw\n' "$w/other" >"$w/mi"
 expect "an unrelated mount does not stop the flash" test "$(MI=$w/mi run "$w/busy" "$w/wic-busy")" -eq 0
 expect "an unreadable mountinfo refuses" test "$(MI=$w/nonexistent run "$w/busy" "$w/wic-busy")" -ne 0
 
+# A regular-file target that backs a loop device is refused, nothing written.
+mkdir -p "$w/sys/block/loop0/loop" "$w/sys/block/loop1/loop"
+printf '%s\n' "$w/busy" >"$w/sys/block/loop0/loop/backing_file"
+printf '%s\n' "$w/elsewhere.img" >"$w/sys/block/loop1/loop/backing_file"
+FLASH_ROOTFS_SYSFS=$w/sys refused "target image backs loop0" "$w/busy" "$w/wic-busy"
+printf '%s\n' "$w/elsewhere.img" >"$w/sys/block/loop0/loop/backing_file"
+expect "an unrelated loop backing file does not stop the flash" \
+	test "$(FLASH_ROOTFS_SYSFS=$w/sys run "$w/busy" "$w/wic-busy")" -eq 0
+
 finish
