@@ -29,9 +29,18 @@ while IFS= read -r line || [ -n "$line" ]; do
 	k=${BASH_REMATCH[1]}
 	[ -z "${kv[$k]+x}" ] || die "$lock:$n: duplicate key $k"
 	kv[$k]=${BASH_REMATCH[2]}
-	if [[ $k =~ ^layer_(.+)_commit$ ]]; then layers+=("${BASH_REMATCH[1]}"); fi
+	# Any layer_<name>_{repo,path,commit} key names a layer.
+	if [[ $k =~ ^layer_(.+)_(repo|path|commit)$ ]]; then
+		case " ${layers[*]:-} " in *" ${BASH_REMATCH[1]} "*) ;; *) layers+=("${BASH_REMATCH[1]}") ;; esac
+	fi
 done <"$lock"
 [ "${#layers[@]}" -gt 0 ] || die "$lock: no layer"
+# Every layer record is complete before anything is fetched.
+for name in "${layers[@]}"; do
+	for f in repo path commit; do
+		[ -n "${kv[layer_${name}_$f]:-}" ] || die "layer $name: no $f (layer_${name}_$f) in $lock"
+	done
+done
 
 # The fetch directory is never inside this clone.
 abs=$dir

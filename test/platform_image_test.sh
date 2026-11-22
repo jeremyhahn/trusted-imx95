@@ -32,8 +32,8 @@ expect "lock parses, no duplicate key" test "$bad" -eq 0 -a "$n" -gt 0
 expect "lock has the manifest and at least one layer commit" test "$commits" -gt 1
 expect "manifest file named" test "${seen[manifest_file]:-}" = imx-6.18.37-2.1.0.xml
 for k in "${!seen[@]}"; do
-	if [[ $k =~ ^layer_(.+)_commit$ ]]; then
-		for f in repo path; do
+	if [[ $k =~ ^layer_(.+)_(repo|path|commit)$ ]]; then
+		for f in repo path commit; do
 			[ -n "${seen[layer_${BASH_REMATCH[1]}_$f]:-}" ] || { bad=$((bad + 1)); echo "missing $f of ${BASH_REMATCH[1]}"; }
 		done
 	fi
@@ -399,6 +399,30 @@ expect "fetch: a clean re-fetch passes after the file is removed" test "$(fetch_
 printf '*.bbappend\n' >"$layer/.git/info/exclude"
 printf 'x\n' >"$layer/ignored.bbappend"
 expect "fetch: an ignored .bbappend fails" test "$(fetch_rc)" -ne 0
+
+# Incomplete layer records: a good layer plus one broken one, so the old
+# commit-keyed discovery (which skipped the broken one) would still pass.
+goodc=$(git -C "$tmp/src" rev-parse HEAD)
+incomplete_rc() { # lock-body; prints the exit status, output in $tmp/inc.out
+	local r=0
+	rm -rf "$tmp/inc-out"
+	{
+		printf 'layer_stub_repo=file://%s/src\nlayer_stub_path=sources/stub\nlayer_stub_commit=%s\n' "$tmp" "$goodc"
+		printf '%s\n' "$1"
+	} >"$tmp/inc.lock"
+	"$ROOT/scripts/platform-image-fetch.sh" "$tmp/inc.lock" "$tmp/inc-out" >"$tmp/inc.out" 2>&1 || r=$?
+	echo "$r"
+}
+rr='layer_other_repo=file:///nonexistent'
+pp='layer_other_path=sources/other'
+cc='layer_other_commit=0000000000000000000000000000000000000001'
+expect "fetch: a layer with repo and path but no commit fails" test "$(incomplete_rc "$rr"$'\n'"$pp")" -ne 0
+expect "fetch: the missing-commit failure names the layer and key" grep -q 'layer other: no commit (layer_other_commit)' "$tmp/inc.out"
+expect "fetch: a misspelled _commt key fails" test "$(incomplete_rc "$rr"$'\n'"$pp"$'\n'layer_other_commt=0000000000000000000000000000000000000001)" -ne 0
+expect "fetch: the misspelled key failure names the missing commit" grep -q 'layer other: no commit' "$tmp/inc.out"
+expect "fetch: a layer with repo and commit but no path fails" test "$(incomplete_rc "$rr"$'\n'"$cc")" -ne 0
+expect "fetch: the missing-path failure names the layer and key" grep -q 'layer other: no path (layer_other_path)' "$tmp/inc.out"
+expect "fetch: a missing path is refused before any layer is fetched" test ! -e "$tmp/inc-out/sources/stub"
 
 # Two pins: pin B starts tracking a path that holds an ignored local file under
 # pin A. The fetch of B must be refused and the file must survive byte for byte.
