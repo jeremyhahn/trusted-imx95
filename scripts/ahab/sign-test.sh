@@ -104,7 +104,10 @@ if [ "$mode" = m7 ]; then
 	"$nxpimage" ahab parse -f "$FAMILY" -r "$REVISION" -b "$work/$out" -o "$work/parsed" >"$work/parse.log" 2>&1 ||
 		{ tail -n 5 "$work/parse.log" >&2; die "nxpimage ahab parse failed"; }
 	rm -f "$work"/parsed/*.bcf
-	pcfg=$(ls "$work"/parsed/*.yaml 2>/dev/null | head -n 1) || true
+	pcfg=
+	for f in "$work"/parsed/*.yaml; do
+		[ -f "$f" ] && { pcfg=$f; break; }
+	done
 	[ -n "$pcfg" ] || die "nxpimage ahab parse wrote no yaml configuration"
 	echo "M7 image entry (nxpimage ahab parse):"
 	for f in core_id load_address entry_point image_type hash_type; do
