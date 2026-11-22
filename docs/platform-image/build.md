@@ -80,7 +80,7 @@ line.
 | `IMAGE_FEATURES += "tools-debug package-management"` | debug image | hardening-survey section 7 for the tools and package manager; no `debug-tweaks`: the login policy is not relaxed in the debug image (provisional, pending #14) |
 | `IMAGE_INSTALL:append = " bash gdb strace imx-test"` | debug image | hardening-survey section 7 |
 | `INIT_MANAGER = "systemd"` | distro | hardening-survey section 7 (systemd 259.5 on wrynose) |
-| `DISTRO_FEATURES:remove`, `DISTRO_FEATURES_BACKFILL_CONSIDERED`, `IMAGE_FEATURES:remove` | distro | hardening-survey section 7 (no display stack or audio); removing bluetooth, wifi, nfc and 3g is MISSING |
+| `DISTRO_FEATURES:remove`, `DISTRO_FEATURES_OPTED_OUT`, `IMAGE_FEATURES:remove` | distro | hardening-survey section 7 (no display stack or audio); removing bluetooth, wifi, nfc and 3g is MISSING |
 | `DISTRO`, `DISTRO_NAME`, `DISTRO_VERSION` | distro | MISSING: naming choices of this layer |
 | `BBFILES += recipes-*/*/*.bb` | layer.conf | MISSING: no survey covers it |
 
