@@ -250,4 +250,70 @@ NOSEED=1 stepcmd
 check "a missing workflows directory is refused" 1 "is not a directory"
 mkdir -p "$work/.github/workflows"
 
+# The step executes and imports nothing from the checkout (Codex security P1 at
+# verify 13). The complete step body, bootstrap included, runs with PyYAML hidden
+# from the "is it installed" probe, against a tree carrying a root-level pip.py and
+# yaml/__init__.py that each write a marker file. No network: pip installs a wheel
+# built here from the PyYAML this test already has, through a python3 shim that only
+# hides the probe and points pip at that wheel; the real `python3 -I -m pip` runs.
+rl="$TMP_ROOT/rl13"
+rm -rf "$rl"
+mkdir -p "$rl/tree/.github/workflows" "$rl/tree/yaml" "$rl/shim" "$rl/wheels" "$rl/rt"
+cp "$ROOT"/.github/workflows/*.yml "$rl/tree/.github/workflows/"
+printf 'open(%s, "w").write("pip")\n' "'$rl/marker-pip'" >"$rl/tree/pip.py"
+printf 'open(%s, "w").write("yaml")\n' "'$rl/marker-yaml'" >"$rl/tree/yaml/__init__.py"
+python3 -I - "$rl/wheels" "$ROOT/.github/workflows/ci.yml" "$rl/body.sh" <<'PY'
+import os, shutil, sys, zipfile
+wheels, ci, body = sys.argv[1:4]
+if os.environ.get("YAML_DIR"):
+    sys.path.insert(0, os.environ["YAML_DIR"])
+import yaml
+src = os.path.dirname(yaml.__file__)
+with zipfile.ZipFile(os.path.join(wheels, "PyYAML-6.0-py3-none-any.whl"), "w") as z:
+    for d, _, fs in os.walk(src):
+        for f in fs:
+            if f.endswith(".py"):
+                p = os.path.join(d, f)
+                z.write(p, os.path.join("yaml", os.path.relpath(p, src)))
+    di = "PyYAML-6.0.dist-info/"
+    z.writestr(di + "METADATA", "Metadata-Version: 2.1\nName: PyYAML\nVersion: 6.0\n")
+    z.writestr(di + "WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+    z.writestr(di + "RECORD", "")
+lines = open(ci, encoding="utf-8").read().splitlines()
+s = next(i for i, l in enumerate(lines) if "- name: Runner labels (ruling 633)" in l)
+r = next(i for i in range(s, len(lines)) if lines[i].strip() == "run: |") + 1
+ind = len(lines[r]) - len(lines[r].lstrip())
+e = r
+while e < len(lines) and (not lines[e].strip() or len(lines[e]) - len(lines[e].lstrip()) >= ind):
+    e += 1
+open(body, "w", encoding="utf-8").write("\n".join(l[ind:] for l in lines[r:e]) + "\n")
+PY
+run bash -c "[ -s '$rl/body.sh' ] && [ -f '$rl/wheels/PyYAML-6.0-py3-none-any.whl' ]"
+check "the whole step body and a local wheel are built" 0
+real_py=$(command -v python3)
+cat >"$rl/shim/python3" <<SH
+#!/bin/bash
+if [ "\$*" = "-I -c import yaml" ]; then exit 1; fi
+case " \$* " in *" -m pip "*) exec "$real_py" "\$@" --no-index --find-links "$rl/wheels" ;; esac
+exec "$real_py" "\$@"
+SH
+chmod +x "$rl/shim/python3"
+bodycmd() {
+	run env -u YAML_DIR PATH="$rl/shim:$PATH" RL_ROOT="$rl/tree" RUNNER_TEMP="$rl/rt" \
+		bash -c "cd '$rl/tree' && bash -e '$rl/body.sh'"
+}
+bodycmd
+check "the whole step, bootstrap included, installs PyYAML and checks the real workflows" 0 "OK:"
+run bash -c "[ ! -e '$rl/marker-pip' ]"
+check "a root-level pip.py in the checkout is not run by the bootstrap" 0
+run bash -c "[ ! -e '$rl/marker-yaml' ]"
+check "a root-level yaml package in the checkout is not imported" 0
+# A PyYAML install target inside the checkout is refused before anything is imported.
+mkdir -p "$rl/tree/evil"
+cp -r "$rl/tree/yaml" "$rl/tree/evil/yaml"
+run env YAML_DIR="$rl/tree/evil" RL_ROOT="$rl/tree" bash -c "cd '$rl' && python3 -I '$work/step.py'"
+check "a PyYAML that would load from inside the checkout is refused" 1 "imports nothing from the checkout"
+run bash -c "[ ! -e '$rl/marker-yaml' ]"
+check "the refused checkout PyYAML was not imported" 0
+
 finish

@@ -1501,16 +1501,43 @@ jobs:
         run: |
           # CUSTOMIZE (#159, Codex security P1 at verify 8): the workflows are read with
           # PyYAML, installed here when the runner lacks it. Never a skip.
+          #
+          # CUSTOMIZE (#159, Codex security P1 at verify 13): the step executes and
+          # imports nothing from the checkout. Every Python call is `-I` (no current
+          # directory on the module path) and runs from a fresh empty directory
+          # outside the checkout; PyYAML installs into a fresh directory there. The
+          # checkout is only read, through RL_ROOT.
+          rl_tmp=$(mktemp -d "${RUNNER_TEMP:-/tmp}/runner-labels.XXXXXX")
+          cd "$rl_tmp"
           yaml_dir=
           if ! python3 -I -c 'import yaml' 2>/dev/null; then
-            yaml_dir="${RUNNER_TEMP:-/tmp}/runner-labels-pyyaml"
-            python3 -m pip install --quiet --isolated --disable-pip-version-check --target "$yaml_dir" pyyaml
+            yaml_dir="$rl_tmp/pyyaml"
+            python3 -I -m pip install --quiet --isolated --disable-pip-version-check --target "$yaml_dir" pyyaml
           fi
           YAML_DIR=$yaml_dir python3 -I - <<'PY'
-          import glob, hashlib, json, os, re, sys
+          import glob, hashlib, importlib.util, json, os, re, sys
 
-          if os.environ.get("YAML_DIR"):
-              sys.path.insert(0, os.environ["YAML_DIR"])
+
+          def inside(path, root):
+              path, root = os.path.realpath(path), os.path.realpath(root)
+              return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+          # yaml must come from the install target, or from the interpreter's own
+          # module path, never from the checkout: this is decided before it is imported.
+          CHECKOUT = os.path.realpath(os.environ.get("RL_ROOT") or os.getcwd())
+          yd = os.environ.get("YAML_DIR")
+          if yd:
+              sys.path.insert(0, yd)
+          allowed = [yd] if yd else [p for p in sys.path if p]
+          try:
+              spec = importlib.util.find_spec("yaml")
+              origin = spec.origin if spec else None
+          except Exception:
+              origin = None
+          if not origin or inside(origin, CHECKOUT) or not any(inside(origin, a) for a in allowed if not inside(a, CHECKOUT)):
+              print(f"::error::runner labels: PyYAML resolves to {origin!r}, which is not the install target or the interpreter's own modules, or is inside the checkout; the step imports nothing from the checkout")
+              sys.exit(1)
           try:
               import yaml
           except ImportError as e:
