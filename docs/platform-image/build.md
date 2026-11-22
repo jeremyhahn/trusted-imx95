@@ -63,11 +63,45 @@ Reproducible builds and the SBOM stay at Yocto's defaults
 (SPDX 3.0) are on, and the test fails if any file under `platform-image/` sets
 the first two or removes the third.
 
-Open, MISSING, and deliberately not set: `BB_NO_NETWORK`, hash equivalence, the
+Open, MISSING, and deliberately not set: the `BBFILES += recipes-*/*/*.bbappend`
+line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, hash equivalence, the
 `SPDX_INCLUDE_*`, `SPDX_INVOKED_BY` and `SPDX_ON_BEHALF_OF` fields
 (reproducible-build-survey question 6 has no recommendation), the xkmsd
 package (go-xkms has no recipe yet; hardening-survey question 7), and any
 login-policy image feature in the production image.
+
+## Kernel hardening fragment
+
+Proposed, pending owner approval (hardening-survey question 1 (c) and question
+5 (b)). `platform-image/recipes-kernel/linux/linux-imx_%.bbappend` adds
+`files/hardening.cfg` as a kernel-yocto fragment to meta-imx-bsp's
+`linux-imx_6.18.bb`, which accepts fragments and rejects
+`DELTA_KERNEL_DEFCONFIG` (survey section 5). `test/platform_image_kernel_test.sh`
+checks the fragment offline.
+
+| Setting group | Source section | Status |
+|---|---|---|
+| The "cheap, no expected driver impact" KSPP options with a plain value (`HARDENED_USERCOPY`, the SLAB and page-allocator randomisation, `LIST_HARDENED`, `FORTIFY_SOURCE`, `INIT_ON_ALLOC_DEFAULT_ON`, `DEFAULT_MMAP_MIN_ADDR=65536`, `SLAB_MERGE_DEFAULT`, `LDISC_AUTOLOAD`, `LEGACY_PTYS`, `LEGACY_TIOCSTI` off, and the rest of that list) | hardening-survey section 3 | provisional |
+| `DEVMEM`, `DEVPORT`, `KEXEC`, `KEXEC_FILE`, `CRASH_DUMP` off | section 4, question 5 (b) | provisional |
+| `PANIC_ON_OOPS=y`, `PANIC_TIMEOUT=-1`, `MAGIC_SYSRQ_DEFAULT_ENABLE=176` | section 3 "behaviour changes", question 5 (b) | provisional |
+
+Dropped because the survey states no usable value: `STATIC_USERMODEHELPER`
+(it also needs a helper path, which the survey does not give; an empty path
+would block every usermode helper).
+
+Deliberately not set, left to the owner: `MODULES=n` and `MODULE_SIG_FORCE`
+with its signing key (questions 2 and 3: out-of-tree BSP modules, key custody
+and reproducibility); lockdown (question 4: its debugfs conflict is
+unconfirmed, section 6); `COMPAT=n` (vendor binaries may be 32-bit); the
+"runtime cost" group; the symbols the survey says 6.18 removed; and every
+toolchain-dependent option (`SHADOW_CALL_STACK`, `CFI_CLANG`,
+`ARM64_BTI_KERNEL`, `ARM64_MTE`, `KASAN_HW_TAGS`, `UNWIND_PATCH_PAC_INTO_SCS`),
+which need a real cross build (sections 3 and 9).
+
+Not verified: no kernel build; no check that the options resolve in 6.18 or
+that the BSP drivers survive them (survey section 6, question 2). The survey
+gives `MAGIC_SYSRQ_DEFAULT_ENABLE=176` without a base; Kconfig reads that hex
+symbol as written, so whether 176 means decimal 176 is unconfirmed.
 
 ## Verified and not verified
 
