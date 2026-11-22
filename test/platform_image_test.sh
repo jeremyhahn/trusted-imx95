@@ -59,6 +59,80 @@ done <"$distro"
 expect "distro requires an fsl-imx-* distro, not poky" test "$derives" -eq 1
 expect "distro names no signing step" test "$signs" -eq 0
 
+# The image recipes (provisional default, hardening-survey section 7).
+img=$ROOT/platform-image/recipes-core/images/trusted-imx95-image.bb
+dbg=$ROOT/platform-image/recipes-core/images/trusted-imx95-image-debug.bb
+layer=$ROOT/platform-image/conf/layer.conf
+banned='(debug-tweaks|allow-empty-password|allow-root-login|empty-root-password|package-management|tools-debug|bash|gdb|strace|imx-test)'
+
+# matches FILE ERE: true when a line of FILE matches the ERE (whole word).
+matches() {
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ $l =~ (^|[^A-Za-z0-9_-])$2([^A-Za-z0-9_-]|$) ]] && return 0
+	done <"$1"
+	return 1
+}
+# noncomment FILE ERE: as matches, ignoring comment lines.
+noncomment() {
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in '#'*) continue ;; esac
+		[[ $l =~ (^|[^A-Za-z0-9_-])$2([^A-Za-z0-9_-]|$) ]] && return 0
+	done <"$1"
+	return 1
+}
+
+expect "production image exists" test -f "$img"
+expect "production image requires core-image-minimal" noncomment "$img" 'require[[:space:]]+.*core-image-minimal'
+! noncomment "$img" '(fsl-image-[a-z0-9-]*|imx-image-[a-z0-9-]*)' && r=0 || r=1
+expect "production image requires no fsl-image-* or imx-image-*" test "$r" -eq 0
+expect "production image has read-only-rootfs" noncomment "$img" 'IMAGE_FEATURES[[:space:]]*\+?=.*read-only-rootfs'
+! matches "$img" "$banned" && r=0 || r=1
+expect "production image names no banned feature or package" test "$r" -eq 0
+expect "debug image exists" test -f "$dbg"
+expect "debug image requires the production image" noncomment "$dbg" 'require[[:space:]]+trusted-imx95-image\.bb'
+expect "debug image names the banned features and packages" noncomment "$dbg" "$banned"
+expect "debug image says it never holds production keys" matches "$dbg" 'NEVER holds production keys'
+only=1
+for f in "$ROOT"/platform-image/conf/layer.conf "$ROOT"/platform-image/conf/distro/*.conf \
+	"$ROOT"/platform-image/conf/*.template "$img"; do
+	! matches "$f" "$banned" || only=0
+done
+expect "the debug image is the only file naming the banned features" test "$only" -eq 1
+expect "layer.conf has the BBFILES line" noncomment "$layer" 'BBFILES[[:space:]]*\+=.*recipes-\*/\*/\*\.bb'
+
+# No file of ours overrides Yocto's reproducible or SBOM defaults (reproducible-build-survey sections 3, 4).
+ovr=0
+for f in "$ROOT"/platform-image/conf/layer.conf "$ROOT"/platform-image/conf/distro/*.conf \
+	"$ROOT"/platform-image/conf/*.template "$img" "$dbg"; do
+	noncomment "$f" '(SOURCE_DATE_EPOCH|REPRODUCIBLE_TIMESTAMP_ROOTFS)' && ovr=1
+	noncomment "$f" 'INHERIT_DISTRO[^#]*(:remove|-=)[^#]*create-spdx' && ovr=1
+	noncomment "$f" 'INHERIT:remove[^#]*create-spdx' && ovr=1
+done
+expect "no platform-image file overrides the epoch, the rootfs timestamp or create-spdx" test "$ovr" -eq 0
+
+# Every assignment is preceded by a comment citing a survey or saying MISSING.
+assign_re='^[A-Za-z_][A-Za-z0-9_.:-]*[[:space:]]*[?:+.]*='
+for f in "$img" "$dbg" "$distro"; do
+	cited=0 uncited=0 prev=
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in
+		'#'*)
+			[[ $l == *survey* || $l == *MISSING* ]] && cited=1
+			prev=c
+			continue
+			;;
+		'' | require* | inherit*) cited=0 prev= ; continue ;;
+		esac
+		if [[ $l =~ $assign_re ]]; then
+			{ [ "$prev" = c ] && [ "$cited" -eq 1 ]; } || uncited=$((uncited + 1))
+		fi
+		cited=0 prev=
+	done <"$f"
+	expect "every assignment in ${f##*/} cites a survey or MISSING" test "$uncited" -eq 0
+done
+
 # scripts/platform-image-fetch.sh against a local file:// stub, no network.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -82,6 +156,19 @@ rc=0
 out=$("$ROOT/scripts/platform-image-fetch.sh" "$tmp/bad.lock" "$tmp/out-bad" 2>&1) || rc=$?
 expect "fetch: a differing commit fails" test "$rc" -ne 0
 expect "fetch: the failure names the layer" test "${out##*layer stub*}" != "$out"
+
+# The "checked out X, the lock pins Y" branch: the lock pins an annotated tag
+# object, checkout peels it to the commit, so HEAD differs from the pin.
+git -C "$tmp/src" -c user.name=t -c user.email=t@example.invalid -c tag.gpgsign=false \
+	tag -a -m stub stub-tag "$good"
+tagobj=$(git -C "$tmp/src" rev-parse stub-tag)
+expect "stub tag object differs from its commit" test "$tagobj" != "$good"
+mklock "$tagobj" "$tmp/tag.lock"
+rc=0
+out=$("$ROOT/scripts/platform-image-fetch.sh" "$tmp/tag.lock" "$tmp/out-tag" 2>&1) || rc=$?
+expect "fetch: a tag object pin fails" test "$rc" -ne 0
+expect "fetch: it says checked out <commit>, the lock pins <tag object>" \
+	test "${out##*"checked out $good, the lock pins $tagobj"*}" != "$out"
 
 rc=0
 "$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$ROOT/inside-clone" >/dev/null 2>&1 || rc=$?
