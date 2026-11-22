@@ -35,12 +35,16 @@ IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"
 # tee-supplicant, started at boot, and the persistent /data partition its
 # REE-FS storage (the fTPM NV) lives on, mounted before it starts. The root file
 # system stays read-only.
+# MISSING: no survey covers OP-TEE; docs/ftpm/README.md records the fTPM choice.
 IMAGE_INSTALL:append = " optee-client trusted-imx95-tee-nv"
+# MISSING: no survey names the partition layout; the wks is provisional
+# (docs/ftpm/README.md, "Where the NV lives").
 WKS_FILE = "trusted-imx95.wks"
+# MISSING: no survey names a disk image format; the wic is provisional, as above.
 IMAGE_FSTYPES += "wic"
 # The Freescale EULA is the owner's to accept (docs/ftpm/build.md), so the image
 # does not accept it. NXP's wic flow pulls in imx-boot, and with it
 # imx-m7-demos, which needs the EULA. This image's wks has no boot container
 # (the boot-container flow of this repository writes it, with the M7 image), so
-# imx-boot is not a dependency of the image.
+# imx-boot is not a dependency of the image. MISSING: no survey covers the EULA.
 WKS_FILE_DEPENDS:remove = "imx-boot"
