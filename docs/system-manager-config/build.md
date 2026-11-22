@@ -10,7 +10,7 @@ own its board configuration. Nothing here is flashed or signed: the image is a b
 
 ```sh
 make system-manager                          # = scripts/sm-build.sh system-manager/sm.lock
-make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 6)
+make docker-run CMD='make system-manager'    # the same, in the devcontainer image (see section 8)
 ```
 
 The pins are in [`system-manager/sm.lock`](../../system-manager/sm.lock). They are **provisional**: they follow
@@ -71,8 +71,9 @@ checked.
 
 ## 3. Where the configuration lives
 
-- The source of truth is NXP's `configs/other/mx95frdm-pro.cfg` at the pinned commit, used **unchanged**: the
-  lock pins its SHA-256 and the build fails if it differs. This repository holds no copy yet.
+- The source of truth is NXP's `configs/other/mx95frdm-pro.cfg` at the pinned commit, the base: the
+  lock pins its SHA-256 and the build fails if it differs. This repository holds no copy; its delta is the patch
+  of section 6 (proposed, pending the owner, #13).
 - `make cfg` turns it into the C headers in `configs/mx95frdm-pro/` of the build tree; they are build output,
   regenerated on every build, never carried.
 - The file names the 19x19 EVK board port (`board=mcimx95evk`); its header comment still says "MX95 EVK".
@@ -104,7 +105,7 @@ names. This settles most of that survey's §8 item 1 for this device. The M7 is 
 | `M7P` (brings `PERF_M7`, `CLK_M7SYSTICK`) | M7 LM, Resources | Granted: the M7 owns `M7P` |
 | `CLK_M7`, `CLK_BUSM7`, `CLK_ENET` | SM LM (LM0), API, the group changed through the Performance protocol | SM-held; the M7 reaches `CLK_M7` only through `PERF_M7` |
 | `PERF_M7` explicit API line | M7 LM, API | **Not present.** Whether `M7P` ownership alone allows `PERFORMANCE_LEVEL_SET` (PRIV) is #107's; a `PERF_M7` line may be needed |
-| M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned as a `test` resource |
+| M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned (its `test` key dropped by 0002) |
 | Pins `GPIO_IO36`, `GPIO_IO37` (also `GPIO_IO14`, `GPIO_IO15`) | M7 LM, Pins | Granted, all four. What they are wired to on the PRO is unconfirmed |
 | M7 timers, CAN, watchdog, mailboxes (`LPIT1`, `LPTMR1/2`, `LPTPM1`, `CAN_FD1`, `WDOG5`, `MU5_A`, `MU7_B`, `MU8_B`, `IRQSTEER_M7`, `TSTMR2`) | M7 LM, Resources | Granted |
 | EdgeLock mailbox `MU_ELE5` | M7 LM, Resources | Granted |
@@ -123,7 +124,107 @@ So the M7 firmware of trusted-firmware's `imx95` row can run on the pinned confi
 tamper response by `LMM_SHUTDOWN` or `SYSTEM_POWER_STATE_SET` is granted. The changes the findings point to are
 the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
 
-## 6. Not confirmed
+## 6. This repository's delta: the M7 fault reactions fail closed
+
+**Proposed, pending owner approval (#13).** The choice between `sys_reset` and `sys_shutdown` is the owner's. The
+fault-recovery survey recommends `sys_reset` ([fault-recovery-survey.md](fault-recovery-survey.md) §10 Q1, option (c),
+or (d) `sys_shutdown` if a restart loop is a concern), so the patch takes `sys_reset`. **Nothing was flashed, signed
+or run on a board.**
+
+The delta is [`system-manager/patches/0001-m7-faults-fail-closed.patch`](../../system-manager/patches/0001-m7-faults-fail-closed.patch),
+a unified diff against `configs/other/mx95frdm-pro.cfg` at the pinned commit. It changes four lines of the M7 LM
+(LM1) Faults block, and nothing else; `FAULT_SW0` (the FuSa reaction) and every other line are unchanged.
+
+| Line (upstream) | Before | After |
+|---|---|---|
+| 433 `FAULT_M7_LOCKUP` | `lm_reset` | `sys_reset` |
+| 434 `FAULT_M7_RESET` | `lm_reset` | `sys_reset` |
+| 436 `FAULT_SW1` | `lm_reset` | `sys_reset` |
+| 437 `FAULT_WDOG5` | `lm_reset` | `sys_reset` |
+
+Why: the M7 runs the trusted firmware and the tamper response. `lm_reset` restarts the M7 alone and leaves the A55
+running unsupervised, which is fail-open. `sys_reset` restarts the A55 with the M7. The survey section it rests on
+is [fault-recovery-survey.md](fault-recovery-survey.md) §9 (the M7 faults bullet) and §10 Q1. A restart loop on a
+persistent fault is the cost; `sys_shutdown` would avoid it and keep the board off until power is cycled.
+
+Mechanism: [`sm.lock`](../../system-manager/sm.lock) gains `sm_patch_sha256` (the patches concatenated in name order)
+and `sm_patched_config_sha256` (the file after they apply). `scripts/sm-build.sh` checks the patches' digest before
+downloading anything, then in each build checks the upstream file's SHA-256, applies each patch in order with
+`git apply`, checks the patched file's SHA-256, and builds. Either digest differing stops the build.
+`test/sm_build_test.sh` covers both checks offline, and checks that the committed patch changes only those four
+fault lines, each from `lm_reset` to `sys_reset` or `sys_shutdown`. Section 4's plan is thus followed, with the patch
+under `system-manager/patches/`. Any change rebuilds the image and the boot container, which must be re-signed.
+
+`make system-manager` with the patch ran on 2026-11-21 in the lane's container: both builds are byte-identical,
+`m33_image.bin` SHA-256 `3ef1c54c829a8bd775dfc3d4f263eb06d8a61e565a3f4f74025d51d9a82f6e85`. The image is a build
+output only.
+
+## 7. This repository's second delta: the M7 LM's test-only grants dropped
+
+**Proposed, provisional, pending owner approval (#13).** Whether the dev/production split of System Manager images
+exists is not decided, so this delta may belong to a production image only. **Nothing was flashed, signed or run on
+a board.**
+
+The delta is [`system-manager/patches/0002-m7-no-test-grants.patch`](../../system-manager/patches/0002-m7-no-test-grants.patch),
+applied after 0001 to `configs/other/mx95frdm-pro.cfg`. It reads only the M7 LM (LM1) block of the file at the pinned
+commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` and `LMM_2` are as 0001 leaves them. Its requirement, acceptance criteria and revert are in
+[architecture.md, "M7 grant delta (patch 0002)"](architecture.md#m7-grant-delta-patch-0002).
+
+| Line (0001's output) | Before | After | Survey |
+|---|---|---|---|
+| 369 `MAILBOX` | `type=mu, mu=9, test=8, priority=high` | `type=mu, mu=9, priority=high` | [scmi-permissions-survey.md](scmi-permissions-survey.md) §3.1 (`test` keys) |
+| 370-371 `CHANNEL db=0` | `..., type=a2p, \` then `test=default` | **unchanged, kept** | the configuration tool stops with "missing default test channel" without it (the first build of the patch that dropped it failed there) |
+| 381-382 | `BRD_SM_CTRL_TEST ALL`, `BRD_SM_CTRL_TEST_A ALL` | removed | §3.1, §3.2 (drop) |
+| 404 | `LPUART3             OWNER, test` | `LPUART3             OWNER` | §3.2 (the `test` key drops, the ownership grant stays) |
+| 412 | `PD_M7               test` | removed | §3.2 (`PD_M7 test` drops) |
+
+What stays, and why:
+
+- `LPUART7` (the M7 console, [m7-resource-map-survey.md](m7-resource-map-survey.md) §6) and every other owned
+  resource. `LPUART3` stays owned (`LPUART3 OWNER`): only its `test` key goes, the ownership grant is not touched.
+- `PD_M7` power: the start/stop lines for `msel` 0, 1, 2 are untouched, so the SM still powers and starts the M7.
+- `MU8_B` stays owned: it is an M7 mailbox resource, not a `test` key. The SCMI channel's test MU (8) was expressed
+  as `test=8` on the `MAILBOX` line, so it is covered by §3.1 and dropped there. Whether `MU8_B` is needed by the
+  M7 firmware is not confirmed.
+- `SYS`, `LMM_2`, `FUSA`, `RTC`, the sensors and the button, as survey §3.2 says.
+
+Mechanism: [`sm.lock`](../../system-manager/sm.lock) carries the new `sm_patch_sha256` (0001 then 0002) and
+`sm_patched_config_sha256`, both computed from the files. After the patched-file hash check, `scripts/sm-build.sh`
+refuses to build when the M7 LM block of the patched file holds a `test` key (other than `test=default`) or a `BRD_SM_CTRL_TEST*` grant, or when
+it finds no M7 block. `test/sm_build_test.sh` checks offline that 0002 touches only M7 block lines, that each removed
+line carries `test` or `BRD_SM_CTRL_TEST`, that each added line is a removed one without the key, that no `Faults`,
+`SYS` or `LMM_2` line is touched, and that the new check fails on a fake M7 block with a `test` key and passes without
+one. The image and the boot container must be rebuilt and re-signed after any change.
+
+Unconfirmed: whether a `test` key widens access in a release build ([scmi-permissions-survey.md](scmi-permissions-survey.md)
+§6); whether the SM's configuration tool accepts the file without `test` keys is checked only by the build below.
+MISSING from the survey: the `CHANNEL db=0` `test=default` key (§3.1 names `test` keys in general but not a channel
+key). It stays, because the tool needs a default test channel, so the M7 block still carries one `test` key and
+`sm-build.sh` exempts exactly `test=default`. Whether the tool can be satisfied another way is the owner's to confirm.
+
+SM build run: `make system-manager` applied 0001 and 0002, passed the `sm-build.sh` M7 block check and built twice
+with identical output (rc=0, 134 s). `m33_image.bin` SHA-256
+`83d1e019f10f5b285080e83207de1450a3e381346ff6d7c7c280a1c64c878d9b`, reproducible. The image is a build result only:
+it is not signed and not yet booted.
+
+## 7a. The M7 LM's grants are an allowlist
+
+**Proposed, pending owner approval (#13).** This is the "minimal grants" half of the row: the M7 gets what it needs
+and nothing else. [`scripts/sm-grants-check.sh`](../../scripts/sm-grants-check.sh) `<patched cfg> <allowlist>` extracts every
+grant line of the M7 LM block (comments and blanks dropped, backslash continuations joined, whitespace collapsed,
+sorted) and fails on a line the list lacks (`grants: UNLISTED`) and on a listed line the file lacks (`grants: STALE`).
+A missing M7 block, an unreadable file and a missing or empty list each fail too. `scripts/sm-build.sh` runs it on the
+patched file in every build, after the `test` key check, so an imx-sm bump or a new patch that widens the M7's grants
+stops the build.
+
+The list is [`system-manager/m7-grants.txt`](../../system-manager/m7-grants.txt) (60 lines), a record of the file after
+0001 and 0002. Regenerate it with `scripts/sm-grants-check.sh --print <patched cfg>`
+(`out/system-manager/tree-1/configs/other/mx95frdm-pro.cfg` after `make system-manager`). Any change to it is a reviewed
+diff, proposed and pending owner approval; it is not digest-pinned in `sm.lock`. **It was produced from, and checked
+against, the real pinned file** patched by 0001 and 0002 (`grants: OK (60 lines)`). `test/sm_build_test.sh` covers the
+check offline, and a fake build whose patched file widens the M7 block.
+
+## 8. Not confirmed
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now

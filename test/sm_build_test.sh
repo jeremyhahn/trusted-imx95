@@ -24,7 +24,7 @@ tc_sha=$(sha256sum "$TMP_ROOT/tc.tar.xz" | cut -d' ' -f1)
 # FAKE_FAIL fails the build.
 repo="$TMP_ROOT/imx-sm"
 mkdir -p "$repo/configs/other"
-echo "board=fake" >"$repo/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake\n' >"$repo/configs/other/fakepro.cfg"
 # shellcheck disable=SC2016 # make's $(...), not the shell's
 printf '%s\n' 'cfg:' \
 	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h' \
@@ -41,6 +41,17 @@ g tag -a v1 -m v1
 commit=$(git -C "$repo" rev-parse HEAD)
 cfg_sha=$(sha256sum "$repo/configs/other/fakepro.cfg" | cut -d' ' -f1)
 
+# The repository's patch, faked: one patch beside the lock, changing the fake
+# configuration. patched_sha is the configuration after it applies.
+mkdir -p "$TMP_ROOT/patches" "$TMP_ROOT/pa/configs/other" "$TMP_ROOT/pb/configs/other"
+printf 'LM1 name="M7"\nboard=fake\n' >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake-closed\n' >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
+(cd "$TMP_ROOT" && diff -u pa/configs/other/fakepro.cfg pb/configs/other/fakepro.cfg |
+	{ read -r _; read -r _; echo "--- a/configs/other/fakepro.cfg"; echo "+++ b/configs/other/fakepro.cfg"; cat; }) \
+	>"$TMP_ROOT/patches/0001-fake.patch" || true
+patch_sha=$(sha256sum "$TMP_ROOT/patches/0001-fake.patch" | cut -d' ' -f1)
+patched_sha=$(sha256sum "$TMP_ROOT/pb/configs/other/fakepro.cfg" | cut -d' ' -f1)
+
 # lock [key=value...]: a good lock in $TMP_ROOT/lock, with the overrides.
 lock() {
 	local f="$TMP_ROOT/lock"
@@ -52,6 +63,8 @@ lock() {
 		echo "sm_config=fakepro"
 		echo "sm_config_file=configs/other/fakepro.cfg"
 		echo "sm_config_sha256=$cfg_sha"
+		echo "sm_patch_sha256=$patch_sha"
+		echo "sm_patched_config_sha256=$patched_sha"
 		echo "sm_monitor_mode=2"
 		echo "toolchain_version=9.9.rel1"
 		echo "toolchain_url=file://$TMP_ROOT/tc.tar.xz"
@@ -72,6 +85,8 @@ has_line() {
 	return 1
 }
 
+# The M7 grants allowlist sits beside the lock; the fake patched block is one line.
+printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
 lock
 out="$TMP_ROOT/out"
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
@@ -96,9 +111,150 @@ lock sm_commit=0123456789abcdef0123456789abcdef01234567
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
 check "a tag on another commit fails" nonzero "v1 is commit $commit"
 
+# A patched file that widens the M7 block (the allowlist lacks its line) stops the build.
+printf 'board=fake\n' >"$TMP_ROOT/m7-grants.txt"
+lock
+run env SM_OUT="$TMP_ROOT/out4" bash "$sm" "$TMP_ROOT/lock"
+check "sm-build.sh stops a build whose patched file widens the M7 block" nonzero "grants: UNLISTED board=fake-closed" "differ from system-manager/m7-grants.txt"
+printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
+
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
 check "a changed configuration fails" nonzero "configs/other/fakepro.cfg SHA-256 is $cfg_sha"
+
+lock sm_patch_sha256=0000000000000000000000000000000000000000000000000000000000000000
+run env SM_OUT="$TMP_ROOT/out3" bash "$sm" "$TMP_ROOT/lock"
+check "a patch of another digest fails" nonzero "patches SHA-256 is $patch_sha"
+lock sm_patched_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
+run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
+check "a patched configuration of another digest fails" nonzero "patched configs/other/fakepro.cfg SHA-256 is $patched_sha"
+expect "the patch reached the fake build" has_line "board=fake-closed" "$out/tree-1/configs/other/fakepro.cfg"
+lock
+printf '+x\n' >>"$TMP_ROOT/patches/0001-fake.patch"
+run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
+check "an edited patch fails" nonzero "patches SHA-256 is"
+head -n -1 "$TMP_ROOT/patches/0001-fake.patch" >"$TMP_ROOT/patches/x" && mv "$TMP_ROOT/patches/x" "$TMP_ROOT/patches/0001-fake.patch"
+
+# The committed patch, offline: it changes only the M7 LM's fault reactions
+# (build.md section 5), each lm_reset to sys_reset or sys_shutdown, and
+# matches the lock.
+patch_file="$ROOT/system-manager/patches/0001-m7-faults-fail-closed.patch"
+expect "the committed patch matches the lock's patch digest" \
+	has_line "sm_patch_sha256=$(cat "$ROOT"/system-manager/patches/*.patch | sha256sum | cut -d' ' -f1)" "$ROOT/system-manager/sm.lock"
+run python3 -I -c '
+import re, sys
+want = {"FAULT_M7_LOCKUP", "FAULT_M7_RESET", "FAULT_SW1", "FAULT_WDOG5"}
+old, new = {}, {}
+for l in open(sys.argv[1]).read().split("\n"):
+    if l.startswith(("---", "+++", "@@", " ")) or not l:
+        continue
+    m = re.match(r"^([-+])(FAULT_[A-Z0-9_]+) +OWNER, reaction=([a-z_]+)$", l)
+    if not m:
+        sys.exit("changed line is not a fault reaction: " + l)
+    (old if m[1] == "-" else new)[m[2]] = m[3]
+if set(old) != want or set(new) != want:
+    sys.exit("changed faults %s, want %s" % (sorted(old), sorted(want)))
+if any(v != "lm_reset" for v in old.values()):
+    sys.exit("a changed reaction was not lm_reset")
+if any(v not in ("sys_reset", "sys_shutdown") for v in new.values()):
+    sys.exit("a new reaction is not sys_reset or sys_shutdown")
+print("patch touches only M7 faults")
+' "$patch_file"
+check "the committed patch changes only the M7 LM's fault reactions" 0 "patch touches only M7 faults"
+
+# 0002: only test keys and BRD_SM_CTRL_TEST* grants of the M7 LM leave.
+patch2="$ROOT/system-manager/patches/0002-m7-no-test-grants.patch"
+run python3 -I -c '
+import re, sys
+def norm(s):
+    return re.sub(r"\s+", " ", s.replace("\\", " ")).strip().rstrip(",")
+def untest(s):
+    return re.sub(r",? ?\btest(=\w+)?\b,?", lambda m: "," if m[0].startswith(",") and m[0].endswith(",") else "", s)
+rem, add = [], []
+for l in open(sys.argv[1]).read().split("\n"):
+    if l.startswith(("---", "+++", "@@", " ")) or not l:
+        continue
+    (rem if l[0] == "-" else add).append(l[1:])
+for l in rem + add:
+    if re.match(r"(FAULT_|SYS\b|LMM_2\b)", l):
+        sys.exit("touches a Faults, SYS or LMM_2 line: " + l)
+for l in rem:
+    if not re.search(r"\btest\b|BRD_SM_CTRL_TEST", l) and not l.rstrip().endswith("\\"):
+        sys.exit("removed line carries no test grant: " + l)
+want = norm(" ".join(untest(l) for l in rem if "BRD_SM_CTRL_TEST" not in l and not re.match(r"PD_M7\s", l)))
+got = norm(" ".join(add))
+if not any(re.fullmatch(r"LPUART3\s+OWNER", l) for l in add) or not any(re.fullmatch(r"LPUART3\s+OWNER, test", l) for l in rem):
+    sys.exit("LPUART3 must keep OWNER and lose only its test key")
+if norm(untest(want)) != norm(got):
+    sys.exit("added lines are not the removed lines without the test key: %r vs %r" % (want, got))
+hunks = [l for l in open(sys.argv[1]).read().split("\n") if l.startswith("@@")]
+for h in hunks:
+    s = int(re.match(r"@@ -(\d+)", h)[1])
+    if s < 366 or s > 410:
+        sys.exit("hunk outside the M7 LM block: " + h)
+print("patch 0002 touches only M7 test grants")
+' "$patch2"
+check "0002 takes only test keys and test grants out of the M7 LM" 0 "patch 0002 touches only M7 test grants"
+
+# The M7 block check of sm-build.sh, on a fake patched configuration.
+mkdir -p "$TMP_ROOT/m7"
+printf 'LM0 name="SM"\ntest\nLM1 name="M7"\nX OWNER\n# test\nLM2 name="AP"\nY OWNER, test\n' >"$TMP_ROOT/m7/ok.cfg"
+printf 'LM1 name="M7"\nX OWNER, test\n' >"$TMP_ROOT/m7/bad1.cfg"
+printf 'LM1 name="M7"\nBRD_SM_CTRL_TEST_A ALL\n' >"$TMP_ROOT/m7/bad2.cfg"
+printf 'LM1 name="M7"\nMAILBOX type=mu, test=8\n' >"$TMP_ROOT/m7/bad3.cfg"
+printf 'LM1 name="M7"\nCHANNEL a, \\\n   test=default\n' >"$TMP_ROOT/m7/ok2.cfg"
+printf 'LM2 name="AP"\n' >"$TMP_ROOT/m7/none.cfg"
+python3 -I -c '
+import re, sys
+s = open(sys.argv[1]).read()
+sys.stdout.write(re.search(r"^m7_clean\(\) \{.*?^\}\n", s, re.S | re.M)[0])
+' "$sm" >"$TMP_ROOT/m7/fn.sh"
+m7run() { bash -c 'die() { echo "$*" >&2; exit 1; }; . "$1"; m7_clean "$2"' _ "$TMP_ROOT/m7/fn.sh" "$TMP_ROOT/m7/$1.cfg"; }
+run m7run ok
+check "sm-build.sh accepts an M7 block without a test grant" 0 ""
+run m7run ok2
+check "sm-build.sh keeps the default test channel key the tool needs" 0 ""
+for c in bad1 bad2 bad3; do
+	run m7run "$c"
+	check "sm-build.sh refuses an M7 block with a test grant ($c)" nonzero "still holds a test grant"
+done
+run m7run none
+check "sm-build.sh refuses a configuration with no M7 block" nonzero "no M7 LM block"
+
+# sm-grants-check.sh: the M7 block's grants equal the reviewed list.
+gc="$ROOT/scripts/sm-grants-check.sh"
+g="$TMP_ROOT/g"
+mkdir -p "$g"
+printf 'LM0 name="SM"\nSYS ALL\nLM1 name="M7"\n# c\nB OWNER\n\nA ALL, \\\n   x=1\nC  READONLY # t\nLM2 name="AP"\nZ ALL\n' >"$g/cfg"
+printf '# list\nA ALL, x=1\nB OWNER\nC READONLY\n' >"$g/ok.txt"
+printf 'C READONLY\nB OWNER\nA ALL, x=1\n' >"$g/reorder.txt"
+printf 'A ALL, x=1\nB OWNER\nC READONLY\nD ALL\n' >"$g/stale.txt"
+printf 'A ALL, x=1\nB OWNER\n' >"$g/unlisted.txt"
+printf '# only a comment\n\n' >"$g/empty.txt"
+printf 'LM2 name="AP"\nZ ALL\n' >"$g/nom7.cfg"
+run "$gc" "$g/cfg" "$g/ok.txt"
+check "grants: a block matching the allowlist passes" 0 "grants: OK (3 lines)"
+run "$gc" "$g/cfg" "$g/reorder.txt"
+check "grants: a reordered list passes" 0 "grants: OK (3 lines)"
+run "$gc" "$g/cfg" "$g/unlisted.txt"
+check "grants: an extra grant line fails with UNLISTED" 1 "grants: UNLISTED C READONLY" "grants: FAILED"
+run "$gc" "$g/cfg" "$g/stale.txt"
+check "grants: a missing line fails with STALE" 1 "grants: STALE D ALL" "grants: FAILED"
+run "$gc" "$g/nom7.cfg" "$g/ok.txt"
+check "grants: a missing M7 block fails" 1 "no M7 LM block"
+run "$gc" "$g/cfg" "$g/empty.txt"
+check "grants: an empty allowlist fails" 1 "is empty"
+run "$gc" "$g/cfg" "$g/none.txt"
+check "grants: a missing allowlist fails" 1 "no allowlist"
+run "$gc" "$g/none.cfg" "$g/ok.txt"
+check "grants: an unreadable cfg fails" 1 "cannot read"
+run "$gc" --print "$g/cfg"
+check "grants: --print shows the normalised sorted grants" 0 "A ALL, x=1"
+# shellcheck disable=SC2016 # expands in the child shell
+expect "grants: --print output is the allowlist's lines" \
+	bash -c '[ "$("$1" --print "$2")" = "$(tail -n 3 "$3")" ]' _ "$gc" "$g/cfg" "$g/ok.txt"
+expect "grants: the committed allowlist is non-empty" \
+	[ -s "$ROOT/system-manager/m7-grants.txt" ]
 
 lock toolchain_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$TMP_ROOT/out2" bash "$sm" "$TMP_ROOT/lock"

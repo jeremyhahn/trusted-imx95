@@ -57,6 +57,49 @@ profile and its use of these resources are trusted-firmware's `imx95` row and ar
 - The CompuLab UCM-iMX95 material is reference only and is not cited for this device
   ([references/README.md](../references/README.md), "The device").
 
+## M7 grant delta (patch 0002)
+
+> **Proposed, pending owner approval (#13).** This section is the requirement and the acceptance criteria of
+> [`system-manager/patches/0002-m7-no-test-grants.patch`](../../system-manager/patches/0002-m7-no-test-grants.patch).
+> It belongs to the same `system-manager-config` row as the fault reactions; it is not a separate change.
+
+### Requirement
+
+In the shipped configuration the M7 logical machine (`SCMI_AGENT0 name="M7"`, LM1) holds no test-only grant. Patch 0002
+removes exactly these, and nothing outside the M7 block:
+
+- the `test=8` key of the M7 `MAILBOX` line (`type=mu, mu=9, priority=high` stays);
+- the `BRD_SM_CTRL_TEST` grant;
+- the `BRD_SM_CTRL_TEST_A` grant;
+- the `test` key of `LPUART3`; the `OWNER` grant on `LPUART3` is kept, so the M7 keeps the UART;
+- the `PD_M7 test` grant.
+
+Kept: `CHANNEL db=0 ... type=a2p, test=default`. The configuration tool needs a default test channel, so it stays; it
+is the one `test` key allowed in the M7 block. The reasons for removing the others, and for what the M7 keeps, are in
+[scmi-permissions-survey.md](scmi-permissions-survey.md) §3.1 (production builds carry no `test` keys or test-only
+APIs) and §3.2 (the M7's own grants table). The survey's §3.2 names the `test` keys as an S1 reference; the patched
+file is the PRO file, and the allowlist below is what was checked against it.
+
+### Acceptance criteria
+
+1. The M7 block of the patched `mx95frdm-pro.cfg` equals the reviewed allowlist
+   [`system-manager/m7-grants.txt`](../../system-manager/m7-grants.txt), line for line, checked by
+   `scripts/sm-grants-check.sh` in every `scripts/sm-build.sh` build. A widened grant fails the build.
+2. The M7 block holds no `test` key other than `CHANNEL test=default` and no `BRD_SM_CTRL_TEST*` grant: the allowlist
+   has none, and the same script and `sm-build.sh` refuse to build otherwise.
+3. `LPUART3 OWNER` is in the allowlist, so the M7 keeps its UART.
+4. Patch 0002 touches only M7 block lines, each removed line carries `test` or `BRD_SM_CTRL_TEST`, each added line is a
+   removed one without the key, and no `Faults`, `SYS` or `LMM_2` line changes: asserted offline by
+   `test/sm_build_test.sh`, which also checks that the grants check fails on a fake M7 block that widens a grant.
+5. The patch is pinned: `sm.lock` carries its hash in `sm_patch_sha256` (0001 then 0002) and the patched file's hash in
+   `sm_patched_config_sha256`; `scripts/sm-build.sh` refuses to build on a mismatch.
+6. Two `make system-manager` builds produce a byte-identical `m33_image.bin`.
+
+### Revert
+
+If the owner rejects this delta: drop patch 0002, its entry in `sm.lock`, and the grants check
+(`scripts/sm-grants-check.sh` with `system-manager/m7-grants.txt`); the build then runs on 0001 alone.
+
 ## Missing
 
 - The System Manager documentation: its configuration format, its SCMI protocols, agents and channels, and how a
