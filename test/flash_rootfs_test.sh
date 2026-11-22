@@ -32,16 +32,19 @@ chmod +x "$w/bin/mkfs.ext4"
 # ("boot root tee-data"; fewer names leave the slots out). Each partition is filled:
 # boot 0xBB, root 0xDD, tee-data 0xAA.
 mkdisk() {
-	python3 -I - "$1" "$2" <<'PY'
+	python3 -I - "$1" "$2" "${3-}" <<'PY'
 import struct, sys, zlib
 
 path, names = sys.argv[1], sys.argv[2].split()
 ss, total = 512, 16 * 1048576
 disk = bytearray(total)
-starts = {"boot": (1, 1, 0xBB), "root": (2, 4, 0xDD), "tee-data": (6, 4, 0xAA)}
+starts = {"boot": (1, 1, 0xBB), "root": (2, 4, 0xDD), "tee-data": (6, 4, 0xAA), "extra": (10, 4, 0xEE)}
+# Optional third argument: the GPT names to write, "|"-separated, one per slot in
+# NAMES (so a slot can carry a name with spaces or a newline, or a duplicate name).
+labels = sys.argv[3].split("|") if sys.argv[3] else names
 entries = b""
-for n in names:
-    s, size, fill = starts[n]
+for slot, n in zip(names, labels):
+    s, size, fill = starts[slot]
     first, last = s * 2048, (s + size) * 2048 - 1
     disk[first * ss:(last + 1) * ss] = bytes([fill]) * (size * 1048576)
     e = bytes(range(1, 17)) + bytes(range(17, 33)) + struct.pack("<QQQ", first, last, 0)
@@ -99,6 +102,17 @@ refused "no root partition" "$w/noroot" "$w/rootfs.ext4"
 head -c $((5 * MiB)) /dev/zero >"$w/big.ext4"
 mkdisk "$w/fit" "boot root tee-data"
 refused "the image does not fit the root partition" "$w/fit" "$w/big.ext4"
+# GPT names are data from the disk: none may inject offsets or sizes (security P1).
+mkdisk "$w/inj1" "boot root tee-data" "boot|root|tee-data 0 1048576"
+refused "a partition named 'tee-data 0 1048576'" "$w/inj1" "$w/rootfs.ext4"
+mkdisk "$w/inj2" "boot root tee-data" $'boot|root|tee-data\n0 1048576'
+refused "a partition name with a newline" "$w/inj2" "$w/rootfs.ext4"
+mkdisk "$w/inj3" "boot root tee-data" $'boot|root|tee-data\t'
+refused "a partition name with a tab" "$w/inj3" "$w/rootfs.ext4"
+mkdisk "$w/dup" "boot root tee-data extra" "boot|root|tee-data|tee-data"
+refused "a duplicate tee-data partition" "$w/dup" "$w/rootfs.ext4"
+mkdisk "$w/duproot" "boot root tee-data extra" "boot|root|tee-data|root"
+refused "a duplicate root partition" "$w/duproot" "$w/rootfs.ext4"
 head -c $((4 * MiB)) /dev/zero >"$w/nogpt"
 refused "no partition table" "$w/nogpt" "$w/rootfs.ext4"
 mkdisk "$w/stubless" "boot root tee-data"

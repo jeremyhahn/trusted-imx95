@@ -34,42 +34,63 @@ fi
 command -v mkfs.ext4 >/dev/null || die "mkfs.ext4 not found; nothing written"
 command -v python3 >/dev/null || die "python3 not found; nothing written"
 
-# Print "name start-byte size-bytes" for each GPT entry, or fail.
-table=$(python3 -I - "$target" <<'PY'
+# The reader matches the exact names itself and prints four validated integers
+# (start and size of root, then of tee-data, in bytes); the shell never splits a name.
+# It fails, printing nothing, on a duplicate or missing name, a name with whitespace
+# or control characters, or a range outside the disk or overlapping.
+nums=$(python3 -I - "$target" <<'PY'
 import struct, sys
 
+def fail(msg):
+    sys.exit(msg)
+
 with open(sys.argv[1], "rb") as f:
+    f.seek(0, 2)
+    disk = f.tell()
     for ss in (512, 4096):
         f.seek(ss)
         hdr = f.read(92)
         if hdr[:8] == b"EFI PART":
             break
     else:
-        sys.exit("no GPT found")
+        fail("no GPT found")
     lba = struct.unpack_from("<Q", hdr, 72)[0]
     count, size = struct.unpack_from("<II", hdr, 80)
+    if size < 128 or count > 4096 or lba * ss + count * size > disk:
+        fail("bad GPT header")
     f.seek(lba * ss)
     raw = f.read(count * size)
+found = {}
 for i in range(count):
     e = raw[i * size:(i + 1) * size]
     if len(e) < 128 or e[:16] == bytes(16):
         continue
     first, last = struct.unpack_from("<QQ", e, 32)
-    name = e[56:128].decode("utf-16le").split("\0")[0]
-    print(name, first * ss, (last - first + 1) * ss)
+    try:
+        name = e[56:128].decode("utf-16le").split("\0")[0]
+    except UnicodeDecodeError:
+        fail("undecodable partition name")
+    if not name or any(c.isspace() or not c.isprintable() for c in name):
+        fail("partition name with whitespace or control characters")
+    if name in found:
+        fail("duplicate partition name " + ascii(name))
+    if last < first or (last + 1) * ss > disk:
+        fail("partition outside the disk")
+    found[name] = (first * ss, (last - first + 1) * ss)
+for n in ("root", "tee-data"):
+    if n not in found:
+        fail("no partition named " + n)
+(ro, rs), (do, ds) = found["root"], found["tee-data"]
+if ro < do + ds and do < ro + rs:
+    fail("root and tee-data overlap")
+print(ro, rs, do, ds)
 PY
-) || die "cannot read the partition table of $target; nothing written"
-
-find_part() { # name -> "start size", fails unless exactly one entry has the name
-	local out
-	out=$(awk -v n="$1" '$1 == n { print $2, $3 }' <<<"$table")
-	[ -n "$out" ] && [ "$(wc -l <<<"$out")" -eq 1 ] || return 1
-	echo "$out"
-}
-root=$(find_part root) || die "no unique partition named root in $target; nothing written"
-data=$(find_part tee-data) || die "no unique partition named tee-data in $target; nothing written"
-read -r root_off root_size <<<"$root"
-read -r data_off data_size <<<"$data"
+) || die "cannot find unique root and tee-data partitions in $target; nothing written"
+read -r root_off root_size data_off data_size <<<"$nums"
+# Only integers may reach the dd and mkfs arguments.
+for v in "$root_off" "$root_size" "$data_off" "$data_size"; do
+	[[ $v =~ ^[0-9]+$ ]] || die "partition table gave a non-numeric value; nothing written"
+done
 
 img_size=$(stat -c %s "$img")
 [ "$img_size" -gt 0 ] || die "$img is empty; nothing written"
