@@ -478,9 +478,12 @@ run python3 "$sel" "$ROOT/.github/workflows/ci.yml"
 check "ci.yml: the tree secret scan runs on every tier, a docs-only PR included" 0 \
 	"PR tier, docs_only=true: the tree secret scan runs" "full tier, docs_only=true: the tree secret scan runs"
 # The condition before this fix, which skipped a docs-only PR, is caught.
-old_if="env.CI_FULL_TIER != 'true' && needs.preflight.outputs.docs_only != 'true' }}"
+# v1.54: the gosec step has no tier test (every PR is the full tier), so the
+# old condition is the template's: a step that skips on a docs-only PR.
+gstep=$'      - name: make gosec (PR tier)\n        if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != \'\' }}'
+old_gstep=${gstep/"!= '' }}"/"!= '' && needs.preflight.outputs.docs_only != 'true' }}"}
 yml=$(<"$ROOT/.github/workflows/ci.yml")
-yml=${yml//"(env.CI_FULL_TIER != 'true' || needs.preflight.outputs.docs_only == 'true') }}"/"$old_if"}
+yml=${yml//"$gstep"/"$old_gstep"}
 printf '%s\n' "$yml" >"$TMP_ROOT/ci-old.yml"
 run python3 "$sel" "$TMP_ROOT/ci-old.yml"
 check "ci.yml: a gosec condition that skips docs-only PRs fails the selection" 1 \
