@@ -202,7 +202,10 @@ MISSING from the survey: the `CHANNEL db=0` `test=default` key (§3.1 names `tes
 key). It stays, because the tool needs a default test channel, so the M7 block still carries one `test` key and
 `sm-build.sh` exempts exactly `test=default`. Whether the tool can be satisfied another way is the owner's to confirm.
 
-SM build run: see the end of this section.
+SM build run: `make system-manager` applied 0001 and 0002, passed the `sm-build.sh` M7 block check and built twice
+with identical output (rc=0, 134 s). `m33_image.bin` SHA-256
+`65bc223faa0c5762679a201c4d2f1bd1e243f34cefe19debb4446b9f79234bc9`, reproducible. The image is a build result only:
+it is not signed and not yet booted.
 
 ## 8. Not confirmed
 
