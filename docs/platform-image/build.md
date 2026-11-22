@@ -103,6 +103,15 @@ Reproducible builds and the SBOM stay at Yocto's defaults
 (SPDX 3.0) are on, and the test fails if any file under `platform-image/` sets
 the first two or removes the third.
 
+One exception to byte-for-byte reproducibility: `/etc/trusted-imx95-rootfs-id`
+is random, drawn once per `do_rootfs` run, so two clean builds of identical
+inputs differ in that one file (and so in the image digest). Everything else
+stays at the reproducible defaults above. Any different build must wipe the
+fTPM NV, and a random identity does that without listing every
+security-relevant attribute (`docs/plans/140.md`, entry 19). A release is
+identified by its published image digest; to compare two builds, exclude that
+one file.
+
 Open, MISSING, and deliberately not set: the `BBFILES += recipes-*/*/*.bbappend`
 line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, hash equivalence, the
 `SPDX_INCLUDE_*`, `SPDX_INVOKED_BY` and `SPDX_ON_BEHALF_OF` fields
