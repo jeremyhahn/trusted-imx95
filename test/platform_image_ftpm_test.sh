@@ -127,15 +127,37 @@ printf 'keep\n' >"$wt/data/tee/obj"
 rm "$wt/rootfs-id"
 expect "wipe: fails closed without a rootfs id" test "$(wipe_run)" -ne 0
 expect "wipe: it kept the files when it failed" test "$(<"$wt/data/tee/obj")" = keep
+# A saved marker that exists but cannot be read must not wipe: exit non-zero, files intact.
+printf 'id-B\n' >"$wt/rootfs-id"
+rm -f "$wt/data/tee-rootfs-id"
+mkdir "$wt/data/tee-rootfs-id"
+expect "wipe: an unreadable marker (a directory) fails" test "$(wipe_run)" -ne 0
+expect "wipe: an unreadable marker leaves the files" test "$(<"$wt/data/tee/obj")" = keep
+rmdir "$wt/data/tee-rootfs-id"
+printf 'id-B\n' >"$wt/data/tee-rootfs-id"
+if [ "$(id -u)" -ne 0 ]; then
+	chmod 000 "$wt/data/tee-rootfs-id"
+	expect "wipe: an unreadable marker (mode 000) fails" test "$(wipe_run)" -ne 0
+	expect "wipe: a mode 000 marker leaves the files" test "$(<"$wt/data/tee/obj")" = keep
+	chmod 600 "$wt/data/tee-rootfs-id"
+fi
 expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
 expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
 expect "unit: runs after the /data mount" ncstr "$unit" 'After=data.mount'
 expect "unit: oneshot" ncstr "$unit" 'Type=oneshot'
+# The BSP supplicant is DefaultDependencies=no, Before=sysinit.target; default
+# dependencies here would make an ordering cycle (Codex P1).
+expect "unit: no default dependencies" ncstr "$unit" 'DefaultDependencies=no'
+expect "unit: requires the /data mount" ncstr "$unit" 'RequiresMountsFor=/data'
+expect "unit: stopped before shutdown" ncstr "$unit" 'Conflicts=shutdown.target'
+expect "unit: ordered before shutdown" ncstr "$unit" 'Before=shutdown.target'
 expect "supplicant drop-in: hard dependency on the wipe" ncstr "$nvf/10-nv.conf" 'Requires=tee-nv-wipe.service'
 expect "supplicant drop-in: ordered after the wipe" ncstr "$nvf/10-nv.conf" 'tee-nv-wipe.service'
 expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplicant@teepriv0.service.requires'
 expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
+expect "README names the flash script as the supported rootfs write" has "$ROOT/docs/ftpm/README.md" 'scripts/flash-rootfs.sh'
+expect "README says a raw root write is unsupported and keeps the NV" has "$ROOT/docs/ftpm/README.md" 'outside this script is unsupported and would keep the NV'
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'

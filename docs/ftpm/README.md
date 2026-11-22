@@ -80,9 +80,14 @@ wiped whenever the root file system is reflashed. The image enforces it: the roo
 (`/etc/trusted-imx95-rootfs-id`), and the oneshot unit `tee-nv-wipe.service` runs after the `/data` mount and before
 `tee-supplicant`, which requires it. If `/data/tee-rootfs-id` is missing or differs, it removes everything under
 `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
-`tee-supplicant` from starting. A rootfs-only reflash of a different build therefore wipes the NV on the next boot, and
-a full-image flash recreates `tee-data` empty. A reflash of the very same build carries the same identity and is not
-told apart. It is plain files that root on Linux can copy or roll back.
+`tee-supplicant` from starting. That boot-time check is the second barrier: it catches a different build, but a reflash of the very same build
+carries the same identity and is not told apart. The first barrier is the flashing operation itself.
+`scripts/flash-rootfs.sh TARGET ROOTFS_IMAGE` is the only supported way to rewrite the root partition. It finds the
+partitions named `root` and `tee-data` (the wks `--part-name`s) in the target's GPT, erases `tee-data` (zeroed whole,
+file system made again), then writes the rootfs. It refuses, with nothing written, if either partition is missing or
+not unique, the image does not fit, or `mkfs.ext4` is absent; a block device also needs `FLASH_ROOTFS_YES=1`. A raw
+write of the root partition outside this script is unsupported and would keep the NV. A full-image flash recreates
+`tee-data` empty. It is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle
 
