@@ -32,6 +32,16 @@ if ! python3 -I -c 'import yaml' 2>/dev/null; then
 fi
 check "PyYAML is importable by the step" 0
 
+# stepcmd: the step, from the fixture directory. The step refuses a tree with no
+# ci.yml, so one fixture workflow runs beside a copy of the real ci.yml unless
+# the case wrote its own ci.yml or sets NOSEED.
+stepcmd() {
+	if [ ! -f "$work/.github/workflows/ci.yml" ] && [ -z "${NOSEED:-}" ]; then
+		cp "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"
+	fi
+	run bash -c "cd '$work' && python3 -I step.py"
+}
+
 # fixture <runs-on text> [if text] [on text]: a one-job workflow, run through
 # the step. The default triggers include pull_request, so an untrusted event.
 fixture() {
@@ -47,7 +57,7 @@ $cond
     steps:
       - run: true
 EOF
-	run bash -c "cd '$work' && python3 -I step.py"
+	stepcmd
 }
 
 fixture "ubuntu-latest"
@@ -119,11 +129,11 @@ jobs:
     steps:
       - run: true
 EOF
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "a new workflow with its own preflight exporting release is refused" 1 "(a) its runs-on holds an expression"
 rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 sed 's/Preflight \[changed files/Preflight [altered files/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "an altered ci.yml preflight job loses the exemption" 1 "(a) its runs-on holds an expression"
 # One `run` line of a non-guard preflight step changed (the Runner labels
 # step's own run is replaced by a marker in the pin, so it is not the target).
@@ -132,7 +142,7 @@ if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; the
 	echo "FAIL fixture is identical to ci.yml: the run-line edit did not apply"
 	exit 1
 fi
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "a changed run line in a non-guard preflight step loses the exemption" 1 "(a) its runs-on holds an expression"
 # Codex security P1 at verify 11: what preflight inherits from the workflow
 # level is pinned too. Only a workflow-level defaults.run.shell wrapper, or only
@@ -142,14 +152,14 @@ if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; the
 	echo "FAIL fixture is identical to ci.yml: the defaults edit did not apply"
 	exit 1
 fi
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "a workflow-level defaults.run.shell wrapper loses the exemption" 1 "(a) its runs-on holds an expression"
 sed '0,/^env:$/s//env:\n  BASH_ENV: \/tmp\/wrapper.sh/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
 if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
 	echo "FAIL fixture is identical to ci.yml: the env edit did not apply"
 	exit 1
 fi
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "a workflow-level env entry loses the exemption" 1 "(a) its runs-on holds an expression"
 
 # Codex security P1s at verify 8: the workflow is parsed as YAML, and every
@@ -157,7 +167,7 @@ check "a workflow-level env entry loses the exemption" 1 "(a) its runs-on holds 
 rawfile() { # rawfile <content>: one workflow, run through the step
 	rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 	printf '%s\n' "$1" >"$work/.github/workflows/t.yml"
-	run bash -c "cd '$work' && python3 -I step.py"
+	stepcmd
 }
 rawfile "name: t
 on: [push, pull_request]
@@ -207,7 +217,37 @@ check "a runs-on mapping is refused" 1 "neither a string nor a list of strings"
 # This repository's own workflows still pass under the stricter evaluator.
 rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 cp "$ROOT"/.github/workflows/*.yml "$work/.github/workflows/"
-run bash -c "cd '$work' && python3 -I step.py"
+stepcmd
 check "this repository's workflows pass the runner-label check" 0 "OK:"
+
+# Codex security P1 at verify 12: the guard fails closed on its input.
+# (a) only a preflight `defaults.run.working-directory` added to the real ci.yml.
+rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
+sed '0,/^        shell: bash$/s//        shell: bash\n        working-directory: \/tmp/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
+	echo "FAIL fixture is identical to ci.yml: the working-directory edit did not apply"
+	exit 1
+fi
+stepcmd
+check "a preflight defaults.run.working-directory loses the exemption" 1 "(a) its runs-on holds an expression"
+# (b) the step run from another current directory still checks the real tree.
+rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
+cp "$ROOT"/.github/workflows/*.yml "$work/.github/workflows/"
+run bash -c "cd /tmp && RL_ROOT='$work' python3 -I '$work/step.py'"
+check "the step run from another directory still checks every workflow of the tree" 0 "OK:"
+run bash -c "cd /tmp && RL_ROOT='$work' python3 -I '$work/step.py'"
+check "the other-directory run names the workflows it read" 0 "workflow file(s)"
+# (c) an empty workflows directory, and a tree without ci.yml, are refused.
+rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
+NOSEED=1 stepcmd
+check "an empty workflows directory is refused" 1 "no workflow file"
+fixture "ubuntu-latest" "" "[push]" >/dev/null 2>&1 || true
+rm -f "$work"/.github/workflows/ci.yml
+NOSEED=1 stepcmd
+check "a tree without ci.yml is refused" 1 "ci.yml is not among the workflow files"
+rm -rf "$work/.github"
+NOSEED=1 stepcmd
+check "a missing workflows directory is refused" 1 "is not a directory"
+mkdir -p "$work/.github/workflows"
 
 finish

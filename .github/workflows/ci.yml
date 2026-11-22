@@ -1490,13 +1490,21 @@ jobs:
       # selection outputs read for it are the hosted default the step emits.
       # Its tests: testdata/runner-labels-tests.py.
       - name: Runner labels (ruling 633)
+        # CUSTOMIZE (#159, Codex security P1 at verify 12): nothing is inherited
+        # here. The step sets its own directory (the workspace, not the job's
+        # `defaults.run.working-directory`), its own shell and the workspace root
+        # the checker resolves every path from.
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          RL_ROOT: ${{ github.workspace }}
         run: |
           # CUSTOMIZE (#159, Codex security P1 at verify 8): the workflows are read with
           # PyYAML, installed here when the runner lacks it. Never a skip.
           yaml_dir=
           if ! python3 -I -c 'import yaml' 2>/dev/null; then
             yaml_dir="${RUNNER_TEMP:-/tmp}/runner-labels-pyyaml"
-            python3 -m pip install --quiet --disable-pip-version-check --target "$yaml_dir" pyyaml
+            python3 -m pip install --quiet --isolated --disable-pip-version-check --target "$yaml_dir" pyyaml
           fi
           YAML_DIR=$yaml_dir python3 -I - <<'PY'
           import glob, hashlib, json, os, re, sys
@@ -1979,7 +1987,7 @@ jobs:
           # is left out of the dump, its `run` replaced by a marker), and (c) the
           # reading job listing that job in its own `needs`.
           PRODUCER_JOB = "preflight"
-          PRODUCER_SHA256 = "1f0eb00c02508785f2cd9262ff487ab8c67a51f18241be3464e743c8f23ded98"
+          PRODUCER_SHA256 = "6f7b2b95460b2c3f3162810d422ec90993f5908ad143cbe0f07dcafda23d2d9d"
           SELF_STEP = "Runner labels (ruling 633)"
 
 
@@ -2084,8 +2092,8 @@ jobs:
               return out
 
 
-          def check(path):
-              text = open(path, encoding="utf-8").read()
+          def check(abspath, path):
+              text = open(abspath, encoding="utf-8").read()
               try:
                   doc = yaml.safe_load(text)
               except yaml.YAMLError as e:
@@ -2194,13 +2202,32 @@ jobs:
               return bad
 
 
-          files = sorted(glob.glob(".github/workflows/*.yml") + glob.glob(".github/workflows/*.yaml"))
+          # CUSTOMIZE (#159, Codex security P1 at verify 12): fail closed on the
+          # input. Every path is resolved from the workspace root (RL_ROOT, set by the
+          # step; the current directory only when the test harness leaves it unset),
+          # never from an inherited working directory. A missing workflows directory,
+          # zero files, or no ci.yml among them is a refusal, not an empty pass.
+          ROOT = os.path.abspath(os.environ.get("RL_ROOT") or os.getcwd())
+          WF = os.path.join(ROOT, ".github", "workflows")
+          if not os.path.isdir(WF):
+              print(f"::error::runner labels: {WF} is not a directory, so no workflow can be checked")
+              sys.exit(1)
+          files = sorted(glob.glob(os.path.join(glob.escape(WF), "*.yml")) + glob.glob(os.path.join(glob.escape(WF), "*.yaml")))
+          if not files:
+              print(f"::error::runner labels: no workflow file under {WF}, so nothing was checked")
+              sys.exit(1)
+          if not os.path.isfile(os.path.join(WF, "ci.yml")):
+              print(f"::error::runner labels: .github/workflows/ci.yml is not among the workflow files under {WF}")
+              sys.exit(1)
           bad = []
           for f in files:
+              rel = ".github/workflows/" + os.path.basename(f)
               try:
-                  bad += check(f)
+                  bad += check(f, rel)
               except (OSError, UnicodeError) as e:
-                  bad.append(f"{f}: cannot be read ({e})")
+                  bad.append(f"{rel}: cannot be read ({e})")
+              except Exception as e:  # any other failure to read a workflow is a refusal, never a skip
+                  bad.append(f"{rel}: cannot be checked ({type(e).__name__}: {e})")
           for b in bad:
               print(f"::error::{b}")
           if bad:
