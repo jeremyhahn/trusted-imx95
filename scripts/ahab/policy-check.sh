@@ -14,9 +14,17 @@
 #   SRK_TABLE_HASH=<hex>        compared as a case-insensitive hex string
 #   USED_SRK_ID=<integer>       compared numerically
 #   SRK_REVOKE_MASK=<hex|int>   compared numerically
-#   FUSE_VERSION_MIN=<integer>  the container's fuse_version must be >= this
+#   FUSE_VERSION_MIN=<integer>  every OEM container's fuse_version must be >= this
+#   NXP_CONTAINERS_ALLOWED=<integer>  optional, default 0: how many NXP-signed
+#                               containers (srk_set nxp, or a binary container
+#                               such as NXP's ELE container) the image may hold.
+#                               More than this fails. An i.MX95 boot image
+#                               begins with one, so its policy may say 1.
+# Every container is accounted for: srk_set none, or a container this check
+# cannot classify, fails. Every OEM container is checked against the four
+# values above; the OEM hash files must match the OEM containers.
 # Comments (#) and blank lines are allowed; an unknown, repeated or missing
-# key is an error.
+# key (NXP_CONTAINERS_ALLOWED excepted) is an error.
 #
 # Never touches a board, a fuse or a key. The .bcf fuse scripts nxpimage
 # writes are deleted unread. Exit 0 ("policy: OK") or 1 ("policy: FAILED").
@@ -71,6 +79,7 @@ num() { # <text> <max>
 MAX_ID=3
 MAX_MASK=15
 MAX_FUSE=255
+MAX_NXP=8 # NXP containers a policy may allow (an i.MX95 image holds one ELE container)
 
 # trim <text>: prints <text> without leading and trailing whitespace.
 trim() {
@@ -89,7 +98,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	k=$(trim "${line%%=*}")
 	v=$(trim "${line#*=}")
 	case "$k" in
-	SRK_TABLE_HASH | USED_SRK_ID | SRK_REVOKE_MASK | FUSE_VERSION_MIN) ;;
+	SRK_TABLE_HASH | USED_SRK_ID | SRK_REVOKE_MASK | FUSE_VERSION_MIN | NXP_CONTAINERS_ALLOWED) ;;
 	*) fail "unknown policy key: $k" ;;
 	esac
 	[ -z "${pol[$k]+x}" ] || fail "repeated policy key: $k"
@@ -103,6 +112,7 @@ done
 p_id=$(num "${pol[USED_SRK_ID]}" "$MAX_ID") || fail "USED_SRK_ID is not an integer in 0..$MAX_ID"
 p_mask=$(num "${pol[SRK_REVOKE_MASK]}" "$MAX_MASK") || fail "SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
 p_min=$(num "${pol[FUSE_VERSION_MIN]}" "$MAX_FUSE") || fail "FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
+p_nxp=$(num "${pol[NXP_CONTAINERS_ALLOWED]:-0}" "$MAX_NXP") || fail "NXP_CONTAINERS_ALLOWED is not an integer in 0..$MAX_NXP"
 p_hash=${pol[SRK_TABLE_HASH]^^}
 
 # --- The container, through the pinned SPSDK.
@@ -118,28 +128,41 @@ mkdir "$work/parsed"
 	{ tail -n 5 "$work/parse.log" >&2; fail "nxpimage ahab parse failed for $bin"; }
 rm -f "$work"/parsed/*.bcf
 
-# Every container in the input is checked against the policy; none is skipped.
-# The parsed configuration lists the containers in order, each opened by a
-# "container:" line. For each, the first "<key>: <value>" line inside it is
-# taken (quotes removed; comment lines never match).
+# Every container the image holds is accounted for, and none is skipped. The
+# parsed configuration lists the image's entries in order, each opened by a
+# "  -" line at the top level of "containers:". An entry is either
+#   container:         a signed container, with an srk_set (oem, nxp, none, ...)
+#   binary_container:  a container SPSDK carries as a binary (NXP's own ELE
+#                      container; SPSDK writes no hash file for it)
+# Entries are counted here, independently of the SRK hash files. Fail closed:
+#   srk_set none (an unsigned container), or a type or srk_set not recognised,
+#   FAILS; an nxp container (srk_set nxp or a binary_container) passes only up
+#   to NXP_CONTAINERS_ALLOWED (default 0); an oem container is checked in full.
+# For each container the first "<key>: <value>" line inside it is taken (quotes
+# removed; comment lines never match).
 pcfg=$work/parsed/parsed_config.yaml
 [ -f "$pcfg" ] || fail "nxpimage ahab parse wrote no parsed_config.yaml"
-declare -a c_ids=() c_masks=() c_fuses=()
+declare -a c_types=() c_sets=() c_ids=() c_masks=() c_fuses=()
 n=-1
 while IFS= read -r l || [ -n "$l" ]; do
-	l=$(trim "${l%$'\r'}")
-	if [ "$l" = "container:" ]; then
+	l=${l%$'\r'}
+	if [[ "$l" =~ ^\ {2}-[[:space:]]*(.*)$ ]]; then
 		n=$((n + 1))
-		continue
+		c_types[n]=unknown
+		l=${BASH_REMATCH[1]}
 	fi
+	l=$(trim "$l")
 	[ "$n" -ge 0 ] || continue
 	case "$l" in
-	used_srk_id:* | srk_revoke_mask:* | fuse_version:*)
+	container:) [ "${c_types[$n]}" != unknown ] || c_types[n]=container ;;
+	binary_container:) [ "${c_types[$n]}" != unknown ] || c_types[n]=binary ;;
+	srk_set:* | used_srk_id:* | srk_revoke_mask:* | fuse_version:*)
 		k=${l%%:*}
 		v=$(trim "${l#*:}")
 		v=${v//[\'\"]/}
 		[ -n "$v" ] || fail "container $n: the parsed container has an empty $k"
 		case "$k" in
+		srk_set) [ -n "${c_sets[$n]+x}" ] || c_sets[n]=${v,,} ;;
 		used_srk_id) [ -n "${c_ids[$n]+x}" ] || c_ids[n]=$v ;;
 		srk_revoke_mask) [ -n "${c_masks[$n]+x}" ] || c_masks[n]=$v ;;
 		fuse_version) [ -n "${c_fuses[$n]+x}" ] || c_fuses[n]=$v ;;
@@ -150,10 +173,31 @@ done <"$pcfg"
 count=$((n + 1))
 [ "$count" -ge 1 ] || fail "the parsed configuration lists no container"
 
-# SPSDK writes one ahab_<set>[<n>]_srk0_hash.txt per distinct SRK table: a
-# single file when the containers share a table (the normal case, as the fuses
-# hold one OEM SRK hash), one per table otherwise. Every hash file must equal
-# the policy hash, and at least one must exist.
+# Classify every entry: oem (checked in full), nxp (counted), anything else fails.
+declare -a c_oem=()
+n_oem=0
+n_nxp=0
+for ((i = 0; i < count; i++)); do
+	case "${c_types[$i]}" in
+	binary) n_nxp=$((n_nxp + 1)) ;;
+	container)
+		case "${c_sets[$i]-}" in
+		oem) c_oem[i]=1; n_oem=$((n_oem + 1)) ;;
+		nxp) n_nxp=$((n_nxp + 1)) ;;
+		none) fail "container $i: srk_set none (an unsigned container)" ;;
+		"") fail "container $i: the parsed container reports no srk_set" ;;
+		*) fail "container $i: unrecognised srk_set '${c_sets[$i]}'" ;;
+		esac
+		;;
+	*) fail "container $i: an entry of a type this check cannot classify" ;;
+	esac
+done
+[ "$n_oem" -ge 1 ] || fail "no OEM container: nothing in the image is signed with the OEM SRK table"
+
+# SPSDK writes one ahab_<set>[<n>]_srk0_hash.txt per OEM container, or a single
+# shared file when every OEM table is identical (the normal case, as the fuses
+# hold one OEM SRK hash). So the number of files is the number of OEM
+# containers, or exactly one. Every hash file must equal the policy hash.
 declare -a c_hashes=()
 for f in "$work"/parsed/ahab_*_hash.txt; do
 	[ -f "$f" ] || continue
@@ -164,6 +208,8 @@ for f in "$work"/parsed/ahab_*_hash.txt; do
 	c_hashes+=("$h")
 done
 [ "${#c_hashes[@]}" -ge 1 ] || fail "nxpimage ahab parse wrote no SRK table hash"
+[ "${#c_hashes[@]}" -eq "$n_oem" ] || [ "${#c_hashes[@]}" -eq 1 ] ||
+	fail "$n_oem OEM container(s) but ${#c_hashes[@]} SRK table hash file(s)"
 
 # --- Compare, one line per field per container.
 bad=0
@@ -181,7 +227,10 @@ for ((i = 0; i < ${#c_hashes[@]}; i++)); do
 	[ "${c_hashes[$i]}" = "$p_hash" ] && r=0 || r=1
 	report "srk_table_hash$sfx" "$r" "${c_hashes[$i]}" "$p_hash"
 done
+[ "$n_nxp" -le "$p_nxp" ] && r=0 || r=1
+report "nxp_containers" "$r" "$n_nxp" "$p_nxp allowed"
 for ((i = 0; i < count; i++)); do
+	[ -n "${c_oem[$i]+x}" ] || continue
 	[ "$count" -eq 1 ] && sfx= || sfx=" [container $i]"
 	[ -n "${c_ids[$i]+x}" ] || fail "container $i: the parsed container reports no used_srk_id"
 	c_id=$(num "${c_ids[$i]}" "$MAX_ID") || fail "container $i: the parsed used_srk_id is not an integer in 0..$MAX_ID"

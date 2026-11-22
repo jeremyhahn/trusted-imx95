@@ -195,10 +195,11 @@ for i in 0 1 2 3 4 5 6 7; do
 done
 head -c 4096 /dev/urandom >"$pki/payload.bin"
 
-# ymlc <fuse_version> <first SRK of the table, 0 or 4>: one container block.
+# ymlc <fuse_version> <first SRK of the table, 0 or 4> [srk_set]: one container
+# block (srk_set oem, nxp or none; default oem).
 ymlc() {
 	echo "  - container:"
-	echo "      srk_set: oem"
+	echo "      srk_set: ${3:-oem}"
 	echo "      used_srk_id: 0"
 	echo "      srk_revoke_mask: '0x00'"
 	echo "      fuse_version: $1"
@@ -218,10 +219,10 @@ ymlc() {
 	echo "          - srk$(($2 + 2)).pub"
 	echo "          - srk$(($2 + 3)).pub"
 }
-# mkbin <name> <container spec>...: builds $pki/<name>.bin, one "<fuse>:<srk base>"
-# per container; the first container's SRK table hash goes to $pki/<name>.hash.
+# mkbin <name> <container spec>...: builds $pki/<name>.bin, one
+# "<fuse>:<srk base>[:<srk_set>]" per container; the first container's SRK table hash goes to $pki/<name>.hash.
 mkbin() {
-	local name=$1 spec
+	local name=$1 spec sf sb ss
 	shift
 	mkdir "$pki/$name.d"
 	cp "$pki"/*.pem "$pki"/payload.bin "$pki/$name.d/"
@@ -232,7 +233,10 @@ mkbin() {
 		echo "target_memory: standard"
 		echo "output: $name.bin"
 		echo "containers:"
-		for spec in "$@"; do ymlc "${spec%%:*}" "${spec##*:}"; done
+		for spec in "$@"; do
+			IFS=: read -r sf sb ss <<<"$spec"
+			ymlc "$sf" "$sb" "${ss:-oem}"
+		done
 	} >"$pki/$name.d/c.yaml"
 	(cd "$pki/$name.d" && "$venv/bin/nxpimage" ahab export -c c.yaml) >"$pki/$name.log" 2>&1 ||
 		{ tail -n 5 "$pki/$name.log"; fail "nxpimage ahab export failed for $name"; return 1; }
@@ -273,6 +277,39 @@ if mkbin two-srk 3:0 3:4; then
 	check "a compliant first container and a second with another signing root fails" 1 \
 		"policy: srk_table_hash [table 1] MISMATCH" "policy: FAILED"
 fi
+
+# Every container is accounted for (fail closed): srk_set none fails; an nxp
+# container passes only up to NXP_CONTAINERS_ALLOWED (default 0).
+# nxpol <file> <hash> <allowed>: a policy that states NXP_CONTAINERS_ALLOWED.
+nxpol() {
+	mkpol "$1" "$2" 0 0 0
+	echo "NXP_CONTAINERS_ALLOWED=$3" >>"$1"
+}
+if mkbin oem-none 0:0 0:0:none; then
+	h=$(<"$pki/oem-none.hash")
+	mkpol "$pki/oem-none.policy" "$h" 0 0 0
+	run "$POLICY" "$pki/oem-none.bin" "$pki/oem-none.policy"
+	check "an OEM container then an srk_set none container fails" 1 "srk_set none" "policy: FAILED"
+fi
+if mkbin oem-nxp 0:0 0:4:nxp; then
+	h=$(<"$pki/oem-nxp.hash")
+	mkpol "$pki/oem-nxp.policy" "$h" 0 0 0
+	run "$POLICY" "$pki/oem-nxp.bin" "$pki/oem-nxp.policy"
+	check "an OEM container then an nxp container fails by default (none allowed)" 1 \
+		"policy: nxp_containers MISMATCH (container 1, policy 0 allowed)" "policy: FAILED"
+	nxpol "$pki/oem-nxp-0.policy" "$h" 0
+	run "$POLICY" "$pki/oem-nxp.bin" "$pki/oem-nxp-0.policy"
+	check "NXP_CONTAINERS_ALLOWED=0 fails an nxp container" 1 "policy: nxp_containers MISMATCH" "policy: FAILED"
+	nxpol "$pki/oem-nxp-1.policy" "$h" 1
+	run "$POLICY" "$pki/oem-nxp.bin" "$pki/oem-nxp-1.policy"
+	check "NXP_CONTAINERS_ALLOWED=1 passes one nxp container" 0 "policy: nxp_containers OK" "policy: srk_table_hash OK" "policy: OK"
+fi
+# TODO (#12, next slice): SPSDK merges two srk_set nxp entries into ONE
+# binary_container (ahab_nxp_containers_1.bin); the check must count the
+# containers inside that binary so "allowed=1 with two nxp containers" fails.
+nxpol "$pki/bad-nxp.policy" "$hash" 9
+run "$POLICY" "$bin" "$pki/bad-nxp.policy"
+check "NXP_CONTAINERS_ALLOWED above the maximum is a policy error" 1 "policy-check: NXP_CONTAINERS_ALLOWED is not" "policy: FAILED"
 if mkbin two-fuse 3:0 1:0; then
 	h=$(<"$pki/two-fuse.hash")
 	mkpol "$pki/two-fuse.policy" "$h" 0 0 3
