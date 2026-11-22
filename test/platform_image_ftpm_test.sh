@@ -216,8 +216,8 @@ idfn=$(awk '/^trusted_imx95_rootfs_id \(\)/,/^}/' "$img")
 expect "the rootfs identity function was found" test -n "$idfn"
 expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' "$idfn" | tr -c 'A-Za-z_' '\n' | grep -cxE 'DATETIME|DATE|TIME|SOURCE_DATE_EPOCH')" -eq 0
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
-expect "README names the flash script as the supported rootfs write" has "$ROOT/docs/ftpm/README.md" 'scripts/flash-rootfs.sh'
-expect "README says a raw root write is unsupported and keeps the NV" has "$ROOT/docs/ftpm/README.md" 'outside this script is unsupported and would keep the NV'
+expect "README says the supported reprovision is the whole .wic" has "$ROOT/docs/ftpm/README.md" 'write the whole `.wic`'
+expect "README says a root-only rewrite is caught on boot by tee-nv-wipe" has "$ROOT/docs/ftpm/README.md" 'catches that on boot'
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'

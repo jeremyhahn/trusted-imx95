@@ -17,5 +17,5 @@ part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --part-name ro
 part /data --ondisk mmcblk --fstype=ext4 --label tee-data --part-name tee-data --no-fstab-update --fixed-size 64M
 
 # The BSP takes the table type from IMX_BOOTLOADER_PTABLE; GPT is kept here for the partition names
-# (the kernel's PARTNAME, which tee-data-mount reads on the root's own disk, and flash-rootfs.sh).
+# (the kernel's PARTNAME, which tee-data-mount reads on the root's own disk).
 bootloader --ptable gpt

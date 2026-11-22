@@ -82,8 +82,12 @@ wiped whenever the root file system is reflashed. The image enforces it: the roo
 `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
 `tee-supplicant` from starting. That boot-time check is the second barrier: it catches a different build, but a reflash of the very same build
 carries the same identity and is not told apart. The first barrier is the flashing operation itself.
-`scripts/flash-rootfs.sh TARGET WIC` is the only supported way to rewrite the root partition. It does not trust the\ntarget's partition table: one reader checks the GPT of the target and of the built `.wic` (header and entry-array\nCRC32s, usable-LBA range, no overlaps, exact names), and the script refuses unless the two tables are equal. It then\nerases `tee-data` (zeroed whole, file system made again) and copies the root partition's byte range from the `.wic`,\nboth ranges taken from the validated `.wic` table; paths are resolved (a symlink is followed, not measured). It\nrefuses, with nothing written, on any difference or if `mkfs.ext4` is absent; a block device also needs\n`FLASH_ROOTFS_YES=1`. A blank target has no table to match and takes the whole `.wic` first. `/data` is mounted by\n`tee-data-mount.service`, which picks the `tee-data` partition on the same disk as `/` (never a global partition\nlabel, which could name another medium's NV) and fails closed if there is none or more than one. A raw\nwrite of the root partition outside this script is unsupported and would keep the NV. A full-image flash recreates
-`tee-data` empty. It is plain files that root on Linux can copy or roll back.
+The supported way to reprovision is to write the whole `.wic`: it recreates `tee-data` empty together with the root,
+so the REE-FS NV is wiped with the root file system. There is no root-only flasher; a root partition rewritten by
+other means keeps the old `tee-data`, and `tee-nv-wipe.service` catches that on boot by comparing the rootfs-id
+marker. `/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on the same disk as `/`
+(never a global partition label, which could name another medium's NV) and fails closed if there is none or more
+than one. A full-image flash recreates `tee-data` empty. It is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle
 
