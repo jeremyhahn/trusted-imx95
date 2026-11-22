@@ -60,7 +60,11 @@ fetch_one() { # name repo path commit
 			git -C "$d" fetch -q "$repo" '+refs/heads/*:refs/remotes/pin/*' '+refs/tags/*:refs/tags/*' ||
 			die "layer $name: cannot fetch $repo"
 	fi
-	git -C "$d" checkout -q --detach "$commit" || die "layer $name: $commit is not in $repo"
+	# Refuse a dirty worktree before checkout, which would overwrite local files.
+	dirty=$(git -C "$d" status --porcelain --untracked-files=all --ignored) ||
+		die "layer $name: cannot read the status of $d"
+	[ -z "$dirty" ] || die "layer $name: $d is not clean (local edits or extra files); remove the directory $d and fetch again"
+	git -C "$d" checkout -q --no-overwrite-ignore --detach "$commit" || die "layer $name: $commit is not in $repo"
 	head=$(git -C "$d" rev-parse HEAD)
 	[ "$head" = "$commit" ] || die "layer $name: checked out $head, the lock pins $commit"
 	# Fail closed on any local edit: staged, unstaged, untracked or ignored.
