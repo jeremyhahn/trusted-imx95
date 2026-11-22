@@ -34,6 +34,7 @@ mkman() {
 # The field tests below run policy-check.sh on A55-only images: POLICY is the
 # real script with PC_MANIFEST (default: one OEM A55 container) as its manifest.
 mkman "$TMP_ROOT/single.yaml" a55
+# shellcheck disable=SC2016 # the wrapper's own $# and $@ stay literal
 printf '#!/usr/bin/env bash\n[ $# -eq 2 ] && set -- "$@" "${PC_MANIFEST:-%s}"\nexec "%s" "$@"\n' "$TMP_ROOT/single.yaml" "$REAL" >"$TMP_ROOT/pc"
 chmod +x "$TMP_ROOT/pc"
 POLICY="$TMP_ROOT/pc"

@@ -118,10 +118,9 @@ for k in SRK_TABLE_HASH USED_SRK_ID SRK_REVOKE_MASK FUSE_VERSION_MIN; do
 	[ -n "${pol[$k]+x}" ] || fail "missing policy key: $k"
 done
 [[ "${pol[SRK_TABLE_HASH]}" =~ ^[0-9a-fA-F]+$ ]] || fail "SRK_TABLE_HASH is not hex"
-p_id=$(num "${pol[USED_SRK_ID]}" "$MAX_ID") || fail "USED_SRK_ID is not an integer in 0..$MAX_ID"
-p_mask=$(num "${pol[SRK_REVOKE_MASK]}" "$MAX_MASK") || fail "SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
-p_min=$(num "${pol[FUSE_VERSION_MIN]}" "$MAX_FUSE") || fail "FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
-p_hash=${pol[SRK_TABLE_HASH]^^}
+num "${pol[USED_SRK_ID]}" "$MAX_ID" >/dev/null || fail "USED_SRK_ID is not an integer in 0..$MAX_ID"
+num "${pol[SRK_REVOKE_MASK]}" "$MAX_MASK" >/dev/null || fail "SRK_REVOKE_MASK is not hex or an integer in 0..$MAX_MASK (0xF)"
+num "${pol[FUSE_VERSION_MIN]}" "$MAX_FUSE" >/dev/null || fail "FUSE_VERSION_MIN is not an integer in 0..$MAX_FUSE"
 # The optional vendor record for the nxp container.
 [ -z "${pol[NXP_SRK_TABLE_HASH]+x}" ] || [[ "${pol[NXP_SRK_TABLE_HASH]}" =~ ^[0-9a-fA-F]+$ ]] || fail "NXP_SRK_TABLE_HASH is not hex"
 [ -z "${pol[NXP_USED_SRK_ID]+x}" ] || num "${pol[NXP_USED_SRK_ID]}" "$MAX_ID" >/dev/null || fail "NXP_USED_SRK_ID is not an integer in 0..$MAX_ID"
