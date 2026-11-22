@@ -55,6 +55,19 @@ check "two variables with a hosted fallback are not hosted" 1 "an unknown label"
 fixture "\${{ 'ubuntu-latest' || vars.RUNNER }}"
 check "a known hosted label ahead of a variable stays hosted" 0 "OK:"
 
+# Evaluated labels count for the release restriction (Codex security P1 at
+# verify 6): a waiver comment relaxes the hosted/self-hosted class rule only.
+fixture "\${{ format('re{0}', 'lease') }} # self-hosted: hardware: dedicated host"
+check "a format()-built release label with a waiver is refused" 1 "(a) names \`release\`"
+fixture "\${{ format('re{0}', 'lease') }}"
+check "a format()-built release label without a waiver is refused" 1 "(a) names \`release\`"
+fixture "\${{ join(fromJSON('[\"re\",\"lease\"]'), '') }} # self-hosted: oversize: big job"
+check "a join() of an unknown with a waiver is refused" 1 "(a) names \`release\`"
+fixture "release # self-hosted: hardware: dedicated host"
+check "a literal release with a waiver is refused" 1 "(a) names \`release\`"
+fixture "[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason"
+check "a literal self-hosted list with a waiver still passes" 0 "OK:"
+
 # This repository's own workflows still pass under the stricter evaluator.
 rm -f "$work"/.github/workflows/*.yml
 cp "$ROOT"/.github/workflows/*.yml "$work/.github/workflows/"

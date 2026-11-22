@@ -1918,6 +1918,30 @@ jobs:
               return re.search(r"(?<![\w.-])['\"]?release['\"]?(?![\w-])", text) is not None
 
 
+          def eval_release(ro, sels, pre):
+              # CUSTOMIZE (#159, Codex security P1 at verify 6): the release check
+              # runs on the labels a runs-on evaluates to, not on its source text
+              # alone (`format('re{0}', 'lease')` names no `release`). Returns
+              # "release" when any evaluation yields that label, "unknown" when
+              # one yields no literal labels (a function call, a variable, ...)
+              # or cannot be read, else None.
+              state = None
+              if pre:
+                  sels = ("unset", "set")
+              for ev, ref, head in HOSTED_CTX:
+                  for sel in sels:
+                      try:
+                          got = runs_on_labels(ro, ev, ref, head, sel)
+                      except ValueError:
+                          state = state or "unknown"
+                          continue
+                      if got is None:
+                          state = state or "unknown"
+                      elif any(g.lower() == "release" for g in got):
+                          return "release"
+              return state
+
+
           def condition(text):
               t = unquote(text) if text else ""
               m = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", t, re.S)
@@ -1942,7 +1966,17 @@ jobs:
                               elif key == "if":
                                   cond = body(lines, k, inline)
                           where = f"{path}:{job}"
+                          # CUSTOMIZE (#159): evaluated labels count too. A runs-on whose
+                          # labels evaluate to `release`, or evaluate to nothing literal
+                          # while a `# self-hosted:` comment sits on it, takes the release
+                          # path below; the waiver relaxes the hosted/self-hosted class
+                          # rule only, never the release restriction.
+                          ro_rel = False
                           if ro is not None and not names_release(ro):
+                              sels0 = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
+                              ev_rel = eval_release(ro, sels0, sels0[0] is not None and job == PRE_JOB and PRE_READ.search(ro))
+                              ro_rel = ev_rel == "release" or (ev_rel == "unknown" and (WAIVER.search(ro_line) or BARE.search(ro_line)))
+                          if ro is not None and not names_release(ro) and not ro_rel:
                               # v1.43 (ruling 833): hosted first.
                               if LARGER.search(ro) and re.search(r"ubuntu|windows|macos", ro):
                                   bad.append(f"{where}: (d) names a larger GitHub-hosted runner ({ro}); it bills on a public repository")
