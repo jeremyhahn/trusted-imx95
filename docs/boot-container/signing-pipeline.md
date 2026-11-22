@@ -103,7 +103,8 @@ blank lines are allowed. An unknown key, a repeated key or a missing key is an e
 | `SRK_REVOKE_MASK` | hex or integer | equal to `srk_revoke_mask`, compared numerically |
 | `FUSE_VERSION_MIN` | integer | every OEM container's `fuse_version` is at or above it |
 | `NXP_CONTAINER_SHA256` | 64 hex, or the environment variable of that name | the pin an nxp manifest position says `policy` for |
-| `NXP_SRK_TABLE_HASH`, `NXP_USED_SRK_ID`, `NXP_SRK_REVOKE_MASK`, `NXP_FUSE_VERSION_MIN` | optional | the vendor record, compared with the nxp container only |
+| `NXP_SRK_TABLE_HASH`, `NXP_USED_SRK_ID`, `NXP_SRK_REVOKE_MASK`, `NXP_FUSE_VERSION` | mandatory | the complete vendor record, compared exactly with the nxp container only; a missing or empty key fails, and the vendor fuse version has no floor semantics |
+| `<NAME>_IMAGE_SHA256`, `<NAME>_LOAD_ADDRESS`, `<NAME>_ENTRY_POINT` (e.g. `M7_IMAGE_SHA256`) | as the manifest names them | the values a manifest image entry names as `policy:<KEY>` (else the environment variable of that name) |
 
 Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255.
 
@@ -120,6 +121,10 @@ Every container the image holds is accounted for, and the check fails closed (pr
 SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
 the SRK table hash as `ahab_oem0_srk0_hash.txt` in the same output directory (the same file name
 `nxpimage ahab export` writes), so no hash algorithm is chosen here.
+
+- Each OEM image entry in the manifest carries `core_id`, `image_type`, `sha256` (of the image bytes the container header references, as SPSDK parses offset and size; 64 hex), `load_address` (`0x` hex string) and, optionally, `entry_point`. A substituted payload, a relocated image or a different entry point FAILS; a missing, empty or malformed field FAILS. Quote addresses in YAML (an unquoted number is rejected).
+- The vendor (nxp) record is mandatory and exact: SRK table hash, used SRK id, revoke mask and `NXP_FUSE_VERSION` must all be present and equal the container's own values; absent keys fail closed.
+- The manifest values and the nxp pins are recorded independently of the build, in the release policy file (or the environment), never in the repository: the committed manifest holds `policy:<KEY>` references only. Provisional default, pending the owner's decision on #12.
 
 No policy values are committed. The real values need IMX95RM and the Security Reference Manual
 (not in `docs/references`) and `oem-key-provisioning`: they stay MISSING (test plan §9 Q3).
