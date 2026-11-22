@@ -59,6 +59,7 @@ mkdir -p "$wrap"
 for t in cpio diffstat file gawk socat; do
 	for p in usr/bin usr/sbin bin; do
 		[ -x "$pkgroot/$p/$t" ] || continue
+		# shellcheck disable=SC2016 # the wrapper expands $LD_LIBRARY_PATH and "$@" when it runs
 		printf '#!/bin/sh\nLD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nMAGIC="%s"\nexport LD_LIBRARY_PATH MAGIC\nexec "%s" "$@"\n' \
 			"$tools_lib" "$magic" "$pkgroot/$p/$t" >"$wrap/$t"
 		chmod +x "$wrap/$t"
