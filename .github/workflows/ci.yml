@@ -1611,7 +1611,12 @@ jobs:
                       elif ta is False:
                           a = b
                       else:
-                          a = b if truthy(b) is True else U
+                          # CUSTOMIZE (#159, Codex security P1): an unknown left
+                          # operand stays unknown whatever the fallback is. The
+                          # template returned the fallback when it was truthy, so
+                          # `vars.RUNNER || 'ubuntu-latest'` counted as hosted
+                          # while the variable could name any runner.
+                          a = U
                   return a
 
               def andx(self):
