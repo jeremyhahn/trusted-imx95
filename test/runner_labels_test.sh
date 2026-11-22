@@ -18,12 +18,19 @@ python3 -I - "$ROOT/.github/workflows/ci.yml" "$work/step.py" <<'PY'
 import re, sys
 lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
 start = next(i for i, s in enumerate(lines) if "- name: Runner labels (ruling 633)" in s)
-a = next(i for i in range(start, len(lines)) if lines[i].strip() == "python3 -I - <<'PY'") + 1
+a = next(i for i in range(start, len(lines)) if lines[i].strip().endswith("python3 -I - <<'PY'")) + 1
 b = next(i for i in range(a, len(lines)) if lines[i].strip() == "PY")
 ind = len(lines[a]) - len(lines[a].lstrip())
 open(sys.argv[2], "w", encoding="utf-8").write("\n".join(s[ind:] for s in lines[a:b]) + "\n")
 PY
 check "the runner-labels step is extracted" 0
+# The step reads workflows with PyYAML; the step installs it when missing (never a skip).
+if ! python3 -I -c 'import yaml' 2>/dev/null; then
+	YAML_DIR="$TMP_ROOT/pyyaml"
+	python3 -m pip install --quiet --disable-pip-version-check --target "$YAML_DIR" pyyaml
+	export YAML_DIR
+fi
+check "PyYAML is importable by the step" 0
 
 # fixture <runs-on text> [if text] [on text]: a one-job workflow, run through
 # the step. The default triggers include pull_request, so an untrusted event.
@@ -45,26 +52,17 @@ EOF
 
 fixture "ubuntu-latest"
 check "a standard image passes" 0 "OK:"
-# Expressions are refused in a workflow an untrusted event can trigger, unless
-# exactly one of the template's selection expressions (resume 9, below); the
-# stricter evaluator still reads them in a workflow only trusted events run.
+# Any `${{` in a runs-on is refused unless it is exactly one of the template's
+# selection expressions, in every workflow whatever its triggers (verify 8).
 T="[push, workflow_dispatch]"
-fixture "\${{ 'ubuntu-latest' }}" "" "$T"
-check "a literal expression passes in a trusted-only workflow" 0 "OK:"
-fixture "\${{ 'ubuntu-latest' || vars.RUNNER }}" "" "$T"
-check "a known hosted label ahead of a variable stays hosted (trusted-only)" 0 "OK:"
-fixture "\${{ vars.RUNNER }}" "" "$T"
-check "a bare unknown variable fails as an unknown label" 1 "an unknown label"
-fixture "\${{ vars.RUNNER || 'ubuntu-latest' }}" "" "$T"
-check "a variable with a hosted fallback is not hosted" 1 "an unknown label"
-fixture "\${{ inputs.runner || 'ubuntu-latest' }}" "" "$T"
-check "an input with a hosted fallback is not hosted" 1 "an unknown label"
-fixture "\${{ vars.RUNNER || vars.OTHER || 'ubuntu-latest' }}" "" "$T"
-check "two variables with a hosted fallback are not hosted" 1 "an unknown label"
-fixture "\${{ vars.RUNNER || 'ubuntu-latest' }}"
-check "a variable with a hosted fallback is refused under a pull_request" 1 "(a) its runs-on holds an expression"
-fixture "\${{ 'ubuntu-latest' }}"
-check "a literal expression is refused under a pull_request" 1 "(a) its runs-on holds an expression"
+for ro in "\${{ 'ubuntu-latest' }}" "\${{ 'ubuntu-latest' || vars.RUNNER }}" "\${{ vars.RUNNER }}" \
+	"\${{ vars.RUNNER || 'ubuntu-latest' }}" "\${{ inputs.runner || 'ubuntu-latest' }}" \
+	"\${{ vars.RUNNER || vars.OTHER || 'ubuntu-latest' }}"; do
+	fixture "$ro" "" "$T"
+	check "an expression is refused in a trusted-only workflow: $ro" 1 "(a) its runs-on holds an expression"
+	fixture "$ro"
+	check "an expression is refused under a pull_request: $ro" 1 "(a) its runs-on holds an expression"
+done
 
 # Evaluated labels count for the release restriction (Codex security P1 at
 # verify 6): a waiver comment relaxes the hosted/self-hosted class rule only.
@@ -101,6 +99,58 @@ fixture "\${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || fo
 check "a server_url selection that falls to release is refused" 1 "(a) its runs-on holds an expression"
 FIXNAME=ci.yml fixture "\${{ github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk' }}"
 check "the template's own selection expression is accepted" 0 "OK:"
+
+# Codex security P1s at verify 8: the workflow is parsed as YAML, and every
+# release job meets the allowlist whatever the triggers.
+rawfile() { # rawfile <content>: one workflow, run through the step
+	rm -f "$work"/.github/workflows/*.yml
+	printf '%s\n' "$1" >"$work/.github/workflows/t.yml"
+	run bash -c "cd '$work' && python3 -I step.py"
+}
+rawfile "name: t
+on: [push, pull_request]
+'jobs':
+  a:
+    runs-on: [self-hosted, linux, x64, release]
+    steps:
+      - run: true"
+check "a quoted jobs key with a release job in a PR workflow is refused" 1 "(a) names \`release\`"
+rawfile "name: t
+on: [pull_request]
+jobs: {a: {runs-on: release, steps: [{run: true}]}}"
+check "a flow-map jobs with a release job in a PR workflow is refused" 1 "(a) names \`release\`"
+rawfile "name: t
+on: [pull_request]
+\"jobs\": {a: {runs-on: [self-hosted, linux, x64, release], steps: [{run: true}]}}"
+check "a quoted jobs key in flow form is refused" 1 "(a) names \`release\`"
+rawfile "name: t
+'on': [push]
+jobs:
+  a:
+    runs-on: release
+    if: github.ref == 'refs/heads/topic'
+    steps:
+      - run: true"
+check "a release job on a push-only workflow with a topic-branch if is refused" 1 "(a) names \`release\`"
+fixture "release" "github.ref == 'refs/heads/topic'" "[push, workflow_dispatch]"
+check "a release job on a push and dispatch workflow with a topic-branch if is refused" 1 "(a) names \`release\`"
+fixture "release" "github.event_name == 'push' && github.ref == 'refs/heads/main'" "[push]"
+check "the allowlisted condition passes in a push-only workflow" 0 "OK:"
+rawfile "name: t
+on: [push
+jobs: [a"
+check "unparseable YAML is refused" 1 "not parseable YAML"
+rawfile "name: t
+on: [push]"
+check "a workflow with no jobs is refused" 1 "no \`jobs\` mapping"
+rawfile "name: t
+on: [push]
+jobs:
+  a:
+    runs-on: {group: g, labels: release}
+    steps:
+      - run: true"
+check "a runs-on mapping is refused" 1 "neither a string nor a list of strings"
 
 # This repository's own workflows still pass under the stricter evaluator.
 rm -f "$work"/.github/workflows/*.yml

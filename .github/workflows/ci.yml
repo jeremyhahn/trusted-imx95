@@ -1485,11 +1485,27 @@ jobs:
       # Its tests: testdata/runner-labels-tests.py.
       - name: Runner labels (ruling 633)
         run: |
-          python3 -I - <<'PY'
-          import glob, json, re, sys
+          # CUSTOMIZE (#159, Codex security P1 at verify 8): the workflows are read with
+          # PyYAML, installed here when the runner lacks it. Never a skip.
+          yaml_dir=
+          if ! python3 -I -c 'import yaml' 2>/dev/null; then
+            yaml_dir="${RUNNER_TEMP:-/tmp}/runner-labels-pyyaml"
+            python3 -m pip install --quiet --disable-pip-version-check --target "$yaml_dir" pyyaml
+          fi
+          YAML_DIR=$yaml_dir python3 -I - <<'PY'
+          import glob, json, os, re, sys
 
-          # Reads .github/workflows/*.yml|yaml as text (no YAML library): the
-          # top-level `on:` keys, and each job's `runs-on` and `if`. A job names
+          if os.environ.get("YAML_DIR"):
+              sys.path.insert(0, os.environ["YAML_DIR"])
+          try:
+              import yaml
+          except ImportError as e:
+              print(f"::error::runner labels: PyYAML cannot be imported ({e}); the step installs it when missing, so this is a failed install, not a skip")
+              sys.exit(1)
+
+          # Reads .github/workflows/*.yml|yaml with PyYAML (CUSTOMIZE, #159): the
+          # top-level `on` triggers, and each job's `runs-on` and `if`. A text line is read only
+          # for the `# self-hosted:` waiver comment on a runs-on line. A job names
           # `release` when that label appears in its runs-on, plain, in a list or as a
           # quoted string in an expression. Its `if` is evaluated under every event
           # outside the release allow-list, with every value this step cannot know
@@ -1745,20 +1761,6 @@ jobs:
               return len(line) - len(line.lstrip(" "))
 
 
-          def body(lines, i, inline):
-              """The value text of the key on line i: the inline part plus every deeper line."""
-              base, parts = ind(lines[i]), []
-              j = i + 1
-              while j < len(lines) and (not lines[j].strip() or ind(lines[j]) > base):
-                  if lines[j].strip() and not lines[j].lstrip().startswith("#"):
-                      parts.append(strip_comment(lines[j]).strip())
-                  j += 1
-              inline = strip_comment(inline).strip()
-              if inline[:1] in ("|", ">"):
-                  return (" " if inline[0] == ">" else "\n").join(parts)
-              return " ".join([inline] + parts).strip()
-
-
           def keys_under(lines, i):
               """(line, key) for each direct child key of the block opened on line i."""
               base, out, child = ind(lines[i]), [], None
@@ -1774,19 +1776,6 @@ jobs:
                       if m:
                           out.append((j, m.group(2).strip(), m.group(3) or ""))
               return out
-
-
-          def triggers(lines):
-              for i, s in enumerate(lines):
-                  m = re.match(r"(['\"]?)(on|true)\1\s*:\s*(.*)$", s)
-                  if m:
-                      v = strip_comment(m.group(3)).strip()
-                      if v.startswith("{"):  # a flow mapping: its keys, nested ones too
-                          return set(re.findall(r"([A-Za-z_]+)['\"]?\s*:", v))
-                      if v:
-                          return {unquote(x) for x in re.split(r"[\s,\[\]]+", v) if x}
-                      return {k for _, k, _ in keys_under(lines, i)}
-              return set()
 
 
           # v1.43 (ruling 833): the standard GitHub-hosted images, free on a public
@@ -1942,17 +1931,16 @@ jobs:
               return state
 
 
-          # CUSTOMIZE (#159, Codex security P1s at verify 7): the release decision is
-          # an exact allowlist. In a workflow that any event outside TRUSTED_ON can
-          # trigger, a runs-on is accepted only as (a) literal labels with no
+          # CUSTOMIZE (#159, Codex security P1s at verify 7 and 8): the release decision is
+          # an exact allowlist, applied to every job of every workflow whatever its
+          # triggers. A runs-on is accepted only as (a) literal labels with no
           # expression anywhere and none of them `release`, or (b) exactly one
           # selection expression the template itself uses (SELECT_OK, copied from
           # ci-template 1ad68ab8, none of which yields `release`); a job that names
           # `release` also needs an `if:` that is exactly one of COND_OK, every one of
-          # which excludes each untrusted event. Nothing is simulated: an arbitrary
-          # branch name, a list element's expression and a server_url that is not
-          # github.com stay unknown by never being read.
-          TRUSTED_ON = {"push", "workflow_dispatch", "schedule"}
+          # which excludes each pull-request event and every other branch. Nothing is
+          # simulated: an arbitrary branch name, a list element's expression and a
+          # server_url that is not github.com stay unknown by never being read.
           SELECT_OK = {
               "github.server_url == 'https://github.com' && (!startsWith(github.event_name, 'pull_request') || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_PREFLIGHT_RUNS_ON || '[\"self-hosted\",\"linux\",\"x64\",\"bigdisk\"]') || 'ubuntu-latest'",
               "github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk'",
@@ -1967,7 +1955,7 @@ jobs:
 
 
           def squash(s):
-              return re.sub(r"\s+", " ", strip_comment(s)).strip()
+              return re.sub(r"\s+", " ", s).strip()
 
 
           def inner(s):
@@ -1982,7 +1970,7 @@ jobs:
                   return None
               if OPEN in text or text.startswith("group:") or "group:" in text:
                   return ("its runs-on holds an expression that is not one of the template's selection expressions "
-                          "(or a runner group); in a workflow an untrusted event can trigger, only a literal label or "
+                          "(or a runner group); only a literal label or "
                           "list of labels, or such an expression, is accepted, whatever a `# self-hosted:` comment says")
               if "release" not in {t.lower() for t in re.split(r"[\s,\[\]'\":]+", text)}:
                   return None
@@ -1990,8 +1978,8 @@ jobs:
               c = c if c is not None else (squash(cond) if cond else "")
               if re.sub(r"\s+", " ", c) in COND_OK:
                   return None
-              return ("names `release` in a workflow an untrusted event can trigger, and its `if:` is not exactly one of "
-                      "the conditions that exclude every such event; no `# self-hosted:` comment relaxes this")
+              return ("names `release`, and its `if:` is not exactly one of "
+                      "the conditions that exclude every pull-request event and every other branch; no `# self-hosted:` comment relaxes this")
 
 
           def condition(text):
@@ -2004,113 +1992,157 @@ jobs:
               return t
 
 
-          def check(path):
-              lines = open(path, encoding="utf-8").read().splitlines()
-              on = triggers(lines)
-              untrusted = not on or bool(on - TRUSTED_ON)
-              bad = []
+          def structure(doc):
+              """(triggers, [(job, runs-on text or None, if text or None)]); ValueError when unreadable."""
+              if not isinstance(doc, dict):
+                  raise ValueError("is not a YAML mapping, so its jobs cannot be read")
+              raw = doc.get("on", doc.get(True))  # YAML 1.1 reads an unquoted `on` key as true
+              if isinstance(raw, str):
+                  on = {raw}
+              elif isinstance(raw, (list, dict)):
+                  on = {str(x) for x in raw}
+              else:
+                  on = set()
+              jobs = doc.get("jobs")
+              if not isinstance(jobs, dict) or not jobs:
+                  raise ValueError("has no `jobs` mapping, so no runs-on can be checked")
+              out = []
+              for name, spec in jobs.items():
+                  if not isinstance(spec, dict):
+                      raise ValueError(f"job {name} is not a mapping")
+                  ro = spec.get("runs-on")
+                  if ro is not None and not isinstance(ro, str):
+                      if not isinstance(ro, list) or not all(isinstance(x, str) for x in ro):
+                          raise ValueError(f"job {name}: runs-on is neither a string nor a list of strings")
+                      ro = "[" + ", ".join(json.dumps(x) for x in ro) + "]"
+                  cond = spec.get("if")
+                  if isinstance(cond, bool):
+                      cond = "true" if cond else "false"
+                  elif cond is not None:
+                      cond = str(cond)
+                  out.append((str(name), ro, cond))
+              return on, out
+
+
+          def runs_on_lines(lines):
+              """job -> the text line of its runs-on, read only for a `# self-hosted:` comment."""
+              out = {}
               for i, s in enumerate(lines):
                   if re.match(r"jobs\s*:\s*(#.*)?$", s):
                       for j, job, _ in keys_under(lines, i):
-                          ro = cond = ro_line = None
-                          for k, key, inline in keys_under(lines, j):
+                          for k, key, _ in keys_under(lines, j):
                               if key == "runs-on":
-                                  ro, ro_line = body(lines, k, inline), lines[k]
-                              elif key == "if":
-                                  cond = body(lines, k, inline)
-                          where = f"{path}:{job}"
-                          # CUSTOMIZE (#159, Codex security P1s at verify 7): in a workflow
-                          # an untrusted event can trigger, the release decision is an
-                          # allowlist, not a simulation. The `# self-hosted:` waiver is
-                          # never consulted here.
-                          if untrusted and ro is not None:
-                              why = release_guard(ro, cond)
-                              if why:
-                                  bad.append(f"{where}: (a) {why}")
+                                  out[job] = lines[k]
+              return out
+
+
+          def check(path):
+              text = open(path, encoding="utf-8").read()
+              try:
+                  doc = yaml.safe_load(text)
+              except yaml.YAMLError as e:
+                  first = (str(e).splitlines() or ["error"])[0]
+                  return [f"{path}: (a) is not parseable YAML ({first}), so no runs-on can be checked"]
+              try:
+                  on, jobs = structure(doc)
+              except ValueError as e:
+                  return [f"{path}: (a) {e}"]
+              ro_lines = runs_on_lines(text.splitlines())
+              bad = []
+              for job, ro, cond in jobs:
+                  ro_line = ro_lines.get(job, "")
+                  where = f"{path}:{job}"
+                  # CUSTOMIZE (#159, Codex security P1s at verify 7 and 8): the release
+                  # decision is an allowlist applied to every job, whatever the triggers.
+                  # The `# self-hosted:` waiver is never consulted here.
+                  if ro is not None:
+                      why = release_guard(ro, cond)
+                      if why:
+                          bad.append(f"{where}: (a) {why}")
+                          continue
+                  # CUSTOMIZE (#159): evaluated labels count too. A runs-on whose
+                  # labels evaluate to `release`, or evaluate to nothing literal
+                  # while a `# self-hosted:` comment sits on it, takes the release
+                  # path below; the waiver relaxes the hosted/self-hosted class
+                  # rule only, never the release restriction.
+                  ro_rel = False
+                  if ro is not None and not names_release(ro):
+                      sels0 = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
+                      ev_rel = eval_release(ro, sels0, sels0[0] is not None and job == PRE_JOB and PRE_READ.search(ro))
+                      ro_rel = ev_rel == "release" or (ev_rel == "unknown" and (WAIVER.search(ro_line) or BARE.search(ro_line)))
+                  if ro is not None and not names_release(ro) and not ro_rel:
+                      # v1.43 (ruling 833): hosted first.
+                      if LARGER.search(ro) and re.search(r"ubuntu|windows|macos", ro):
+                          bad.append(f"{where}: (d) names a larger GitHub-hosted runner ({ro}); it bills on a public repository")
+                          continue
+                      rf = review_finding(path, where, ro, ro_line)
+                      if rf:
+                          bad.append(rf)
+                          continue
+                      if WAIVER.search(ro_line):
+                          continue
+                      off = []
+                      sels = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
+                      if sels[0] is not None and job == PRE_JOB and PRE_READ.search(ro):
+                          sels = ("unset", "set")  # v1.49: its own two states, no selection output
+                      for ev, ref, head in HOSTED_CTX:
+                          # v1.51: under pull_request_target, a fork's head never
+                          # reaches a self-hosted runner, overflow or not.
+                          # v1.52: under pull_request too.
+                          fork_target = ev in PR and head == "fork/r" and ev in on
+                          for sel in sels:
+                              try:
+                                  got = runs_on_labels(ro, ev, ref, head, sel)
+                              except ValueError as e:
+                                  off.append(f"{ev} ({ref}): cannot be read ({e})")
                                   continue
-                          # CUSTOMIZE (#159): evaluated labels count too. A runs-on whose
-                          # labels evaluate to `release`, or evaluate to nothing literal
-                          # while a `# self-hosted:` comment sits on it, takes the release
-                          # path below; the waiver relaxes the hosted/self-hosted class
-                          # rule only, never the release restriction.
-                          ro_rel = False
-                          if ro is not None and not names_release(ro):
-                              sels0 = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
-                              ev_rel = eval_release(ro, sels0, sels0[0] is not None and job == PRE_JOB and PRE_READ.search(ro))
-                              ro_rel = ev_rel == "release" or (ev_rel == "unknown" and (WAIVER.search(ro_line) or BARE.search(ro_line)))
-                          if ro is not None and not names_release(ro) and not ro_rel:
-                              # v1.43 (ruling 833): hosted first.
-                              if LARGER.search(ro) and re.search(r"ubuntu|windows|macos", ro):
-                                  bad.append(f"{where}: (d) names a larger GitHub-hosted runner ({ro}); it bills on a public repository")
+                              if got is not None and sel == "overflow" and got in OVERFLOW and not fork_target:
                                   continue
-                              rf = review_finding(path, where, ro, ro_line)
-                              if rf:
-                                  bad.append(rf)
+                              if sel == "unset" and got == OVERFLOW[0] and not fork_target:
                                   continue
-                              if WAIVER.search(ro_line):
-                                  continue
-                              off = []
-                              sels = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
-                              if sels[0] is not None and job == PRE_JOB and PRE_READ.search(ro):
-                                  sels = ("unset", "set")  # v1.49: its own two states, no selection output
-                              for ev, ref, head in HOSTED_CTX:
-                                  # v1.51: under pull_request_target, a fork's head never
-                                  # reaches a self-hosted runner, overflow or not.
-                                  # v1.52: under pull_request too.
-                                  fork_target = ev in PR and head == "fork/r" and ev in on
-                                  for sel in sels:
-                                      try:
-                                          got = runs_on_labels(ro, ev, ref, head, sel)
-                                      except ValueError as e:
-                                          off.append(f"{ev} ({ref}): cannot be read ({e})")
-                                          continue
-                                      if got is not None and sel == "overflow" and got in OVERFLOW and not fork_target:
-                                          continue
-                                      if sel == "unset" and got == OVERFLOW[0] and not fork_target:
-                                          continue
-                                      if (sel is None and got == OVERFLOW[0] and ev in PR and head == "o/r"
-                                              and path.replace("\\", "/").rsplit("/", 1)[-1] in REVIEW_FILES):
-                                          continue  # v1.53: a same-repository head's review guard
-                                      if got is None or len(got) != 1 or not STANDARD.fullmatch(got[0]):
-                                          what = "an unknown label" if got is None else ", ".join(got)
-                                          note = ", runner selection overflow" if sel == "overflow" else ""
-                                          if sel in ("unset", "set"):
-                                              note = ", CI_PREFLIGHT_RUNS_ON " + ("unset" if sel == "unset" else 'set to "ubuntu-latest"')
-                                          if fork_target and got is not None:
-                                              note += f", {ev}: a fork never reaches a self-hosted runner"
-                                          off.append(f"{ev} ({ref}{', fork' if head == 'fork/r' else ''}{note}): {what}")
-                              if off and BARE.search(ro_line):
-                                  bad.append(f"{where}: (e) its `# self-hosted:` reason names no category; ruling 999 allows a self-hosted job "
-                                             f"only as `# self-hosted: hardware: <reason>` or `# self-hosted: oversize: <reason>`; it runs on " + "; ".join(dict.fromkeys(off)))
-                              elif off:
-                                  bad.append(f"{where}: (c) does not run on a standard GitHub-hosted image on github.com and its runs-on "
-                                             f"line gives no `# self-hosted: hardware|oversize: <reason>`; it runs on " + "; ".join(dict.fromkeys(off)))
-                              continue
-                          if ro is None:
-                              continue
-                          if cond is None:
-                              if on & PR:
-                                  bad.append(f"{where}: (a) names `release` in a workflow with a pull_request trigger, and has no `if:`")
-                              bad.append(f"{where}: (b) names `release` and has no `if:` restricting it to {ALLOWED}")
-                              continue
-                          try:
-                              expr = condition(cond)
-                              toks = lex(expr)
-                              runs = []
-                              for ev, ref in CTX:
-                                  r = truthy(P(toks, lambda p: ctx_get(ev, ref, p)).parse())
-                                  if r is not False:
-                                      runs.append((ev, ref))
-                          except ValueError as e:
-                              bad.append(f"{where}: (b) names `release` and its `if:` cannot be read ({e})")
-                              continue
-                          pr = [c for c in runs if c[0] in PR and c[0] in on]
-                          if pr:
-                              bad.append(f"{where}: (a) names `release` and a {pr[0][0]} event can run it")
-                          rest = [c for c in runs if c not in pr]
-                          if rest:
-                              bad.append(f"{where}: (b) names `release` and its `if:` does not restrict it to {ALLOWED}; it can run on "
-                                         + ", ".join(dict.fromkeys(f"{ev} ({ref})" for ev, ref in rest)))
+                              if (sel is None and got == OVERFLOW[0] and ev in PR and head == "o/r"
+                                      and path.replace("\\", "/").rsplit("/", 1)[-1] in REVIEW_FILES):
+                                  continue  # v1.53: a same-repository head's review guard
+                              if got is None or len(got) != 1 or not STANDARD.fullmatch(got[0]):
+                                  what = "an unknown label" if got is None else ", ".join(got)
+                                  note = ", runner selection overflow" if sel == "overflow" else ""
+                                  if sel in ("unset", "set"):
+                                      note = ", CI_PREFLIGHT_RUNS_ON " + ("unset" if sel == "unset" else 'set to "ubuntu-latest"')
+                                  if fork_target and got is not None:
+                                      note += f", {ev}: a fork never reaches a self-hosted runner"
+                                  off.append(f"{ev} ({ref}{', fork' if head == 'fork/r' else ''}{note}): {what}")
+                      if off and BARE.search(ro_line):
+                          bad.append(f"{where}: (e) its `# self-hosted:` reason names no category; ruling 999 allows a self-hosted job "
+                                     f"only as `# self-hosted: hardware: <reason>` or `# self-hosted: oversize: <reason>`; it runs on " + "; ".join(dict.fromkeys(off)))
+                      elif off:
+                          bad.append(f"{where}: (c) does not run on a standard GitHub-hosted image on github.com and its runs-on "
+                                     f"line gives no `# self-hosted: hardware|oversize: <reason>`; it runs on " + "; ".join(dict.fromkeys(off)))
+                      continue
+                  if ro is None:
+                      continue
+                  if cond is None:
+                      if on & PR:
+                          bad.append(f"{where}: (a) names `release` in a workflow with a pull_request trigger, and has no `if:`")
+                      bad.append(f"{where}: (b) names `release` and has no `if:` restricting it to {ALLOWED}")
+                      continue
+                  try:
+                      expr = condition(cond)
+                      toks = lex(expr)
+                      runs = []
+                      for ev, ref in CTX:
+                          r = truthy(P(toks, lambda p: ctx_get(ev, ref, p)).parse())
+                          if r is not False:
+                              runs.append((ev, ref))
+                  except ValueError as e:
+                      bad.append(f"{where}: (b) names `release` and its `if:` cannot be read ({e})")
+                      continue
+                  pr = [c for c in runs if c[0] in PR and c[0] in on]
+                  if pr:
+                      bad.append(f"{where}: (a) names `release` and a {pr[0][0]} event can run it")
+                  rest = [c for c in runs if c not in pr]
+                  if rest:
+                      bad.append(f"{where}: (b) names `release` and its `if:` does not restrict it to {ALLOWED}; it can run on "
+                                 + ", ".join(dict.fromkeys(f"{ev} ({ref})" for ev, ref in rest)))
               return bad
 
 
