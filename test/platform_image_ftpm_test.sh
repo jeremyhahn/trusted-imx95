@@ -167,6 +167,8 @@ expect "README makes no claim that the NV survives a reflash" none 'partition is
 # The EULA is the owner's: not accepted, and imx-boot (-> imx-m7-demos) is not an image dependency.
 expect "the image drops imx-boot from the wks dependencies" ncstr "$img" 'WKS_FILE_DEPENDS:remove = "imx-boot"'
 expect "the boot partition lists no imx-m7-demos binary" ncstr "$img" 'IMAGE_BOOT_FILES:remove = "mcore-demos/'
+expect "the image depends on optee-os:do_deploy (the firmware with the fTPM TA)" ncstr "$img" 'do_image_complete[depends] += "optee-os:do_deploy"'
+expect "optee-os depends on the fTPM TA deploy" ncstr "$os_app" 'do_compile[depends] += "optee-ftpm:do_deploy"'
 expect "ACCEPT_FSL_EULA is not set in the layer" tree_none 'ACCEPT_FSL_EULA = ' 'platform-image/conf'
 expect "REE FS on" ncstr "$flags" 'CFG_REE_FS=y'
 expect "RPMB FS off" ncstr "$flags" 'CFG_RPMB_FS=n'

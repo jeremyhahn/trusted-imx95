@@ -48,6 +48,10 @@ IMAGE_FSTYPES += "wic"
 # (the boot-container flow of this repository writes it, with the M7 image), so
 # imx-boot is not a dependency of the image. MISSING: no survey covers the EULA.
 WKS_FILE_DEPENDS:remove = "imx-boot"
+# Dropping imx-boot also dropped the image's only path to building optee-os, whose
+# firmware (tee.bin) carries the fTPM early TA (optee-os bbappend: do_compile
+# depends on optee-ftpm:do_deploy). The image needs it explicitly. MISSING: no survey covers it.
+do_image_complete[depends] += "optee-os:do_deploy"
 # The machine's boot partition also lists the M7 demo binaries of imx-m7-demos
 # (EULA again); the M7 image comes from the boot-container flow. MISSING: no survey covers it.
 IMAGE_BOOT_FILES:remove = "mcore-demos/imx95-19x19-frdm_m7_TCM_hello_world.bin mcore-demos/imx95-19x19-frdm_m7_TCM_power_mode_switch.bin mcore-demos/imx95-19x19-frdm_m7_TCM_rpmsg_lite_pingpong_rtos_linux_remote.bin mcore-demos/imx95-19x19-frdm_m7_TCM_rpmsg_lite_str_echo_rtos.bin"
