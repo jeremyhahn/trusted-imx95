@@ -125,6 +125,15 @@ rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 sed 's/Preflight \[changed files/Preflight [altered files/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
 run bash -c "cd '$work' && python3 -I step.py"
 check "an altered ci.yml preflight job loses the exemption" 1 "(a) its runs-on holds an expression"
+# One `run` line of a non-guard preflight step changed (the Runner labels
+# step's own run is replaced by a marker in the pin, so it is not the target).
+sed 's/not a schedule run: no check"/not a schedule run: no checks"/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
+	echo "FAIL fixture is identical to ci.yml: the run-line edit did not apply"
+	exit 1
+fi
+run bash -c "cd '$work' && python3 -I step.py"
+check "a changed run line in a non-guard preflight step loses the exemption" 1 "(a) its runs-on holds an expression"
 
 # Codex security P1s at verify 8: the workflow is parsed as YAML, and every
 # release job meets the allowlist whatever the triggers.
