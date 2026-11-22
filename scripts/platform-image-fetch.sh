@@ -39,7 +39,7 @@ dir=$(cd "$dir" && pwd -P)
 case "$dir/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
 
 fetch_one() { # name repo path commit
-	local name=$1 repo=$2 path=$3 commit=$4 d=$dir/$3 head
+	local name=$1 repo=$2 path=$3 commit=$4 d=$dir/$3 head dirty
 	[[ $commit =~ ^[0-9a-f]{40}$ ]] || die "layer $name: commit '$commit' is not 40 hex (MISSING or malformed)"
 	[[ $path =~ ^sources/[A-Za-z0-9._-]+$ ]] || die "layer $name: unexpected path $path"
 	[ -d "$d/.git" ] || git init -q "$d"
@@ -52,6 +52,10 @@ fetch_one() { # name repo path commit
 	git -C "$d" checkout -q --detach "$commit" || die "layer $name: $commit is not in $repo"
 	head=$(git -C "$d" rev-parse HEAD)
 	[ "$head" = "$commit" ] || die "layer $name: checked out $head, the lock pins $commit"
+	# Fail closed on any local edit: staged, unstaged, untracked or ignored.
+	dirty=$(git -C "$d" status --porcelain --untracked-files=all --ignored) ||
+		die "layer $name: cannot read the status of $d"
+	[ -z "$dirty" ] || die "layer $name: $d is not clean (local edits or extra files); remove the directory $d and fetch again"
 	echo "platform-image-fetch: $name $commit"
 }
 

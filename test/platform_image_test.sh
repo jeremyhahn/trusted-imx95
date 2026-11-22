@@ -171,8 +171,44 @@ expect "fetch: it says checked out <commit>, the lock pins <tag object>" \
 	test "${out##*"checked out $good, the lock pins $tagobj"*}" != "$out"
 
 rc=0
-"$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$ROOT/inside-clone" >/dev/null 2>&1 || rc=$?
+inside=$(mktemp -d "$ROOT/.inside-clone.XXXXXX") # a path this test creates and owns
+"$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$inside" >/dev/null 2>&1 || rc=$?
 expect "fetch: a directory inside the clone is refused" test "$rc" -ne 0
-rm -rf "$ROOT/inside-clone"
+rm -rf "$inside"
+
+# A locally modified layer is refused on a re-fetch.
+mkdir -p "$tmp/src/recipes"
+printf 'A = "1"\n' >"$tmp/src/recipes/r.bb"
+git -C "$tmp/src" add recipes/r.bb
+git -C "$tmp/src" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false \
+	commit -q -m recipe
+rec=$(git -C "$tmp/src" rev-parse HEAD)
+mklock "$rec" "$tmp/rec.lock"
+tl="$tmp/out-dirty"
+fetch_rc() { # prints the exit status of a fetch into the temp layer root
+	local r=0
+	"$ROOT/scripts/platform-image-fetch.sh" "$tmp/rec.lock" "$tl" >"$tmp/fetch.out" 2>&1 || r=$?
+	echo "$r"
+}
+expect "fetch: first fetch of the recipe layer passes" test "$(fetch_rc)" -eq 0
+expect "fetch: a clean re-fetch passes" test "$(fetch_rc)" -eq 0
+layer="$tl/sources/stub"
+
+printf 'A = "2"\n' >"$layer/recipes/r.bb"
+expect "fetch: an unstaged edit to a tracked recipe fails" test "$(fetch_rc)" -ne 0
+expect "fetch: the dirty failure names the layer" grep -q 'layer stub: .* is not clean' "$tmp/fetch.out"
+git -C "$layer" add recipes/r.bb
+expect "fetch: a staged edit to a tracked recipe fails" test "$(fetch_rc)" -ne 0
+git -C "$layer" reset -q --hard
+expect "fetch: a clean re-fetch passes after the edit is removed" test "$(fetch_rc)" -eq 0
+
+printf 'x\n' >"$layer/recipes/extra.bbappend"
+expect "fetch: an untracked .bbappend fails" test "$(fetch_rc)" -ne 0
+rm -f "$layer/recipes/extra.bbappend"
+expect "fetch: a clean re-fetch passes after the file is removed" test "$(fetch_rc)" -eq 0
+
+printf '*.bbappend\n' >"$layer/.git/info/exclude"
+printf 'x\n' >"$layer/ignored.bbappend"
+expect "fetch: an ignored .bbappend fails" test "$(fetch_rc)" -ne 0
 
 finish

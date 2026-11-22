@@ -21,7 +21,9 @@ section 11), written down so the owner can read a working proposal.
   `imx95-19x19-lpddr5-frdm-pro`.
 - `scripts/platform-image-fetch.sh`, `make platform-image-fetch`: checks the
   layers out into a directory outside the clone and fails when a layer's
-  commit differs from the lock. It needs the network, so it is in neither
+  commit differs from the lock. A fetched layer must also be clean: any staged,
+  unstaged, untracked or ignored file fails the fetch, so remove the layer
+  directory and fetch again. It needs the network, so it is in neither
   `make build` nor `make test`.
 - `test/platform_image_test.sh`, in `make test`: offline checks of the lock,
   the machine name and the distro file.
