@@ -2,7 +2,8 @@
 # The template's helper scripts (ci-template v1.54, #159), run by the
 # template's own tests, copied unchanged to test/testdata/. The tests find the
 # scripts and ci.yml beside their own testdata/ directory, so they run on a
-# copy laid out that way.
+# copy laid out that way. ci-image-history-tests.py is the template's except
+# its publish fixtures, adapted to the retained ci-image-cache.sh (#159).
 set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -17,14 +18,12 @@ cp "$ROOT/test/testdata/ci-mask-lan-tests.py" \
 
 run python3 -I "$lay/testdata/ci-mask-lan-tests.py"
 check "ci-mask-lan: the template's tests pass" 0
-# The ci-image-history wiring cases parse ci.yml with PyYAML, which the
-# toolchain image does not carry; without it they are skipped, named here.
-if python3 -I -c 'import yaml' 2>/dev/null; then
-  run python3 -I "$lay/testdata/ci-image-history-tests.py"
-  check "ci-image-history: the template's tests pass" 0
-else
-  echo "SKIP ci-image-history: PyYAML is not installed"
-fi
+# The ci-image-history wiring cases parse ci.yml with PyYAML (py3-yaml in the
+# toolchain image). A missing PyYAML fails here; it is never skipped.
+run python3 -I -c 'import yaml'
+check "ci-image-history: PyYAML is installed" 0
+run python3 -I "$lay/testdata/ci-image-history-tests.py"
+check "ci-image-history: the tests pass" 0 "0 failure(s)"
 
 # The scripts themselves, run through bash and sh on PATH (check-script-tests
 # counts a script tested only so). docker and go are stubs.

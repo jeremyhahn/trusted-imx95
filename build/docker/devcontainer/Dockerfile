@@ -18,7 +18,7 @@ FROM ${ALPINE_IMAGE} AS base
 # tar: GNU tar, for scripts/in-toolchain-image.sh's --owner/--group/
 # --numeric-owner stream (BusyBox tar refuses those options).
 RUN apk upgrade --no-cache \
- && apk add --no-cache bash coreutils make git python3 tar xz \
+ && apk add --no-cache bash coreutils make git python3 py3-yaml tar xz \
  && git config --system --add safe.directory '*' \
  && adduser -D -u 10001 dev
 ENV HOME=/tmp

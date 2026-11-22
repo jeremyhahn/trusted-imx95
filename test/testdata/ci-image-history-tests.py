@@ -3,7 +3,9 @@
 
 A pool build takes the LAN caches as BuildKit secrets, which no layer and no
 history entry keeps; a build argument's value is recorded in every RUN of the
-image history. ci-image-history.sh reads each image's history and config and
+image history. (This copy differs from the template's in its publish
+fixtures only, adapted to this repository's ci-image-cache.sh; see #159.)
+ci-image-history.sh reads each image's history and config and
 fails on any RFC 1918 address, naming the image and the entry, never the
 address. A stub docker on PATH stands in for the daemon.
 
@@ -145,62 +147,83 @@ def wiring_cases():
     check(late != text and wiring_problems(late), "an image check after the first use passes the template check")
 
 
-# Stubs for ci-image-cache.sh publish. make prints the toolchain tag and
-# builds nothing; docker logs each call to $STUB_DIR/log and answers manifest
-# inspect with a miss; the repository's in-toolchain-image.sh (trivy) passes;
-# its ci-image-history.sh logs the call and exits $HIST_STATUS.
+# Adapted by this repository (#159); the rest of this file is the template's,
+# unchanged. The template's publish fixtures stub its older publish path
+# (docker save, a manifest probe, a history check before the push). The
+# retained ci-image-cache.sh v5 publishes with `docker buildx build --output
+# type=registry`, reads the registry's digest through `docker buildx imagetools
+# inspect`, takes the Dockerfile's path from `make`, and runs no history check
+# of its own, so these fixtures stub that path: make prints the toolchain tag
+# and a Dockerfile path; docker logs each call to $STUB_DIR/log, answers a
+# digest probe with a miss until the build has run, and writes the build's
+# metadata file; $REG_DIGEST_AFTER is the digest the registry then reports.
 CACHE_MAKE = """#!/bin/sh
 case "$*" in
-*toolchain-image*) [ "$1" = -s ] && { echo repo-toolchain:abc; exit 0; } ;;
+*ci-image-cache-dockerfile*) echo Dockerfile; exit 0 ;;
+*toolchain-image*) echo repo-toolchain:abc; exit 0 ;;
 esac
 echo "make $*" >> "$STUB_DIR/log"
 """
+GOOD = "sha256:" + "a" * 64
+OTHER = "sha256:" + "b" * 64
 CACHE_DOCKER = """#!/bin/sh
 echo "docker $*" >> "$STUB_DIR/log"
-case "$1 $2" in
-"manifest inspect") exit 1 ;;
-"image inspect") echo forge.example/ns/repo-toolchain@sha256:0 ;;
-esac
+if [ "$1 $2 $3" = "buildx imagetools inspect" ]; then
+  [ -f "$STUB_DIR/built" ] || [ -f "$STUB_DIR/held" ] || exit 1
+  printf '{"digest":"%s"}\\n' "$REG_DIGEST_AFTER"
+  exit 0
+fi
 case $1 in
-save) shift; while [ $# -gt 1 ]; do [ "$1" = -o ] && : > "$2"; shift; done ;;
 login) cat >/dev/null ;;
+buildx)
+  if [ "$2" = build ]; then
+    while [ $# -gt 1 ]; do
+      [ "$1" = --metadata-file ] && printf '{"containerimage.digest":"%s"}\\n' "$BUILT_DIGEST" > "$2"
+      shift
+    done
+    : > "$STUB_DIR/built"
+  fi ;;
 esac
 exit 0
 """
 
 
-def publish_run(hist_status):
+def publish_run(held=False, registry_after=GOOD):
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "repo", "scripts"))
         os.makedirs(os.path.join(d, "bin"))
         shutil.copy(CACHE, os.path.join(d, "repo", "scripts", "ci-image-cache.sh"))
+        with open(os.path.join(d, "repo", "Dockerfile"), "w") as f:
+            f.write("FROM scratch\n")
+        if held:
+            open(os.path.join(d, "held"), "w").close()
         for path, body in [
             (os.path.join(d, "bin", "make"), CACHE_MAKE),
             (os.path.join(d, "bin", "docker"), CACHE_DOCKER),
-            (os.path.join(d, "repo", "scripts", "in-toolchain-image.sh"), "#!/bin/sh\necho \"trivy $*\" >> \"$STUB_DIR/log\"\n"),
-            (os.path.join(d, "repo", "scripts", "ci-image-history.sh"), "#!/bin/sh\necho \"history $*\" >> \"$STUB_DIR/log\"\nexit \"$HIST_STATUS\"\n"),
         ]:
             with open(path, "w") as f:
                 f.write(body)
             os.chmod(path, 0o755)
         env = {"PATH": os.path.join(d, "bin") + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"), "STUB_DIR": d,
-               "HIST_STATUS": str(hist_status), "GITHUB_SERVER_URL": "https://forge.example", "CI_IMAGE_NAMESPACE": "ns",
-               "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
-               "RELEASE_REGISTRY_USER": "u", "RELEASE_REGISTRY_TOKEN": "t"}
+               "BUILT_DIGEST": GOOD, "REG_DIGEST_AFTER": registry_after, "GITHUB_SERVER_URL": "https://forge.example",
+               "CI_IMAGE_NAMESPACE": "ns", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+               "RELEASE_REGISTRY_USER": "u", "RELEASE_REGISTRY_TOKEN": "t", "HOME": d}
         out = subprocess.run(["bash", "scripts/ci-image-cache.sh", "publish"], cwd=os.path.join(d, "repo"), env=env, capture_output=True, text=True)
         log = open(os.path.join(d, "log")).read().splitlines() if os.path.exists(os.path.join(d, "log")) else []
-        return out.returncode, log, out.stderr
+        return out.returncode, log, out.stderr + out.stdout
 
 
 def publish_cases():
-    rc, log, err = publish_run(0)
-    hist = [i for i, l in enumerate(log) if l == "history repo-toolchain:abc"]
-    push = [i for i, l in enumerate(log) if l.startswith("docker push") or l.startswith("docker login")]
-    check(rc == 0 and hist and push, f"publish with a clean image does not check it and push ({rc}): {log} {err}")
-    check(hist and push and hist[0] < min(push), f"publish checks the image after it logs in or pushes: {log}")
-    rc, log, err = publish_run(1)
-    check(rc != 0, f"publish succeeds with an image that carries a private address: {log}")
-    check(not any(l.startswith("docker push") or l.startswith("docker login") for l in log), f"publish logs in or pushes an image that carries a private address: {log}")
+    rc, log, err = publish_run()
+    login = [i for i, l in enumerate(log) if l.startswith("docker login")]
+    build = [i for i, l in enumerate(log) if l.startswith("docker buildx build")]
+    check(rc == 0 and login and build, f"a publish of a tag the registry lacks does not log in and build ({rc}): {log} {err}")
+    check(login and build and login[0] < build[0], f"publish builds before it logs in: {log}")
+    check(build and "type=registry,name=forge.example/ns/repo-toolchain:abc-main" in log[build[0]], f"publish does not push the build's result to the registry: {log}")
+    rc, log, err = publish_run(held=True)
+    check(rc == 0 and not any(l.startswith(("docker login", "docker buildx build")) for l in log), f"publish of a tag the registry holds logs in or builds ({rc}): {log} {err}")
+    rc, log, err = publish_run(registry_after=OTHER)
+    check(rc != 0, f"publish succeeds when the registry's digest is not the build's: {log}")
 
 
 def main():
