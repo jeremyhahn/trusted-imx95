@@ -181,8 +181,10 @@ for l in rem + add:
 for l in rem:
     if not re.search(r"\btest\b|BRD_SM_CTRL_TEST", l) and not l.rstrip().endswith("\\"):
         sys.exit("removed line carries no test grant: " + l)
-want = norm(" ".join(untest(l) for l in rem if "BRD_SM_CTRL_TEST" not in l and not re.match(r"(LPUART3|PD_M7)\s", l)))
+want = norm(" ".join(untest(l) for l in rem if "BRD_SM_CTRL_TEST" not in l and not re.match(r"PD_M7\s", l)))
 got = norm(" ".join(add))
+if not any(re.fullmatch(r"LPUART3\s+OWNER", l) for l in add) or not any(re.fullmatch(r"LPUART3\s+OWNER, test", l) for l in rem):
+    sys.exit("LPUART3 must keep OWNER and lose only its test key")
 if norm(untest(want)) != norm(got):
     sys.exit("added lines are not the removed lines without the test key: %r vs %r" % (want, got))
 hunks = [l for l in open(sys.argv[1]).read().split("\n") if l.startswith("@@")]

@@ -18,15 +18,16 @@
  BRD_SM_RTC_PCA2131        ALL
  BRD_SM_SENSOR_TEMP_PF09   SET
  BRD_SM_SENSOR_TEMP_PF5301 SET
-@@ -401,7 +399,6 @@
+@@ -401,7 +399,7 @@
  LPTMR1              OWNER
  LPTMR2              OWNER
  LPTPM1              OWNER
 -LPUART3             OWNER, test
++LPUART3             OWNER
  LPUART7             OWNER
  MSGINTR1            OWNER
  MSGINTR2            OWNER
-@@ -409,7 +406,6 @@
+@@ -409,7 +407,6 @@
  MU7_B               OWNER
  MU8_B               OWNER
  MU_ELE5             OWNER

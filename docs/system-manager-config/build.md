@@ -105,7 +105,7 @@ names. This settles most of that survey's §8 item 1 for this device. The M7 is 
 | `M7P` (brings `PERF_M7`, `CLK_M7SYSTICK`) | M7 LM, Resources | Granted: the M7 owns `M7P` |
 | `CLK_M7`, `CLK_BUSM7`, `CLK_ENET` | SM LM (LM0), API, the group changed through the Performance protocol | SM-held; the M7 reaches `CLK_M7` only through `PERF_M7` |
 | `PERF_M7` explicit API line | M7 LM, API | **Not present.** Whether `M7P` ownership alone allows `PERFORMANCE_LEVEL_SET` (PRIV) is #107's; a `PERF_M7` line may be needed |
-| M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned as a `test` resource |
+| M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned (its `test` key dropped by 0002) |
 | Pins `GPIO_IO36`, `GPIO_IO37` (also `GPIO_IO14`, `GPIO_IO15`) | M7 LM, Pins | Granted, all four. What they are wired to on the PRO is unconfirmed |
 | M7 timers, CAN, watchdog, mailboxes (`LPIT1`, `LPTMR1/2`, `LPTPM1`, `CAN_FD1`, `WDOG5`, `MU5_A`, `MU7_B`, `MU8_B`, `IRQSTEER_M7`, `TSTMR2`) | M7 LM, Resources | Granted |
 | EdgeLock mailbox `MU_ELE5` | M7 LM, Resources | Granted |
@@ -174,14 +174,13 @@ commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` a
 | 369 `MAILBOX` | `type=mu, mu=9, test=8, priority=high` | `type=mu, mu=9, priority=high` | [scmi-permissions-survey.md](scmi-permissions-survey.md) §3.1 (`test` keys) |
 | 370-371 `CHANNEL db=0` | `..., type=a2p, \` then `test=default` | **unchanged, kept** | the configuration tool stops with "missing default test channel" without it (the first build of the patch that dropped it failed there) |
 | 381-382 | `BRD_SM_CTRL_TEST ALL`, `BRD_SM_CTRL_TEST_A ALL` | removed | §3.1, §3.2 (drop) |
-| 404 | `LPUART3             OWNER, test` | removed | §3.2 (test key on the M7 UART drops) |
+| 404 | `LPUART3             OWNER, test` | `LPUART3             OWNER` | §3.2 (the `test` key drops, the ownership grant stays) |
 | 412 | `PD_M7               test` | removed | §3.2 (`PD_M7 test` drops) |
 
 What stays, and why:
 
 - `LPUART7` (the M7 console, [m7-resource-map-survey.md](m7-resource-map-survey.md) §6) and every other owned
-  resource. `LPUART3` is not the M7 console on this device, and its only reason in LM1 was the `test` key, so the
-  whole line goes, not only the key. If the owner prefers the narrower edit, the line becomes `LPUART3 OWNER`.
+  resource. `LPUART3` stays owned (`LPUART3 OWNER`): only its `test` key goes, the ownership grant is not touched.
 - `PD_M7` power: the start/stop lines for `msel` 0, 1, 2 are untouched, so the SM still powers and starts the M7.
 - `MU8_B` stays owned: it is an M7 mailbox resource, not a `test` key. The SCMI channel's test MU (8) was expressed
   as `test=8` on the `MAILBOX` line, so it is covered by §3.1 and dropped there. Whether `MU8_B` is needed by the
@@ -204,7 +203,7 @@ key). It stays, because the tool needs a default test channel, so the M7 block s
 
 SM build run: `make system-manager` applied 0001 and 0002, passed the `sm-build.sh` M7 block check and built twice
 with identical output (rc=0, 134 s). `m33_image.bin` SHA-256
-`65bc223faa0c5762679a201c4d2f1bd1e243f34cefe19debb4446b9f79234bc9`, reproducible. The image is a build result only:
+`83d1e019f10f5b285080e83207de1450a3e381346ff6d7c7c280a1c64c878d9b`, reproducible. The image is a build result only:
 it is not signed and not yet booted.
 
 ## 7a. The M7 LM's grants are an allowlist
