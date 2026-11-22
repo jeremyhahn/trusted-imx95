@@ -1493,7 +1493,7 @@ jobs:
             python3 -m pip install --quiet --disable-pip-version-check --target "$yaml_dir" pyyaml
           fi
           YAML_DIR=$yaml_dir python3 -I - <<'PY'
-          import glob, json, os, re, sys
+          import glob, hashlib, json, os, re, sys
 
           if os.environ.get("YAML_DIR"):
               sys.path.insert(0, os.environ["YAML_DIR"])
@@ -1797,7 +1797,7 @@ jobs:
           # default must be a standard image, as (c) asks of every job, and the
           # overflow may also be exactly the list its output names. Any other
           # self-hosted value still needs its waiver.
-          SEL_FILES = {"ci.yml", "ci.yaml"}
+          SEL_FILES = {"ci.yml"}  # CUSTOMIZE (#159): the pinned producer lives in ci.yml only
           # v1.53 (Tenant Agent on trusted-firmware #821): code-review.yml's
           # API-only guard jobs may take exactly [self-hosted, linux, x64,
           # bigdisk] for a same-repository head under a PR event; a fork's
@@ -1963,10 +1963,46 @@ jobs:
               return m.group(1).strip() if m else None
 
 
-          def release_guard(ro, cond):
+          # CUSTOMIZE (#159, Codex security P1 at verify 9): a selection expression is
+          # exempt only where its producer is the template's own. The expression
+          # reads needs.<job>.outputs.<name>; a new workflow, or a ci.yml whose
+          # preflight job differs, could export "release" there. So the exemption
+          # needs (a) the file .github/workflows/ci.yml, (b) every job it reads
+          # outputs from named preflight, defined exactly as pinned here (the
+          # canonical JSON of the job, SHA-256; the step that holds this constant
+          # is left out of the dump, its `run` replaced by a marker), and (c) the
+          # reading job listing that job in its own `needs`.
+          PRODUCER_JOB = "preflight"
+          PRODUCER_SHA256 = "15a8359ee17cb3da023b4fda3983b985dad99c86ac954f27c2bf28bd9ebd438e"
+          SELF_STEP = "Runner labels (ruling 633)"
+
+
+          def producer_digest(spec):
+              steps = [dict(s, run="<this step>") if isinstance(s, dict) and s.get("name") == SELF_STEP else s
+                       for s in spec.get("steps") or []]
+              canon = json.dumps(dict(spec, steps=steps), sort_keys=True, separators=(",", ":"), default=str)
+              return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+          def producer_ok(expr, path, job, jobs):
+              if path.replace("\\", "/") != ".github/workflows/ci.yml":
+                  return False
+              read = set(re.findall(r"needs\.([A-Za-z_][\w-]*)\.outputs\.", expr))
+              spec = jobs.get(job) or {}
+              needs = spec.get("needs")
+              needs = [needs] if isinstance(needs, str) else needs if isinstance(needs, list) else []
+              for p in read:
+                  if p != PRODUCER_JOB or p == job or p not in needs or p not in jobs:
+                      return False
+                  if not isinstance(jobs[p], dict) or producer_digest(jobs[p]) != PRODUCER_SHA256:
+                      return False
+              return True
+
+
+          def release_guard(ro, cond, path, job, jobs):
               text = squash(ro)
               expr = inner(ro)
-              if expr is not None and re.sub(r"\s+", " ", expr) in SELECT_OK:
+              if expr is not None and re.sub(r"\s+", " ", expr) in SELECT_OK and producer_ok(expr, path, job, jobs):
                   return None
               if OPEN in text or text.startswith("group:") or "group:" in text:
                   return ("its runs-on holds an expression that is not one of the template's selection expressions "
@@ -2056,7 +2092,7 @@ jobs:
                   # decision is an allowlist applied to every job, whatever the triggers.
                   # The `# self-hosted:` waiver is never consulted here.
                   if ro is not None:
-                      why = release_guard(ro, cond)
+                      why = release_guard(ro, cond, path, job, doc["jobs"])
                       if why:
                           bad.append(f"{where}: (a) {why}")
                           continue

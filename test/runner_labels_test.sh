@@ -36,7 +36,7 @@ check "PyYAML is importable by the step" 0
 # the step. The default triggers include pull_request, so an untrusted event.
 fixture() {
 	local cond=${2:+"    if: $2"} on=${3:-[push, pull_request]}
-	rm -f "$work"/.github/workflows/*.yml
+	rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 	cat >"$work/.github/workflows/${FIXNAME:-t.yml}" <<EOF
 name: t
 on: $on
@@ -98,12 +98,38 @@ check "an expression inside a list element without a waiver is refused" 1 "(a) i
 fixture "\${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || format('re{0}', 'lease') }}"
 check "a server_url selection that falls to release is refused" 1 "(a) its runs-on holds an expression"
 FIXNAME=ci.yml fixture "\${{ github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk' }}"
-check "the template's own selection expression is accepted" 0 "OK:"
+check "the selection expression with no pinned producer is refused" 1 "(a) its runs-on holds an expression"
+
+# Codex security P1 at verify 9: a selection expression is exempt only where its
+# producer is the template's own preflight job (pinned by digest).
+rm -f "$work"/.github/workflows/*.yml
+cat >"$work/.github/workflows/ci.yaml" <<'EOF'
+name: t
+on: [pull_request]
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      runner_docker: '"release"'
+    steps:
+      - run: true
+  build:
+    needs: [preflight]
+    runs-on: ${{ github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk' }}
+    steps:
+      - run: true
+EOF
+run bash -c "cd '$work' && python3 -I step.py"
+check "a new workflow with its own preflight exporting release is refused" 1 "(a) its runs-on holds an expression"
+rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
+sed 's/Preflight \[changed files/Preflight [altered files/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+run bash -c "cd '$work' && python3 -I step.py"
+check "an altered ci.yml preflight job loses the exemption" 1 "(a) its runs-on holds an expression"
 
 # Codex security P1s at verify 8: the workflow is parsed as YAML, and every
 # release job meets the allowlist whatever the triggers.
 rawfile() { # rawfile <content>: one workflow, run through the step
-	rm -f "$work"/.github/workflows/*.yml
+	rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 	printf '%s\n' "$1" >"$work/.github/workflows/t.yml"
 	run bash -c "cd '$work' && python3 -I step.py"
 }
@@ -153,7 +179,7 @@ jobs:
 check "a runs-on mapping is refused" 1 "neither a string nor a list of strings"
 
 # This repository's own workflows still pass under the stricter evaluator.
-rm -f "$work"/.github/workflows/*.yml
+rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
 cp "$ROOT"/.github/workflows/*.yml "$work/.github/workflows/"
 run bash -c "cd '$work' && python3 -I step.py"
 check "this repository's workflows pass the runner-label check" 0 "OK:"
