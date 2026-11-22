@@ -29,8 +29,25 @@ section 11), written down so the owner can read a working proposal.
   check, run on a build host (bitbake and the network). It fetches the pinned
   layers, writes the build directory's conf from the templates, runs
   `bitbake -p`, then `bitbake -e` for `trusted-imx95-image` and
-  `trusted-imx95-image-debug` and checks that `MACHINE` is the lock's machine.
-  It builds no image. CI does not run it.
+  `trusted-imx95-image-debug`. It checks that the effective `MACHINE` is the
+  lock's, `DISTRO` is `local.conf.template`'s, `INIT_MANAGER` is the distro's,
+  and that `IMAGE_FEATURES` holds none of `debug-tweaks`, `empty-root-password`,
+  `allow-empty-password` or `allow-root-login`. It refuses to overwrite a
+  `build/conf/local.conf` or `bblayers.conf` that differs from the templates,
+  unless `PLATFORM_IMAGE_PARSE_FORCE=1`. It builds no image.
+- `scripts/platform-image-kernel-config.sh`, `make platform-image-kernel-config`:
+  the kernel configuration check, run on a build host after the parse check.
+  In the same build directory it runs `bitbake linux-imx -c configure`, finds
+  the generated `.config` (`B` from `bitbake -e linux-imx`) and checks it
+  against `platform-image/kernel-required.txt`, the one table
+  `test/platform_image_kernel_test.sh` also checks the fragment against.
+  A required `n` holds when the symbol is "is not set" or absent.
+
+Both build-host targets, `make platform-image-parse` (the metadata check) and
+`make platform-image-kernel-config` (the kernel-config check), need bitbake
+and the network, and **CI does not run them yet** (provisional, pending a
+build-host CI runner). Their stub-driven tests, `test/platform_image_parse_test.sh`
+and `test/platform_image_kernel_config_test.sh`, run in `make test`.
 - `test/platform_image_test.sh`, in `make test`: offline checks of the lock,
   the machine name, the distro file, the templates against the lock, and the
   absence of root-login relaxations (`debug-tweaks` and the like) in the image
@@ -60,7 +77,7 @@ line.
 | `IMAGE_FEATURES += "read-only-rootfs"` | production image | hardening-survey section 7; verified-boot-survey section 3.6, question 5 (a) (dm-verity comes later) |
 | `IMAGE_INSTALL = "packagegroup-core-boot ..."` | production image | hardening-survey section 7 (only what exists today; `firmware-ele-imx` comes from the machine) |
 | `SUMMARY` | both images | MISSING: no survey names it |
-| `IMAGE_FEATURES += "debug-tweaks tools-debug package-management"` | debug image | hardening-survey section 7 for the tools and package manager; the root-login behaviour of `debug-tweaks` is MISSING (the survey names debug tools, not login policy) |
+| `IMAGE_FEATURES += "tools-debug package-management"` | debug image | hardening-survey section 7 for the tools and package manager; no `debug-tweaks`: the login policy is not relaxed in the debug image (provisional, pending #14) |
 | `IMAGE_INSTALL:append = " bash gdb strace imx-test"` | debug image | hardening-survey section 7 |
 | `INIT_MANAGER = "systemd"` | distro | hardening-survey section 7 (systemd 259.5 on wrynose) |
 | `DISTRO_FEATURES:remove`, `DISTRO_FEATURES_BACKFILL_CONSIDERED`, `IMAGE_FEATURES:remove` | distro | hardening-survey section 7 (no display stack or audio); removing bluetooth, wifi, nfc and 3g is MISSING |

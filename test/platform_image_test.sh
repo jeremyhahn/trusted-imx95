@@ -129,17 +129,26 @@ rm -rf "$nt/pi"
 # The templates agree with the lock and the distro (POSIX sed on the copies).
 localt=$ROOT/platform-image/conf/local.conf.template
 bblt=$ROOT/platform-image/conf/bblayers.conf.template
-# conf_val FILE KEY: the quoted value of the first non-comment KEY = "v" line.
+# conf_val FILE KEY: the quoted value BitBake gives KEY after the whole file:
+# the last `=` or `:=` wins; else the first `?=` (a later `?=` finds it set);
+# else the first `??=` (the weakest). Fails when KEY is never assigned.
 conf_val() {
-	local l
+	local l strong='' soft='' weak='' hs=0 hf=0 hw=0 op v
 	while IFS= read -r l || [ -n "$l" ]; do
 		case $l in '#'*) continue ;; esac
-		if [[ $l =~ ^$2[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
-			printf '%s\n' "${BASH_REMATCH[1]}"
-			return 0
+		if [[ $l =~ ^$2[[:space:]]*(\?\?=|\?=|:=|=)[[:space:]]*\"([^\"]*)\" ]]; then
+			op=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+			case $op in
+			'=' | ':=') strong=$v hs=1 ;;
+			'?=') [ "$hf" -eq 1 ] || { soft=$v hf=1; } ;;
+			'??=') [ "$hw" -eq 1 ] || { weak=$v hw=1; } ;;
+			esac
 		fi
 	done <"$1"
-	return 1
+	if [ "$hs" -eq 1 ]; then printf '%s\n' "$strong"
+	elif [ "$hf" -eq 1 ]; then printf '%s\n' "$soft"
+	elif [ "$hw" -eq 1 ]; then printf '%s\n' "$weak"
+	else return 1; fi
 }
 # check_local LOCAL DISTRODIR: MACHINE is the lock's, DISTRO names an existing distro conf.
 check_local() {
@@ -149,39 +158,70 @@ check_local() {
 	d=$(conf_val "$1" DISTRO) || return 1
 	[ -n "$d" ] && [ -f "$2/$d.conf" ]
 }
-# check_layers BBLAYERS: every BBLAYERS entry is pinned in the lock, and every
-# pinned path is listed unless it is not a layer of this image.
-notlisted=' sources/bitbake sources/meta-yocto sources/meta-clang sources/base sources/meta-freescale-ml sources/meta-qt6 sources/meta-browser sources/meta-security sources/meta-timesys sources/meta-virtualization sources/meta-nxp-connectivity sources/meta-nxp-demo-experience '
+# The layers the image lists, as full paths under the fetch directory. Each is
+# a pinned path or lies inside one.
+expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-imx/meta-imx-sdk '
+# Pinned paths that are not listed in BBLAYERS, and why:
+#   sources/bitbake                 not a layer: the BitBake tool itself
+#   sources/base                    not a layer: fsl-community-bsp-base, the setup scripts
+#   sources/meta-clang, meta-freescale-ml, meta-qt6, meta-browser, meta-security,
+#   meta-timesys, meta-virtualization, meta-nxp-connectivity, meta-nxp-demo-experience
+#                                   optional, not in LAYERDEPENDS of meta-imx-bsp/meta-imx-sdk
+#                                   (a claim from the manifest's layer set, NOT checked
+#                                   against the pinned conf/layer.conf files: no fetched
+#                                   copy is available offline)
+# sources/meta-yocto is not exempt: its meta-poky sublayer is listed.
+notlisted=' sources/bitbake sources/base sources/meta-clang sources/meta-freescale-ml sources/meta-qt6 sources/meta-browser sources/meta-security sources/meta-timesys sources/meta-virtualization sources/meta-nxp-connectivity sources/meta-nxp-demo-experience '
+# check_layers BBLAYERS: the listed set is exactly expected_layers (full paths),
+# each inside a pinned path; every pinned path is the root of a listed layer or
+# exempt; the repo's platform-image layer is listed.
 check_layers() {
-	local l p listed=' ' pinned=' '
+	local l p q k listed=' ' pinned=' ' repo=0 ok
 	while IFS= read -r l || [ -n "$l" ]; do
 		case $l in '#'*) continue ;; esac
-		if [[ $l =~ \#\#FETCH_DIR\#\#/(sources/[A-Za-z0-9._-]+)/? ]]; then listed="$listed${BASH_REMATCH[1]} "; fi
+		if [[ $l =~ \#\#FETCH_DIR\#\#/(sources/[A-Za-z0-9._/-]+) ]]; then
+			p=${BASH_REMATCH[1]}
+			listed="$listed${p%/} "
+		fi
+		[[ $l =~ ^[[:space:]]*\#\#REPO_DIR\#\#/platform-image[[:space:]]*\\?$ ]] && repo=1
 	done <"$1"
+	[ "$repo" -eq 1 ] || return 1
 	[ "$listed" != ' ' ] || return 1
 	for k in "${!seen[@]}"; do
 		[[ $k =~ ^layer_.+_path$ ]] && pinned="$pinned${seen[$k]} "
 	done
 	for p in $listed; do
-		case $pinned in *" $p "*) ;; *) return 1 ;; esac
+		case $expected_layers in *" $p "*) ;; *) return 1 ;; esac
+		ok=0
+		for q in $pinned; do
+			case $p in "$q" | "$q"/*) ok=1 ;; esac
+		done
+		[ "$ok" -eq 1 ] || return 1
 	done
-	for p in $pinned; do
-		case $listed$notlisted in *" $p "*) ;; *) return 1 ;; esac
+	for p in $expected_layers; do
+		case $listed in *" $p "*) ;; *) return 1 ;; esac
+	done
+	for q in $pinned; do
+		case $notlisted in *" $q "*) continue ;; esac
+		ok=0
+		for p in $listed; do
+			case $p in "$q" | "$q"/*) ok=1 ;; esac
+		done
+		[ "$ok" -eq 1 ] || return 1
 	done
 	return 0
 }
-# check_distro FILE: keeps its base require/include and selects systemd.
+# check_distro FILE: keeps its base require/include and the last effective
+# INIT_MANAGER is systemd.
 check_distro() {
-	local l base=0 sd=0
+	local l base=0
 	while IFS= read -r l || [ -n "$l" ]; do
 		case $l in
 		'#'*) continue ;;
 		require[[:space:]]* | include[[:space:]]*) base=1 ;;
 		esac
-		[[ $l =~ ^INIT_MANAGER[[:space:]]*=[[:space:]]*\"systemd\" ]] && sd=1
-		[[ $l =~ ^DISTRO_FEATURES[[:space:]]*[+.:a-z]*=.*systemd ]] && [[ $l != *remove* ]] && sd=1
 	done <"$1"
-	[ "$base" -eq 1 ] && [ "$sd" -eq 1 ]
+	[ "$base" -eq 1 ] && [ "$(conf_val "$1" INIT_MANAGER || true)" = systemd ]
 }
 # check_target RECIPEDIR NAME FILE...: the recipe exists and every FILE names it.
 check_target() {
@@ -209,6 +249,32 @@ neg "a removed layer entry is caught" check_layers "$nt/bbl.removed"
 sed 's|^\(  ##FETCH_DIR##/sources/meta-arm/meta-arm \\\)$|\1\
   ##FETCH_DIR##/sources/meta-unpinned \\|' "$bblt" >"$nt/bbl.extra"
 neg "an unpinned layer entry is caught" check_layers "$nt/bbl.extra"
+sed '/sources\/meta-imx\/meta-imx-sdk/d' "$bblt" >"$nt/bbl.nosdk"
+neg "a removed meta-imx-sdk entry is caught while meta-imx-bsp stays" check_layers "$nt/bbl.nosdk"
+sed '/sources\/meta-yocto\/meta-poky/d' "$bblt" >"$nt/bbl.nopoky"
+neg "a removed meta-poky entry is caught" check_layers "$nt/bbl.nopoky"
+sed '/##REPO_DIR##\/platform-image/d' "$bblt" >"$nt/bbl.norepo"
+neg "a removed ##REPO_DIR##/platform-image entry is caught" check_layers "$nt/bbl.norepo"
+sed 's|##FETCH_DIR##/sources/meta-imx/meta-imx-sdk|##FETCH_DIR##/sources/meta-imx/meta-other|' "$bblt" >"$nt/bbl.other"
+neg "a sibling path under a pinned layer is caught" check_layers "$nt/bbl.other"
+# BitBake semantics: a later assignment wins over an earlier one.
+conf_val_is() { [ "$(conf_val "$1" "$2" || echo none)" = "$3" ]; }
+cp "$localt" "$nt/local.append.machine"
+printf 'MACHINE = "other"\n' >>"$nt/local.append.machine"
+neg "an appended MACHINE = other is caught" check_local "$nt/local.append.machine" "$ROOT/platform-image/conf/distro"
+cp "$localt" "$nt/local.append.distro"
+printf 'DISTRO = "other"\n' >>"$nt/local.append.distro"
+neg "an appended DISTRO = other is caught" check_local "$nt/local.append.distro" "$ROOT/platform-image/conf/distro"
+cp "$distro" "$nt/distro.append.init"
+printf 'INIT_MANAGER = "sysvinit"\n' >>"$nt/distro.append.init"
+neg "an appended INIT_MANAGER = sysvinit is caught" check_distro "$nt/distro.append.init"
+printf 'A = "1"\nA ?= "2"\nA = "3"\nB ??= "w"\nB ?= "s"\nC ??= "w"\nC = "x"\nD = "1"\nD := "2"\n' >"$nt/sem.conf"
+expect "conf_val: a later = wins over an earlier one" conf_val_is "$nt/sem.conf" A 3
+expect "conf_val: ?= beats ??= whatever the order" conf_val_is "$nt/sem.conf" B s
+expect "conf_val: = beats ??=" conf_val_is "$nt/sem.conf" C x
+expect "conf_val: a later := wins over =" conf_val_is "$nt/sem.conf" D 2
+printf 'M = "1"\nM ?= "2"\n' >"$nt/sem2.conf"
+expect "conf_val: a later ?= does not override a set value" conf_val_is "$nt/sem2.conf" M 1
 expect "the distro keeps its base require and selects systemd" check_distro "$distro"
 sed '/^require /d' "$distro" >"$nt/distro.norequire"
 neg "a dropped require is caught" check_distro "$nt/distro.norequire"

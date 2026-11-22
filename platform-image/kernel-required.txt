@@ -1,0 +1,38 @@
+# The required kernel symbol=value set (proposed, pending owner approval, issue #14;
+# hardening-survey section 10, Q1 (c) and Q5 (b)). One SYMBOL=VALUE per line, no
+# CONFIG_ prefix; n means "not set". The one table both checks read, so they
+# cannot drift apart:
+#   test/platform_image_kernel_test.sh        the fragment hardening.cfg (offline, in make test)
+#   scripts/platform-image-kernel-config.sh   the .config bitbake generates (build host)
+# MAGIC_SYSRQ_DEFAULT_ENABLE is a hex symbol: 0xb0 = sync 0x10 + remount-ro 0x20 + reboot 0x80.
+HARDENED_USERCOPY=y
+SLAB_FREELIST_RANDOM=y
+SLAB_FREELIST_HARDENED=y
+SLAB_BUCKETS=y
+RANDOM_KMALLOC_CACHES=y
+SLAB_MERGE_DEFAULT=n
+SHUFFLE_PAGE_ALLOCATOR=y
+LIST_HARDENED=y
+BUG_ON_DATA_CORRUPTION=y
+SCHED_STACK_END_CHECK=y
+FORTIFY_SOURCE=y
+SECURITY_DMESG_RESTRICT=y
+RANDOMIZE_KSTACK_OFFSET_DEFAULT=y
+INIT_ON_ALLOC_DEFAULT_ON=y
+SYN_COOKIES=y
+LDISC_AUTOLOAD=n
+LEGACY_PTYS=n
+LEGACY_TIOCSTI=n
+PROC_MEM_NO_FORCE=y
+DEBUG_WX=y
+DEFAULT_MMAP_MIN_ADDR=65536
+ARM64_SW_TTBR0_PAN=y
+ZERO_CALL_USED_REGS=y
+DEVMEM=n
+DEVPORT=n
+KEXEC=n
+KEXEC_FILE=n
+CRASH_DUMP=n
+PANIC_ON_OOPS=y
+PANIC_TIMEOUT=-1
+MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0

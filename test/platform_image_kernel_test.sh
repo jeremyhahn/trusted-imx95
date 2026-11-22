@@ -15,18 +15,16 @@ layer=$ROOT/platform-image/conf/layer.conf
 out_re='^(MODULES|MODULE_SIG[A-Z0-9_]*|SECURITY_LOCKDOWN_LSM[A-Z0-9_]*|LOCK_DOWN_KERNEL_FORCE_[A-Z0-9_]*|COMPAT|SHADOW_CALL_STACK|CFI_CLANG|ARM64_BTI_KERNEL|ARM64_MTE|KASAN_HW_TAGS|UNWIND_PATCH_PAC_INTO_SCS|DEBUG_RODATA|DEBUG_CREDENTIALS|REFCOUNT_FULL|RANDOM_TRUST_CPU|RANDOM_TRUST_BOOTLOADER|DEBUG_SET_MODULE_RONX|PAGE_POISONING_ZERO)$'
 val_re='^(y|n|-?[0-9]+|0x[0-9a-fA-F]+)$'
 
-# The complete required symbol=value set: every assignment the fragment makes.
-# MAGIC_SYSRQ_DEFAULT_ENABLE is a hex symbol: 0xb0 = sync 0x10 + remount-ro 0x20 + reboot 0x80.
-REQUIRED=(
-	HARDENED_USERCOPY=y SLAB_FREELIST_RANDOM=y SLAB_FREELIST_HARDENED=y SLAB_BUCKETS=y
-	RANDOM_KMALLOC_CACHES=y SLAB_MERGE_DEFAULT=n SHUFFLE_PAGE_ALLOCATOR=y LIST_HARDENED=y
-	BUG_ON_DATA_CORRUPTION=y SCHED_STACK_END_CHECK=y FORTIFY_SOURCE=y SECURITY_DMESG_RESTRICT=y
-	RANDOMIZE_KSTACK_OFFSET_DEFAULT=y INIT_ON_ALLOC_DEFAULT_ON=y SYN_COOKIES=y LDISC_AUTOLOAD=n
-	LEGACY_PTYS=n LEGACY_TIOCSTI=n PROC_MEM_NO_FORCE=y DEBUG_WX=y DEFAULT_MMAP_MIN_ADDR=65536
-	ARM64_SW_TTBR0_PAN=y ZERO_CALL_USED_REGS=y
-	DEVMEM=n DEVPORT=n KEXEC=n KEXEC_FILE=n CRASH_DUMP=n
-	PANIC_ON_OOPS=y PANIC_TIMEOUT=-1 MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0
-)
+# The complete required symbol=value set: every assignment the fragment makes,
+# read from the table scripts/platform-image-kernel-config.sh checks the
+# generated .config against, so the two cannot drift apart.
+reqfile=$ROOT/platform-image/kernel-required.txt
+REQUIRED=()
+while IFS= read -r l || [ -n "$l" ]; do
+	case $l in '' | '#'*) continue ;; esac
+	REQUIRED+=("$l")
+done <"$reqfile"
+expect "the shared required table has entries" test "${#REQUIRED[@]}" -gt 20
 
 # symbols FILE: prints "SYMBOL VALUE" per non-comment, non-blank line (VALUE n
 # for "# CONFIG_X is not set"), or "BAD <line>" for a malformed one.

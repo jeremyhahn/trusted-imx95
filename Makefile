@@ -47,7 +47,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	platform-image-fetch platform-image-parse
+	platform-image-fetch platform-image-parse platform-image-kernel-config
 
 help: ## List the targets
 	@echo "Targets:"
@@ -182,6 +182,9 @@ platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins,
 
 platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake -p, bitbake -e for trusted-imx95-image and trusted-imx95-image-debug (needs bitbake and network; not in CI)
 	@scripts/platform-image-parse.sh
+
+platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
+	@scripts/platform-image-kernel-config.sh
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
