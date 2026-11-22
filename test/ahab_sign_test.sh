@@ -72,6 +72,14 @@ yaml_val() {
 		esac
 	done <"$ROOT/scripts/ahab/m7-container.yaml"
 }
+# field_eq <key> <parsed> <yaml>: exact equality; addresses compare numerically
+# (SPSDK prints 0x0 for 0x00000000), core_id as an exact string.
+field_eq() {
+	case "$1" in
+	core_id) [ "$2" = "$3" ] ;;
+	*) [[ "$2" =~ ^0x[0-9a-f]+$ && "$3" =~ ^0x[0-9a-f]+$ ]] && [ $(($2)) -eq $(($3)) ] ;;
+	esac
+}
 m7out="$TMP_ROOT/m7out"
 mkdir -p "$m7out"
 run env AHAB_OUT_DIR="$m7out" make -C "$ROOT" --no-print-directory ahab-m7-test
@@ -81,10 +89,33 @@ m7bin="$m7out/m7-container.bin"
 if [ -s "$m7bin" ]; then
 	for k in core_id load_address entry_point; do
 		want=$(yaml_val "$k")
-		# Compare numerically for addresses: SPSDK prints 0x0 for 0x00000000.
-		case "$k" in core_id) wantv=$want ;; *) wantv=$(printf '0x%x' "$want") ;; esac
-		check "(e) the parsed $k is $wantv, as in m7-container.yaml" 0 "  $k: $wantv"
+		got=""
+		found=0
+		while IFS= read -r l; do
+			l=${l#"${l%%[![:space:]]*}"}
+			case "$l" in
+			"$k:"*) got=${l#"$k:"}; got=${got//[\' ]/}; got=${got,,}; found=1; break ;;
+			esac
+		done <<<"$OUT"
+		if [ "$found" = 0 ]; then
+			fail "(e) the parsed $k is missing from the nxpimage ahab parse output" "m7-container.yaml: $want"
+		elif field_eq "$k" "$got" "$want"; then
+			pass "(e) the parsed $k is exactly $got, as in m7-container.yaml"
+		else
+			fail "(e) the parsed $k differs from m7-container.yaml" "parsed: '$got' yaml: '$want'"
+		fi
 	done
+	# Self-test of the comparison: a trailing extra digit must not match.
+	if field_eq entry_point 0x303c00000 0x303c0000; then
+		fail "(e) self-test: entry_point 0x303c00000 matched 0x303c0000"
+	else
+		pass "(e) self-test: entry_point 0x303c00000 does not match 0x303c0000"
+	fi
+	if field_eq core_id cortex-m70 cortex-m7; then
+		fail "(e) self-test: core_id cortex-m70 matched cortex-m7"
+	else
+		pass "(e) self-test: core_id cortex-m70 does not match cortex-m7"
+	fi
 	run "$SIGN" verify "$m7bin"
 	check "(e) the handed-back M7 container passes nxpimage ahab verify" 0 "verify: OK"
 	flip "$m7bin" "$TMP_ROOT/m7-payload.bin" $(($(stat -c %s "$m7bin") - 1))
