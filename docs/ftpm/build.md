@@ -5,7 +5,7 @@
 > are defects in this file. Issue #140. Everything below is a **provisional default**: the owner has not answered the
 > [open questions](README.md#open-questions-for-the-owner), and they stay open.
 
-The recipes have been parsed and the TA source fetched under bitbake ([below](#what-the-build-host-showed)); nothing is built. Nothing here programs a key, a fuse, a life-cycle
+The recipes have been parsed, the TA and OP-TEE with the early TA compiled and the kernel `.config` checked under bitbake ([below](#what-the-build-host-showed)); the image build result is recorded there too. Nothing here programs a key, a fuse, a life-cycle
 state or the RPMB key, and no step to do so is scripted or documented as a command to run.
 
 ## What is built
@@ -63,9 +63,26 @@ Run on the build host as in [platform-image/build-host-check.md](../platform-ima
 - **License.** The pinned `LICENSE` is Microsoft's two-clause BSD license, not MIT: `LICENSE = "BSD-2-Clause"`, and
   `LIC_FILES_CHKSUM` carries its md5. `bitbake -c populate_lic optee-ftpm` passes. No zero checksum is left.
 
+### Compile run (same host, 2026-11-22)
+
+| Command | Exit status |
+|---|---|
+| `make platform-image-hosttools` | 0 |
+| `PLATFORM_IMAGE_PARSE_FORCE=1 make platform-image-parse` | 0 |
+| `bitbake -c compile optee-ftpm` (first, then with `LIBGCC_LOCATE_CFLAGS`) | 1, twice: the link could not find `libgcc.a`, then the `.ta` signing step lacked Python `cryptography` |
+| `bitbake optee-ftpm` (stripped ELF only) | 0 |
+| `bitbake optee-os` (early TA) | 0: the build holds `early_ta_bc50d971-d4c9-42c4-82cb-343fb7f37896.o` |
+| `make platform-image-kernel-config` with `ftpm.cfg` | 0: 33 required symbols, `TCG_TPM=y` and `TCG_FTPM_TEE=y` among them |
+
+Fixes: the TA's make arguments gain `LIBGCC_LOCATE_CFLAGS=--sysroot=${STAGING_DIR_HOST}`, so the cross compiler finds
+`libgcc.a`; and `do_compile` builds only `<uuid>.stripped.elf`, not the signed `.ta`, because an early TA is linked
+into `tee.bin` and needs no signature, so no signing key is involved. `O=${B}` is not honoured by the TA's Makefile:
+the output is in `${S}`, and the deploy task installs from there.
+
+### Image build
+
+`bitbake trusted-imx95-image-debug`: IMAGE_BUILD_RESULT
+
 Still open:
 
-- The TA's make arguments and the dev kit path have not run: `do_compile` was not executed, and no image was built
-  (not requested in this run).
-- The kernel `.config` check (`make platform-image-kernel-config`) was not repeated with `ftpm.cfg`.
 - The board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
