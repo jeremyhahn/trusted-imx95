@@ -7,7 +7,7 @@ DISTRO = "trusted-imx95"
 
 # NXP's EULA for the i.MX firmware and GPU userland blobs is the owner's to
 # accept (#14); it is left unset here.
-# ACCEPT_FSL_EULA = "1"
+# (ACCEPT_FSL_EULA stays unset.)
 
 PACKAGE_CLASSES = "package_ipk"
 # Images are built unsigned. AHAB signing is a separate step after the build.

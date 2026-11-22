@@ -1,0 +1,9 @@
+# Disk layout of the FRDM-IMX95-PRO image (provisional, SPEC row ftpm, #140).
+# The boot container is written to its own raw offset by the boot-container
+# flow, not here. The root file system stays read-only; /data is a separate
+# writable partition, the home of the fTPM NV (OP-TEE REE-FS storage), mounted
+# before tee-supplicant starts (recipes-security/optee/trusted-imx95-tee-nv).
+part / --source rootfs --fstype=ext4 --label root --part-name root --align 8192 --fixed-size 1024M
+part /data --fstype=ext4 --label tee-data --part-name tee-data --fixed-size 64M
+
+bootloader --ptable gpt

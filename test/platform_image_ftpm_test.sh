@@ -81,6 +81,26 @@ expect "no floating revision (no AUTOREV)" none AUTOREV "$ftpm_bb"
 expect "optee-os: early TAs on" ncstr "$os_app" 'CFG_EARLY_TA=y'
 expect "optee-os: EARLY_TA_PATHS names the fTPM TA UUID" nc "$os_app" 'EARLY_TA_PATHS=.*\$\{FTPM_TA_UUID\}'
 expect "the fTPM TA UUID is the one the secure-world doc gives" ncstr "$os_app" 'FTPM_TA_UUID = "bc50d971-d4c9-42c4-82cb-343fb7f37896"'
+expect "optee-os: the PKCS#11 TA is an in-tree early TA (as secure-world-build.sh)" ncstr "$os_app" 'CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee'
+
+# tee-supplicant and the persistent NV (SPEC row ftpm, #140).
+nv=$odir/trusted-imx95-tee-nv_1.0.bb
+nvf=$odir/trusted-imx95-tee-nv
+wks=$ROOT/platform-image/files/wic/trusted-imx95.wks
+expect "image installs the OP-TEE client (tee-supplicant)" nc "$img" 'IMAGE_INSTALL:append = ".* optee-client( |")'
+expect "image installs the NV recipe" nc "$img" 'IMAGE_INSTALL:append = ".* trusted-imx95-tee-nv( |")'
+expect "the NV recipe enables tee-supplicant at boot" ncstr "$nv" 'basic.target.wants/tee-supplicant@teepriv0.service'
+expect "the supplicant stores under /data/tee" ncstr "$nvf/tee-supplicant" '--fs-parent-path=/data/tee'
+expect "data.mount mounts on /data" ncstr "$nvf/data.mount" 'Where=/data'
+expect "data.mount names the tee-data partition" ncstr "$nvf/data.mount" 'What=/dev/disk/by-partlabel/tee-data'
+expect "tee-supplicant waits for the /data mount" ncstr "$nvf/10-nv.conf" 'RequiresMountsFor=/data'
+expect "the wks has a writable tee-data partition" ncstr "$wks" '--part-name tee-data'
+expect "the image uses that wks" ncstr "$img" 'WKS_FILE = "trusted-imx95.wks"'
+expect "the root file system stays read-only" ncstr "$img" 'IMAGE_FEATURES += "read-only-rootfs"'
+
+# The EULA is the owner's: not accepted, and imx-boot (-> imx-m7-demos) is not an image dependency.
+expect "the image drops imx-boot from the wks dependencies" ncstr "$img" 'WKS_FILE_DEPENDS:remove = "imx-boot"'
+expect "ACCEPT_FSL_EULA is not set in the layer" tree_none 'ACCEPT_FSL_EULA = ' 'platform-image/conf'
 expect "REE FS on" ncstr "$flags" 'CFG_REE_FS=y'
 expect "RPMB FS off" ncstr "$flags" 'CFG_RPMB_FS=n'
 expect "optee-os takes the shared flags" ncstr "$os_app" 'optee-ftpm-flags.inc'

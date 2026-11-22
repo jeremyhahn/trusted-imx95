@@ -1,0 +1,11 @@
+[Unit]
+Description=Persistent data (OP-TEE REE-FS storage for the fTPM NV)
+
+[Mount]
+What=/dev/disk/by-partlabel/tee-data
+Where=/data
+Type=ext4
+Options=rw,nosuid,nodev,noexec
+
+[Install]
+WantedBy=local-fs.target

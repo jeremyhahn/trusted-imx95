@@ -30,3 +30,17 @@ IMAGE_FEATURES += "read-only-rootfs"
 # hardening-survey section 7: add only the boot packagegroup (kernel, systemd
 # through INIT_MANAGER); the machine adds firmware-ele-imx.
 IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"
+
+# SPEC row ftpm, issue #140 (provisional): the BSP's OP-TEE client with
+# tee-supplicant, started at boot, and the persistent /data partition its
+# REE-FS storage (the fTPM NV) lives on, mounted before it starts. The root file
+# system stays read-only.
+IMAGE_INSTALL:append = " optee-client trusted-imx95-tee-nv"
+WKS_FILE = "trusted-imx95.wks"
+IMAGE_FSTYPES += "wic"
+# The Freescale EULA is the owner's to accept (docs/ftpm/build.md), so the image
+# does not accept it. NXP's wic flow pulls in imx-boot, and with it
+# imx-m7-demos, which needs the EULA. This image's wks has no boot container
+# (the boot-container flow of this repository writes it, with the M7 image), so
+# imx-boot is not a dependency of the image.
+WKS_FILE_DEPENDS:remove = "imx-boot"

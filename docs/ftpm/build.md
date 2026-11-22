@@ -14,7 +14,7 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
 |---|---|---|
 | Kernel driver | `platform-image/recipes-kernel/linux/files/ftpm.cfg`, listed in the `linux-imx` bbappend | `CONFIG_TCG_TPM=y` and `CONFIG_TCG_FTPM_TEE=y`, built in, so `/dev/tpmrm0` exists once `tee-supplicant` has started. Both symbols are in `platform-image/kernel-required.txt` |
 | TA recipe | `platform-image/recipes-security/optee/optee-ftpm_4.10.0.bb` | `optee_ftpm` 4.10.0 on `ms-tpm-20-ref`, at the commits [secure-world/build.md](../secure-world/build.md#the-pins) pins and `secure-world/bsp.lock` holds; no floating revision |
-| OP-TEE OS | `optee-os_%.bbappend` and `optee-os-tadevkit_%.bbappend`, with the shared `optee-ftpm-flags.inc` | `CFG_EARLY_TA=y` with the fTPM TA (UUID in the bbappend) in `EARLY_TA_PATHS`, `CFG_REE_FS=y`, `CFG_RPMB_FS=n` |
+| OP-TEE OS | `optee-os_%.bbappend` and `optee-os-tadevkit_%.bbappend`, with the shared `optee-ftpm-flags.inc` | `CFG_EARLY_TA=y` with the fTPM TA (UUID in the bbappend) in `EARLY_TA_PATHS` and the PKCS#11 TA in `CFG_IN_TREE_EARLY_TAS`, `CFG_REE_FS=y`, `CFG_RPMB_FS=n` |
 | Debug image | `trusted-imx95-image-debug.bb` | tpm2-tools; the production image does not carry it |
 
 ## The defaults, each provisional
@@ -22,7 +22,7 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
 1. **NV storage on the OP-TEE REE file system, RPMB off** ([question 1](README.md#open-questions-for-the-owner)).
    The TA sets `CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE`. No RPMB key option is set anywhere in the
    layer. The limits: **no rollback protection** (root on Linux can restore an older copy of the files), and
-   **the NV is lost on a rootfs reflash**, which destroys the TPM's seeds and with them the EK.
+   **the NV is lost if the `tee-data` partition (`/data/tee`) is wiped or the disk is flashed whole**, which destroys the TPM's seeds and with them the EK.
 2. **The TA is `optee_ftpm` 4.10.0** (ms-tpm-20-ref), as an early TA linked into `tee.bin`
    ([question 2](README.md#open-questions-for-the-owner)).
 3. **The kernel driver is built in**, not a module.
@@ -81,9 +81,21 @@ the output is in `${S}`, and the deploy task installs from there.
 
 ### Image build
 
-`bitbake trusted-imx95-image-debug`: exit 1 after 2415 tasks, one failed. The kernel (with `ftpm.cfg`) compiled. The failure
-is `imx-m7-demos` `do_unpack`: the recipe needs the Freescale EULA accepted (`ACCEPT_FSL_EULA`), a licence decision that
-is the owner's, not set here. The image is not built; the rest is open until that is decided.
+`bitbake trusted-imx95-image-debug` first stopped (exit 1) at `imx-m7-demos` `do_unpack`: that recipe needs the Freescale
+EULA accepted (`ACCEPT_FSL_EULA`). **Accepting it awaits the owner**; the layer does not set it. NXP's wic flow pulled
+`imx-boot`, and with it `imx-m7-demos`, in through `WKS_FILE_DEPENDS`. The image now uses its own wks
+(`platform-image/files/wic/trusted-imx95.wks`, no boot container: this repository's boot-container flow writes that,
+with the M7 image) and removes `imx-boot` from `WKS_FILE_DEPENDS`, so the EULA gate is not reached. The wks was first
+not found (exit 1 at `do_image_wic`): BitBake looks in `<layer>/files/wic`, not `<layer>/wic`.
+
+| Command | Exit status |
+|---|---|
+| `bitbake optee-os` (fTPM and PKCS#11 early TAs) | 0: `early_ta_` objects for `bc50d971-…` and `fd02c9da-…` are in the build |
+| `bitbake trusted-imx95-image-debug` | 0 (4698 tasks), with `optee-client`, `trusted-imx95-tee-nv` and the wic image |
+
+`tee-supplicant` is enabled at boot by `trusted-imx95-tee-nv`, which also mounts the `tee-data` partition on `/data`
+(its REE-FS storage is `/data/tee`) before the supplicant starts; the NV therefore survives a reboot
+([README](README.md#nv-storage)). Not run on a board.
 
 Still open:
 
