@@ -51,7 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 help: ## List the targets
 	@echo "Targets:"
 	@while IFS= read -r line; do \
-		if [[ "$$line" =~ ^([a-z-]+):.*\#\#\ (.*)$$ ]]; then \
+		if [[ "$$line" =~ ^([a-z0-9-]+):.*\#\#\ (.*)$$ ]]; then \
 			printf '  %-24s %s\n' "$${BASH_REMATCH[1]}" "$${BASH_REMATCH[2]}"; \
 		fi; \
 	done < $(firstword $(MAKEFILE_LIST))
