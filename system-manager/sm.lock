@@ -21,13 +21,13 @@ sm_config_file=configs/other/mx95frdm-pro.cfg
 sm_config_sha256=37d8f4c2b324cdc8dafb1de3f3f741850c86ca2e842880b9fdbdc16db72c1d63
 
 # This repository's delta (system-manager/patches/, applied in name order):
-# the M7 LM's fault reactions fail closed. PROPOSED, pending owner approval
-# (#13). sm_patch_sha256 is the SHA-256 of the patches concatenated in name
-# order (one patch today: its own SHA-256); sm_patched_config_sha256 is the
-# SHA-256 of the configuration after they apply. The build fails when either
-# differs.
-sm_patch_sha256=6097602db98638e9c1bf5082f0a4a153a527f55b1859f441f584b2b9556652d3
-sm_patched_config_sha256=05ae8b66f9d7399df570064ab5c5ebb8754d8e1556b1473c92359cc946a940e9
+# 0001 the M7 LM's fault reactions fail closed, 0002 the M7 LM's test-only
+# grants dropped. PROVISIONAL, PROPOSED, pending owner approval (#13).
+# sm_patch_sha256 is the SHA-256 of the patches concatenated in name order;
+# sm_patched_config_sha256 is the SHA-256 of the configuration after they
+# apply. The build fails when either differs.
+sm_patch_sha256=6c30a79a1b5bc119a32de6b700bec37e80a2435da70240a5f3564d5d299c0554
+sm_patched_config_sha256=e2adf9bd074cb839645d18835126ac99d32ddcb5268ed3669adf2cbffb68c176
 
 # The monitor mode meta-imx's recipe passes (SYSTEM_MANAGER_MONITOR_MODE ??= 2).
 # Production's choice is open (sm-build-survey.md section 10, question 4).

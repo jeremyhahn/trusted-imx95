@@ -78,6 +78,29 @@ out=$(cd "$out" && pwd -P)
 start=$SECONDS
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 
+# m7_clean <config>: the M7 LM's block of the (patched) configuration, from its
+# "LM<n> ... name="M7"" line to the next LM line, holds no `test` key and no
+# BRD_SM_CTRL_TEST* grant (the survey's production rule; the delta in
+# system-manager/patches/0002). No M7 block is an error too.
+m7_clean() {
+	local l in=0 seen=0 bad=""
+	while IFS= read -r l; do
+		l=${l%%#*}
+		if [[ $l =~ ^LM[0-9]+[[:space:]] ]]; then
+			in=0
+			if [[ $l == *'name="M7"'* ]]; then in=1; seen=1; fi
+			continue
+		fi
+		[ "$in" = 1 ] || continue
+		if [[ $l =~ (^|[[:space:],])test([=,[:space:]]|$) ]] || [[ $l == *BRD_SM_CTRL_TEST* ]]; then
+			bad=$l
+			break
+		fi
+	done <"$1"
+	[ "$seen" = 1 ] || die "no M7 LM block in ${1##*/}"
+	[ -z "$bad" ] || die "the M7 LM block of ${1##*/} still holds a test grant: $bad"
+}
+
 # The repository's patches of the configuration, in name order: their
 # concatenation must match the lock before anything is downloaded.
 patches_dir=$(cd "$(dirname "$lock")" && pwd -P)/patches
@@ -148,6 +171,7 @@ build() {
 	got=$(sha "$tree/${pin[sm_config_file]}")
 	[ "$got" = "${pin[sm_patched_config_sha256]}" ] ||
 		die "patched ${pin[sm_config_file]} SHA-256 is $got, the lock pins ${pin[sm_patched_config_sha256]}"
+	m7_clean "$tree/${pin[sm_config_file]}"
 	if ! (cd "$tree" && export SOURCE_DATE_EPOCH="$epoch" SM_CROSS_COMPILE="$cross" PATH="$out/shim:$PATH" &&
 		make config="${pin[sm_config]}" cfg &&
 		make -j"$jobs" config="${pin[sm_config]}" M="${pin[sm_monitor_mode]}" all) >"$log" 2>&1; then

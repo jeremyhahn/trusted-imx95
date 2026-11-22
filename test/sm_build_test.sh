@@ -24,7 +24,7 @@ tc_sha=$(sha256sum "$TMP_ROOT/tc.tar.xz" | cut -d' ' -f1)
 # FAKE_FAIL fails the build.
 repo="$TMP_ROOT/imx-sm"
 mkdir -p "$repo/configs/other"
-echo "board=fake" >"$repo/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake\n' >"$repo/configs/other/fakepro.cfg"
 # shellcheck disable=SC2016 # make's $(...), not the shell's
 printf '%s\n' 'cfg:' \
 	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h' \
@@ -44,8 +44,8 @@ cfg_sha=$(sha256sum "$repo/configs/other/fakepro.cfg" | cut -d' ' -f1)
 # The repository's patch, faked: one patch beside the lock, changing the fake
 # configuration. patched_sha is the configuration after it applies.
 mkdir -p "$TMP_ROOT/patches" "$TMP_ROOT/pa/configs/other" "$TMP_ROOT/pb/configs/other"
-echo "board=fake" >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
-echo "board=fake-closed" >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake\n' >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake-closed\n' >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
 (cd "$TMP_ROOT" && diff -u pa/configs/other/fakepro.cfg pb/configs/other/fakepro.cfg |
 	{ read -r _; read -r _; echo "--- a/configs/other/fakepro.cfg"; echo "+++ b/configs/other/fakepro.cfg"; cat; }) \
 	>"$TMP_ROOT/patches/0001-fake.patch" || true
@@ -131,7 +131,7 @@ head -n -1 "$TMP_ROOT/patches/0001-fake.patch" >"$TMP_ROOT/patches/x" && mv "$TM
 # matches the lock.
 patch_file="$ROOT/system-manager/patches/0001-m7-faults-fail-closed.patch"
 expect "the committed patch matches the lock's patch digest" \
-	has_line "sm_patch_sha256=$(sha256sum "$patch_file" | cut -d' ' -f1)" "$ROOT/system-manager/sm.lock"
+	has_line "sm_patch_sha256=$(cat "$ROOT"/system-manager/patches/*.patch | sha256sum | cut -d' ' -f1)" "$ROOT/system-manager/sm.lock"
 run python3 -I -c '
 import re, sys
 want = {"FAULT_M7_LOCKUP", "FAULT_M7_RESET", "FAULT_SW1", "FAULT_WDOG5"}
@@ -152,6 +152,60 @@ if any(v not in ("sys_reset", "sys_shutdown") for v in new.values()):
 print("patch touches only M7 faults")
 ' "$patch_file"
 check "the committed patch changes only the M7 LM's fault reactions" 0 "patch touches only M7 faults"
+
+# 0002: only test keys and BRD_SM_CTRL_TEST* grants of the M7 LM leave.
+patch2="$ROOT/system-manager/patches/0002-m7-no-test-grants.patch"
+run python3 -I -c '
+import re, sys
+def norm(s):
+    return re.sub(r"\s+", " ", s.replace("\\", " ")).strip().rstrip(",")
+def untest(s):
+    return re.sub(r",? ?\btest(=\w+)?\b,?", lambda m: "," if m[0].startswith(",") and m[0].endswith(",") else "", s)
+rem, add = [], []
+for l in open(sys.argv[1]).read().split("\n"):
+    if l.startswith(("---", "+++", "@@", " ")) or not l:
+        continue
+    (rem if l[0] == "-" else add).append(l[1:])
+for l in rem + add:
+    if re.match(r"(FAULT_|SYS\b|LMM_2\b)", l):
+        sys.exit("touches a Faults, SYS or LMM_2 line: " + l)
+for l in rem:
+    if not re.search(r"\btest\b|BRD_SM_CTRL_TEST", l) and not l.rstrip().endswith("\\"):
+        sys.exit("removed line carries no test grant: " + l)
+want = norm(" ".join(untest(l) for l in rem if "BRD_SM_CTRL_TEST" not in l and not re.match(r"(LPUART3|PD_M7)\s", l)))
+got = norm(" ".join(add))
+if norm(untest(want)) != norm(got):
+    sys.exit("added lines are not the removed lines without the test key: %r vs %r" % (want, got))
+hunks = [l for l in open(sys.argv[1]).read().split("\n") if l.startswith("@@")]
+for h in hunks:
+    s = int(re.match(r"@@ -(\d+)", h)[1])
+    if s < 366 or s > 410:
+        sys.exit("hunk outside the M7 LM block: " + h)
+print("patch 0002 touches only M7 test grants")
+' "$patch2"
+check "0002 takes only test keys and test grants out of the M7 LM" 0 "patch 0002 touches only M7 test grants"
+
+# The M7 block check of sm-build.sh, on a fake patched configuration.
+mkdir -p "$TMP_ROOT/m7"
+printf 'LM0 name="SM"\ntest\nLM1 name="M7"\nX OWNER\n# test\nLM2 name="AP"\nY OWNER, test\n' >"$TMP_ROOT/m7/ok.cfg"
+printf 'LM1 name="M7"\nX OWNER, test\n' >"$TMP_ROOT/m7/bad1.cfg"
+printf 'LM1 name="M7"\nBRD_SM_CTRL_TEST_A ALL\n' >"$TMP_ROOT/m7/bad2.cfg"
+printf 'LM1 name="M7"\nCHANNEL a, \\\n   test=default\n' >"$TMP_ROOT/m7/bad3.cfg"
+printf 'LM2 name="AP"\n' >"$TMP_ROOT/m7/none.cfg"
+python3 -I -c '
+import re, sys
+s = open(sys.argv[1]).read()
+sys.stdout.write(re.search(r"^m7_clean\(\) \{.*?^\}\n", s, re.S | re.M)[0])
+' "$sm" >"$TMP_ROOT/m7/fn.sh"
+m7run() { bash -c 'die() { echo "$*" >&2; exit 1; }; . "$1"; m7_clean "$2"' _ "$TMP_ROOT/m7/fn.sh" "$TMP_ROOT/m7/$1.cfg"; }
+run m7run ok
+check "sm-build.sh accepts an M7 block without a test grant" 0 ""
+for c in bad1 bad2 bad3; do
+	run m7run "$c"
+	check "sm-build.sh refuses an M7 block with a test grant ($c)" nonzero "still holds a test grant"
+done
+run m7run none
+check "sm-build.sh refuses a configuration with no M7 block" nonzero "no M7 LM block"
 
 lock toolchain_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$TMP_ROOT/out2" bash "$sm" "$TMP_ROOT/lock"
