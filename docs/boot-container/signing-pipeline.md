@@ -81,7 +81,7 @@ values for a real device (U3, as above).
 ## Policy check
 
 ```sh
-scripts/ahab/policy-check.sh <container.bin> <policy file>
+scripts/ahab/policy-check.sh <container.bin> <policy file> [<manifest>]
 ```
 
 This is the host side of cases C2, C3 and C4 of
@@ -102,15 +102,19 @@ blank lines are allowed. An unknown key, a repeated key or a missing key is an e
 | `USED_SRK_ID` | integer | equal to `used_srk_id` |
 | `SRK_REVOKE_MASK` | hex or integer | equal to `srk_revoke_mask`, compared numerically |
 | `FUSE_VERSION_MIN` | integer | every OEM container's `fuse_version` is at or above it |
-| `NXP_CONTAINERS_ALLOWED` | integer, optional, default 0 | at most this many NXP containers (`srk_set: nxp`, or inside a binary container) in the image |
+| `NXP_CONTAINER_SHA256` | 64 hex, or the environment variable of that name | the pin an nxp manifest position says `policy` for |
+| `NXP_SRK_TABLE_HASH`, `NXP_USED_SRK_ID`, `NXP_SRK_REVOKE_MASK`, `NXP_FUSE_VERSION_MIN` | optional | the vendor record, compared with the nxp container only |
 
-Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255, `NXP_CONTAINERS_ALLOWED` 0..8.
+Accepted ranges, for the policy file and the container alike (hex `0x..` or decimal, checked before any arithmetic; anything else is a policy error, exit 1): `USED_SRK_ID` 0..3, `SRK_REVOKE_MASK` 0..0xF, `FUSE_VERSION_MIN` 0..255.
 
 Every container the image holds is accounted for, and the check fails closed (provisional, pending #12):
 
 - An `srk_set: none` container fails; so does an entry or `srk_set` the check cannot classify.
-- NXP containers are counted and capped by `NXP_CONTAINERS_ALLOWED`. SPSDK merges them into one binary container, so the containers inside it are counted with SPSDK's own AHAB parser. A binary that cannot be parsed, holds no container, or whose header count differs from the parsed count fails. An i.MX95 boot image begins with NXP's signed ELE container, so a real policy may allow one.
-- OEM containers: the number of SRK hash files equals the number of OEM containers, or is exactly one shared file (every OEM table identical). Every hash file equals `SRK_TABLE_HASH`; `used_srk_id`, `srk_revoke_mask` and `fuse_version` are checked per OEM container.
+- The manifest (third argument, default `scripts/ahab/container-manifest.yaml`) lists the containers in order. A missing, empty or malformed manifest fails; so does any container count, order or role that differs from it. Fields: `containers:` is a list; each entry has `role: nxp|oem`. An `oem` entry has `images:`, the exact ordered entries its container must carry, each `core_id` and `image_type` as SPSDK parses them (the OEM boot container carries `cortex-m7-1`/`executable`). An `nxp` entry has `sha256:`, 64 hex digits or `policy` (from `NXP_CONTAINER_SHA256`, policy file first, else environment); the vendor binary and digest are not in the repository.
+- Each OEM container is checked against the OEM policy: the hash of its own SRK table (SPSDK parser and SRK-hash API), `used_srk_id`, `srk_revoke_mask`, `fuse_version`. The SRK hash files stay a cross-check (their number is the OEM count or one, and each equals a computed OEM table hash).
+- The nxp container (SPSDK's merged binary container) is held to its pinned sha256, and to the vendor record keys if given; the OEM values are not applied to it.
+- Each OEM container carries exactly its role's image entries; a missing M7 image or swapped OEM containers fail.
+- Every non-zero byte of the image and of each nxp binary container must lie in a parsed container's header, signature block or referenced image; otherwise the check fails naming the offset.
 - An image with no OEM container fails.
 
 SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
