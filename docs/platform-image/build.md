@@ -27,7 +27,9 @@ section 11), written down so the owner can read a working proposal.
   directory and fetch again. It needs the network, so it is in neither
   `make build` nor `make test`.
 - `scripts/platform-image-parse.sh`, `make platform-image-parse`: the metadata
-  check, run on a build host (bitbake and the network). It fetches the pinned
+  check, run on a build host (bitbake and the network). It rejects a directory
+  inside the clone first and deletes only an ignored, untracked
+  `pyshtables.py` of the bitbake checkout (else it fails closed). It fetches the pinned
   layers, writes the build directory's conf from the templates, runs
   `bitbake -p`, then `bitbake -e` for `trusted-imx95-image` and
   `trusted-imx95-image-debug`. It checks that the effective `MACHINE` is the

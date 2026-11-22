@@ -28,9 +28,37 @@ want_distro=$(confval DISTRO "$localt")
 want_init=$(confval INIT_MANAGER "$distroconf")
 [ -n "$want_init" ] || { echo "platform-image-parse: no INIT_MANAGER in the distro conf" >&2; exit 1; }
 
+die() {
+	echo "platform-image-parse: $*" >&2
+	exit 1
+}
+# The fetch directory is never inside this clone: checked here, before anything
+# in it is touched (the fetcher repeats the check).
+abs=$dir
+case $abs in /*) ;; *) abs=$PWD/$abs ;; esac
+anc=$abs
+rest=
+while [ ! -d "$anc" ]; do
+	rest=/$(basename "$anc")$rest
+	anc=$(dirname "$anc")
+done
+phys=$(cd "$anc" && pwd -P)$rest
+case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
+
 # bitbake writes this generated, git-ignored file into its own tree on a run; the
 # fetch refuses a layer with ignored files, so a repeat run would fail on it.
-rm -f "$dir/sources/bitbake/lib/bb/pysh/pyshtables.py"
+# Remove it only when git reports exactly that path as an ignored, untracked file
+# of the bitbake checkout; any other state (tracked, edited, untracked and not
+# ignored, no checkout) fails closed and nothing is deleted.
+bb=$phys/sources/bitbake
+pysh=lib/bb/pysh/pyshtables.py
+if [ -e "$bb/$pysh" ] || [ -L "$bb/$pysh" ]; then
+	top=$(git -C "$bb" rev-parse --show-toplevel 2>/dev/null || true)
+	st=$(git -C "$bb" status --porcelain --ignored --untracked-files=all -- "$pysh" 2>/dev/null || true)
+	{ [ "$top" = "$bb" ] && [ "$st" = "!! $pysh" ]; } ||
+		die "$bb/$pysh is not an ignored, untracked generated file of the bitbake checkout; not removing it: remove it yourself or the directory $phys"
+	rm -f "$bb/$pysh"
+fi
 "${PLATFORM_IMAGE_FETCH:-$root/scripts/platform-image-fetch.sh}" "$root/platform-image/manifest.lock" "$dir"
 dir=$(cd "$dir" && pwd -P)
 build=$dir/build

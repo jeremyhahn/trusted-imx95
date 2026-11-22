@@ -19,7 +19,7 @@ real_bash=$(command -v bash)
 # A PATH with only the tools the script uses, and no bitbake of the host.
 tools=$tmp/tools
 mkdir -p "$tools" "$tmp/stub"
-for t in env sed cp mkdir dirname basename cat rm; do
+for t in env sed cp mkdir dirname basename cat rm git; do
 	ln -s "$(command -v "$t")" "$tools/$t"
 done
 
@@ -135,12 +135,58 @@ run "$tmp/stub:$tools" "$want"
 run2 "$tmp/stub:$tools" "$want"
 expect "unchanged confs on a re-run: the script passes" test "$rc" -eq 0
 
-# bitbake's generated pyshtables.py from an earlier run is removed before the fetch.
-mkdir -p "$tmp/d/sources/bitbake/lib/bb/pysh"
-: >"$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py"
+# bitbake's generated pyshtables.py: removed only when git reports it as an ignored,
+# untracked file of the bitbake checkout; the fetch directory is checked first.
+py=$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py
+mkbb() { # a bitbake checkout whose pyshtables.py is git-ignored, as bitbake's is
+	rm -rf "$tmp/d"
+	mkdir -p "$tmp/d/sources/bitbake/lib/bb/pysh"
+	git init -q "$tmp/d/sources/bitbake"
+	echo pyshtables.py >"$tmp/d/sources/bitbake/.git/info/exclude"
+}
+mkbb
+: >"$py"
 run2 "$tmp/stub:$tools" "$want"
 expect "a repeat run passes" test "$rc" -eq 0
-expect "bitbake's generated pyshtables.py is removed before the fetch" test ! -e "$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py"
+expect "an ignored, untracked pyshtables.py is removed before the fetch" test ! -e "$py"
+
+mkbb
+printf 'mine\n' >"$py"
+git -C "$tmp/d/sources/bitbake" add -f lib/bb/pysh/pyshtables.py
+printf 'edited\n' >"$py"
+run2 "$tmp/stub:$tools" "$want"
+expect "a tracked, edited pyshtables.py: the run fails closed" test "$rc" -ne 0
+expect "a tracked, edited pyshtables.py: it is preserved" test "$(cat "$py")" = edited
+expect "a tracked, edited pyshtables.py: the message says why" test "${out##*not removing it*}" != "$out"
+
+mkbb
+echo '!pyshtables.py' >"$tmp/d/sources/bitbake/.git/info/exclude"
+printf 'mine\n' >"$py"
+run2 "$tmp/stub:$tools" "$want"
+expect "an untracked, not ignored pyshtables.py: the run fails closed" test "$rc" -ne 0
+expect "an untracked, not ignored pyshtables.py: it is preserved" test "$(cat "$py")" = mine
+
+rm -rf "$tmp/d"
+mkdir -p "$tmp/d/sources/bitbake/lib/bb/pysh"
+printf 'mine\n' >"$py"
+run2 "$tmp/stub:$tools" "$want"
+expect "a pyshtables.py in no git checkout: the run fails closed" test "$rc" -ne 0
+expect "a pyshtables.py in no git checkout: it is preserved" test "$(cat "$py")" = mine
+
+# A directory inside this clone is rejected before anything is deleted or created.
+inside=$ROOT/.parse-test-inside-$$
+rc=0
+out=$(PATH="$tmp/stub:$tools" PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_KILL_LOG=$tmp/kill BB_INIT_LOG=$tmp/init.log \
+	BB_MACHINE=$want "$real_bash" "$script" "$inside" 2>&1) || rc=$?
+expect "a directory inside the clone: the script fails" test "$rc" -ne 0
+expect "a directory inside the clone: it says so" test "${out##*is inside this clone*}" != "$out"
+expect "a directory inside the clone: nothing is created" test ! -e "$inside"
+before=$(git -C "$ROOT" status --porcelain --ignored)
+rc=0
+out=$(PATH="$tmp/stub:$tools" PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_KILL_LOG=$tmp/kill BB_INIT_LOG=$tmp/init.log \
+	BB_MACHINE=$want "$real_bash" "$script" "$ROOT/test/../test" 2>&1) || rc=$?
+expect "an existing directory inside the clone: the script fails" test "$rc" -ne 0
+expect "an existing directory inside the clone: the clone is untouched" test "$(git -C "$ROOT" status --porcelain --ignored)" = "$before"
 
 # The BitBake server is stopped on every exit, errors included; a stale one is stopped first.
 run "$tmp/stub:$tools" "$want"

@@ -79,8 +79,9 @@ lock's meta-imx commit sets the obsolete `DISTRO_FEATURES_DEFAULT`, so the
 distro requires `poky.conf` and carries over the settings it needs from
 `fsl-imx-base.inc`; meta-perl and meta-multimedia (for the `wireplumber` and
 `dvb-apps` bbappends of meta-imx) joined the layer set; the parse script
-removes BitBake's generated `lib/bb/pysh/pyshtables.py` so a repeat run passes
-the fetch's cleanliness check; both scripts stop the BitBake server they
+checks the fetch directory first, then removes BitBake's generated
+`lib/bb/pysh/pyshtables.py` only when git reports it ignored and untracked
+(else it fails closed), so a repeat run passes the fetch's cleanliness check; both scripts stop the BitBake server they
 started on every exit.
 
 ## The checked values
