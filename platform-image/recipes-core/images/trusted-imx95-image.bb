@@ -51,3 +51,13 @@ WKS_FILE_DEPENDS:remove = "imx-boot"
 # The machine's boot partition also lists the M7 demo binaries of imx-m7-demos
 # (EULA again); the M7 image comes from the boot-container flow. MISSING: no survey covers it.
 IMAGE_BOOT_FILES:remove = "mcore-demos/imx95-19x19-frdm_m7_TCM_hello_world.bin mcore-demos/imx95-19x19-frdm_m7_TCM_power_mode_switch.bin mcore-demos/imx95-19x19-frdm_m7_TCM_rpmsg_lite_pingpong_rtos_linux_remote.bin mcore-demos/imx95-19x19-frdm_m7_TCM_rpmsg_lite_str_echo_rtos.bin"
+
+# SPEC row ftpm: the fTPM NV is wiped with the root file system. The read-only
+# rootfs carries a build identity; trusted-imx95-tee-nv's tee-nv-wipe unit wipes
+# /data/tee when /data/tee-rootfs-id differs from it (docs/ftpm/README.md).
+# A reflash of the very same build is not told apart; a full .wic flash is.
+trusted_imx95_rootfs_id () {
+    printf '%s\n' "${IMAGE_NAME}-${DATETIME}" > ${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id
+}
+# MISSING: no survey covers it; the rootfs identity for the NV wipe.
+ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"

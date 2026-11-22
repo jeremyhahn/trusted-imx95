@@ -101,6 +101,42 @@ expect "the wks keeps the BSP boot partition (kernel, DTBs)" ncstr "$wks" 'part 
 expect "the wks has no raw boot-container entry" none 'rawcopy' "$wks"
 expect "the NV recipe installs the /data mountpoint" ncstr "$nv" 'D}/data'
 expect "the NV recipe packages /data" ncstr "$nv" '+= "/data '
+# The NV wipe is coupled to the rootfs identity (Codex P1): run the script on a temp tree.
+wipe=$nvf/tee-nv-wipe
+unit=$nvf/tee-nv-wipe.service
+wt=$(mktemp -d)
+trap 'rm -rf "$wt"' EXIT
+mkdir -p "$wt/data/tee/sub"
+printf 'seed\n' >"$wt/data/tee/sub/obj"
+printf 'id-A\n' >"$wt/rootfs-id"
+wipe_run() { # prints the exit status of the wipe script
+	local r=0
+	TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" bash "$wipe" 2>/dev/null || r=$?
+	echo "$r"
+}
+expect "wipe: a missing id wipes" test "$(wipe_run)" -eq 0
+expect "wipe: the old object is gone" test ! -e "$wt/data/tee/sub/obj"
+expect "wipe: the new id is recorded" test "$(<"$wt/data/tee-rootfs-id")" = id-A
+printf 'keep\n' >"$wt/data/tee/obj"
+expect "wipe: the same id keeps the files" test "$(wipe_run)$(<"$wt/data/tee/obj")" = 0keep
+printf 'id-B\n' >"$wt/rootfs-id"
+expect "wipe: a different id wipes" test "$(wipe_run)" -eq 0
+expect "wipe: the different id removed the files" test ! -e "$wt/data/tee/obj"
+expect "wipe: the different id is recorded" test "$(<"$wt/data/tee-rootfs-id")" = id-B
+printf 'keep\n' >"$wt/data/tee/obj"
+rm "$wt/rootfs-id"
+expect "wipe: fails closed without a rootfs id" test "$(wipe_run)" -ne 0
+expect "wipe: it kept the files when it failed" test "$(<"$wt/data/tee/obj")" = keep
+expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
+expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
+expect "unit: runs after the /data mount" ncstr "$unit" 'After=data.mount'
+expect "unit: oneshot" ncstr "$unit" 'Type=oneshot'
+expect "supplicant drop-in: hard dependency on the wipe" ncstr "$nvf/10-nv.conf" 'Requires=tee-nv-wipe.service'
+expect "supplicant drop-in: ordered after the wipe" ncstr "$nvf/10-nv.conf" 'tee-nv-wipe.service'
+expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplicant@teepriv0.service.requires'
+expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'
+expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
+
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'
 expect "README says the NV is wiped whenever the root file system is reflashed" ncstr "$ROOT/docs/ftpm/README.md" 'wiped whenever the root file system is reflashed'

@@ -1,0 +1,13 @@
+[Unit]
+Description=Wipe the fTPM NV when the root file system is not the one it was written under
+RequiresMountsFor=/data
+After=data.mount
+Before=tee-supplicant@teepriv0.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/tee-nv-wipe
+
+[Install]
+RequiredBy=tee-supplicant@teepriv0.service

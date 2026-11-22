@@ -1,0 +1,33 @@
+#!/bin/sh
+# Couple the fTPM NV to the root file system (SPEC row ftpm: the REE-FS NV is
+# wiped with the root file system). The read-only rootfs carries an identity
+# fixed at image build time; /data/tee-rootfs-id remembers the identity the NV
+# was written under. A missing or different id wipes /data/tee. It fails
+# closed: any error exits non-zero, and tee-supplicant, which requires this
+# unit, then does not start.
+# TEE_NV_DATA and TEE_NV_ROOTFS_ID exist for the test (test/platform_image_ftpm_test.sh).
+set -eu
+
+data=${TEE_NV_DATA:-/data}
+idfile=${TEE_NV_ROOTFS_ID:-/etc/trusted-imx95-rootfs-id}
+
+cur=$(cat "$idfile")
+[ -n "$cur" ] || { echo "tee-nv-wipe: $idfile is empty" >&2; exit 1; }
+[ -d "$data" ] || { echo "tee-nv-wipe: $data is not a directory" >&2; exit 1; }
+
+if [ -f "$data/tee-rootfs-id" ] && [ "$(cat "$data/tee-rootfs-id")" = "$cur" ]; then
+	exit 0
+fi
+
+echo "tee-nv-wipe: rootfs identity changed or unknown: wiping $data/tee" >&2
+rm -rf "$data/tee"
+mkdir -p "$data/tee"
+chmod 0700 "$data/tee"
+sync
+# The identity is written last, through a temporary file and a rename, so a
+# power cut before it leaves no id and the next boot wipes again.
+tmp=$data/.tee-rootfs-id.new
+printf '%s\n' "$cur" >"$tmp"
+sync
+mv -f "$tmp" "$data/tee-rootfs-id"
+sync
