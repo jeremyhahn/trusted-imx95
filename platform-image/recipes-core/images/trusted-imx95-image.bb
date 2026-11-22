@@ -60,8 +60,23 @@ IMAGE_BOOT_FILES:remove = "mcore-demos/imx95-19x19-frdm_m7_TCM_hello_world.bin m
 # rootfs carries a build identity; trusted-imx95-tee-nv's tee-nv-wipe unit wipes
 # /data/tee when /data/tee-rootfs-id differs from it (docs/ftpm/README.md).
 # A reflash of the very same build is not told apart; a full .wic flash is.
+# The identity is derived from the rootfs tree itself (paths, types, modes, link
+# targets and file contents, less the identity file), never from the clock, so
+# identical inputs give identical bytes (reproducible builds).
 trusted_imx95_rootfs_id () {
-    printf '%s\n' "${IMAGE_NAME}-${DATETIME}" > ${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id
+    idf=${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id
+    rm -f $idf
+    (
+        cd ${IMAGE_ROOTFS}
+        {
+            find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+            find . -printf '%p %y %m %l\n' | LC_ALL=C sort
+        } | sha256sum | cut -d' ' -f1
+    ) > ${WORKDIR}/trusted-imx95-rootfs-id
+    install -m 0644 ${WORKDIR}/trusted-imx95-rootfs-id $idf
 }
 # MISSING: no survey covers it; the rootfs identity for the NV wipe.
 ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"
+# A change to the function body must rebuild do_rootfs (the hook is run by name, so
+# its body is not otherwise part of the task signature). MISSING: no survey covers it.
+do_rootfs[vardeps] += "trusted_imx95_rootfs_id"

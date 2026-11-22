@@ -155,6 +155,11 @@ expect "supplicant drop-in: hard dependency on the wipe" ncstr "$nvf/10-nv.conf"
 expect "supplicant drop-in: ordered after the wipe" ncstr "$nvf/10-nv.conf" 'tee-nv-wipe.service'
 expect "recipe: the supplicant requires the wipe unit" ncstr "$nv" 'tee-supplicant@teepriv0.service.requires'
 expect "image writes the rootfs identity" ncstr "$img" 'ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"'
+expect "the rootfs identity is a hash of the rootfs tree" ncstr "$img" '| sha256sum | cut -d'
+expect "the rootfs identity names its input (the rootfs tree)" has "$img" 'derived from the rootfs tree itself'
+idfn=$(awk '/^trusted_imx95_rootfs_id \(\)/,/^}/' "$img")
+expect "the rootfs identity function was found" test -n "$idfn"
+expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' "$idfn" | tr -c 'A-Za-z_' '\n' | grep -cxE 'DATETIME|DATE|TIME|SOURCE_DATE_EPOCH')" -eq 0
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
 expect "README names the flash script as the supported rootfs write" has "$ROOT/docs/ftpm/README.md" 'scripts/flash-rootfs.sh'
 expect "README says a raw root write is unsupported and keeps the NV" has "$ROOT/docs/ftpm/README.md" 'outside this script is unsupported and would keep the NV'
