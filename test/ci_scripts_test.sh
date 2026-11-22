@@ -1072,6 +1072,35 @@ n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
 n_tag=$(grep -c 'TOOLCHAIN_IMAGE=$(make -s toolchain-image)' <<<"$ci" || true)
 # shellcheck disable=SC2016
 n_it=$(grep -cE 'make (integration-test|"\$SOAK_TARGET") .*IT_IMAGE_ID="\$IT_LEASE_ID"' <<<"$ci" || true)
+# The integration, image and soak lease blocks resolve the image through
+# `make -s it-ref`, never the $IT_IMAGE tag directly (Codex P1, security): on
+# a trusted run the tag names whatever the daemon holds under it.
+# shellcheck disable=SC2016
+n_itref=$(grep -c 'ref=$(make -s it-ref IT_IMAGE="$IT_IMAGE" 2>/dev/null) || return 1' <<<"$ci" || true)
+# shellcheck disable=SC2016
+n_ittag=$(grep -cE "docker image inspect -f '\{\{\.Id\}\}' \"\\\$IT_IMAGE\"" <<<"$ci" || true)
+if [ "$n_itref" = 3 ] && [ "$n_ittag" = 0 ]; then
+	pass "ci.yml: the three lease blocks resolve the integration image through make it-ref, never the tag"
+else
+	fail "ci.yml: the three lease blocks resolve the integration image through make it-ref, never the tag" "it-ref $n_itref, tag inspect $n_ittag"
+fi
+
+# The image job's checkout is the full history while it runs make security,
+# which scans every commit (Codex P1): the job's first checkout sets fetch-depth 0.
+imgco=$(python3 - "$ROOT/.github/workflows/ci.yml" <<'EOF'
+import re, sys
+t = open(sys.argv[1]).read()
+j = t[re.search(r"^  image:\n", t, re.M).start():]
+j = j[:re.search(r"^  [a-z-]+:\n", j[5:], re.M).start() + 5]
+c = j[j.index("actions/checkout"):]
+print("full" if re.search(r"fetch-depth: 0", c[:c.index("- name:")]) else "shallow")
+EOF
+)
+if [ "$imgco" = full ] && grep -q 'make security' <<<"$ci"; then
+	pass "ci.yml: the image job checks out the full history for make security"
+else
+	fail "ci.yml: the image job checks out the full history for make security" "checkout: $imgco"
+fi
 if [ "$n_ref" = 5 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
 	pass "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID"
 else
