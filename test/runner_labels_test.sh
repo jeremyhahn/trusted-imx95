@@ -134,6 +134,23 @@ if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; the
 fi
 run bash -c "cd '$work' && python3 -I step.py"
 check "a changed run line in a non-guard preflight step loses the exemption" 1 "(a) its runs-on holds an expression"
+# Codex security P1 at verify 11: what preflight inherits from the workflow
+# level is pinned too. Only a workflow-level defaults.run.shell wrapper, or only
+# a workflow-level env entry, is added to the real ci.yml.
+sed '0,/^env:$/s//defaults:\n  run:\n    shell: "bash {0}"\nenv:/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
+	echo "FAIL fixture is identical to ci.yml: the defaults edit did not apply"
+	exit 1
+fi
+run bash -c "cd '$work' && python3 -I step.py"
+check "a workflow-level defaults.run.shell wrapper loses the exemption" 1 "(a) its runs-on holds an expression"
+sed '0,/^env:$/s//env:\n  BASH_ENV: \/tmp\/wrapper.sh/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
+	echo "FAIL fixture is identical to ci.yml: the env edit did not apply"
+	exit 1
+fi
+run bash -c "cd '$work' && python3 -I step.py"
+check "a workflow-level env entry loses the exemption" 1 "(a) its runs-on holds an expression"
 
 # Codex security P1s at verify 8: the workflow is parsed as YAML, and every
 # release job meets the allowlist whatever the triggers.

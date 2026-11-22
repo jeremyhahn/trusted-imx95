@@ -1134,6 +1134,12 @@ jobs:
       contents: read
     env:
       OBJSTORE_SEAMS: ''      # CUSTOMIZE
+    # CUSTOMIZE (Codex security P1, verify 11): the shell is explicit, so a
+    # workflow-level `defaults.run.shell` wrapper never reaches this job's
+    # scripts; the producer pin also covers the workflow-level defaults and env.
+    defaults:
+      run:
+        shell: bash
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
       lint_gates: ${{ steps.diff.outputs.lint_gates }}   # v1.30
@@ -1973,20 +1979,26 @@ jobs:
           # is left out of the dump, its `run` replaced by a marker), and (c) the
           # reading job listing that job in its own `needs`.
           PRODUCER_JOB = "preflight"
-          PRODUCER_SHA256 = "15a8359ee17cb3da023b4fda3983b985dad99c86ac954f27c2bf28bd9ebd438e"
+          PRODUCER_SHA256 = "1f0eb00c02508785f2cd9262ff487ab8c67a51f18241be3464e743c8f23ded98"
           SELF_STEP = "Runner labels (ruling 633)"
 
 
-          def producer_digest(spec):
+          def producer_digest(spec, doc):
               steps = [dict(s, run="<this step>") if isinstance(s, dict) and s.get("name") == SELF_STEP else s
                        for s in spec.get("steps") or []]
-              canon = json.dumps(dict(spec, steps=steps), sort_keys=True, separators=(",", ":"), default=str)
+              # What the job inherits from the workflow level is pinned too: the
+              # exact top-level `defaults` and `env` mappings (a shell wrapper or
+              # BASH_ENV there runs in the producer's steps). The template's own
+              # top-level env is kept, so it is pinned rather than refused.
+              pinned = {"job": dict(spec, steps=steps), "defaults": doc.get("defaults"), "env": doc.get("env")}
+              canon = json.dumps(pinned, sort_keys=True, separators=(",", ":"), default=str)
               return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
-          def producer_ok(expr, path, job, jobs):
+          def producer_ok(expr, path, job, doc):
               if path.replace("\\", "/") != ".github/workflows/ci.yml":
                   return False
+              jobs = doc["jobs"]
               read = set(re.findall(r"needs\.([A-Za-z_][\w-]*)\.outputs\.", expr))
               spec = jobs.get(job) or {}
               needs = spec.get("needs")
@@ -1994,15 +2006,15 @@ jobs:
               for p in read:
                   if p != PRODUCER_JOB or p == job or p not in needs or p not in jobs:
                       return False
-                  if not isinstance(jobs[p], dict) or producer_digest(jobs[p]) != PRODUCER_SHA256:
+                  if not isinstance(jobs[p], dict) or producer_digest(jobs[p], doc) != PRODUCER_SHA256:
                       return False
               return True
 
 
-          def release_guard(ro, cond, path, job, jobs):
+          def release_guard(ro, cond, path, job, doc):
               text = squash(ro)
               expr = inner(ro)
-              if expr is not None and re.sub(r"\s+", " ", expr) in SELECT_OK and producer_ok(expr, path, job, jobs):
+              if expr is not None and re.sub(r"\s+", " ", expr) in SELECT_OK and producer_ok(expr, path, job, doc):
                   return None
               if OPEN in text or text.startswith("group:") or "group:" in text:
                   return ("its runs-on holds an expression that is not one of the template's selection expressions "
@@ -2092,7 +2104,7 @@ jobs:
                   # decision is an allowlist applied to every job, whatever the triggers.
                   # The `# self-hosted:` waiver is never consulted here.
                   if ro is not None:
-                      why = release_guard(ro, cond, path, job, doc["jobs"])
+                      why = release_guard(ro, cond, path, job, doc)
                       if why:
                           bad.append(f"{where}: (a) {why}")
                           continue
