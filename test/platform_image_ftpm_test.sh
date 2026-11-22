@@ -97,9 +97,18 @@ expect "tee-supplicant waits for the /data mount" ncstr "$nvf/10-nv.conf" 'Requi
 expect "the wks has a writable tee-data partition" ncstr "$wks" '--part-name tee-data'
 expect "the image uses that wks" ncstr "$img" 'WKS_FILE = "trusted-imx95.wks"'
 expect "the root file system stays read-only" ncstr "$img" 'IMAGE_FEATURES += "read-only-rootfs"'
+expect "the wks keeps the BSP boot partition (kernel, DTBs)" ncstr "$wks" 'part /boot --source bootimg-partition'
+expect "the wks has no raw boot-container entry" none 'rawcopy' "$wks"
+expect "the NV recipe installs the /data mountpoint" ncstr "$nv" 'D}/data'
+expect "the NV recipe packages /data" ncstr "$nv" '+= "/data '
+# SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
+expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'
+expect "README says the NV is wiped whenever the root file system is reflashed" ncstr "$ROOT/docs/ftpm/README.md" 'wiped whenever the root file system is reflashed'
+expect "README makes no claim that the NV survives a reflash" none 'partition is kept' "$ROOT/docs/ftpm/README.md"
 
 # The EULA is the owner's: not accepted, and imx-boot (-> imx-m7-demos) is not an image dependency.
 expect "the image drops imx-boot from the wks dependencies" ncstr "$img" 'WKS_FILE_DEPENDS:remove = "imx-boot"'
+expect "the boot partition lists no imx-m7-demos binary" ncstr "$img" 'IMAGE_BOOT_FILES:remove = "mcore-demos/'
 expect "ACCEPT_FSL_EULA is not set in the layer" tree_none 'ACCEPT_FSL_EULA = ' 'platform-image/conf'
 expect "REE FS on" ncstr "$flags" 'CFG_REE_FS=y'
 expect "RPMB FS off" ncstr "$flags" 'CFG_RPMB_FS=n'

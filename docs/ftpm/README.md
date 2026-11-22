@@ -60,7 +60,7 @@ objects, in the storage `CFG_FTPM_TA_TEE_STORAGE_ID` selects
 | | RPMB on the board's eMMC | REE file system |
 |---|---|---|
 | Rollback | The eMMC's write counter anchors the state ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §2) | None: root on Linux can restore an older copy of the files |
-| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | Only if the `tee-data` partition is kept: the files live on it, not in the (read-only) root file system; a flash of the whole disk wipes them |
+| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | No: the NV is wiped whenever the root file system is reflashed (SPEC row `ftpm`). A full-image flash recreates `tee-data` empty |
 | Use from U-Boot | U-Boot can serve OP-TEE's RPMB requests itself (unconfirmed for this board) | No `tee-supplicant` before Linux, so U-Boot cannot reach the TPM's NV |
 | Precondition | The eMMC's RPMB authentication key is programmed: once, irreversibly ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5) | None |
 | Confidentiality | OP-TEE encrypts objects with keys derived from the hardware unique key | The same |
@@ -75,7 +75,9 @@ limits above ([question 1](#open-questions-for-the-owner)).
 **Where the NV lives (provisional).** `tee-supplicant` (the BSP's OP-TEE client, enabled in the image) keeps OP-TEE's
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `data.mount` before the supplicant starts; the root file system
-stays read-only. The NV therefore survives a reboot. It is still plain files that root on Linux can copy or roll back.
+stays read-only. The NV therefore persists across a reboot. As SPEC row `ftpm` says, the REE-FS NV is
+wiped whenever the root file system is reflashed: a full-image flash recreates `tee-data` empty, and any root file system
+update path must format `tee-data` in the same step. It is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle
 

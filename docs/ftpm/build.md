@@ -22,7 +22,7 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
 1. **NV storage on the OP-TEE REE file system, RPMB off** ([question 1](README.md#open-questions-for-the-owner)).
    The TA sets `CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE`. No RPMB key option is set anywhere in the
    layer. The limits: **no rollback protection** (root on Linux can restore an older copy of the files), and
-   **the NV is lost if the `tee-data` partition (`/data/tee`) is wiped or the disk is flashed whole**, which destroys the TPM's seeds and with them the EK.
+   **the NV is wiped whenever the root file system is reflashed** (SPEC row `ftpm`; a full-image flash recreates `tee-data` empty), which destroys the TPM's seeds and with them the EK.
 2. **The TA is `optee_ftpm` 4.10.0** (ms-tpm-20-ref), as an early TA linked into `tee.bin`
    ([question 2](README.md#open-questions-for-the-owner)).
 3. **The kernel driver is built in**, not a module.
@@ -94,8 +94,13 @@ not found (exit 1 at `do_image_wic`): BitBake looks in `<layer>/files/wic`, not 
 | `bitbake trusted-imx95-image-debug` | 0 (4698 tasks), with `optee-client`, `trusted-imx95-tee-nv` and the wic image |
 
 `tee-supplicant` is enabled at boot by `trusted-imx95-tee-nv`, which also mounts the `tee-data` partition on `/data`
-(its REE-FS storage is `/data/tee`) before the supplicant starts; the NV therefore survives a reboot
+(its REE-FS storage is `/data/tee`) before the supplicant starts; the NV therefore persists across a reboot (and is wiped with a rootfs reflash)
 ([README](README.md#nv-storage)). Not run on a board.
+
+The wic's GPT, read from the image: `boot` (256 MiB, FAT, holds `Image` and the `imx95-19x19-frdm-pro*.dtb` files),
+`root` (1 GiB) and `tee-data` (64 MiB). The wks follows the BSP's boot-partition layout and leaves out only the raw
+`imx-boot` entry; the image drops the `mcore-demos/` entries of `IMAGE_BOOT_FILES` (imx-m7-demos, EULA). The rootfs has
+the `/data` mountpoint. The NV is wiped with a rootfs reflash (SPEC row `ftpm`): a full-image flash recreates `tee-data` empty.
 
 Still open:
 
