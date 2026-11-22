@@ -1,18 +1,15 @@
 --- a/configs/other/mx95frdm-pro.cfg
 +++ b/configs/other/mx95frdm-pro.cfg
-@@ -366,9 +366,8 @@
+@@ -366,7 +366,7 @@
  # RPC Interface
  
  SCMI_AGENT0         name="M7"
 -MAILBOX             type=mu, mu=9, test=8, priority=high
--CHANNEL             db=0, xport=smt, check=crc32, rpc=scmi, type=a2p, \
--                    test=default
 +MAILBOX             type=mu, mu=9, priority=high
-+CHANNEL             db=0, xport=smt, check=crc32, rpc=scmi, type=a2p
+ CHANNEL             db=0, xport=smt, check=crc32, rpc=scmi, type=a2p, \
+                     test=default
  CHANNEL             db=1, xport=smt, check=crc32, rpc=scmi, \
-                     type=p2a_notify, notify=24
- CHANNEL             db=2, xport=smt, check=crc32, rpc=scmi, \
-@@ -378,8 +377,6 @@
+@@ -378,8 +378,6 @@
  
  BRD_SM_CTRL_BUTTON        NOTIFY
  BRD_SM_CTRL_PCA2131       ALL
@@ -21,7 +18,7 @@
  BRD_SM_RTC_PCA2131        ALL
  BRD_SM_SENSOR_TEMP_PF09   SET
  BRD_SM_SENSOR_TEMP_PF5301 SET
-@@ -401,7 +398,6 @@
+@@ -401,7 +399,6 @@
  LPTMR1              OWNER
  LPTMR2              OWNER
  LPTPM1              OWNER
@@ -29,7 +26,7 @@
  LPUART7             OWNER
  MSGINTR1            OWNER
  MSGINTR2            OWNER
-@@ -409,7 +405,6 @@
+@@ -409,7 +406,6 @@
  MU7_B               OWNER
  MU8_B               OWNER
  MU_ELE5             OWNER

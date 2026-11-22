@@ -26,8 +26,8 @@ sm_config_sha256=37d8f4c2b324cdc8dafb1de3f3f741850c86ca2e842880b9fdbdc16db72c1d6
 # sm_patch_sha256 is the SHA-256 of the patches concatenated in name order;
 # sm_patched_config_sha256 is the SHA-256 of the configuration after they
 # apply. The build fails when either differs.
-sm_patch_sha256=6c30a79a1b5bc119a32de6b700bec37e80a2435da70240a5f3564d5d299c0554
-sm_patched_config_sha256=e2adf9bd074cb839645d18835126ac99d32ddcb5268ed3669adf2cbffb68c176
+sm_patch_sha256=c3005bd5f0152c4109a2006e553a3823a3906b97e2b8f7edc1d73d160ab2b767
+sm_patched_config_sha256=23f6ea40755f44ca4a60f0be5e1e3973160894bf85e416b8c4b49e14e2981e6c
 
 # The monitor mode meta-imx's recipe passes (SYSTEM_MANAGER_MONITOR_MODE ??= 2).
 # Production's choice is open (sm-build-survey.md section 10, question 4).

@@ -190,7 +190,8 @@ mkdir -p "$TMP_ROOT/m7"
 printf 'LM0 name="SM"\ntest\nLM1 name="M7"\nX OWNER\n# test\nLM2 name="AP"\nY OWNER, test\n' >"$TMP_ROOT/m7/ok.cfg"
 printf 'LM1 name="M7"\nX OWNER, test\n' >"$TMP_ROOT/m7/bad1.cfg"
 printf 'LM1 name="M7"\nBRD_SM_CTRL_TEST_A ALL\n' >"$TMP_ROOT/m7/bad2.cfg"
-printf 'LM1 name="M7"\nCHANNEL a, \\\n   test=default\n' >"$TMP_ROOT/m7/bad3.cfg"
+printf 'LM1 name="M7"\nMAILBOX type=mu, test=8\n' >"$TMP_ROOT/m7/bad3.cfg"
+printf 'LM1 name="M7"\nCHANNEL a, \\\n   test=default\n' >"$TMP_ROOT/m7/ok2.cfg"
 printf 'LM2 name="AP"\n' >"$TMP_ROOT/m7/none.cfg"
 python3 -I -c '
 import re, sys
@@ -200,6 +201,8 @@ sys.stdout.write(re.search(r"^m7_clean\(\) \{.*?^\}\n", s, re.S | re.M)[0])
 m7run() { bash -c 'die() { echo "$*" >&2; exit 1; }; . "$1"; m7_clean "$2"' _ "$TMP_ROOT/m7/fn.sh" "$TMP_ROOT/m7/$1.cfg"; }
 run m7run ok
 check "sm-build.sh accepts an M7 block without a test grant" 0 ""
+run m7run ok2
+check "sm-build.sh keeps the default test channel key the tool needs" 0 ""
 for c in bad1 bad2 bad3; do
 	run m7run "$c"
 	check "sm-build.sh refuses an M7 block with a test grant ($c)" nonzero "still holds a test grant"

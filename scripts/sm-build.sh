@@ -92,6 +92,9 @@ m7_clean() {
 			continue
 		fi
 		[ "$in" = 1 ] || continue
+		# The configuration tool refuses a file with no default test channel
+		# ("missing default test channel"), so `test=default` stays.
+		l=${l//test=default/}
 		if [[ $l =~ (^|[[:space:],])test([=,[:space:]]|$) ]] || [[ $l == *BRD_SM_CTRL_TEST* ]]; then
 			bad=$l
 			break
