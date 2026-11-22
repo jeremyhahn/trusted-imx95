@@ -59,4 +59,33 @@ done <"$distro"
 expect "distro requires an fsl-imx-* distro, not poky" test "$derives" -eq 1
 expect "distro names no signing step" test "$signs" -eq 0
 
+# scripts/platform-image-fetch.sh against a local file:// stub, no network.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+git init -q "$tmp/src"
+git -C "$tmp/src" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false \
+	commit -q --allow-empty -m stub
+good=$(git -C "$tmp/src" rev-parse HEAD)
+mklock() { # commit file
+	printf 'layer_stub_repo=file://%s/src\nlayer_stub_path=sources/stub\nlayer_stub_commit=%s\n' "$tmp" "$1" >"$2"
+}
+mklock "$good" "$tmp/good.lock"
+mklock aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$tmp/bad.lock"
+
+rc=0
+out=$("$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$tmp/out-good" 2>&1) || rc=$?
+expect "fetch: a matching commit passes" test "$rc" -eq 0
+expect "fetch: the layer is checked out at the pin" test "$(git -C "$tmp/out-good/sources/stub" rev-parse HEAD)" = "$good"
+expect "fetch: it reports OK" test "${out##*OK*}" != "$out"
+
+rc=0
+out=$("$ROOT/scripts/platform-image-fetch.sh" "$tmp/bad.lock" "$tmp/out-bad" 2>&1) || rc=$?
+expect "fetch: a differing commit fails" test "$rc" -ne 0
+expect "fetch: the failure names the layer" test "${out##*layer stub*}" != "$out"
+
+rc=0
+"$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$ROOT/inside-clone" >/dev/null 2>&1 || rc=$?
+expect "fetch: a directory inside the clone is refused" test "$rc" -ne 0
+rm -rf "$ROOT/inside-clone"
+
 finish
