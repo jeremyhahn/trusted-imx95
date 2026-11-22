@@ -11,7 +11,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 dir=${1:-${PLATFORM_IMAGE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/trusted-imx95/platform-image}}
 targets="trusted-imx95-image trusted-imx95-image-debug"
 
-"$root/scripts/platform-image-fetch.sh" "$root/platform-image/manifest.lock" "$dir"
+"${PLATFORM_IMAGE_FETCH:-$root/scripts/platform-image-fetch.sh}" "$root/platform-image/manifest.lock" "$dir"
 dir=$(cd "$dir" && pwd -P)
 build=$dir/build
 mkdir -p "$build/conf"
@@ -24,6 +24,7 @@ want=$(sed -n 's/^machine=//p' "$root/platform-image/manifest.lock")
 
 # shellcheck disable=SC1091
 . "$dir/sources/openembedded-core/oe-init-build-env" "$build" >/dev/null
+command -v bitbake >/dev/null 2>&1 || { echo "platform-image-parse: bitbake is not on PATH; run this on a Yocto build host" >&2; exit 1; }
 bitbake -p
 for t in $targets; do
 	got=$(bitbake -e "$t" | sed -n 's/^MACHINE="\(.*\)"$/\1/p')
