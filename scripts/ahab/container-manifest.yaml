@@ -1,0 +1,37 @@
+# Container manifest for scripts/ahab/policy-check.sh (issue #12; provisional
+# fail-closed defaults, pending the owner's decision on #12).
+#
+# The image's containers, in order. policy-check.sh fails on a missing, empty
+# or malformed manifest, and on any container count or order, or any image
+# entry list, that differs from it. Each position has a role:
+#
+#   role: nxp     NXP's enclave firmware container (SPSDK merges every
+#                 srk_set nxp container into one binary container, so a run of
+#                 them is one position).
+#     sha256      the sha256 of that binary container (the file
+#                 "nxpimage ahab parse" writes as ahab_nxp_containers_<n>.bin):
+#                 64 hex digits, or "policy" to take it at release from
+#                 NXP_CONTAINER_SHA256 in the policy file, else from the
+#                 environment. The vendor binary and its digest are not in
+#                 this repository.
+#   role: oem     a container signed with the OEM SRK table, checked against
+#                 the OEM policy values (SRK table hash, used_srk_id,
+#                 srk_revoke_mask, fuse_version floor).
+#     images      the image entries the container must carry, exactly and in
+#                 order, each named by the fields SPSDK parses: core_id and
+#                 image_type (as in container.yaml and m7-container.yaml).
+#
+# The OEM boot container carries the Cortex-M7 image (test plan section 7,
+# item 2; m7-load-path-survey.md section 3: core id cortex-m7-1, an
+# executable image); the A55 container carries the data image for cortex-a55.
+containers:
+  - role: nxp
+    sha256: policy
+  - role: oem
+    images:
+      - core_id: cortex-m7-1
+        image_type: executable
+  - role: oem
+    images:
+      - core_id: cortex-a55
+        image_type: data
