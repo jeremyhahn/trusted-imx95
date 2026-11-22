@@ -92,9 +92,9 @@ check "a release job on exactly the push-to-main condition passes" 0 "OK:"
 fixture "release" "\${{ github.event_name == 'push'  &&  github.ref == 'refs/heads/main' }}"
 check "the allowlisted condition is read whitespace-normalized" 0 "OK:"
 # (2) a list element's expression is never evaluated.
-fixture '[self-hosted, linux, x64, "\${{ format('"'"'re{0}'"'"', '"'"'lease'"'"') }}"] # self-hosted: hardware: dedicated host'
+fixture "[self-hosted, linux, x64, \"\${{ format('re{0}', 'lease') }}\"] # self-hosted: hardware: dedicated host"
 check "an expression inside a list element with a waiver is refused" 1 "(a) its runs-on holds an expression"
-fixture '[self-hosted, linux, x64, "\${{ vars.X }}"]'
+fixture "[self-hosted, linux, x64, \"\${{ vars.X }}\"]"
 check "an expression inside a list element without a waiver is refused" 1 "(a) its runs-on holds an expression"
 # (3) github.server_url is not always github.com.
 fixture "\${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || format('re{0}', 'lease') }}"
