@@ -19,7 +19,7 @@ real_bash=$(command -v bash)
 # A PATH with only the tools the script uses, and no bitbake of the host.
 tools=$tmp/tools
 mkdir -p "$tools" "$tmp/stub"
-for t in env sed cp mkdir dirname basename cat; do
+for t in env sed cp mkdir dirname basename cat rm; do
 	ln -s "$(command -v "$t")" "$tools/$t"
 done
 
@@ -130,5 +130,12 @@ expect "a differing bblayers.conf: the script fails" test "$rc" -ne 0
 run "$tmp/stub:$tools" "$want"
 run2 "$tmp/stub:$tools" "$want"
 expect "unchanged confs on a re-run: the script passes" test "$rc" -eq 0
+
+# bitbake's generated pyshtables.py from an earlier run is removed before the fetch.
+mkdir -p "$tmp/d/sources/bitbake/lib/bb/pysh"
+: >"$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py"
+run2 "$tmp/stub:$tools" "$want"
+expect "a repeat run passes" test "$rc" -eq 0
+expect "bitbake's generated pyshtables.py is removed before the fetch" test ! -e "$tmp/d/sources/bitbake/lib/bb/pysh/pyshtables.py"
 
 finish

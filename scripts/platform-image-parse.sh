@@ -28,6 +28,9 @@ want_distro=$(confval DISTRO "$localt")
 want_init=$(confval INIT_MANAGER "$distroconf")
 [ -n "$want_init" ] || { echo "platform-image-parse: no INIT_MANAGER in the distro conf" >&2; exit 1; }
 
+# bitbake writes this generated, git-ignored file into its own tree on a run; the
+# fetch refuses a layer with ignored files, so a repeat run would fail on it.
+rm -f "$dir/sources/bitbake/lib/bb/pysh/pyshtables.py"
 "${PLATFORM_IMAGE_FETCH:-$root/scripts/platform-image-fetch.sh}" "$root/platform-image/manifest.lock" "$dir"
 dir=$(cd "$dir" && pwd -P)
 build=$dir/build
