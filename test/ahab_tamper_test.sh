@@ -131,21 +131,48 @@ print(int(str(c.flag_used_srk_id), 0))
 	return "${PIPESTATUS[0]}"
 }
 
+# nxpout FILE: nxpimage ahab verify's full output on FILE (stdout and stderr).
+nxpout() {
+	local v
+	v=$("$ROOT/scripts/ahab/spsdk-venv.sh")
+	(cd "$TMP_ROOT/t" && "$v/bin/nxpimage" ahab verify -f mimx9596 -r b0 -b "$1" 2>&1) || true
+}
+
 # C2b (header selector): the container header's key selector, flags bits 4-5 (byte 4
 # of the little-endian flags word at byte 4), set to a different SRK index. The SRK
-# data record is left as built (index 0). The signature is NOT redone: the header is
-# signed content, so this case tests that a header selecting another SRK than the
-# SRK data record names is rejected. It is asserted parsed first, so the case cannot
-# pass on a header that never changed.
+# data record is left as built (index 0). The signature is NOT redone: the test PKI
+# is removed when sign-test.sh exits, and nxpimage cannot re-sign an existing binary.
+# So the rejection is isolated by the verifier's own path instead:
+#  - control: the same header rewritten with the ORIGINAL selector is accepted, so
+#    the byte write itself breaks nothing;
+#  - the changed container fails inside the SRK table check (SPSDK indexes the SRK
+#    record the header selects and finds no SRK data: "TypeError: object of type
+#    'NoneType' has no len()"), and the verifier's output holds no signature result
+#    at all: the signature check is never reached, so it is not a signature mismatch.
+# It is asserted parsed first, so the case cannot pass on a header that never changed.
 oldflags=$(u8 "$good" 4)
 oldsel=$(((oldflags >> 4) & 3))
 newsel=$(((oldsel + 1) & 3))
+cp "$good" "$t"
+setbyte "$t" 4 "$oldflags"
+run "$SIGN" verify "$t"
+check "C2b (header selector): control, original selector rewritten, is accepted" 0 "verify: OK"
 cp "$good" "$t"
 setbyte "$t" 4 $(((oldflags & ~0x30) | (newsel << 4)))
 if got=$(parsed_srk_id "$t"); then
 	if [ "$got" = "$newsel" ]; then
 		pass "C2b (header selector): SPSDK parses used_srk_id $got from the changed header"
 		rejects "C2b (header selector $oldsel -> $newsel, SRK data record unchanged)" "$t"
+		selout=$(nxpout "$t")
+		case "$selout" in
+		*"TypeError: object of type 'NoneType' has no len()"*)
+			pass "C2b (header selector): verifier fails on the selected SRK record having no data" ;;
+		*) fail "C2b (header selector): not the SRK-selection failure" "$(printf '%s' "$selout" | tail -n 3)" ;;
+		esac
+		case "$selout" in
+		*"Signature #"*) fail "C2b (header selector): a signature result is present, so the signature check ran" ;;
+		*) pass "C2b (header selector): the signature check is never reached" ;;
+		esac
 	else
 		fail "C2b (header selector): parsed used_srk_id is '$got', want $newsel"
 	fi
