@@ -52,7 +52,7 @@ Every design and change about the hardware cites a document and section in [refe
 - The owner approves the whole of both files.
 - CI conforms to the handbook's `software/conventions/ci-standard.md`: build, unit tests, integration tests, security scans and the latest-version check, all in the project's devcontainer image.
 - The firmware split follows owner ruling 771: the Cortex-A55 secure world is upstream TF-A and the NXP BSP's OP-TEE, built here; trusted-firmware's `imx95` row owns the Cortex-M7 firmware and its board profile; the Cortex-M33 stays NXP's System Manager.
-- The NXP Linux BSP release that the secure world's TF-A and OP-TEE revisions come from is pinned (`secure-world` row).
+- BL31 is pinned to a tagged upstream Arm TF-A release (owner ruling 771), and OP-TEE OS to the revision one named NXP Linux BSP release carries, that BSP release provisional until the owner chooses the baseline (#14) (`secure-world` row).
 - The `ftpm` row's fTPM TA source revision is pinned, and the open questions in [ftpm/](ftpm/README.md#open-questions-for-the-owner) are answered, the RPMB key question first.
 - The owner decides how the platform image is built; the CompuLab Yocto image is reference only.
 - The open questions in the Features rows are answered: the side that calls the HSM API, the SE051's role, the provisioning place and life-cycle close, the attestation evidence beyond the firmware TPM's `tpm`-format device-attest-01 (`ftpm` row), and the A55 side of `hsm-self-defence`.

@@ -13,8 +13,8 @@ references give about the cores and the enclave the secure world runs beside, an
 Owner ruling 771 (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
 row, Release criteria). The SPEC.md text that records it was approved by the owner on 2026-11-21 (PR #138).
 
-- **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31) and OP-TEE OS from NXP's Linux BSP, at
-  the revisions one named NXP Linux BSP release carries. It is not this repository's own code: this repository
+- **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31), at a tagged upstream release (ruling
+  771), and NXP's BSP OP-TEE OS, at the revision one named NXP Linux BSP release carries. It is not this repository's own code: this repository
   configures it, builds it reproducibly, and puts its images in the boot container that AHAB verifies
   ([SPEC.md](../SPEC.md), `boot-container` row).
 - **Trusted applications.** OP-TEE runs the PKCS#11 TA, which go-xkms's PKCS#11 backend uses, and hosts the

@@ -266,19 +266,23 @@ expect "a wrong artefact hash publishes nothing" nothing_published badhash
 
 # --- build.md records the script's build configuration -------------------------
 # The artefact hashes in docs/secure-world/build.md hold for one build
-# configuration. build.md records the SHA-256 of that configuration (TFA_REPO
-# and TFA_COMMIT from bsp.lock, the bl31 make call, the
-# optee_flags array and the final OP-TEE make call, whitespace squeezed), and
-# this check recomputes it from the script, so a changed flag cannot leave old
-# hashes standing.
+# configuration. build.md records the SHA-256 of that configuration: every
+# non-comment, non-blank line of bsp.lock (all the source, toolchain and wheel
+# pins), the uuid assignments, the optee_flags array and every make build step
+# of the script (bl31, optee-devkit, ftpm and optee, with their flags and
+# continuation lines), whitespace squeezed. This check recomputes it from the
+# files, so a changed pin or flag cannot leave old hashes standing.
+# optee_config_digest [lock [script]]: defaults to the committed files.
 optee_config_digest() {
-	local l on=0 acc=
-	while IFS= read -r l; do
-		[[ "$l" == TFA_REPO=* || "$l" == TFA_COMMIT=* ]] && acc+="$l"$'\n'
-	done <"$good"
+	local lk=${1:-$good} sc=${2:-$sw} l on=0 acc=
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ -z "${l//[[:space:]]/}" || "$l" == \#* ]] && continue
+		acc+="$l"$'\n'
+	done <"$lk"
 	while IFS= read -r l; do
 		if [[ "$l" == "optee_flags=("* ]]; then on=1; fi
-		if [[ "$l" == "step bl31 make"* || "$l" == "step optee make"* ]]; then on=2; fi
+		if [[ "$l" == "ftpm_uuid="* || "$l" == "pkcs11_uuid="* ]]; then acc+="$l"$'\n'; fi
+		if [[ "$l" == "step "*" make "* ]]; then on=2; fi
 		if [ "$on" != 0 ]; then
 			l=${l//$'\t'/ }
 			while [[ "$l" == *"  "* ]]; do l=${l//  / }; done
@@ -286,7 +290,7 @@ optee_config_digest() {
 		fi
 		if [ "$on" = 1 ] && [[ "$l" == ")" ]]; then on=0; fi
 		if [ "$on" = 2 ] && [[ "$l" != *"\\" ]]; then on=0; fi
-	done <"$sw"
+	done <"$sc"
 	printf '%s' "$acc" | sha256sum | cut -d' ' -f1
 }
 recorded_config_digest() {
@@ -300,6 +304,23 @@ recorded_config_digest() {
 	return 1
 }
 config_tied() { [ "$(recorded_config_digest)" = "$(optee_config_digest)" ]; }
-expect "build.md records the digest of the TF-A pin and the script's build configuration" config_tied
+expect "build.md records the digest of the lock file and the script's build steps" config_tied
+
+# The guard fails when a pin the old digest left out, or an fTPM flag, changes.
+edit_optee_pin() { [[ "$1" == OPTEE_COMMIT=* ]] && echo OPTEE_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
+edit_ftpm_pin() { [[ "$1" == FTPM_COMMIT=* ]] && echo FTPM_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
+edit_mstpm_pin() { [[ "$1" == MSTPM_COMMIT=* ]] && echo MSTPM_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
+tied_with() { [ "$(recorded_config_digest)" = "$(optee_config_digest "$1" "$2")" ]; }
+not_tied_with() { ! tied_with "$@"; }
+for n in optee_pin ftpm_pin mstpm_pin; do
+	lk=$(lockcopy "dg$n" "edit_$n")
+	expect "a changed ${n%_pin} commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
+done
+ftpm_script=$TMP_ROOT/ftpm-script.sh
+: >"$ftpm_script"
+while IFS= read -r l; do
+	printf '%s\n' "${l//TEE_STORAGE_PRIVATE_REE/TEE_STORAGE_PRIVATE_RPMB}" >>"$ftpm_script"
+done <"$sw"
+expect "a changed fTPM flag in the script fails the digest guard" not_tied_with "$good" "$ftpm_script"
 
 finish

@@ -142,12 +142,13 @@ output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' 
 | 2 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
 
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
-`TFA_REPO` and `TFA_COMMIT` from `secure-world/bsp.lock`, the script's `bl31` make call, its `optee_flags` array and
-its final OP-TEE make call, whitespace squeezed. The test fails when the TF-A pin, the bl31 arguments or the OP-TEE
-flags differ from the configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new
-digest together with new hashes.
+every non-comment, non-blank line of `secure-world/bsp.lock`, the script's two UUID assignments, its `optee_flags`
+array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed.
+The test fails when any pin, toolchain or wheel line of the lock, or any build argument or flag, differs from the
+configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
+hashes.
 
-Build configuration digest: `85e2abd683b958a150324c100369b90d65cc971622e9029dc008c4eb1b84960e`
+Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66376f3761a23d3`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
