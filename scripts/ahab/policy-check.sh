@@ -140,9 +140,9 @@ while IFS= read -r l || [ -n "$l" ]; do
 		v=${v//[\'\"]/}
 		[ -n "$v" ] || fail "container $n: the parsed container has an empty $k"
 		case "$k" in
-		used_srk_id) [ -n "${c_ids[$n]+x}" ] || c_ids[$n]=$v ;;
-		srk_revoke_mask) [ -n "${c_masks[$n]+x}" ] || c_masks[$n]=$v ;;
-		fuse_version) [ -n "${c_fuses[$n]+x}" ] || c_fuses[$n]=$v ;;
+		used_srk_id) [ -n "${c_ids[$n]+x}" ] || c_ids[n]=$v ;;
+		srk_revoke_mask) [ -n "${c_masks[$n]+x}" ] || c_masks[n]=$v ;;
+		fuse_version) [ -n "${c_fuses[$n]+x}" ] || c_fuses[n]=$v ;;
 		esac
 		;;
 	esac
