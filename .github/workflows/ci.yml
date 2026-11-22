@@ -1942,6 +1942,58 @@ jobs:
               return state
 
 
+          # CUSTOMIZE (#159, Codex security P1s at verify 7): the release decision is
+          # an exact allowlist. In a workflow that any event outside TRUSTED_ON can
+          # trigger, a runs-on is accepted only as (a) literal labels with no
+          # expression anywhere and none of them `release`, or (b) exactly one
+          # selection expression the template itself uses (SELECT_OK, copied from
+          # ci-template 1ad68ab8, none of which yields `release`); a job that names
+          # `release` also needs an `if:` that is exactly one of COND_OK, every one of
+          # which excludes each untrusted event. Nothing is simulated: an arbitrary
+          # branch name, a list element's expression and a server_url that is not
+          # github.com stay unknown by never being read.
+          TRUSTED_ON = {"push", "workflow_dispatch", "schedule"}
+          SELECT_OK = {
+              "github.server_url == 'https://github.com' && (!startsWith(github.event_name, 'pull_request') || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_PREFLIGHT_RUNS_ON || '[\"self-hosted\",\"linux\",\"x64\",\"bigdisk\"]') || 'ubuntu-latest'",
+              "github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk'",
+              "github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner || '\"ubuntu-latest\"') || 'ci-gate'",
+          }
+          COND_OK = {
+              "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+              "github.event_name == 'push' && github.ref == 'refs/heads/main' && (github.server_url != 'https://github.com' || vars.RELEASE_RUNNER == 'true')",
+              "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')",
+              "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+          }
+
+
+          def squash(s):
+              return re.sub(r"\s+", " ", strip_comment(s)).strip()
+
+
+          def inner(s):
+              m = re.fullmatch(r"\$\{\{(.*)\}\}", squash(s), re.S)
+              return m.group(1).strip() if m else None
+
+
+          def release_guard(ro, cond):
+              text = squash(ro)
+              expr = inner(ro)
+              if expr is not None and re.sub(r"\s+", " ", expr) in SELECT_OK:
+                  return None
+              if OPEN in text or text.startswith("group:") or "group:" in text:
+                  return ("its runs-on holds an expression that is not one of the template's selection expressions "
+                          "(or a runner group); in a workflow an untrusted event can trigger, only a literal label or "
+                          "list of labels, or such an expression, is accepted, whatever a `# self-hosted:` comment says")
+              if "release" not in {t.lower() for t in re.split(r"[\s,\[\]'\":]+", text)}:
+                  return None
+              c = inner(cond) if cond else None
+              c = c if c is not None else (squash(cond) if cond else "")
+              if re.sub(r"\s+", " ", c) in COND_OK:
+                  return None
+              return ("names `release` in a workflow an untrusted event can trigger, and its `if:` is not exactly one of "
+                      "the conditions that exclude every such event; no `# self-hosted:` comment relaxes this")
+
+
           def condition(text):
               t = unquote(text) if text else ""
               m = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", t, re.S)
@@ -1955,6 +2007,7 @@ jobs:
           def check(path):
               lines = open(path, encoding="utf-8").read().splitlines()
               on = triggers(lines)
+              untrusted = not on or bool(on - TRUSTED_ON)
               bad = []
               for i, s in enumerate(lines):
                   if re.match(r"jobs\s*:\s*(#.*)?$", s):
@@ -1966,6 +2019,15 @@ jobs:
                               elif key == "if":
                                   cond = body(lines, k, inline)
                           where = f"{path}:{job}"
+                          # CUSTOMIZE (#159, Codex security P1s at verify 7): in a workflow
+                          # an untrusted event can trigger, the release decision is an
+                          # allowlist, not a simulation. The `# self-hosted:` waiver is
+                          # never consulted here.
+                          if untrusted and ro is not None:
+                              why = release_guard(ro, cond)
+                              if why:
+                                  bad.append(f"{where}: (a) {why}")
+                                  continue
                           # CUSTOMIZE (#159): evaluated labels count too. A runs-on whose
                           # labels evaluate to `release`, or evaluate to nothing literal
                           # while a `# self-hosted:` comment sits on it, takes the release
