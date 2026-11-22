@@ -216,12 +216,15 @@ idfn=$(awk '/^trusted_imx95_rootfs_id \(\)/,/^}/' "$img")
 expect "the rootfs identity function was found" test -n "$idfn"
 expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' "$idfn" | tr -c 'A-Za-z_' '\n' | grep -cxE 'DATETIME|DATE|TIME|SOURCE_DATE_EPOCH')" -eq 0
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
-expect "README says the supported reprovision is the whole .wic" has "$ROOT/docs/ftpm/README.md" 'write the whole'
-expect "README says a root-only rewrite is caught on boot by tee-nv-wipe" has "$ROOT/docs/ftpm/README.md" 'catches that on boot'
+expect "README says the supported reprovision is the whole .wic" has "$ROOT/docs/ftpm/README.md" 'Writing the whole'
+expect "README says a different build is caught on boot by tee-nv-wipe" has "$ROOT/docs/ftpm/README.md" 'rewritten with a different build is caught on boot'
+expect "README says a byte-identical root rewrite keeps the NV" has "$ROOT/docs/ftpm/README.md" 'A byte-identical root rewrite'
+expect "README makes no claim that every root-only rewrite is caught" none 'catches that on boot' "$ROOT/docs/ftpm/README.md"
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'
-expect "README says the NV is wiped whenever the root file system is reflashed" ncstr "$ROOT/docs/ftpm/README.md" 'wiped whenever the root file system is reflashed'
+expect "README marks the lifecycle wording as proposed, pending owner approval" ncstr "$ROOT/docs/ftpm/README.md" 'pending owner'
+expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
 expect "README makes no claim that the NV survives a reflash" none 'partition is kept' "$ROOT/docs/ftpm/README.md"
 
 # The EULA is the owner's: not accepted, and imx-boot (-> imx-m7-demos) is not an image dependency.
