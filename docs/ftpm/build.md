@@ -5,7 +5,7 @@
 > are defects in this file. Issue #140. Everything below is a **provisional default**: the owner has not answered the
 > [open questions](README.md#open-questions-for-the-owner), and they stay open.
 
-No bitbake build or parse has been run for this configuration. Nothing here programs a key, a fuse, a life-cycle
+The recipes have been parsed and the TA source fetched under bitbake ([below](#what-the-build-host-showed)); nothing is built. Nothing here programs a key, a fuse, a life-cycle
 state or the RPMB key, and no step to do so is scripted or documented as a command to run.
 
 ## What is built
@@ -46,12 +46,26 @@ None is closed by this configuration; `CFG_TA_MEASURED_BOOT` stays off. The gaps
   measured only if U-Boot extended it.
 - Linux user space (IMA): whether IMA is built is `hsm-self-defence`'s open question.
 
-## Left for the build host
+## What the build host showed
 
-- `LIC_FILES_CHKSUM` in `optee-ftpm_4.10.0.bb` is a zero placeholder: the pinned source was not fetched here, so
-  its license file's md5 was not read. The first parse fails with the real value; set it then.
-- The recipe name `optee-os-tadevkit` is assumed to be meta-imx's TA dev kit recipe; unconfirmed.
-- The make arguments of the TA and the dev kit path in `optee-ftpm_4.10.0.bb` follow `scripts/secure-world-build.sh`
-  but have not been run under bitbake.
-- A parse (`make platform-image-parse`), the kernel `.config` check (`make platform-image-kernel-config`) and a
-  build, then the board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
+Run on the build host as in [platform-image/build-host-check.md](../platform-image/build-host-check.md#repeat-this-run)
+(2026-11-22, Yocto wrynose, the lock's layers):
+
+- **Parse.** `make platform-image-hosttools` and `make platform-image-parse` exit 0: 3631 recipes parsed, 0 errors. The
+  first parse failed on `tpm2-tools`, which lives in `meta-security/meta-tpm`; that layer (already pinned through
+  `meta-security`) is now in `bblayers.conf.template`.
+- **`bitbake -e optee-os`** (read with `bitbake-getvar`) holds `CFG_EARLY_TA=y`, the fTPM UUID in `EARLY_TA_PATHS`
+  (`bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf`), `CFG_REE_FS=y` and `CFG_RPMB_FS=n`.
+- **Recipe name.** `optee-os-tadevkit` exists in meta-imx at the pinned revision
+  (`optee-os-tadevkit_4.10.0.imx.bb`); the `%` bbappend applies.
+- **Fetch and unpack.** `bitbake -c fetch optee-ftpm` passes with both pins. `-c unpack` failed on `S = "${WORKDIR}/git"`
+  (wrynose sets `S` itself), so the assignment is removed and `CFG_MS_TPM_20_REF` points into `${UNPACKDIR}`.
+- **License.** The pinned `LICENSE` is Microsoft's two-clause BSD license, not MIT: `LICENSE = "BSD-2-Clause"`, and
+  `LIC_FILES_CHKSUM` carries its md5. `bitbake -c populate_lic optee-ftpm` passes. No zero checksum is left.
+
+Still open:
+
+- The TA's make arguments and the dev kit path have not run: `do_compile` was not executed, and no image was built
+  (not requested in this run).
+- The kernel `.config` check (`make platform-image-kernel-config`) was not repeated with `ftpm.cfg`.
+- The board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
