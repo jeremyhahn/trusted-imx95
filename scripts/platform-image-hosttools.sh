@@ -9,7 +9,7 @@
 #  2. cpio, diffstat, file, gawk and socat (with their libraries) are fetched
 #     with `apt-get download` (a private apt state directory, no root) and
 #     unpacked with `dpkg -x` under DIR; `file` needs MAGIC and the libraries
-#     LD_LIBRARY_PATH. The SDK installer needs a real `file` on PATH.
+#     LD_LIBRARY_PATH: each tool is reached through a wrapper that sets them. The SDK installer needs a real `file` on PATH.
 #  3. DIR/env.sh is written: source it, then run make platform-image-parse.
 # Test seams: HOSTTOOLS_CURL, HOSTTOOLS_APT_GET, HOSTTOOLS_DPKG, and
 # HOSTTOOLS_BUILDTOOLS_SHA256 / HOSTTOOLS_BUILDTOOLS_URL (the pin and the
@@ -33,10 +33,7 @@ dir=$(cd "$dir" && pwd -P)
 [ "$(id -u)" -ne 0 ] || echo "platform-image-hosttools: running as root; bitbake refuses to run as root" >&2
 
 pkgroot=$dir/pkgroot
-tools_path=$pkgroot/usr/bin:$pkgroot/usr/sbin:$pkgroot/bin
 tools_lib=$pkgroot/usr/lib/x86_64-linux-gnu:$pkgroot/lib/x86_64-linux-gnu
-magic=$pkgroot/usr/lib/file/magic.mgc
-[ -e "$magic" ] || magic=$pkgroot/usr/share/misc/magic.mgc
 
 # 2. The host tools from apt, unpacked under DIR.
 if [ ! -e "$dir/.pkgs-done" ]; then
@@ -51,7 +48,24 @@ if [ ! -e "$dir/.pkgs-done" ]; then
 	done
 	: >"$dir/.pkgs-done"
 fi
-export PATH="$tools_path:$PATH" LD_LIBRARY_PATH="$tools_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" MAGIC=$magic
+# Bitbake runs its tasks with a filtered environment, so LD_LIBRARY_PATH and MAGIC
+# do not reach the extracted tools there: each is reached through a wrapper that
+# sets them (bitbake's hosttools symlinks point at the wrapper).
+magic=$pkgroot/usr/lib/file/magic.mgc
+[ -e "$magic" ] || magic=$pkgroot/usr/share/misc/magic.mgc
+wrap=$dir/wrappers
+rm -rf "$wrap"
+mkdir -p "$wrap"
+for t in cpio diffstat file gawk socat; do
+	for p in usr/bin usr/sbin bin; do
+		[ -x "$pkgroot/$p/$t" ] || continue
+		printf '#!/bin/sh\nLD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nMAGIC="%s"\nexport LD_LIBRARY_PATH MAGIC\nexec "%s" "$@"\n' \
+			"$tools_lib" "$magic" "$pkgroot/$p/$t" >"$wrap/$t"
+		chmod +x "$wrap/$t"
+		break
+	done
+done
+export PATH="$wrap:$PATH"
 
 # 1. buildtools-extended, checked before it is run.
 bt=$dir/buildtools
@@ -81,15 +95,13 @@ cat >"$dir/env.sh" <<EOF
 # Written by scripts/platform-image-hosttools.sh. Source it, then run
 # make platform-image-parse and make platform-image-kernel-config.
 . "$setup"
-export PATH="$tools_path:\$PATH"
-export LD_LIBRARY_PATH="$tools_lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
-export MAGIC="$magic"
+export PATH="$wrap:\$PATH"
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="$dir/pycache"
 export PLATFORM_IMAGE_DIR="$dir/platform-image"
 export DL_DIR="$dir/downloads"
 export SSTATE_DIR="$dir/sstate-cache"
-export BB_ENV_PASSTHROUGH_ADDITIONS="PLATFORM_IMAGE_DIR DL_DIR SSTATE_DIR MAGIC LD_LIBRARY_PATH PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX LANG LC_ALL"
+export BB_ENV_PASSTHROUGH_ADDITIONS="PLATFORM_IMAGE_DIR DL_DIR SSTATE_DIR PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX LANG LC_ALL"
 EOF
 echo "platform-image-hosttools: OK; source $dir/env.sh"
