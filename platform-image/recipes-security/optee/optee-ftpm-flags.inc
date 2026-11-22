@@ -2,7 +2,7 @@
 # optee-os-tadevkit bbappends so the TA dev kit and tee.bin are built with the
 # same flags (docs/secure-world/build.md, "The flags"; docs/ftpm/build.md).
 # SPEC row ftpm, issue #140. Provisional, pending the owner's answers in
-# docs/ftpm/README.md. Not parsed by bitbake yet.
+# docs/ftpm/README.md. Parsed by bitbake (docs/ftpm/build.md).
 #
 # NV storage is the REE file system (provisional default, question 1): RPMB
 # stays off, and no RPMB key option is set anywhere in this layer. Limits: no

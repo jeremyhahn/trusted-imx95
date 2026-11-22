@@ -26,6 +26,7 @@ BBLAYERS ?= " \
   ##FETCH_DIR##/sources/meta-freescale-3rdparty \
   ##FETCH_DIR##/sources/meta-freescale-distro \
   ##FETCH_DIR##/sources/meta-imx/meta-imx-bsp \
+  ##FETCH_DIR##/sources/meta-security/meta-tpm \
   ##FETCH_DIR##/sources/meta-imx/meta-imx-sdk \
   ##REPO_DIR##/platform-image \
 "

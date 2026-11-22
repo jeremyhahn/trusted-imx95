@@ -1,17 +1,14 @@
 SUMMARY = "OP-TEE firmware TPM 2.0 TA (optee_ftpm 4.10.0 on ms-tpm-20-ref), built as an early TA"
 # SPEC row ftpm, issue #140. Provisional, pending the owner's answers in
-# docs/ftpm/README.md. Not parsed or built by bitbake yet.
+# docs/ftpm/README.md. Parsed and fetched by bitbake (docs/ftpm/build.md); not built.
 #
 # Both pins are those of docs/secure-world/build.md (and secure-world/bsp.lock):
 # optee_ftpm at its tag 4.10.0, peeled, and the ms-tpm-20-ref commit its README
 # names. Nothing here fetches an unpinned revision. ms-tpm-20-ref's wolfssl
 # submodule is not fetched: the TA uses OP-TEE's crypto and libmbedtls.
-LICENSE = "MIT"
-# MISSING: the checksum below is a zero placeholder. The pinned optee_ftpm source
-# was not fetched in the lane that wrote this, so its license file's md5 was not
-# read. The first parse on the build host fails with the real value; set it then
-# (listed in docs/ftpm/build.md, "Left for the build host").
-LIC_FILES_CHKSUM = "file://LICENSE;md5=00000000000000000000000000000000"
+# The pinned source's LICENSE file is Microsoft's two-clause BSD license.
+LICENSE = "BSD-2-Clause"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=5a3925ece0806073ae9ebbb08ff6f11e"
 
 SRCREV_FORMAT = "ftpm_mstpm"
 SRCREV_ftpm = "a09269b15de635e1816fe832e26adfbfb44c5455"
@@ -19,7 +16,6 @@ SRCREV_mstpm = "98b60a44aba79b15fcce1c0d1e46cf5918400f6a"
 SRC_URI = "git://github.com/OP-TEE/optee_ftpm.git;protocol=https;nobranch=1;name=ftpm \
            git://github.com/microsoft/ms-tpm-20-ref.git;protocol=https;nobranch=1;name=mstpm;destsuffix=ms-tpm-20-ref \
           "
-S = "${WORKDIR}/git"
 
 DEPENDS = "optee-os-tadevkit python3-pycryptodomex-native"
 inherit deploy
@@ -30,7 +26,7 @@ FTPM_TA_UUID = "bc50d971-d4c9-42c4-82cb-343fb7f37896"
 # CFG_TA_MEASURED_BOOT stays off, the TA's default (docs/ftpm/README.md,
 # "Measured boot").
 EXTRA_OEMAKE = "TA_DEV_KIT_DIR=${STAGING_INCDIR}/optee/export-user_ta \
-                CFG_MS_TPM_20_REF=${WORKDIR}/ms-tpm-20-ref \
+                CFG_MS_TPM_20_REF=${UNPACKDIR}/ms-tpm-20-ref \
                 CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE \
                 CFG_TEE_TA_LOG_LEVEL=0 \
                 CROSS_COMPILE=${HOST_PREFIX} \

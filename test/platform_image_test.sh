@@ -163,7 +163,7 @@ check_local() {
 }
 # The layers the image lists, as full paths under the fetch directory. Each is
 # a pinned path or lies inside one.
-expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-perl sources/meta-openembedded/meta-multimedia sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-imx/meta-imx-sdk '
+expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-perl sources/meta-openembedded/meta-multimedia sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-security/meta-tpm sources/meta-imx/meta-imx-sdk '
 # Pinned paths that are not listed in BBLAYERS, and why:
 #   sources/bitbake                 not a layer: the BitBake tool itself
 #   sources/base                    not a layer: fsl-community-bsp-base, the setup scripts
