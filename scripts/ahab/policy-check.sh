@@ -150,9 +150,10 @@ done <"$pcfg"
 count=$((n + 1))
 [ "$count" -ge 1 ] || fail "the parsed configuration lists no container"
 
-# One SRK table hash file per container (ahab_<set><n>_srk0_hash.txt). The
-# count must equal the container count, so a container without a hash cannot
-# pass; every hash must equal the policy hash.
+# SPSDK writes one ahab_<set>[<n>]_srk0_hash.txt per distinct SRK table: a
+# single file when the containers share a table (the normal case, as the fuses
+# hold one OEM SRK hash), one per table otherwise. Every hash file must equal
+# the policy hash, and at least one must exist.
 declare -a c_hashes=()
 for f in "$work"/parsed/ahab_*_hash.txt; do
 	[ -f "$f" ] || continue
@@ -162,7 +163,7 @@ for f in "$work"/parsed/ahab_*_hash.txt; do
 	[[ "$h" =~ ^[0-9A-F]+$ ]] || fail "the SRK table hash in $(basename "$f") is not hex"
 	c_hashes+=("$h")
 done
-[ "${#c_hashes[@]}" -eq "$count" ] || fail "$count container(s) but ${#c_hashes[@]} SRK table hash file(s)"
+[ "${#c_hashes[@]}" -ge 1 ] || fail "nxpimage ahab parse wrote no SRK table hash"
 
 # --- Compare, one line per field per container.
 bad=0
@@ -175,6 +176,11 @@ report() { # <label> <ok 0|1> <container> <policy>
 	fi
 }
 echo "policy: $count container(s) to check"
+for ((i = 0; i < ${#c_hashes[@]}; i++)); do
+	[ "${#c_hashes[@]}" -eq 1 ] && sfx= || sfx=" [table $i]"
+	[ "${c_hashes[$i]}" = "$p_hash" ] && r=0 || r=1
+	report "srk_table_hash$sfx" "$r" "${c_hashes[$i]}" "$p_hash"
+done
 for ((i = 0; i < count; i++)); do
 	[ "$count" -eq 1 ] && sfx= || sfx=" [container $i]"
 	[ -n "${c_ids[$i]+x}" ] || fail "container $i: the parsed container reports no used_srk_id"
@@ -183,8 +189,6 @@ for ((i = 0; i < count; i++)); do
 	c_mask=$(num "${c_masks[$i]}" "$MAX_MASK") || fail "container $i: the parsed srk_revoke_mask is not a number in 0..$MAX_MASK"
 	[ -n "${c_fuses[$i]+x}" ] || fail "container $i: the parsed container reports no fuse_version"
 	c_fuse=$(num "${c_fuses[$i]}" "$MAX_FUSE") || fail "container $i: the parsed fuse_version is not an integer in 0..$MAX_FUSE"
-	[ "${c_hashes[$i]}" = "$p_hash" ] && r=0 || r=1
-	report "srk_table_hash$sfx" "$r" "${c_hashes[$i]}" "$p_hash"
 	[ "$c_id" -eq "$p_id" ] && r=0 || r=1
 	report "used_srk_id$sfx" "$r" "$c_id" "$p_id"
 	[ "$c_mask" -eq "$p_mask" ] && r=0 || r=1

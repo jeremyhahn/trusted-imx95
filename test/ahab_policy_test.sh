@@ -237,7 +237,11 @@ mkbin() {
 	(cd "$pki/$name.d" && "$venv/bin/nxpimage" ahab export -c c.yaml) >"$pki/$name.log" 2>&1 ||
 		{ tail -n 5 "$pki/$name.log"; fail "nxpimage ahab export failed for $name"; return 1; }
 	cp "$pki/$name.d/$name.bin" "$pki/$name.bin"
-	tr -d '[:space:]' <"$pki/$name.d/ahab_oem0_srk0_hash.txt" >"$pki/$name.hash"
+	local hf
+	for hf in "$pki/$name.d"/ahab_*_hash.txt; do
+		tr -d '[:space:]' <"$hf" >"$pki/$name.hash"
+		break
+	done
 }
 
 # Above the floor: a container with fuse_version 3 is accepted at floors 1 and
@@ -256,12 +260,18 @@ if mkbin f3 3:0; then
 fi
 
 # Several containers: each is checked, not only the first.
+if mkbin two-ok 3:0 3:0; then
+	h=$(<"$pki/two-ok.hash")
+	mkpol "$pki/two.policy" "$h" 0 0 3
+	run "$POLICY" "$pki/two-ok.bin" "$pki/two.policy"
+	check "two containers sharing one compliant SRK table pass" 0 "policy: 2 container(s) to check" "policy: srk_table_hash OK" "policy: OK"
+fi
 if mkbin two-srk 3:0 3:4; then
 	h=$(<"$pki/two-srk.hash")
 	mkpol "$pki/two-srk.policy" "$h" 0 0 3
 	run "$POLICY" "$pki/two-srk.bin" "$pki/two-srk.policy"
 	check "a compliant first container and a second with another signing root fails" 1 \
-		"policy: srk_table_hash [container 1] MISMATCH" "policy: FAILED"
+		"policy: srk_table_hash [table 1] MISMATCH" "policy: FAILED"
 fi
 if mkbin two-fuse 3:0 1:0; then
 	h=$(<"$pki/two-fuse.hash")
