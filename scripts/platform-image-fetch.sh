@@ -34,6 +34,17 @@ done <"$lock"
 [ "${#layers[@]}" -gt 0 ] || die "$lock: no layer"
 
 # The fetch directory is never inside this clone.
+abs=$dir
+case $abs in /*) ;; *) abs=$PWD/$abs ;; esac
+anc=$abs
+rest=
+while [ ! -d "$anc" ]; do
+	rest=/$(basename "$anc")$rest
+	anc=$(dirname "$anc")
+done
+phys=$(cd "$anc" && pwd -P)$rest
+# Refuse before anything is created.
+case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
 mkdir -p "$dir"
 dir=$(cd "$dir" && pwd -P)
 case "$dir/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac

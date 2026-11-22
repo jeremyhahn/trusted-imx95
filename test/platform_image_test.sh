@@ -171,10 +171,13 @@ expect "fetch: it says checked out <commit>, the lock pins <tag object>" \
 	test "${out##*"checked out $good, the lock pins $tagobj"*}" != "$out"
 
 rc=0
-inside=$(mktemp -d "$ROOT/.inside-clone.XXXXXX") # a path this test creates and owns
-"$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$inside" >/dev/null 2>&1 || rc=$?
+inside="$ROOT/.inside-clone.$$.$RANDOM" # an absent path; nothing is created or removed
+[ ! -e "$inside" ] || { echo "FAIL: $inside exists" >&2; exit 1; }
+out=$("$ROOT/scripts/platform-image-fetch.sh" "$tmp/good.lock" "$inside" 2>&1) || rc=$?
 expect "fetch: a directory inside the clone is refused" test "$rc" -ne 0
-rm -rf "$inside"
+expect "fetch: it says the directory is inside this clone" \
+	test "${out##*"is inside this clone"*}" != "$out"
+expect "fetch: the refused path was not created" test ! -e "$inside"
 
 # A locally modified layer is refused on a re-fetch.
 mkdir -p "$tmp/src/recipes"
