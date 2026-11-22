@@ -172,7 +172,7 @@ commit, and changes nothing outside it. The `Faults` lines, `FAULT_SW0`, `SYS` a
 | Line (0001's output) | Before | After | Survey |
 |---|---|---|---|
 | 369 `MAILBOX` | `type=mu, mu=9, test=8, priority=high` | `type=mu, mu=9, priority=high` | [scmi-permissions-survey.md](scmi-permissions-survey.md) §3.1 (`test` keys) |
-| 370-371 `CHANNEL db=0` | `..., type=a2p, \` then `test=default` | `..., type=a2p` | §3.1 |
+| 370-371 `CHANNEL db=0` | `..., type=a2p, \` then `test=default` | **unchanged, kept** | the configuration tool stops with "missing default test channel" without it (the first build of the patch that dropped it failed there) |
 | 381-382 | `BRD_SM_CTRL_TEST ALL`, `BRD_SM_CTRL_TEST_A ALL` | removed | §3.1, §3.2 (drop) |
 | 404 | `LPUART3             OWNER, test` | removed | §3.2 (test key on the M7 UART drops) |
 | 412 | `PD_M7               test` | removed | §3.2 (`PD_M7 test` drops) |
@@ -190,7 +190,7 @@ What stays, and why:
 
 Mechanism: [`sm.lock`](../../system-manager/sm.lock) carries the new `sm_patch_sha256` (0001 then 0002) and
 `sm_patched_config_sha256`, both computed from the files. After the patched-file hash check, `scripts/sm-build.sh`
-refuses to build when the M7 LM block of the patched file holds a `test` key or a `BRD_SM_CTRL_TEST*` grant, or when
+refuses to build when the M7 LM block of the patched file holds a `test` key (other than `test=default`) or a `BRD_SM_CTRL_TEST*` grant, or when
 it finds no M7 block. `test/sm_build_test.sh` checks offline that 0002 touches only M7 block lines, that each removed
 line carries `test` or `BRD_SM_CTRL_TEST`, that each added line is a removed one without the key, that no `Faults`,
 `SYS` or `LMM_2` line is touched, and that the new check fails on a fake M7 block with a `test` key and passes without
@@ -199,7 +199,8 @@ one. The image and the boot container must be rebuilt and re-signed after any ch
 Unconfirmed: whether a `test` key widens access in a release build ([scmi-permissions-survey.md](scmi-permissions-survey.md)
 §6); whether the SM's configuration tool accepts the file without `test` keys is checked only by the build below.
 MISSING from the survey: the `CHANNEL db=0` `test=default` key (§3.1 names `test` keys in general but not a channel
-key); it is dropped under the general rule and is the owner's to confirm.
+key). It stays, because the tool needs a default test channel, so the M7 block still carries one `test` key and
+`sm-build.sh` exempts exactly `test=default`. Whether the tool can be satisfied another way is the owner's to confirm.
 
 SM build run: see the end of this section.
 
