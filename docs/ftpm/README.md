@@ -76,8 +76,13 @@ limits above ([question 1](#open-questions-for-the-owner)).
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `data.mount` before the supplicant starts; the root file system
 stays read-only. The NV therefore persists across a reboot. As SPEC row `ftpm` says, the REE-FS NV is
-wiped whenever the root file system is reflashed: a full-image flash recreates `tee-data` empty, and any root file system
-update path must format `tee-data` in the same step. It is plain files that root on Linux can copy or roll back.
+wiped whenever the root file system is reflashed. The image enforces it: the rootfs carries a build identity
+(`/etc/trusted-imx95-rootfs-id`), and the oneshot unit `tee-nv-wipe.service` runs after the `/data` mount and before
+`tee-supplicant`, which requires it. If `/data/tee-rootfs-id` is missing or differs, it removes everything under
+`/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
+`tee-supplicant` from starting. A rootfs-only reflash of a different build therefore wipes the NV on the next boot, and
+a full-image flash recreates `tee-data` empty. A reflash of the very same build carries the same identity and is not
+told apart. It is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle
 
