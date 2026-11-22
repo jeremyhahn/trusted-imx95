@@ -50,16 +50,22 @@ chmod +x "$stubs/docker" "$stubs/go"
 # ci-mask-lan.sh
 run env -i PATH="$PATH" bash "$ROOT/scripts/ci-mask-lan.sh"
 check "ci-mask-lan.sh: no registry or cache variable masks nothing" 0
-[ -z "$OUT" ] && pass "ci-mask-lan.sh: prints nothing for an empty environment" ||
+if [ -z "$OUT" ]; then
+	pass "ci-mask-lan.sh: prints nothing for an empty environment"
+else
 	fail "ci-mask-lan.sh: prints nothing for an empty environment" "$OUT"
+fi
 run env -i PATH="$PATH" DEVCACHE_GOPROXY=http://10.9.8.7:3000/go \
 	CI_IMAGE_REGISTRY=registry.corp:5000 GOPROXY="https://proxy.golang.org,direct" \
 	bash "$ROOT/scripts/ci-mask-lan.sh"
 check "ci-mask-lan.sh: an internal address and host name are masked" 0 \
 	"::add-mask::http://10.9.8.7:3000/go" "::add-mask::10.9.8.7:3000" \
 	"::add-mask::10.9.8.7" "::add-mask::registry.corp"
-[[ "$OUT" != *proxy.golang.org* ]] && pass "ci-mask-lan.sh: a public host is left" ||
+if [[ "$OUT" != *proxy.golang.org* ]]; then
+	pass "ci-mask-lan.sh: a public host is left"
+else
 	fail "ci-mask-lan.sh: a public host is left" "$OUT"
+fi
 
 # ci-image-history.sh
 run env PATH="$stubs:$PATH" bash "$ROOT/scripts/ci-image-history.sh"
@@ -70,8 +76,11 @@ run env PATH="$stubs:$PATH" STUB_HISTORY="ARG X=http://10.1.2.3:8080" \
 	bash "$ROOT/scripts/ci-image-history.sh" img:1
 check "ci-image-history.sh: a private address in the history fails" 1 \
 	"history entry 1 carries a private address"
-[[ "$OUT" != *10.1.2.3* ]] && pass "ci-image-history.sh: the address is never printed" ||
+if [[ "$OUT" != *10.1.2.3* ]]; then
+	pass "ci-image-history.sh: the address is never printed"
+else
 	fail "ci-image-history.sh: the address is never printed" "$OUT"
+fi
 run env PATH="$stubs:$PATH" STUB_CONFIG='{"Env":["P=192.168.0.5"]}' \
 	bash "$ROOT/scripts/ci-image-history.sh" img:1
 check "ci-image-history.sh: a private address in the config fails" 1 "its config"
