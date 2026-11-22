@@ -144,8 +144,9 @@ no procedure that uses them.
 
 - S5 (IMX95RM) and S6 (Security Reference Manual). These are needed for tamper pins,
   security violation sources and how the ELE behaves when aborted or tampered with.
-- S8 (the Linux ELE driver and NVM manager). This would show where the key store blob
-  is kept and how the A55 side sees an aborted ELE.
+- S8 (the Linux ELE driver and NVM manager). The driver's userspace surface and failure
+  reporting are now in the [A55 signals survey](a55-signals-survey.md). Where the key
+  store blob is kept is still open.
 - S9 (the text of issue #44). This survey follows the lane brief and may not
   cover every point the issue lists.
 
