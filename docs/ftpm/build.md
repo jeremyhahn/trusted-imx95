@@ -81,7 +81,9 @@ the output is in `${S}`, and the deploy task installs from there.
 
 ### Image build
 
-`bitbake trusted-imx95-image-debug`: IMAGE_BUILD_RESULT
+`bitbake trusted-imx95-image-debug`: exit 1 after 2415 tasks, one failed. The kernel (with `ftpm.cfg`) compiled. The failure
+is `imx-m7-demos` `do_unpack`: the recipe needs the Freescale EULA accepted (`ACCEPT_FSL_EULA`), a licence decision that
+is the owner's, not set here. The image is not built; the rest is open until that is decided.
 
 Still open:
 
