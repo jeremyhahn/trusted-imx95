@@ -85,7 +85,7 @@ checks the fragment offline.
 |---|---|---|
 | The "cheap, no expected driver impact" KSPP options with a plain value (`HARDENED_USERCOPY`, the SLAB and page-allocator randomisation, `LIST_HARDENED`, `FORTIFY_SOURCE`, `INIT_ON_ALLOC_DEFAULT_ON`, `DEFAULT_MMAP_MIN_ADDR=65536`, `SLAB_MERGE_DEFAULT`, `LDISC_AUTOLOAD`, `LEGACY_PTYS`, `LEGACY_TIOCSTI` off, and the rest of that list) | hardening-survey section 3 | provisional |
 | `DEVMEM`, `DEVPORT`, `KEXEC`, `KEXEC_FILE`, `CRASH_DUMP` off | section 4, question 5 (b) | provisional |
-| `PANIC_ON_OOPS=y`, `PANIC_TIMEOUT=-1`, `MAGIC_SYSRQ_DEFAULT_ENABLE=176` | section 3 "behaviour changes", question 5 (b) | provisional |
+| `PANIC_ON_OOPS=y`, `PANIC_TIMEOUT=-1`, `MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0` | section 3 "behaviour changes", question 5 (b) | provisional |
 
 Dropped because the survey states no usable value: `STATIC_USERMODEHELPER`
 (it also needs a helper path, which the survey does not give; an empty path
@@ -102,8 +102,8 @@ which need a real cross build (sections 3 and 9).
 
 Not verified: no kernel build; no check that the options resolve in 6.18 or
 that the BSP drivers survive them (survey section 6, question 2). The survey
-gives `MAGIC_SYSRQ_DEFAULT_ENABLE=176` without a base; Kconfig reads that hex
-symbol as written, so whether 176 means decimal 176 is unconfirmed.
+gave the SysRq mask as 176 without a base; Kconfig reads that symbol as hex, so
+the fragment writes `0xb0` (sync 0x10, remount read-only 0x20, reboot 0x80).
 
 ## Verified and not verified
 

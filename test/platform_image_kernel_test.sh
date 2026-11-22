@@ -15,6 +15,19 @@ layer=$ROOT/platform-image/conf/layer.conf
 out_re='^(MODULES|MODULE_SIG[A-Z0-9_]*|SECURITY_LOCKDOWN_LSM[A-Z0-9_]*|LOCK_DOWN_KERNEL_FORCE_[A-Z0-9_]*|COMPAT|SHADOW_CALL_STACK|CFI_CLANG|ARM64_BTI_KERNEL|ARM64_MTE|KASAN_HW_TAGS|UNWIND_PATCH_PAC_INTO_SCS|DEBUG_RODATA|DEBUG_CREDENTIALS|REFCOUNT_FULL|RANDOM_TRUST_CPU|RANDOM_TRUST_BOOTLOADER|DEBUG_SET_MODULE_RONX|PAGE_POISONING_ZERO)$'
 val_re='^(y|n|-?[0-9]+|0x[0-9a-fA-F]+)$'
 
+# The complete required symbol=value set: every assignment the fragment makes.
+# MAGIC_SYSRQ_DEFAULT_ENABLE is a hex symbol: 0xb0 = sync 0x10 + remount-ro 0x20 + reboot 0x80.
+REQUIRED=(
+	HARDENED_USERCOPY=y SLAB_FREELIST_RANDOM=y SLAB_FREELIST_HARDENED=y SLAB_BUCKETS=y
+	RANDOM_KMALLOC_CACHES=y SLAB_MERGE_DEFAULT=n SHUFFLE_PAGE_ALLOCATOR=y LIST_HARDENED=y
+	BUG_ON_DATA_CORRUPTION=y SCHED_STACK_END_CHECK=y FORTIFY_SOURCE=y SECURITY_DMESG_RESTRICT=y
+	RANDOMIZE_KSTACK_OFFSET_DEFAULT=y INIT_ON_ALLOC_DEFAULT_ON=y SYN_COOKIES=y LDISC_AUTOLOAD=n
+	LEGACY_PTYS=n LEGACY_TIOCSTI=n PROC_MEM_NO_FORCE=y DEBUG_WX=y DEFAULT_MMAP_MIN_ADDR=65536
+	ARM64_SW_TTBR0_PAN=y ZERO_CALL_USED_REGS=y
+	DEVMEM=n DEVPORT=n KEXEC=n KEXEC_FILE=n CRASH_DUMP=n
+	PANIC_ON_OOPS=y PANIC_TIMEOUT=-1 MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0
+)
+
 # symbols FILE: prints "SYMBOL VALUE" per non-comment, non-blank line (VALUE n
 # for "# CONFIG_X is not set"), or "BAD <line>" for a malformed one.
 symbols() {
@@ -55,6 +68,11 @@ checker() {
 		if [[ $s =~ $out_re ]]; then echo "out-of-scope symbol: $s"; rc=1; fi
 	done < <(symbols "$f")
 	[ "$n" -gt 0 ] || { echo "no symbols"; rc=1; }
+	local kv got
+	for kv in "${REQUIRED[@]}"; do
+		got=$(value_of "$f" "${kv%%=*}" || true)
+		[ "$got" = "${kv#*=}" ] || { echo "required ${kv%%=*}: want ${kv#*=}, got ${got:-missing}"; rc=1; }
+	done
 	return "$rc"
 }
 
@@ -97,12 +115,10 @@ done < <(symbols "$frag")
 expect "no out-of-scope symbol (modules, signing, lockdown, compat, toolchain, removed)" test -z "$banned"
 
 q5ok=1
-for kv in DEVMEM=n DEVPORT=n KEXEC=n KEXEC_FILE=n CRASH_DUMP=n PANIC_ON_OOPS=y PANIC_TIMEOUT=-1 \
-	MAGIC_SYSRQ_DEFAULT_ENABLE=176 SLAB_MERGE_DEFAULT=n LDISC_AUTOLOAD=n LEGACY_PTYS=n \
-	LEGACY_TIOCSTI=n DEFAULT_MMAP_MIN_ADDR=65536; do
+for kv in "${REQUIRED[@]}"; do
 	[ "$(value_of "$frag" "${kv%%=*}" || true)" = "${kv#*=}" ] || { q5ok=0; echo "wrong: $kv"; }
 done
-expect "the Q5 (b) and plain-value settings are as in the brief" test "$q5ok" -eq 1
+expect "every required hardening symbol has its required value (SysRq mask is hex 0xb0)" test "$q5ok" -eq 1
 
 expect "layer.conf BBFILES line covers the bbappend" live "$layer" 'BBFILES[[:space:]]*\+=.*recipes-\*/\*/\*\.bbappend'
 
@@ -114,5 +130,29 @@ cp "$frag" "$tmp/bad.cfg"
 echo 'CONFIG_MODULE_SIG_FORCE=y' >>"$tmp/bad.cfg"
 run checker "$tmp/bad.cfg"
 check "negative: checker rejects an added out-of-scope symbol" nonzero "out-of-scope symbol: MODULE_SIG_FORCE"
+
+# Each case edits a copy: a missing, flipped or wrong-base value must fail.
+run checker "$frag"
+check "positive: the unmodified fragment passes the full set" 0
+mut() { # mut NAME SED-FREE-FILTER: copy frag lines through a bash filter
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do "$2" "$l"; done <"$frag" >"$tmp/$1.cfg"
+}
+del_fortify() { [ "$1" = CONFIG_FORTIFY_SOURCE=y ] || printf '%s\n' "$1"; }
+flip_usercopy() { if [ "$1" = CONFIG_HARDENED_USERCOPY=y ]; then echo '# CONFIG_HARDENED_USERCOPY is not set'; else printf '%s\n' "$1"; fi; }
+flip_freelist() { if [ "$1" = CONFIG_SLAB_FREELIST_HARDENED=y ]; then echo 'CONFIG_SLAB_FREELIST_HARDENED=n'; else printf '%s\n' "$1"; fi; }
+dec_sysrq() { if [[ $1 == CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=* ]]; then echo 'CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=176'; else printf '%s\n' "$1"; fi; }
+mut del del_fortify
+run checker "$tmp/del.cfg"
+check "negative: a deleted required protection fails" nonzero "required FORTIFY_SOURCE: want y, got missing"
+mut flip flip_usercopy
+run checker "$tmp/flip.cfg"
+check "negative: a required protection set to not-set fails" nonzero "required HARDENED_USERCOPY: want y, got n"
+mut flipn flip_freelist
+run checker "$tmp/flipn.cfg"
+check "negative: a required protection set to n fails" nonzero "required SLAB_FREELIST_HARDENED: want y, got n"
+mut dec dec_sysrq
+run checker "$tmp/dec.cfg"
+check "negative: the SysRq mask as decimal 176 fails" nonzero "required MAGIC_SYSRQ_DEFAULT_ENABLE: want 0xb0, got 176"
 
 finish

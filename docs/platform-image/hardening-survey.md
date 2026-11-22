@@ -99,7 +99,7 @@ Not set by NXP, grouped by what they cost (my grouping, KSPP's options) [S2]:
   `KFENCE`, `UBSAN_BOUNDS` with `UBSAN_TRAP`, `DEBUG_LIST`, `DEBUG_SG`,
   `DEBUG_NOTIFIERS`, `DEBUG_VIRTUAL`, `SCHED_CORE`.
 - **Behaviour changes:** `PANIC_ON_OOPS=y` with `PANIC_TIMEOUT=-1` (an oops
-  reboots the board at once), `MAGIC_SYSRQ_DEFAULT_ENABLE=176` (NXP: `0x1`, all
+  reboots the board at once), `MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0` (hex; sync, remount read-only, reboot; NXP: `0x1`, all
   SysRq functions), `COMPAT=n` (no 32-bit userspace), `INET_DIAG=n`.
 - **Toolchain-dependent (unconfirmed, §1):** `SHADOW_CALL_STACK`,
   `UNWIND_PATCH_PAC_INTO_SCS`, `ARM64_BTI_KERNEL`, `ARM64_MTE`,
