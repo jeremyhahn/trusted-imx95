@@ -90,7 +90,7 @@ with `nxpimage ahab parse` (pinned SPSDK) and fails unless the container's SRK t
 `used_srk_id`, `srk_revoke_mask` and `fuse_version` agree with the policy file. It prints one
 `policy: <field> OK` or `policy: <field> MISMATCH (container X, policy Y)` line per field, then
 `policy: OK` (exit 0) or `policy: FAILED` (exit 1). A missing, empty or unreadable policy file, a
-missing field in either input, or a container that does not parse FAILS; nothing is skipped. It
+missing field in either input, or a container that does not parse FAILS; nothing is skipped. Every container in the input is checked against the policy (not only the first), and each needs its own SRK table hash file, as the test plan's "each container" requires. It
 touches no board, fuse or key, and deletes the `.bcf` files unread.
 
 The policy file is plain `KEY=VALUE` lines, parsed by the script and never sourced. `#` comments and

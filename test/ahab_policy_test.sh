@@ -185,6 +185,92 @@ else
 	check "FUSE_VERSION_MIN at its maximum is accepted and compared" 1 "policy: fuse_version MISMATCH (container $fuse, policy >= 255)"
 fi
 
+# Test containers built here from the same throwaway test PKI (temp directory,
+# nothing committed): a nonzero fuse_version, and several containers.
+pki="$TMP_ROOT/pki"
+mkdir "$pki"
+for i in 0 1 2 3 4 5 6 7; do
+	"$venv/bin/nxpcrypto" key generate -k secp384r1 -o "$pki/srk$i.pem" >/dev/null 2>"$pki/keygen.log" ||
+		{ tail -n 3 "$pki/keygen.log"; fail "nxpcrypto key generate failed for srk$i"; finish; exit 1; }
+done
+head -c 4096 /dev/urandom >"$pki/payload.bin"
+
+# ymlc <fuse_version> <first SRK of the table, 0 or 4>: one container block.
+ymlc() {
+	echo "  - container:"
+	echo "      srk_set: oem"
+	echo "      used_srk_id: 0"
+	echo "      srk_revoke_mask: '0x00'"
+	echo "      fuse_version: $1"
+	echo "      sw_version: 0"
+	echo "      signer: type=file;file_path=srk$2.pem"
+	echo "      images:"
+	echo "        - image_path: payload.bin"
+	echo "          load_address: '0x90000000'"
+	echo "          entry_point: '0x90000000'"
+	echo "          image_type: data"
+	echo "          core_id: cortex-a55"
+	echo "          hash_type: sha384"
+	echo "      srk_table:"
+	echo "        srk_array:"
+	echo "          - srk$2.pub"
+	echo "          - srk$(($2 + 1)).pub"
+	echo "          - srk$(($2 + 2)).pub"
+	echo "          - srk$(($2 + 3)).pub"
+}
+# mkbin <name> <container spec>...: builds $pki/<name>.bin, one "<fuse>:<srk base>"
+# per container; the first container's SRK table hash goes to $pki/<name>.hash.
+mkbin() {
+	local name=$1 spec
+	shift
+	mkdir "$pki/$name.d"
+	cp "$pki"/*.pem "$pki"/payload.bin "$pki/$name.d/"
+	for i in 0 1 2 3 4 5 6 7; do cp "$pki/srk$i.pub" "$pki/$name.d/" 2>/dev/null || true; done
+	{
+		echo "family: mimx9596"
+		echo "revision: b0"
+		echo "target_memory: standard"
+		echo "output: $name.bin"
+		echo "containers:"
+		for spec in "$@"; do ymlc "${spec%%:*}" "${spec##*:}"; done
+	} >"$pki/$name.d/c.yaml"
+	(cd "$pki/$name.d" && "$venv/bin/nxpimage" ahab export -c c.yaml) >"$pki/$name.log" 2>&1 ||
+		{ tail -n 5 "$pki/$name.log"; fail "nxpimage ahab export failed for $name"; return 1; }
+	cp "$pki/$name.d/$name.bin" "$pki/$name.bin"
+	tr -d '[:space:]' <"$pki/$name.d/ahab_oem0_srk0_hash.txt" >"$pki/$name.hash"
+}
+
+# Above the floor: a container with fuse_version 3 is accepted at floors 1 and
+# 3 and rejected at floor 4 (a -ge turned into -eq fails the floor-1 case).
+if mkbin f3 3:0; then
+	h3=$(<"$pki/f3.hash")
+	mkpol "$pki/f3-1.policy" "$h3" 0 0 1
+	run "$POLICY" "$pki/f3.bin" "$pki/f3-1.policy"
+	check "C4: a container with fuse_version 3 is accepted at floor 1" 0 "policy: fuse_version OK" "policy: OK"
+	mkpol "$pki/f3-3.policy" "$h3" 0 0 3
+	run "$POLICY" "$pki/f3.bin" "$pki/f3-3.policy"
+	check "C4: a container with fuse_version 3 is accepted at floor 3" 0 "policy: fuse_version OK" "policy: OK"
+	mkpol "$pki/f3-4.policy" "$h3" 0 0 4
+	run "$POLICY" "$pki/f3.bin" "$pki/f3-4.policy"
+	check "C4: a container with fuse_version 3 is rejected at floor 4" 1 "policy: fuse_version MISMATCH (container 3, policy >= 4)" "policy: FAILED"
+fi
+
+# Several containers: each is checked, not only the first.
+if mkbin two-srk 3:0 3:4; then
+	h=$(<"$pki/two-srk.hash")
+	mkpol "$pki/two-srk.policy" "$h" 0 0 3
+	run "$POLICY" "$pki/two-srk.bin" "$pki/two-srk.policy"
+	check "a compliant first container and a second with another signing root fails" 1 \
+		"policy: srk_table_hash [container 1] MISMATCH" "policy: FAILED"
+fi
+if mkbin two-fuse 3:0 1:0; then
+	h=$(<"$pki/two-fuse.hash")
+	mkpol "$pki/two-fuse.policy" "$h" 0 0 3
+	run "$POLICY" "$pki/two-fuse.bin" "$pki/two-fuse.policy"
+	check "a compliant first container and a second with fuse_version below the floor fails" 1 \
+		"policy: fuse_version [container 1] MISMATCH (container 1, policy >= 3)" "policy: FAILED"
+fi
+
 # A policy file that is missing, empty, or malformed fails; never a skip.
 run "$POLICY" "$bin" "$TMP_ROOT/no-such.policy"
 check "a missing policy file fails" 1 "no such" "policy: FAILED"

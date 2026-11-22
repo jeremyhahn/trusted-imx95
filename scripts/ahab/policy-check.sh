@@ -118,42 +118,55 @@ mkdir "$work/parsed"
 	{ tail -n 5 "$work/parse.log" >&2; fail "nxpimage ahab parse failed for $bin"; }
 rm -f "$work"/parsed/*.bcf
 
-# cfg_val <key>: the first "<key>: <value>" line of the parsed configuration
-# (the first container), without quotes. Comment lines never match.
+# Every container in the input is checked against the policy; none is skipped.
+# The parsed configuration lists the containers in order, each opened by a
+# "container:" line. For each, the first "<key>: <value>" line inside it is
+# taken (quotes removed; comment lines never match).
 pcfg=$work/parsed/parsed_config.yaml
 [ -f "$pcfg" ] || fail "nxpimage ahab parse wrote no parsed_config.yaml"
-cfg_val() {
-	local l
-	while IFS= read -r l; do
-		l=$(trim "${l%$'\r'}")
-		case "$l" in
-		"$1:"*)
-			l=$(trim "${l#*:}")
-			l=${l//[\'\"]/}
-			[ -n "$l" ] || return 1
-			echo "$l"
-			return 0
-			;;
+declare -a c_ids=() c_masks=() c_fuses=()
+n=-1
+while IFS= read -r l || [ -n "$l" ]; do
+	l=$(trim "${l%$'\r'}")
+	if [ "$l" = "container:" ]; then
+		n=$((n + 1))
+		continue
+	fi
+	[ "$n" -ge 0 ] || continue
+	case "$l" in
+	used_srk_id:* | srk_revoke_mask:* | fuse_version:*)
+		k=${l%%:*}
+		v=$(trim "${l#*:}")
+		v=${v//[\'\"]/}
+		[ -n "$v" ] || fail "container $n: the parsed container has an empty $k"
+		case "$k" in
+		used_srk_id) [ -n "${c_ids[$n]+x}" ] || c_ids[$n]=$v ;;
+		srk_revoke_mask) [ -n "${c_masks[$n]+x}" ] || c_masks[$n]=$v ;;
+		fuse_version) [ -n "${c_fuses[$n]+x}" ] || c_fuses[$n]=$v ;;
 		esac
-	done <"$pcfg"
-	return 1
-}
+		;;
+	esac
+done <"$pcfg"
+count=$((n + 1))
+[ "$count" -ge 1 ] || fail "the parsed configuration lists no container"
 
-hash_file=$work/parsed/ahab_oem0_srk0_hash.txt
-[ -s "$hash_file" ] || fail "nxpimage ahab parse wrote no SRK table hash (ahab_oem0_srk0_hash.txt)"
-c_hash=$(tr -d '[:space:]' <"$hash_file")
-c_hash=${c_hash^^}
-[[ "$c_hash" =~ ^[0-9A-F]+$ ]] || fail "the container's SRK table hash is not hex"
-c_id=$(cfg_val used_srk_id) || fail "the parsed container reports no used_srk_id"
-c_id=$(num "$c_id" "$MAX_ID") || fail "the parsed used_srk_id is not an integer in 0..$MAX_ID"
-c_mask=$(cfg_val srk_revoke_mask) || fail "the parsed container reports no srk_revoke_mask"
-c_mask=$(num "$c_mask" "$MAX_MASK") || fail "the parsed srk_revoke_mask is not a number in 0..$MAX_MASK"
-c_fuse=$(cfg_val fuse_version) || fail "the parsed container reports no fuse_version"
-c_fuse=$(num "$c_fuse" "$MAX_FUSE") || fail "the parsed fuse_version is not an integer in 0..$MAX_FUSE"
+# One SRK table hash file per container (ahab_<set><n>_srk0_hash.txt). The
+# count must equal the container count, so a container without a hash cannot
+# pass; every hash must equal the policy hash.
+declare -a c_hashes=()
+for f in "$work"/parsed/ahab_*_hash.txt; do
+	[ -f "$f" ] || continue
+	[ -s "$f" ] || fail "an SRK table hash file is empty: $(basename "$f")"
+	h=$(tr -d '[:space:]' <"$f")
+	h=${h^^}
+	[[ "$h" =~ ^[0-9A-F]+$ ]] || fail "the SRK table hash in $(basename "$f") is not hex"
+	c_hashes+=("$h")
+done
+[ "${#c_hashes[@]}" -eq "$count" ] || fail "$count container(s) but ${#c_hashes[@]} SRK table hash file(s)"
 
-# --- Compare, one line per field.
+# --- Compare, one line per field per container.
 bad=0
-report() { # <field> <ok 0|1> <container> <policy>
+report() { # <label> <ok 0|1> <container> <policy>
 	if [ "$2" = 0 ]; then
 		echo "policy: $1 OK"
 	else
@@ -161,14 +174,24 @@ report() { # <field> <ok 0|1> <container> <policy>
 		bad=1
 	fi
 }
-[ "$c_hash" = "$p_hash" ] && r=0 || r=1
-report srk_table_hash "$r" "$c_hash" "$p_hash"
-[ "$c_id" -eq "$p_id" ] && r=0 || r=1
-report used_srk_id "$r" "$c_id" "$p_id"
-[ "$c_mask" -eq "$p_mask" ] && r=0 || r=1
-report srk_revoke_mask "$r" "$c_mask" "$p_mask"
-[ "$c_fuse" -ge "$p_min" ] && r=0 || r=1
-report fuse_version "$r" "$c_fuse" ">= $p_min"
+echo "policy: $count container(s) to check"
+for ((i = 0; i < count; i++)); do
+	[ "$count" -eq 1 ] && sfx= || sfx=" [container $i]"
+	[ -n "${c_ids[$i]+x}" ] || fail "container $i: the parsed container reports no used_srk_id"
+	c_id=$(num "${c_ids[$i]}" "$MAX_ID") || fail "container $i: the parsed used_srk_id is not an integer in 0..$MAX_ID"
+	[ -n "${c_masks[$i]+x}" ] || fail "container $i: the parsed container reports no srk_revoke_mask"
+	c_mask=$(num "${c_masks[$i]}" "$MAX_MASK") || fail "container $i: the parsed srk_revoke_mask is not a number in 0..$MAX_MASK"
+	[ -n "${c_fuses[$i]+x}" ] || fail "container $i: the parsed container reports no fuse_version"
+	c_fuse=$(num "${c_fuses[$i]}" "$MAX_FUSE") || fail "container $i: the parsed fuse_version is not an integer in 0..$MAX_FUSE"
+	[ "${c_hashes[$i]}" = "$p_hash" ] && r=0 || r=1
+	report "srk_table_hash$sfx" "$r" "${c_hashes[$i]}" "$p_hash"
+	[ "$c_id" -eq "$p_id" ] && r=0 || r=1
+	report "used_srk_id$sfx" "$r" "$c_id" "$p_id"
+	[ "$c_mask" -eq "$p_mask" ] && r=0 || r=1
+	report "srk_revoke_mask$sfx" "$r" "$c_mask" "$p_mask"
+	[ "$c_fuse" -ge "$p_min" ] && r=0 || r=1
+	report "fuse_version$sfx" "$r" "$c_fuse" ">= $p_min"
+done
 
 if [ "$bad" = 0 ]; then
 	echo "policy: OK"
