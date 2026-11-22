@@ -2,7 +2,8 @@
 # #14. Not built yet: the layer set is a proposal, no bitbake run has parsed
 # it. Replace ##FETCH_DIR## with the directory scripts/platform-image-fetch.sh
 # checked the layers out into (paths as manifest.lock gives them).
-# meta-poky is listed because NXP's fsl-imx-* distros require poky.conf.
+# meta-poky is listed because the distro requires poky.conf. meta-perl is
+# listed because meta-imx-sdk's layer.conf depends on perl-layer.
 
 POKY_BBLAYERS_CONF_VERSION = "2"
 BBPATH = "${TOPDIR}"
@@ -12,6 +13,7 @@ BBLAYERS ?= " \
   ##FETCH_DIR##/sources/openembedded-core/meta \
   ##FETCH_DIR##/sources/meta-openembedded/meta-oe \
   ##FETCH_DIR##/sources/meta-openembedded/meta-python \
+  ##FETCH_DIR##/sources/meta-openembedded/meta-perl \
   ##FETCH_DIR##/sources/meta-openembedded/meta-networking \
   ##FETCH_DIR##/sources/meta-openembedded/meta-filesystems \
   ##FETCH_DIR##/sources/meta-yocto/meta-poky \

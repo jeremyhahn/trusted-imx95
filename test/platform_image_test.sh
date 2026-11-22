@@ -47,16 +47,19 @@ done <"$ROOT/system-manager/sm.lock"
 expect "machine is set" test -n "$machine"
 expect "machine matches the sm.lock comment" test "$sm_machine_found" -eq 1
 
-signs=0 derives=0
+signs=0 derives=0 fslreq=0 obsolete=0
 while IFS= read -r line; do
 	case $line in
-	require*fsl-imx-*) derives=1 ;;
-	require*poky*) signs=1 ;;
 	'#'*) ;;
+	require*conf/distro/poky.conf) derives=1 ;;
+	require*fsl-imx-*) fslreq=1 ;;
+	*DISTRO_FEATURES_DEFAULT:* | *DISTRO_FEATURES_DEFAULT[\ =]* | *DISTRO_FEATURES_BACKFILL_CONSIDERED*) obsolete=1 ;;
 	*[Ss][Ii][Gg][Nn]* | *[Cc][Ss][Tt]* | *spsdk* | *SPSDK* | *ahab* | *AHAB* | *fuse* | *rpmb*) signs=1 ;;
 	esac
 done <"$distro"
-expect "distro requires an fsl-imx-* distro, not poky" test "$derives" -eq 1
+expect "distro requires poky's conf/distro/poky.conf" test "$derives" -eq 1
+expect "distro does not require an fsl-imx-* distro (the release's fsl-imx-fb-minimal.conf sets the obsolete DISTRO_FEATURES_DEFAULT)" test "$fslreq" -eq 0
+expect "distro sets neither DISTRO_FEATURES_DEFAULT nor DISTRO_FEATURES_BACKFILL_CONSIDERED (obsolete on wrynose)" test "$obsolete" -eq 0
 expect "distro names no signing step" test "$signs" -eq 0
 
 # The image recipes (provisional default, hardening-survey section 7).
@@ -160,7 +163,7 @@ check_local() {
 }
 # The layers the image lists, as full paths under the fetch directory. Each is
 # a pinned path or lies inside one.
-expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-imx/meta-imx-sdk '
+expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-perl sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-imx/meta-imx-sdk '
 # Pinned paths that are not listed in BBLAYERS, and why:
 #   sources/bitbake                 not a layer: the BitBake tool itself
 #   sources/base                    not a layer: fsl-community-bsp-base, the setup scripts
