@@ -76,8 +76,7 @@ limits above ([question 1](#open-questions-for-the-owner)).
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system
 stays read-only, which is why the NV cannot live on it. The NV therefore persists across a reboot.
-Lifecycle (SPEC row `ftpm` says the NV is wiped with the root file system; the wording below is proposed, pending owner
-approval, and the SPEC is not yet changed):
+Lifecycle (SPEC row `ftpm` carries this wording as a proposal, pending owner approval):
 - Writing the whole `.wic` is the supported way to reprovision: it recreates `tee-data` empty, so the NV is wiped.
 - A root partition rewritten with a different build is caught on boot. The rootfs carries a build identity
   (`/etc/trusted-imx95-rootfs-id`) and the oneshot `tee-nv-wipe.service` runs after the `/data` mount and before

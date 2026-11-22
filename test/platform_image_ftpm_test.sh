@@ -222,7 +222,8 @@ expect "README says a byte-identical root rewrite keeps the NV" has "$ROOT/docs/
 expect "README makes no claim that every root-only rewrite is caught" none 'catches that on boot' "$ROOT/docs/ftpm/README.md"
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
-expect "SPEC row ftpm says the NV is wiped with the root file system" ncstr "$ROOT/docs/SPEC.md" 'wiped with the root file system'
+expect "SPEC row ftpm carries the proposed NV lifecycle" ncstr "$ROOT/docs/SPEC.md" 'a byte-identical root rewrite keeps the NV (proposed, pending owner approval)'
+expect "SPEC row ftpm no longer says the NV is wiped with the root file system" none 'wiped with the root file system' "$ROOT/docs/SPEC.md"
 expect "README marks the lifecycle wording as proposed, pending owner approval" ncstr "$ROOT/docs/ftpm/README.md" 'pending owner'
 expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
 expect "README makes no claim that the NV survives a reflash" none 'partition is kept' "$ROOT/docs/ftpm/README.md"
