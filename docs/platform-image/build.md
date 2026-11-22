@@ -25,8 +25,16 @@ section 11), written down so the owner can read a working proposal.
   unstaged, untracked or ignored file fails the fetch, so remove the layer
   directory and fetch again. It needs the network, so it is in neither
   `make build` nor `make test`.
+- `scripts/platform-image-parse.sh`, `make platform-image-parse`: the metadata
+  check, run on a build host (bitbake and the network). It fetches the pinned
+  layers, writes the build directory's conf from the templates, runs
+  `bitbake -p`, then `bitbake -e` for `trusted-imx95-image` and
+  `trusted-imx95-image-debug` and checks that `MACHINE` is the lock's machine.
+  It builds no image. CI does not run it.
 - `test/platform_image_test.sh`, in `make test`: offline checks of the lock,
-  the machine name and the distro file.
+  the machine name, the distro file, the templates against the lock, and the
+  absence of root-login relaxations (`debug-tweaks` and the like) in the image
+  metadata.
 
 ## The #14 questions and the answer assumed
 

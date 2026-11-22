@@ -102,6 +102,126 @@ done
 expect "the debug image is the only file naming the banned features" test "$only" -eq 1
 expect "layer.conf has the BBFILES line" noncomment "$layer" 'BBFILES[[:space:]]*\+=.*recipes-\*/\*/\*\.bb'
 
+# Root-login relaxations are in no image recipe, conf or template (comments aside).
+# login_clean DIR: true when no non-comment line under DIR names one.
+login_clean() {
+	local f
+	while IFS= read -r f; do
+		noncomment "$f" '(debug-tweaks|empty-root-password|allow-empty-password|allow-root-login)' && return 1
+	done <<EOF
+$(find "$1" -type f)
+EOF
+	return 0
+}
+expect "no platform-image file relaxes root login" login_clean "$ROOT/platform-image"
+expect "the debug image does not enable debug-tweaks" test "$(noncomment "$dbg" 'debug-tweaks' && echo yes || echo no)" = no
+nt=$(mktemp -d)
+trap 'rm -rf "$nt"' EXIT
+cp -R "$ROOT/platform-image" "$nt/pi"
+printf 'IMAGE_FEATURES += "debug-tweaks"\n' >>"$nt/pi/recipes-core/images/trusted-imx95-image-debug.bb"
+expect "negative: debug-tweaks in the debug image is caught" test "$(login_clean "$nt/pi" && echo clean || echo caught)" = caught
+rm -rf "$nt/pi"
+cp -R "$ROOT/platform-image" "$nt/pi"
+printf 'EXTRA_IMAGE_FEATURES += "empty-root-password"\n' >>"$nt/pi/conf/local.conf.template"
+expect "negative: empty-root-password in a template is caught" test "$(login_clean "$nt/pi" && echo clean || echo caught)" = caught
+rm -rf "$nt/pi"
+
+# The templates agree with the lock and the distro (POSIX sed on the copies).
+localt=$ROOT/platform-image/conf/local.conf.template
+bblt=$ROOT/platform-image/conf/bblayers.conf.template
+# conf_val FILE KEY: the quoted value of the first non-comment KEY = "v" line.
+conf_val() {
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in '#'*) continue ;; esac
+		if [[ $l =~ ^$2[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
+			printf '%s\n' "${BASH_REMATCH[1]}"
+			return 0
+		fi
+	done <"$1"
+	return 1
+}
+# check_local LOCAL DISTRODIR: MACHINE is the lock's, DISTRO names an existing distro conf.
+check_local() {
+	local m d
+	m=$(conf_val "$1" MACHINE) || return 1
+	[ -n "$machine" ] && [ "$m" = "$machine" ] || return 1
+	d=$(conf_val "$1" DISTRO) || return 1
+	[ -n "$d" ] && [ -f "$2/$d.conf" ]
+}
+# check_layers BBLAYERS: every BBLAYERS entry is pinned in the lock, and every
+# pinned path is listed unless it is not a layer of this image.
+notlisted=' sources/bitbake sources/meta-yocto sources/meta-clang sources/base sources/meta-freescale-ml sources/meta-qt6 sources/meta-browser sources/meta-security sources/meta-timesys sources/meta-virtualization sources/meta-nxp-connectivity sources/meta-nxp-demo-experience '
+check_layers() {
+	local l p listed=' ' pinned=' '
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in '#'*) continue ;; esac
+		if [[ $l =~ \#\#FETCH_DIR\#\#/(sources/[A-Za-z0-9._-]+)/? ]]; then listed="$listed${BASH_REMATCH[1]} "; fi
+	done <"$1"
+	[ "$listed" != ' ' ] || return 1
+	for k in "${!seen[@]}"; do
+		[[ $k =~ ^layer_.+_path$ ]] && pinned="$pinned${seen[$k]} "
+	done
+	for p in $listed; do
+		case $pinned in *" $p "*) ;; *) return 1 ;; esac
+	done
+	for p in $pinned; do
+		case $listed$notlisted in *" $p "*) ;; *) return 1 ;; esac
+	done
+	return 0
+}
+# check_distro FILE: keeps its base require/include and selects systemd.
+check_distro() {
+	local l base=0 sd=0
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in
+		'#'*) continue ;;
+		require[[:space:]]* | include[[:space:]]*) base=1 ;;
+		esac
+		[[ $l =~ ^INIT_MANAGER[[:space:]]*=[[:space:]]*\"systemd\" ]] && sd=1
+		[[ $l =~ ^DISTRO_FEATURES[[:space:]]*[+.:a-z]*=.*systemd ]] && [[ $l != *remove* ]] && sd=1
+	done <"$1"
+	[ "$base" -eq 1 ] && [ "$sd" -eq 1 ]
+}
+# check_target RECIPEDIR NAME FILE...: the recipe exists and every FILE names it.
+check_target() {
+	local d=$1 t=$2 f
+	shift 2
+	[ -f "$d/$t.bb" ] || return 1
+	for f in "$@"; do matches "$f" "$t" || return 1; done
+}
+# neg DESC CMD...: the check must fail.
+neg() {
+	local d=$1 r=0
+	shift
+	"$@" && r=1
+	expect "negative: $d" test "$r" -eq 0
+}
+export LC_ALL=C
+expect "local.conf.template MACHINE is the lock's machine" check_local "$localt" "$ROOT/platform-image/conf/distro"
+sed 's/^MACHINE = .*/MACHINE = "other-machine"/' "$localt" >"$nt/local.machine"
+neg "a changed MACHINE is caught" check_local "$nt/local.machine" "$ROOT/platform-image/conf/distro"
+sed 's/^DISTRO = .*/DISTRO = "no-such-distro"/' "$localt" >"$nt/local.distro"
+neg "a DISTRO with no conf file is caught" check_local "$nt/local.distro" "$ROOT/platform-image/conf/distro"
+expect "bblayers.conf.template lists the pinned layers and only those" check_layers "$bblt"
+sed '/sources\/meta-freescale-distro/d' "$bblt" >"$nt/bbl.removed"
+neg "a removed layer entry is caught" check_layers "$nt/bbl.removed"
+sed 's|^\(  ##FETCH_DIR##/sources/meta-arm/meta-arm \\\)$|\1\
+  ##FETCH_DIR##/sources/meta-unpinned \\|' "$bblt" >"$nt/bbl.extra"
+neg "an unpinned layer entry is caught" check_layers "$nt/bbl.extra"
+expect "the distro keeps its base require and selects systemd" check_distro "$distro"
+sed '/^require /d' "$distro" >"$nt/distro.norequire"
+neg "a dropped require is caught" check_distro "$nt/distro.norequire"
+sed '/^INIT_MANAGER/d' "$distro" >"$nt/distro.nosystemd"
+neg "a dropped INIT_MANAGER is caught" check_distro "$nt/distro.nosystemd"
+imgdir=$ROOT/platform-image/recipes-core/images
+for t in trusted-imx95-image trusted-imx95-image-debug; do
+	expect "image target $t is a recipe named by the Makefile and the docs" \
+		check_target "$imgdir" "$t" "$ROOT/Makefile" "$ROOT/docs/platform-image/build.md"
+	sed "s/$t/$t-renamed/g" "$ROOT/Makefile" >"$nt/Makefile.renamed"
+	neg "a Makefile naming $t differently is caught" check_target "$imgdir" "$t" "$nt/Makefile.renamed"
+done
+
 # No file of ours overrides Yocto's reproducible or SBOM defaults (reproducible-build-survey sections 3, 4).
 ovr=0
 for f in "$ROOT"/platform-image/conf/layer.conf "$ROOT"/platform-image/conf/distro/*.conf \
@@ -135,7 +255,7 @@ done
 
 # scripts/platform-image-fetch.sh against a local file:// stub, no network.
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp" "$nt"' EXIT
 git init -q "$tmp/src"
 git -C "$tmp/src" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false \
 	commit -q --allow-empty -m stub
@@ -213,5 +333,32 @@ expect "fetch: a clean re-fetch passes after the file is removed" test "$(fetch_
 printf '*.bbappend\n' >"$layer/.git/info/exclude"
 printf 'x\n' >"$layer/ignored.bbappend"
 expect "fetch: an ignored .bbappend fails" test "$(fetch_rc)" -ne 0
+
+# Two pins: pin B starts tracking a path that holds an ignored local file under
+# pin A. The fetch of B must be refused and the file must survive byte for byte.
+git init -q "$tmp/src2"
+gc2() { git -C "$tmp/src2" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+printf 'secret.txt\n' >"$tmp/src2/.gitignore"
+git -C "$tmp/src2" add .gitignore
+gc2 commit -q -m pinA
+pa=$(git -C "$tmp/src2" rev-parse HEAD)
+printf 'tracked by B\n' >"$tmp/src2/secret.txt"
+git -C "$tmp/src2" add -f secret.txt
+gc2 commit -q -m pinB
+pb=$(git -C "$tmp/src2" rev-parse HEAD)
+lockpin() { printf 'layer_stub_repo=file://%s/src2\nlayer_stub_path=sources/stub\nlayer_stub_commit=%s\n' "$tmp" "$1" >"$2"; }
+lockpin "$pa" "$tmp/pa.lock"
+lockpin "$pb" "$tmp/pb.lock"
+t2=$tmp/out-two
+rc=0
+"$ROOT/scripts/platform-image-fetch.sh" "$tmp/pa.lock" "$t2" >"$tmp/two.out" 2>&1 || rc=$?
+expect "fetch: pin A passes" test "$rc" -eq 0
+printf 'local secret\n' >"$t2/sources/stub/secret.txt"
+printf 'local secret\n' >"$tmp/secret.want"
+rc=0
+"$ROOT/scripts/platform-image-fetch.sh" "$tmp/pb.lock" "$t2" >"$tmp/two.out" 2>&1 || rc=$?
+expect "fetch: pin B over an ignored file it tracks is refused" test "$rc" -ne 0
+expect "fetch: the ignored file survives byte for byte" cmp -s "$tmp/secret.want" "$t2/sources/stub/secret.txt"
+expect "fetch: the layer is still at pin A" test "$(git -C "$t2/sources/stub" rev-parse HEAD)" = "$pa"
 
 finish
