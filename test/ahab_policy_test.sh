@@ -125,6 +125,40 @@ check "SRK_REVOKE_MASK above 0xF is a policy error" 1 "policy-check: SRK_REVOKE_
 mkpol "$TMP_ROOT/over-fuse.policy" "$hash" "$id" "$mask" 256
 run "$POLICY" "$bin" "$TMP_ROOT/over-fuse.policy"
 check "FUSE_VERSION_MIN above 255 is a policy error" 1 "policy-check: FUSE_VERSION_MIN is not" "policy: FAILED"
+# Decimal and per-field long forms: each must fail closed, naming the field.
+# negpol <label> <field> <id> <mask> <min>
+negpol() {
+	mkpol "$TMP_ROOT/neg-$1.policy" "$hash" "$3" "$4" "$5"
+	run "$POLICY" "$bin" "$TMP_ROOT/neg-$1.policy"
+	check "$2 $6 is a policy error" 1 "policy-check: $2 is not" "policy: FAILED"
+}
+negpol fuse-dec20 FUSE_VERSION_MIN "$id" "$mask" 18446744073709551615 "as a 20-digit decimal"
+negpol fuse-dec5 FUSE_VERSION_MIN "$id" "$mask" 65536 "as a 5-digit decimal"
+negpol id-hex17 USED_SRK_ID 0x10000000000000000 "$mask" "$fuse" "as a 17-digit hex"
+negpol id-hexmax USED_SRK_ID 0xffffffffffffffff "$mask" "$fuse" "as 0xffffffffffffffff"
+negpol id-dec20 USED_SRK_ID 18446744073709551615 "$mask" "$fuse" "as a long decimal"
+negpol id-hex4 USED_SRK_ID 0x4 "$mask" "$fuse" "as hex 0x4"
+negpol mask-hex17 SRK_REVOKE_MASK "$id" 0x10000000000000000 "$fuse" "as a 17-digit hex"
+negpol mask-hexmax SRK_REVOKE_MASK "$id" 0xffffffffffffffff "$fuse" "as 0xffffffffffffffff"
+negpol mask-dec20 SRK_REVOKE_MASK "$id" 18446744073709551615 "$fuse" "as a long decimal"
+# In range with leading zeros: still accepted.
+mkpol "$TMP_ROOT/lz-id.policy" "$hash" 0003 "$mask" "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/lz-id.policy"
+if [ "$id" = 3 ]; then
+	check "USED_SRK_ID 0003 is accepted as 3" 0 "policy: used_srk_id OK"
+else
+	check "USED_SRK_ID 0003 is accepted as 3" 1 "policy: used_srk_id MISMATCH (container $id, policy 3)"
+fi
+mkpol "$TMP_ROOT/lz-mask.policy" "$hash" "$id" 0015 "$fuse"
+run "$POLICY" "$bin" "$TMP_ROOT/lz-mask.policy"
+if [ "$((mask))" = 15 ]; then
+	check "SRK_REVOKE_MASK 0015 is accepted as 15" 0 "policy: srk_revoke_mask OK"
+else
+	check "SRK_REVOKE_MASK 0015 is accepted as 15" 1 "policy: srk_revoke_mask MISMATCH"
+fi
+mkpol "$TMP_ROOT/lz-fuse.policy" "$hash" "$id" "$mask" 0000
+run "$POLICY" "$bin" "$TMP_ROOT/lz-fuse.policy"
+check "FUSE_VERSION_MIN 0000 is accepted as 0" 0 "policy: fuse_version OK" "policy: OK"
 mkpol "$TMP_ROOT/hex-id17.policy" "$hash" 0x00000000000000000 "$mask" "$fuse"
 run "$POLICY" "$bin" "$TMP_ROOT/hex-id17.policy"
 check "leading zeros do not widen a field: 17 digits of 0 are still the value 0" 0 "policy: used_srk_id OK" "policy: OK"
