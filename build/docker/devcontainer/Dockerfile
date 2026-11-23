@@ -31,6 +31,16 @@ RUN apk add --no-cache curl
 COPY scripts/tool-pins.sh scripts/fetch-tools.sh /pins/
 RUN sh /pins/fetch-tools.sh /pins/tool-pins.sh /out/bin
 
+# Build-only: the pinned imx-secure-enclave source, fetched by the commit in
+# secure-key-handling/ele-lib.lock and checked against its archive SHA-256
+# (fails closed). Only the unpacked source leaves it.
+FROM base AS ele-src
+COPY scripts/ele-lib-build.sh /ele/scripts/
+COPY secure-key-handling/ele-lib.lock /ele/secure-key-handling/
+COPY secure-world/bsp.lock /ele/secure-world/
+RUN bash /ele/scripts/ele-lib-build.sh --work /tmp/ele-work --src-only \
+ && mv /tmp/ele-work/src /ele-src
+
 FROM base AS toolchain
 # openssh-keygen: git's SSH signature verification (gpg.format ssh) runs
 # ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
@@ -45,6 +55,9 @@ FROM base AS toolchain
 # (the secure-key-handling client's unit and backend tests are built on the host).
 RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat build-base
 COPY --from=fetch /out/bin/ /usr/local/bin/
+# The verified pinned secure-enclave source, for the backend tests (ELE_SRC).
+COPY --from=ele-src /ele-src /opt/ele-src
+ENV ELE_SRC=/opt/ele-src
 # SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
 # scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
 # SHA-256 in scripts/ahab, into /opt/spsdk. CI stages run without network, so

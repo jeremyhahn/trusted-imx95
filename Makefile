@@ -75,14 +75,14 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
 	@[ -n "$(UNIT_TESTS)" ] || { echo "test: no test/*_test.sh found"; exit 1; }
 	@fail=0; for t in $(UNIT_TESTS); do \
-		echo "--- $$t"; bash "$$t" || { echo "FAIL $$t"; fail=1; }; \
+		echo "--- $$t"; REQUIRE_ELE_SRC=1 bash "$$t" || { echo "FAIL $$t"; fail=1; }; \
 	done; exit $$fail
 
 # coverage runs the suite once: check-script-tests.sh runs every test, prints
 # its output as `make test` does, and fails when one fails. A `test`
 # prerequisite would run the suite a second time.
 coverage: check-tracked-cst ## Unit tests, once, and the share of project scripts a test runs (COVERAGE_THRESHOLD)
-	@scripts/check-script-tests.sh $(COVERAGE_THRESHOLD)
+	@REQUIRE_ELE_SRC=1 scripts/check-script-tests.sh $(COVERAGE_THRESHOLD)
 
 integration-test: ## Integration tests in the integration image (IT_IMAGE_ID if set, else IT_IMAGE), hardened, no network
 	@if command -v docker >/dev/null 2>&1; then \

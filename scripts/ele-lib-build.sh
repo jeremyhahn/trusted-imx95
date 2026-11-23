@@ -8,6 +8,9 @@
 #       offline: parse the lock and the toolchain pin, check every value
 #   ele-lib-build.sh --work DIR --out DIR [--cache DIR] [--lock FILE]
 #       fetch (outside the tree), verify, build; needs the network
+#   ele-lib-build.sh --work DIR --src-only [--lock FILE]
+#       fetch and verify only: DIR/src is the pinned source (the toolchain
+#       image's ELE_SRC); no toolchain, no build
 #
 # Fails closed: a commit or digest mismatch removes what was fetched and stops.
 # Nothing here touches a board, a fuse or a block device.
@@ -19,6 +22,7 @@ work=
 out=
 cache=
 check_only=0
+src_only=0
 
 die() { echo "ele-lib-build: $*" >&2; exit 1; }
 
@@ -29,6 +33,7 @@ while [ $# -gt 0 ]; do
 	--work) [ $# -ge 2 ] || die "--work needs a directory"; work=$2; shift ;;
 	--out) [ $# -ge 2 ] || die "--out needs a directory"; out=$2; shift ;;
 	--cache) [ $# -ge 2 ] || die "--cache needs a directory"; cache=$2; shift ;;
+	--src-only) src_only=1 ;;
 	*) die "unknown argument $1" ;;
 	esac
 	shift
@@ -93,13 +98,18 @@ if [ "$check_only" = 1 ]; then
 	exit 0
 fi
 
-[ -n "$work" ] && [ -n "$out" ] || die "give --check-lock, or --work and --out"
+if [ "$src_only" = 1 ]; then
+	[ -n "$work" ] || die "--src-only needs --work"
+else
+	[ -n "$work" ] && [ -n "$out" ] || die "give --check-lock, or --work and --out, or --work and --src-only"
+fi
 [ -n "$cache" ] || cache=$work/cache
 case $(cd "$(dirname "$work")" 2>/dev/null && pwd -P)/$(basename "$work")/ in
 "$root"/*) die "--work must be outside the checkout" ;;
 esac
 
-mkdir -p "$work" "$out" "$cache"
+mkdir -p "$work"
+[ "$src_only" = 1 ] || mkdir -p "$out" "$cache"
 rm -rf "$work/src" "$work/git" "$work/toolchain"
 
 # Fetch the commit and check it, then check the archive digest.
@@ -114,6 +124,11 @@ got=$(git -C "$work/git" archive --format=tar "${pin[ELE_COMMIT]}" | sha256sum |
 }
 mkdir -p "$work/src"
 git -C "$work/git" archive --format=tar "${pin[ELE_COMMIT]}" | tar -x -C "$work/src"
+if [ "$src_only" = 1 ]; then
+	rm -rf "$work/git"
+	echo "ele-lib-build: source OK (${pin[ELE_COMMIT]}, archive SHA-256 ${pin[ELE_ARCHIVE_SHA256]}) in $work/src"
+	exit 0
+fi
 
 # The pinned toolchain, checked before it is unpacked.
 tarball=$cache/toolchain-${tc[TOOLCHAIN_VERSION]}.tar.xz
