@@ -237,8 +237,13 @@ check offline, and a fake build whose patched file widens the M7 block.
   concluded success and its `sm-toolchain-check` step succeeded. It also succeeded on `fbb58056` (runs
   45021223766 and 45013632384). So in the image, `gcompat` is enough to start the pinned compiler, the System
   Manager builds with it, and the output has a non-empty `m33_image.bin` and manifest and a linked ARM ELF. The
-  check does not run the image on a board or verify its behaviour, and it does not check the build is
-  reproducible. The base image does not need to change (#14).
+  check does not run the image on a board or verify its behaviour. It does cover reproducibility:
+  `scripts/sm-toolchain-check.sh` runs `make system-manager` (line 11), whose `scripts/sm-build.sh` builds two
+  clean trees (lines 190-193) and, when their `m33_image.bin` hashes differ, writes `reproducible=no` and fails
+  (lines 194-195, 204 and 207). The base image does not need to change (#14).
+  Where to check: the runs are on this project's GitHub Actions page (github.com, Actions tab), by the run IDs
+  above; the job log shows the `sm-toolchain-check` step. They were read from the GitHub Actions API by the
+  coordinator, not by the lane, which has no network access to them.
 - Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
   `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
   checked.

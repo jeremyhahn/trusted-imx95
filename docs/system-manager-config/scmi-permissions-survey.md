@@ -475,6 +475,29 @@ section answers the open `PERF_M7` question of
 `m7-resource-map-survey.md` (section 8 item 6) and of the matching row
 in `build.md`.
 
+### 8.0 What a reviewer can and cannot confirm
+
+Every upstream claim below cites a path under the imx-sm tree and a
+line at commit `eec232878ab7` (tag `lf-6.18.37-2.1.0`, pinned in
+`system-manager/sm.lock`). The imx-sm source is not in this repository,
+and no vendor text is copied here. To check a claim, fetch that tag
+the way `scripts/sm-build.sh` does (lines 134-143, which fail closed if
+the commit differs) and open the cited line.
+
+- Confirmable from this repository alone: the lock pins, the patch
+  contents, and that `system-manager/patches/` leaves `M7P` and
+  `PERF_M7` alone.
+- **Not confirmable without the imx-sm tree**: all `rpc_scmi_perf.c`,
+  `lmm_perf.c`, `m7mix.cfg`, `mx95frdm-pro.cfg`, `mx95evk.cfg` and
+  `config_scmi.h` citations in 8.1 to 8.4. They were read once by the
+  lane and have not been reviewed independently.
+- **Not read at all**: the PRO's generated `config_scmi.h`,
+  `configs/configtool.pl`'s handling of an API line, and the M7 level
+  values.
+
+All of section 8 therefore stays provisional until a second reader (or
+the build check proposed in 8.5) confirms the citations.
+
 ### 8.1 Answer
 
 **No `PERF_M7` API line is needed for the M7 to set its own performance
