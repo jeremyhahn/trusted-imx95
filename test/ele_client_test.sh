@@ -187,8 +187,8 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		rm -f "$tmp/pipe.rc" "$tmp/pipe.err"
 		{
 			sleep 0.5 # the reader below has closed its end by now
-			# shellcheck disable=SC2086
 			prc=0
+			# shellcheck disable=SC2086
 			"$tmp/ele_cli" --split-confirmed 5 3 $op 3<"$tmp/nonce" 2>"$tmp/pipe.err" || prc=$?
 			echo "$prc" >"$tmp/pipe.rc"
 		} | { exec 0<&-; sleep 1; }
