@@ -104,7 +104,7 @@ names. This settles most of that survey's §8 item 1 for this device. The M7 is 
 | M7 CPU `CPU_M7P`, power `PD_M7` | M7 LM, start/stop lines for `msel` 0, 1, 2 | Granted: the SM powers `PD_M7` and starts the CPU at LM start; `PD_M7` is also an M7 `test` resource |
 | `M7P` (brings `PERF_M7`, `CLK_M7SYSTICK`) | M7 LM, Resources | Granted: the M7 owns `M7P` |
 | `CLK_M7`, `CLK_BUSM7`, `CLK_ENET` | SM LM (LM0), API, the group changed through the Performance protocol | SM-held; the M7 reaches `CLK_M7` only through `PERF_M7` |
-| `PERF_M7` explicit API line | M7 LM, API | **Not present.** Whether `M7P` ownership alone allows `PERFORMANCE_LEVEL_SET` (PRIV) is #107's; a `PERF_M7` line may be needed |
+| `PERF_M7` explicit API line | M7 LM, API | **Not present, and not needed** (provisional, #167): `M7P` ownership brings all rights on `PERF_M7`, and `PERFORMANCE_LEVEL_SET` needs PRIV; the PRO's generated table is inferred from the EVK's, not read. See [scmi-permissions-survey.md](scmi-permissions-survey.md) section 8 |
 | M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned (its `test` key dropped by 0002) |
 | Pins `GPIO_IO36`, `GPIO_IO37` (also `GPIO_IO14`, `GPIO_IO15`) | M7 LM, Pins | Granted, all four. What they are wired to on the PRO is unconfirmed |
 | M7 timers, CAN, watchdog, mailboxes (`LPIT1`, `LPTMR1/2`, `LPTPM1`, `CAN_FD1`, `WDOG5`, `MU5_A`, `MU7_B`, `MU8_B`, `IRQSTEER_M7`, `TSTMR2`) | M7 LM, Resources | Granted |
@@ -122,7 +122,7 @@ not documented in the sources read; and the SM's own debug UART is `LPUART2` (in
 
 So the M7 firmware of trusted-firmware's `imx95` row can run on the pinned configuration as it stands, and the
 tamper response by `LMM_SHUTDOWN` or `SYSTEM_POWER_STATE_SET` is granted. The changes the findings point to are
-the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
+the M7 fault reactions; a `PERF_M7` grant is not among them (row above).
 
 ## 6. This repository's delta: the M7 fault reactions fail closed
 

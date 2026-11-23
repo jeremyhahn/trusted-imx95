@@ -460,3 +460,102 @@ states it.
    review only.
    Recommendation: (a), which shares one configtool run with #55's
    TRDC check and leaves TRDC rules to #55.
+
+## 8. Does the M7 need a `PERF_M7` API line? (#167; provisional)
+
+Status: provisional survey. No `.cfg` patch is made. The #13 delta is
+still pending owner approval.
+
+Source: NXP `imx-sm` at the revision pinned in `system-manager/sm.lock`
+(tag `lf-6.18.37-2.1.0`, commit `eec232878ab7`). It was fetched as
+`scripts/sm-build.sh` fetches it: the commit and the SHA-256 of
+`configs/other/mx95frdm-pro.cfg` both matched the lock. Line numbers
+below are that revision's; imx-sm text is cited, not copied. This
+section answers the open `PERF_M7` question of
+`m7-resource-map-survey.md` (section 8 item 6) and of the matching row
+in `build.md`.
+
+### 8.1 Answer
+
+**No `PERF_M7` API line is needed for the M7 to set its own performance
+level.** Ownership of `M7P` already gives the M7 agent all rights on
+the `PERF_M7` domain, and `PERFORMANCE_LEVEL_SET` needs only PRIV. The
+M7 in fact holds ALL there, more than the message needs. One link is
+inferred, not read: the generated table of the PRO file (item 2).
+
+### 8.2 Evidence
+
+1. The M7 LM defines its `OWNER` macro as `perm=rw, api=all`
+   (`configs/other/mx95frdm-pro.cfg:344`) and lists `M7P OWNER` under
+   Resources (`:396`). The SoC device file bundles `PERF_M7` with `M7P`
+   (`devices/MIMX95/configtool/m7mix.cfg:39`). Per section 2.3 (S2),
+   `api=all` on a resource gives full rights on every SCMI object in
+   its bundle. The M7 LM's API list (`:379-392`) has no `PERF_*`
+   entry, and neither patch under `system-manager/patches/` touches
+   `M7P` or `PERF_M7`.
+2. The PRO's generated `config_scmi.h` is built at image time and is
+   not in the fetched tree. Its sibling `configs/mx95evk/config_scmi.h`
+   is. The EVK's M7 LM has the same `OWNER` macro, `M7P OWNER` and no
+   `PERF_M7` line (`configs/mx95evk.cfg:347,399`), and its generated
+   M7 agent record sets `perfPerms[DEV_SM_PERF_M7]` to
+   `SM_SCMI_PERM_ALL` (`configs/mx95evk/config_scmi.h:95`). That the PRO
+   table matches is inferred from the identical `.cfg` structure:
+   **unconfirmed** until the generated PRO file is read (section 8.5).
+3. Function `PerformanceLevelSet` rejects the call with `SM_ERR_DENIED`
+   when the agent's `perfPerms[domain]` is below `SM_SCMI_PERM_PRIV`
+   (`sm/rpc/scmi/rpc_scmi_perf.c:1098-1104`), otherwise it calls
+   `LMM_PerfLevelSet` (`:1106-1111`). No other permission is read.
+4. `PerformanceLimitsSet` needs SET (`:955-961`) but then returns
+   `SM_ERR_NOT_SUPPORTED` whatever the permission (`:963-967`). The M7
+   cannot narrow a domain's limits at this revision, line or not.
+5. `PerformanceDomainAttributes` reports to the caller whether it may
+   set the level (PRIV or above) and the limits (SET or above)
+   (`rpc_scmi_perf.c:743-755`). The M7 can read this at run time.
+6. The domain uses Level Indexing Mode (`:740`) and
+   `PerformanceDescribeLevels` returns an index per level (`:870`), so
+   the level argument is an index. `LMM_PerfLevelSet` rejects an index
+   at or above the number of levels with `SM_ERR_INVALID_PARAMETERS`
+   (`sm/lmm/lmm_perf.c:130-132`). The level values and frequencies
+   come from device code that was not read: **unconfirmed**.
+
+### 8.3 What the M7 can do with the grant it has
+
+- Set its `PERF_M7` level by index: yes (items 1 and 3). The SM keeps
+  one request per LM and applies the highest across LMs
+  (`sm/lmm/lmm_perf.c:139-153`). The M7 can raise the domain but cannot
+  hold it below a level another LM requests. Whether any other LM
+  requests `PERF_M7` is **unconfirmed**; this `.cfg` gives the domain
+  only to the M7's LM.
+- Read the level, the limits, the described levels and the domain
+  attributes: these handlers check no permission
+  (`rpc_scmi_perf.c:691-763`, `:810-900`, `:990-1055`, `:1134-1161`).
+- Set limits: no (item 4).
+- Set `CLK_M7` or `CLK_BUSM7` through the Clock protocol: no. Both are
+  in LM0's clock list (`mx95frdm-pro.cfg:161,180`, in the block headed
+  "Modified via PERF protocol" at `:149`), and the M7's generated clock
+  rights list only its own peripheral clocks (EVK example,
+  `config_scmi.h:69-74`, no `CLK_M7`). The core clock moves only as a
+  result of the performance level.
+
+### 8.4 Without ownership of `M7P`
+
+If a configuration did not give `M7P` to the M7, it would have no
+`PERF_M7` entry: level set would fail with `SM_ERR_DENIED` (item 3)
+while the read messages above still worked. A `PERF_M7` API line would
+then be the way to give the level. This does not apply to the pinned
+file.
+
+### 8.5 Follow-ups (proposed, pending owner approval)
+
+- Text only, no patch: if the owner wants the grant explicit, or
+  lower than ALL, the line would be `PERF_M7  PRIV` in the M7 LM's API
+  list. Whether an API line overrides the `api=all` bundle of `M7P` or
+  only adds to it was not read in `configs/configtool.pl`:
+  **unconfirmed**, so such a line may change nothing. Proposed,
+  pending owner approval.
+- Check for the image build: read the generated PRO `config_scmi.h` and
+  assert that the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is the value
+  assumed here and that no other agent holds one. This closes item 2
+  and fits section 5.2. Proposed, pending owner approval.
+- Open, for the M7 firmware rather than the SM: whether the firmware
+  needs to change its level at all.
