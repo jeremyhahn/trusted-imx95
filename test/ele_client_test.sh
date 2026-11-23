@@ -149,6 +149,19 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		"${bsrc[@]}" "$d/ele_cli_args.c" "$d/ele_client_cli.c"
 	check "ele_client command line compiles against the double" 0
 	printf '1234\n' >"$tmp/nonce"
+	# The shipped backend never reports the counter acknowledged (client.md, Q2),
+	# so no generate or delete succeeds through it. The success path and the
+	# checks of its stdout writes run against a test-only backend double,
+	# linked with the same command line source; it is not part of the shipped build.
+	run cc -std=gnu11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${inc[@]}" -o "$tmp/ele_cli_ok" \
+		"$d/ele_hsm_cli_double.c" "$d/ele_client.c" "$d/ele_cli_args.c" "$d/ele_client_cli.c"
+	check "ele_client command line compiles against the success double" 0
+	run "$tmp/ele_cli_ok" --split-confirmed 5 3 gen 3<"$tmp/nonce"
+	check "gen that commits with both acknowledgements prints the key and exits 0" 0 "key 7 rollback-protected"
+	run "$tmp/ele_cli_ok" --split-confirmed 5 3 del 7 3<"$tmp/nonce"
+	check "del that commits with the strict acknowledgement exits 0" 0 "deleted "
+	run "$tmp/ele_cli_ok" 5 3 gen 3<"$tmp/nonce"
+	check "gen with the split unconfirmed still fails on the double" 1 "refused"
 	cli() { # cli ERR ARGS...: run with nonce on fd 3, the double's log in $tmp/hsm.log
 		local err=$1
 		shift
@@ -254,13 +267,13 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	# A result that cannot be written: exit 1, the key id and its state on stderr.
 	if [ -w /dev/full ]; then
 		rc=0
-		"$tmp/ele_cli" --split-confirmed 5 3 gen 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		"$tmp/ele_cli_ok" --split-confirmed 5 3 gen 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
 		[ "$rc" = 1 ] || fail "gen with a full stdout: exit $rc, want 1"
-		grep -q 'key 7 was generated' "$tmp/full.err" || fail "gen with a full stdout: the key id is not on stderr"
+		grep -q 'cannot write the result; key 7 was generated' "$tmp/full.err" || fail "gen with a full stdout: the write-failure diagnostic with the key id is missing"
 		rc=0
-		"$tmp/ele_cli" --split-confirmed 5 3 del 7 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		"$tmp/ele_cli_ok" --split-confirmed 5 3 del 7 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
 		[ "$rc" = 1 ] || fail "del with a full stdout: exit $rc, want 1"
-		grep -q 'key 7 delete is NOT rollback-protected' "$tmp/full.err" || fail "del with a full stdout: the key id is not on stderr"
+		grep -q 'cannot write the result; key 7 was deleted' "$tmp/full.err" || fail "del with a full stdout: the write-failure diagnostic with the key id is missing"
 	else
 		fail "/dev/full is not writable here"
 	fi
@@ -272,11 +285,11 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 			sleep 0.5 # the reader below has closed its end by now
 			prc=0
 			# shellcheck disable=SC2086
-			"$tmp/ele_cli" --split-confirmed 5 3 $op 3<"$tmp/nonce" 2>"$tmp/pipe.err" || prc=$?
+			"$tmp/ele_cli_ok" --split-confirmed 5 3 $op 3<"$tmp/nonce" 2>"$tmp/pipe.err" || prc=$?
 			echo "$prc" >"$tmp/pipe.rc"
 		} | { exec 0<&-; sleep 1; }
 		[ "$(cat "$tmp/pipe.rc" 2>/dev/null)" = 1 ] || fail "$op with a closed reader: exit $(cat "$tmp/pipe.rc" 2>/dev/null), want 1"
-		grep -Eq 'key 7 (was |delete is)' "$tmp/pipe.err" || fail "$op with a closed reader: the key id is not on stderr"
+		grep -Eq 'cannot write the result; key 7 (was generated|was deleted)' "$tmp/pipe.err" || fail "$op with a closed reader: the key id is not on stderr"
 	done
 elif [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
 	# The toolchain image sets REQUIRE_ELE_SRC=1 beside ELE_SRC, the verified
