@@ -213,7 +213,7 @@ export BI_M7
 
 boot-image-inputs: ## Collect the boot image inputs into BI_OUT/inputs (stand-ins, labelled, for what is not built; BI_M7=<file> for the Cortex-M7 image)
 	@scripts/boot-image-inputs.sh --check
-	@scripts/boot-image-inputs.sh --collect "$(BI_OUT)/inputs" $${BI_M7:+--m7 "$$BI_M7"}
+	@scripts/boot-image-inputs.sh --collect "$(BI_OUT)/inputs" $${BI_M7:+--m7 "$$BI_M7"} $${BI_UBOOT:+--uboot "$$BI_UBOOT"} $${BI_ELE:+--ele "$$BI_ELE"}
 
 boot-image-test: boot-image-inputs ## Assemble, sign (test PKI outside the tree, pinned SPSDK), verify every container and tamper-test every payload; image and SHA256SUMS in BI_OUT
 	@scripts/ahab/boot-image.sh --inputs "$(BI_OUT)/inputs" --out "$(BI_OUT)"

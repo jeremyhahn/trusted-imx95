@@ -80,6 +80,8 @@ check "check: meta-imx pin differing from secure-world/bsp.lock is refused" nonz
 cp "$LOCK" "$FXLOCK"
 
 # --- collect ---
+# the test must not pick up a real make system-manager / secure-world output
+export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw
 out=$TMP_ROOT/in
 run "$SCRIPT" --collect "$out" --system-manager "$TMP_ROOT/none.bin"
 check "collect: a named file that is missing is refused" nonzero "no such file"

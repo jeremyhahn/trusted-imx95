@@ -14,7 +14,7 @@ writes is deleted unread. The SRK table hash it prints belongs to the test PKI o
 
 ```sh
 make boot-image-test                  # inputs, image, verify, tamper; out/boot-image/
-make boot-image-test BI_M7=<file>     # use a real Cortex-M7 image for that entry
+make boot-image-test BI_M7=<file>     # a real Cortex-M7 image for that entry (also BI_UBOOT, BI_ELE)
 make boot-image-inputs                # only collect the inputs (pins checked first)
 ```
 
@@ -67,17 +67,32 @@ the pins cover the sources, and nothing here ties a built binary to its source.
 An input with no file becomes a **STAND-IN** payload: a 4 KiB random blob whose first line says
 `STAND-IN <name>: not a real image`. It is signed like a real payload, so the container, signature and
 hash checks are real for it, but the image is not bootable. `inputs.txt` and the run's last lines say
-how many entries are stand-ins. In the lane that produced this document no input was built, so all six
-entries were stand-ins:
+how many entries are stand-ins. The target uses `make system-manager` and `make secure-world` output
+when it is there. The run recorded here (2026-11-23, lane #161) had three real inputs and three stand-ins:
 
-- **System Manager, BL31, tee.bin**: built by `make system-manager` and `make secure-world`, which fetch
-  sources and a toolchain and take long; they were not run in the lane. The target uses their output
-  when it is there.
-- **Cortex-M7 image**: no build exists in this repository; pass `BI_M7`.
-- **U-Boot**: no build recipe exists here yet (the platform image's Yocto build, #14, will build it).
-- **ELE firmware**: the installer is pinned, but unpacking it needs a person to accept NXP's licence
-  agreement, so the script never unpacks it. On a device this position is NXP's own container; here it is
-  an OEM-signed `ele` entry (see "Containers").
+| Input | State | SHA-256 |
+|---|---|---|
+| `m33_image.bin` (System Manager) | **real**, `make system-manager`, reproducible over two builds | `83d1e019f10f5b285080e83207de1450a3e381346ff6d7c7c280a1c64c878d9b` |
+| `bl31.bin` (TF-A) | **real**, `make secure-world` | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` |
+| `tee.bin` (OP-TEE, fTPM and PKCS#11 early TAs) | **real**, `make secure-world` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+| `m7_image.bin` | STAND-IN | random per run |
+| `u-boot.bin` | STAND-IN | random per run |
+| `ele.bin` | STAND-IN | random per run |
+
+All six entries, real and stand-in, were signed, verified (3 of 3 containers) and tamper-rejected. The
+blockers of the three stand-ins:
+
+- **Cortex-M7 image**: nothing in this repository builds one (#153 packages a container around a random
+  payload only); pass `BI_M7=<file>`.
+- **U-Boot**: the pinned source archive downloads and matches its SHA-256 (checked in the lane), and the
+  pinned Arm aarch64 toolchain of `secure-world/bsp.lock` is there, but `make imx95_19x19_frdm_pro_defconfig`
+  stopped at `bison: not found`. The lane host has no bison, flex, bc, swig, setuptools or gnutls
+  headers, no Docker, and an empty apt index; installing host packages was out of scope. The platform
+  image's Yocto build (#14) is the intended builder. Until then pass `BI_UBOOT=<file>` (not tied to its
+  source, see above).
+- **ELE firmware**: the installer's SHA-256 matched when downloaded in the lane, but unpacking it needs a
+  person to accept NXP's licence agreement, so the script never unpacks it. Pass `BI_ELE=<file>`. On a
+  device this position is NXP's own container; here it is an OEM-signed `ele` entry (see "Containers").
 
 ## What the test checks
 
