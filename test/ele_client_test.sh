@@ -139,6 +139,40 @@ else
 	fail "client policy tests: no C compiler (cc) on PATH"
 fi
 
+# The success double (ele_hsm_cli_double.c) answers every update as committed
+# with the acknowledgements; only this test may link it. The shipped ele_client
+# link line in the build script names neither it nor the fake.
+# link_line FILE: the ele_client link command (from its -o to its die line).
+link_line() {
+	local l on=0 acc=
+	while IFS= read -r l; do
+		case $l in *'-o "$out/ele_client"'*) on=1 ;; esac
+		if [ "$on" = 1 ]; then
+			acc+="$l"$'\n'
+			case $l in *'die "the client does not build'*) break ;; esac
+		fi
+	done <"$1"
+	printf '%s' "$acc"
+}
+# link_check FILE: fail when the shipped link line names a test-only source.
+link_check() {
+	local ll
+	ll=$(link_line "$1")
+	[ -n "$ll" ] || { echo "link_check: no ele_client link line found in $1"; return 2; }
+	case $ll in *ele_hsm_cli_double.c*) echo "the ele_client link line names the success double ele_hsm_cli_double.c"; return 1 ;; esac
+	case $ll in *ele_hsm_fake.c*) echo "the ele_client link line names the test double ele_hsm_fake.c"; return 1 ;; esac
+	echo "link line OK"
+}
+run link_check "$script"
+check "the shipped ele_client link line names neither the success double nor the fake" 0 "link line OK"
+# The check bites: a copy of the script with the double added is refused.
+while IFS= read -r line; do
+	printf '%s\n' "${line/'"$cdir/ele_client.c"'/'"$cdir/ele_hsm_cli_double.c" "$cdir/ele_client.c"'}"
+done <"$script" >"$tmp/ele-lib-build.mut.sh"
+cmp -s "$script" "$tmp/ele-lib-build.mut.sh" && fail "the mutated build script copy is identical to the original"
+run link_check "$tmp/ele-lib-build.mut.sh"
+check "a build script that links the success double is refused, naming it" 1 "ele_hsm_cli_double.c"
+
 # The backend's flag constants against the library's headers. Needs the fetched
 # source (ELE_SRC=<work>/src from scripts/ele-lib-build.sh), which `make test`
 # does not fetch: without it the check is reported as skipped, not passed.
@@ -171,6 +205,17 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	run cc -std=gnu11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${inc[@]}" -o "$tmp/ele_cli" \
 		"${bsrc[@]}" "$d/ele_cli_args.c" "$d/ele_client_cli.c"
 	check "ele_client command line compiles against the double" 0
+	# This is the shipped link (backend plus the library's double, no success
+	# double): none of the success double's own symbols are in it.
+	if command -v nm >/dev/null 2>&1; then
+		nm "$tmp/ele_cli" >"$tmp/ele_cli.nm" 2>&1 || fail "nm could not read the host command line"
+		for sym in ack_all dbl_generate dbl_sign dbl_del; do
+			if grep -qw "$sym" "$tmp/ele_cli.nm"; then fail "the shipped-link host CLI has the success double's symbol $sym"; fi
+		done
+		pass "the shipped-link host CLI has none of the success double's symbols"
+	else
+		fail "nm is not available here"
+	fi
 	printf '1234\n' >"$tmp/nonce"
 	# The shipped backend never reports the counter acknowledged (client.md, Q2),
 	# so no generate or delete succeeds through it. The success path and the
@@ -179,6 +224,9 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	run cc -std=gnu11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${inc[@]}" -o "$tmp/ele_cli_ok" \
 		"$d/ele_hsm_cli_double.c" "$d/ele_client.c" "$d/ele_cli_args.c" "$d/ele_client_cli.c"
 	check "ele_client command line compiles against the success double" 0
+	# Control for the nm check above: the success double's symbols do show in its own build.
+	nm "$tmp/ele_cli_ok" >"$tmp/ele_cli_ok.nm" 2>&1 || fail "nm could not read the success-double CLI"
+	grep -qw dbl_generate "$tmp/ele_cli_ok.nm" || fail "the nm control did not find dbl_generate in the success-double build"
 	run "$tmp/ele_cli_ok" --split-confirmed 5 3 gen 3<"$tmp/nonce"
 	check "gen that commits with both acknowledgements prints the key and exits 0" 0 "key 7 rollback-protected"
 	run "$tmp/ele_cli_ok" --split-confirmed 5 3 del 7 3<"$tmp/nonce"
