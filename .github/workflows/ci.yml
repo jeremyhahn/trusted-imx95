@@ -1220,49 +1220,70 @@ jobs:
   # make secure-world builds BL31 and OP-TEE twice in clean directories and
   # fails unless both are byte-identical (docs/secure-world/build.md). It
   # fetches the pinned sources, toolchain and wheels, each checked against its
-  # pin, so the container has the network.
+  # pin, so the job has the network.
+  #
+  # Host: secure-world/bsp.lock pins CPython 3.13 wheels for x86_64 glibc
+  # (cryptography cp311-abi3-manylinux_2_28, cffi cp313-manylinux2014), and
+  # Arm's toolchain is glibc-hosted, so the project's Alpine (musl) toolchain
+  # image cannot run it. The job runs in the official python:3.13 Debian
+  # bookworm image (glibc 2.36, CPython 3.13), pinned by digest.
+  #
+  # The job runs the build only when a changed file can affect it
+  # (SECURE_WORLD_PATTERN below); otherwise its steps are skipped and the job
+  # succeeds, which the CI Gate counts as passed. A push, a schedule or a
+  # manual run always builds.
   secure-world-build:
     name: Secure world builds twice and compares
     runs-on: ubuntu-latest
     needs: preflight
     if: ${{ !github.event.pull_request.draft && (needs.preflight.outputs.verdict == 'run' || needs.preflight.outputs.verdict == 'proven') }}
     timeout-minutes: 60
+    container:
+      image: python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
     env:
-      CI_STACK_PREFIX: ${{ github.event.repository.name }}-ci-
-      CI_CACHE_CLASS: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && 'main' || 'pr' }}
-      CI_IMAGE_NAMESPACE: ${{ vars.CI_IMAGE_NAMESPACE }}
+      # Every file the build reads: the lock and its directory, the script, the
+      # make target, its unit test, and this workflow.
+      SECURE_WORLD_PATTERN: '^(secure-world/|scripts/secure-world-build\.sh$|test/secure_world_build_test\.sh$|Makefile$|\.github/workflows/ci\.yml$)'
     steps:
+      # git for the changed-files diff; curl, make and xz for the script's own
+      # checks; uv for its hash-checked wheel install (pinned below).
+      - name: Host tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates curl make xz-utils
+          printf '%s\n' 'uv==0.13.9 --hash=sha256:d7f459fe4fd247d830351c75686d3996ace3c6f3f728eb0e85a30b7ada0cef19' > "$RUNNER_TEMP/uv-req.txt"
+          python3 -m pip install -q --require-hashes --only-binary :all: -r "$RUNNER_TEMP/uv-req.txt"
+          # What the pinned wheels need: CPython 3.13 on x86_64 glibc.
+          python3 -c 'import sys,platform; assert sys.version_info[:2]==(3,13), sys.version; print(sys.version.split()[0], platform.machine(), platform.libc_ver())'
+
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
 
-      - name: Pull the toolchain image from the registry cache
-        run: scripts/ci-image-cache.sh pull || true
-
-      # The toolchain image alone, as in the system-manager-build job.
-      - name: Build the toolchain image
-        run: |
-          ( umask 077; : > "$RUNNER_TEMP/gomodauth.env"
-            for v in GOPRIVATE; do
-              if [ -n "${!v:-}" ]; then printf '%s=%s\n' "$v" "${!v}" >> "$RUNNER_TEMP/gomodauth.env"; fi
-            done )
-          bp=
-          if [ -n "${DEVCACHE_GOPROXY:-}" ] && curl -s -o /dev/null --max-time 5 "$DEVCACHE_GOPROXY/"; then
-            bp="GO_BUILD_PROXY=$DEVCACHE_GOPROXY|https://proxy.golang.org"
-          fi
-          make docker-build-toolchain ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
-          rm -f "$RUNNER_TEMP/gomodauth.env"
-          ref=$(make -s toolchain-ref)
-          echo "TOOLCHAIN_IMAGE=$ref" >> "$GITHUB_ENV"
-
-      # The checkout is copied into the container, never bind-mounted. /src is
-      # root's there: sources, build trees and output go under $TMPDIR.
-      - name: make secure-world
+      - name: Did a changed file reach the secure-world build?
+        id: select
         env:
-          IN_IMAGE_NETWORK: bridge
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
         run: |
-          # shellcheck disable=SC2016 # the container's shell expands $TMPDIR
-          scripts/in-toolchain-image.sh "$TOOLCHAIN_IMAGE" 'make secure-world SW_BASE="$TMPDIR/secure-world" SW_OUT="$TMPDIR/secure-world/out"'
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            # Any doubt (no diff) runs the build.
+            if files=$(git diff --name-only --no-renames "$BASE...$HEAD") && [ -n "$files" ]; then
+              printf '%s\n' "$files"
+              printf '%s\n' "$files" | grep -qE "$SECURE_WORLD_PATTERN" || run=false
+            fi
+          fi
+          echo "secure-world inputs changed: $run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: make secure-world
+        if: steps.select.outputs.run == 'true'
+        run: |
+          make secure-world SW_BASE="$RUNNER_TEMP/secure-world" SW_OUT="$RUNNER_TEMP/secure-world/out"
 
   # v1.21: every stage runs in the project's own devcontainer image and no
   # other (ci-standard.md §2, devcontainer.md §7). One image job (Company Agent
