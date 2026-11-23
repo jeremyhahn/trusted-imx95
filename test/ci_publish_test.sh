@@ -262,7 +262,7 @@ if not m:
 body = m.group(1)
 head, _, rest = body.partition("\n    steps:\n")
 steps = re.split(r"^      - ", rest, flags=re.M)[1:]
-pub = [i for i, s in enumerate(steps) if "ci-image-cache.sh publish" in s]
+pub = [i for i, s in enumerate(steps) if re.search(r"^\s+scripts/ci-image-cache\.sh publish ", s, re.M)]
 reap = [i for i, s in enumerate(steps) if re.search(r"^\s+run: scripts/reap-stale-ci-stacks\.sh \"\$CI_STACK_PREFIX\"$", s, re.M)]
 if len(pub) != 1 or len(reap) != 1 or reap[0] <= pub[0]:
     sys.exit("publish-images needs one reaper step after the publish step")
