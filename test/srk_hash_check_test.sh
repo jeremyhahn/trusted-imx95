@@ -63,6 +63,30 @@ run non-pem-refused 2 "neither a PEM" -- "$work/expected.txt" "$work/not-pem.der
 printf 'zz\n' >"$work/bad-hex.txt"
 run bad-expected-file 2 "not a hex string" -- "$work/bad-hex.txt" "${pub[@]}"
 
+# PEM certificate input: disposable self-signed certificates over the same test
+# keys; the reference hash is an AHAB export that names those certificates.
+for i in 0 1 2 3 4; do
+	openssl req -x509 -new -key "$work/srk$i.pem" -subj "/CN=srk-hash-check-test-$i" -days 2 -out "$work/srk$i.crt" >/dev/null 2>&1 ||
+		{ echo "FAIL: openssl could not make test certificate $i" >&2; exit 1; }
+done
+mkdir "$work/refc"
+cfg=$(<"$root/scripts/ahab/container.yaml")
+for i in 0 1 2 3; do
+	cfg=${cfg//srk$i.pub/srk$i.crt}
+	cp "$work/srk$i.pem" "$work/srk$i.crt" "$work/refc/"
+done
+printf '%s\n' "$cfg" >"$work/refc/container.yaml"
+cp "$work/ref/payload.bin" "$work/refc/"
+(cd "$work/refc" && "$venv/bin/nxpimage" ahab export -c container.yaml) >"$work/refc.log" 2>&1 ||
+	{ tail -n 5 "$work/refc.log" >&2; echo "FAIL: reference export with certificates" >&2; exit 1; }
+tr -d '[:space:]' <"$work/refc/ahab_oem0_srk0_hash.txt" >"$work/expected-crt.txt"
+crt=("$work/srk0.crt" "$work/srk1.crt" "$work/srk2.crt" "$work/srk3.crt")
+{ head -n 3 "$work/srk0.crt"; } >"$work/bad.crt"
+
+run cert-match 0 "srk-hash-check: match" -- "$work/expected-crt.txt" "${crt[@]}"
+run cert-substituted-mismatch 1 "srk-hash-check: mismatch" -- "$work/expected-crt.txt" "${crt[@]:0:3}" "$work/srk4.crt"
+run cert-malformed-refused 2 "SPSDK could not load" -- "$work/expected-crt.txt" "$work/bad.crt" "${crt[@]:1}"
+
 # The output states the hash and names no fuse step.
 "$check" "$work/expected.txt" "${pub[@]}" >"$work/out.log" 2>&1 || true
 if grep -q "SRK table hash: $(cat "$work/expected.txt")" "$work/out.log"; then ok "hash printed"; else bad "hash not printed"; fi
