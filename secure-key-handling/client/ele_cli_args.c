@@ -90,19 +90,26 @@ static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 {
 	size_t n = 0;
 	ssize_t r;
+	char ch;
 
 	if (isatty(fd))
 		return -1;
-	while (n < ELE_NONCE_BUF - 1 && (r = read(fd, buf + n, ELE_NONCE_BUF - 1 - n)) != 0) {
+	/* One byte at a time, up to the newline: a producer that writes the line
+	 * and keeps its end open (no EOF) must not block the client. The buffer
+	 * still bounds the length; EOF ends the text as a newline does. */
+	while (n < ELE_NONCE_BUF - 1) {
+		r = read(fd, &ch, 1);
 		if (r < 0) {
 			if (errno == EINTR)
 				continue;
+			ele_secure_zero(&ch, sizeof(ch));
 			return -1;
 		}
-		n += (size_t)r;
+		if (r == 0 || ch == '\n')
+			break;
+		buf[n++] = ch;
 	}
-	if (n > 0 && buf[n - 1] == '\n')
-		n--;
+	ele_secure_zero(&ch, sizeof(ch));
 	buf[n] = '\0';
 	/* Anything longer than the buffer holds is not a 32-bit number. */
 	if (n == 0 || n > 16 || memchr(buf, '\0', n))

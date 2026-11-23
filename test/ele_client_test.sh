@@ -63,6 +63,19 @@ check "work is a dangling symlink into the checkout" 1 "outside the checkout"
 run bash "$script" --work "$ROOT/.." --out "$tmp/out"
 check "work that contains the checkout" 1 "must not contain the checkout"
 
+# A reused --out is refused before anything is fetched: a stale, lexically
+# earlier libele_hsm.so.* in it can never be selected or listed. (The build
+# itself stages into $work/stage and publishes only into an empty --out; it
+# needs the network, so only the refusal runs here.)
+mkdir -p "$tmp/reused"
+: >"$tmp/reused/libele_hsm.so.0.0.1"
+run bash "$script" --work "$tmp/reused-work" --out "$tmp/reused"
+check "a non-empty --out holding an older libele_hsm.so.* is refused" 1 "not an empty directory"
+if [ ! -e "$tmp/reused-work" ]; then pass "the refusal came before anything was fetched"; else fail "the refusal came before anything was fetched"; fi
+: >"$tmp/afile"
+run bash "$script" --work "$tmp/reused-work" --out "$tmp/afile"
+check "an --out that is a file is refused" 1 "not an empty directory"
+
 # The client policy tests, built with the host compiler.
 d=$ROOT/secure-key-handling/client
 if command -v cc >/dev/null 2>&1; then
@@ -153,6 +166,21 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 5 3 sign 7 msg
 	check "sign prints the signature as one line of lowercase hex" 0 "$want"
 	[ "$OUT" = "$want" ] || fail "sign output is not exactly the signature hex"
+	# A producer that writes the nonce line and keeps its end open (no EOF):
+	# the client must stop at the newline. The timeout turns a hang into a failure.
+	mkfifo "$tmp/nfifo"
+	exec 4<>"$tmp/nfifo"
+	printf '1234\n' >&4
+	ELE_FAKE_ERR=0 ELE_FAKE_LOG="$tmp/hsm.log" run timeout 10 "$tmp/ele_cli" 5 3 sign 7 msg 3<"$tmp/nfifo"
+	check "the nonce line is read without waiting for EOF (producer keeps its end open)" 0 "$want"
+	# Over-length, empty and newline-only input still fail.
+	printf '12345678901234567\n' >&4
+	ELE_FAKE_ERR=0 ELE_FAKE_LOG="$tmp/hsm.log" run timeout 10 "$tmp/ele_cli" 5 3 sign 7 msg 3<"$tmp/nfifo"
+	check "an over-long nonce line is refused" 2 "cannot read the nonce"
+	printf '\n' >&4
+	ELE_FAKE_ERR=0 ELE_FAKE_LOG="$tmp/hsm.log" run timeout 10 "$tmp/ele_cli" 5 3 sign 7 msg 3<"$tmp/nfifo"
+	check "an empty nonce line is refused" 2 "cannot read the nonce"
+	exec 4>&-
 	for i in $(seq 0 63); do printf '%b' "\\x$(printf '%02x' $(((3 * i + 1) & 255)))"; done >"$tmp/sig.bin"
 	rm -f "$tmp/hsm.log"
 	ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --raw 5 3 sign 7 msg 3<"$tmp/nonce" >"$tmp/sig.out"
