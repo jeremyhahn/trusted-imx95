@@ -277,6 +277,7 @@ expect "marker: write left no file behind" test ! -e "$wt/no-such-file"
 # then copies the result to the deploy directory. UNBUILT: the order is read from the pinned classes
 # (docs/ftpm/build.md), not observed in a build.
 chk=$ROOT/scripts/platform-image-check-root-marker.sh
+expect "scripts/platform-image-check-root-marker.sh is executable" test -x "$chk"
 hookfn=trusted_imx95_mark_root
 expect "the hook function is in the image recipe" has "$img" "$hookfn () {"
 # The wks geometry: --fixed-size (MiB) and --align (KiB) of each part line, in order.
