@@ -491,22 +491,28 @@ the commit differs) and open the cited line.
   `lmm_perf.c`, `m7mix.cfg`, `mx95frdm-pro.cfg`, `mx95evk.cfg` and
   `config_scmi.h` citations in 8.1 to 8.4. They were read once by the
   lane and have not been reviewed independently.
-- **Not read at all**: the PRO's generated `config_scmi.h`,
-  `configs/configtool.pl`'s handling of an API line, and the M7 level
-  values.
+- **Not read**: the M7 level values and frequencies (device code).
 
-All of section 8 therefore stays provisional until a second reader (or
-the build check proposed in 8.5) confirms the citations.
+To regenerate the PRO table that item 2 reads, from a checkout of the
+pinned commit with `system-manager/patches/*.patch` applied in name
+order (`git apply`, as `scripts/sm-build.sh` does): run
+`make config=mx95frdm-pro cfg`. The file is then
+`configs/mx95frdm-pro/config_scmi.h`; it is generated output and is not
+copied here. Its SHA-256 is not pinned, so a reviewer compares the one
+line cited, not a digest.
+
+Section 8 stays provisional because no second reader has yet repeated
+the vendor-tree reads. It no longer relies on the EVK's table.
 
 ### 8.1 Answer
 
 **No `PERF_M7` API line is needed for the M7 to set its own performance
 level.** Ownership of `M7P` already gives the M7 agent all rights on
 the `PERF_M7` domain, and `PERFORMANCE_LEVEL_SET` needs only PRIV. The
-M7 in fact holds ALL there, more than the message needs. One link is
-inferred, not read: the generated table of the PRO file (item 2), so
-the `PERF_M7  PRIV` line stays open until that table is checked
-(proposed, pending owner approval).
+PRO's own generated table, regenerated from the pinned, patched file
+(8.0), gives the M7 agent ALL on `PERF_M7` (item 2). The `PERF_M7  PRIV`
+line is therefore not required, and the open row is closed. An explicit
+line would not even lower the grant (item 7).
 
 ### 8.2 Evidence
 
@@ -518,14 +524,23 @@ the `PERF_M7  PRIV` line stays open until that table is checked
    its bundle. The M7 LM's API list (`:379-392`) has no `PERF_*`
    entry, and neither patch under `system-manager/patches/` touches
    `M7P` or `PERF_M7`.
-2. The PRO's generated `config_scmi.h` is built at image time and is
-   not in the fetched tree. Its sibling `configs/mx95evk/config_scmi.h`
-   is. The EVK's M7 LM has the same `OWNER` macro, `M7P OWNER` and no
-   `PERF_M7` line (`configs/mx95evk.cfg:347,399`), and its generated
-   M7 agent record sets `perfPerms[DEV_SM_PERF_M7]` to
-   `SM_SCMI_PERM_ALL` (`configs/mx95evk/config_scmi.h:95`). That the PRO
-   table matches is inferred from the identical `.cfg` structure:
-   **unconfirmed** until the generated PRO file is read (section 8.5).
+2. The PRO's generated `config_scmi.h` is built from the `.cfg` by the
+   configuration tool (`make config=mx95frdm-pro cfg`, 8.0), and was
+   read after generating it from the pinned file with this repository's
+   two patches applied. Its agent 0 record, headed "SCMI AGENT0 Config
+   (M7)" (`configs/mx95frdm-pro/config_scmi.h:57`), sets
+   `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
+   the only line naming `PERF_M7` in the file, so no other agent holds
+   it. The tool derives such a line in `get_perms`
+   (`configs/configtool.pl:2410`): it takes each protocol's `perf=<perm>`
+   word on the agent's lines (`:2461-2463`), keeps one value per
+   resource (`:2474`) and writes `<proto>Perms[<resource>] =
+   SM_SCMI_PERM_<PERM>` (`:2486-2506`). The `perf=all` comes from
+   `api=all` of the `OWNER` macro (`mx95frdm-pro.cfg:344`), expanded to
+   every protocol (`configtool.pl:244-257`; permission names `:85-86`;
+   dictionary `ALL`, `mx95frdm-pro.cfg:58`).
+   The EVK's generated table gives the same answer
+   (`configs/mx95evk/config_scmi.h:95`) and is no longer relied on.
 3. Function `PerformanceLevelSet` rejects the call with `SM_ERR_DENIED`
    when the agent's `perfPerms[domain]` is below `SM_SCMI_PERM_PRIV`
    (`sm/rpc/scmi/rpc_scmi_perf.c:1098-1104`), otherwise it calls
@@ -542,6 +557,19 @@ the `PERF_M7  PRIV` line stays open until that table is checked
    at or above the number of levels with `SM_ERR_INVALID_PARAMETERS`
    (`sm/lmm/lmm_perf.c:130-132`). The level values and frequencies
    come from device code that was not read: **unconfirmed**.
+7. An explicit API line does not lower an owned resource's grant. In
+   `get_perms` the last `perf=` word seen for a resource wins
+   (`configs/configtool.pl:2461-2474`, lines in file order). A line
+   `PERF_M7  PRIV` becomes `perf=priv` by the dictionary
+   (`mx95frdm-pro.cfg:57`) and `configtool.pl:244-257`. In the M7 LM the
+   API list (`:377-392`) comes before the Resources list (`:394`) and
+   `M7P  OWNER` (`:396`), whose `perf=all` is therefore read later and
+   wins. So a `PERF_M7  PRIV` line in the API list would change nothing;
+   only a line after `M7P  OWNER` could lower the grant. This is from
+   reading the tool; it was not tested by generating a changed file.
+   These `.cfg` line numbers are the upstream file's; the patches shift
+   later lines by two (0002 removes two test grants from the API list),
+   which does not alter any entry cited here.
 
 ### 8.3 What the M7 can do with the grant it has
 
@@ -558,8 +586,8 @@ the `PERF_M7  PRIV` line stays open until that table is checked
 - Set `CLK_M7` or `CLK_BUSM7` through the Clock protocol: no. Both are
   in LM0's clock list (`mx95frdm-pro.cfg:161,180`, in the block headed
   "Modified via PERF protocol" at `:149`), and the M7's generated clock
-  rights list only its own peripheral clocks (EVK example,
-  `config_scmi.h:69-74`, no `CLK_M7`). The core clock moves only as a
+  rights list only its own peripheral clocks (the generated PRO
+  `config_scmi.h` has no `CLK_M7` or `CLK_BUSM7` entry at all). The core clock moves only as a
   result of the performance level.
 
 ### 8.4 Without ownership of `M7P`
@@ -572,15 +600,14 @@ file.
 
 ### 8.5 Follow-ups (proposed, pending owner approval)
 
-- Text only, no patch: if the owner wants the grant explicit, or
-  lower than ALL, the line would be `PERF_M7  PRIV` in the M7 LM's API
-  list. Whether an API line overrides the `api=all` bundle of `M7P` or
-  only adds to it was not read in `configs/configtool.pl`:
-  **unconfirmed**, so such a line may change nothing. Proposed,
-  pending owner approval.
-- Check for the image build: read the generated PRO `config_scmi.h` and
-  assert that the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is the value
-  assumed here and that no other agent holds one. This closes item 2
-  and fits section 5.2. Proposed, pending owner approval.
+- Text only, no patch: if the owner wants the grant lower than ALL, a
+  `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM
+  (item 7); in the API list it changes nothing. Proposed, pending owner
+  approval, and not needed for the M7 to set its level.
+- Check for the image build: read the generated PRO `config_scmi.h`
+  and assert that the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is ALL
+  (or the owner's chosen value) and that no other agent holds one.
+  This would keep item 2 true across an imx-sm bump and fits section
+  5.2. Proposed, pending owner approval.
 - Open, for the M7 firmware rather than the SM: whether the firmware
   needs to change its level at all.
