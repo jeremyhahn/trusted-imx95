@@ -52,7 +52,12 @@ if command -v cc >/dev/null 2>&1; then
 		"$d/ele_client.c" "$d/ele_stub.c" "$d/ele_client_test.c"
 	check "client tests compile" 0
 	run "$tmp/ele_client_test"
-	check "client policy tests: both flags, strict only, counter only, neither" 0 "all passed"
+	check "client policy tests: both flags, strict only, counter only, neither, counter warning fails" 0 "all passed"
+	run cc -std=c99 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -o "$tmp/ele_cli_args_test" \
+		"$d/ele_cli_args.c" "$d/ele_cli_args_test.c"
+	check "cli argument tests compile" 0
+	run "$tmp/ele_cli_args_test"
+	check "cli args: strict numbers (4294967297, 1junk, -1, '' refused), nonce never from argv" 0 "all passed"
 else
 	fail "client policy tests: no C compiler (cc) on PATH"
 fi
@@ -75,6 +80,51 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "a wrong constant fails the check" nonzero "static assertion failed"
 	run cc -std=gnu11 -fsyntax-only "${inc[@]}" "$d/ele_hsm_backend.c"
 	check "backend compiles against the library headers" 0
+
+	# The shipped backend against a test double of libele_hsm (built on the
+	# library's headers): the flags it sends and its return-code translation.
+	bsrc=("$d/ele_hsm_backend.c" "$d/ele_hsm_fake.c" "$d/ele_client.c")
+	run cc -std=gnu11 -Wall -Wextra -Werror "${inc[@]}" -o "$tmp/ele_hsm_backend_test" \
+		"${bsrc[@]}" "$d/ele_hsm_backend_test.c"
+	check "backend test compiles against the double" 0
+	run "$tmp/ele_hsm_backend_test"
+	check "backend: flags sent (strict+counter; delete strict only; no CREATE/PLAINTEXT) and HSM_NO_ERROR/HSM_KEY_STORE_COUNTER/other" 0 "all passed"
+
+	# The command line over the same double.
+	run cc -std=gnu11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${inc[@]}" -o "$tmp/ele_cli" \
+		"${bsrc[@]}" "$d/ele_cli_args.c" "$d/ele_client_cli.c"
+	check "ele_client command line compiles against the double" 0
+	printf '1234\n' >"$tmp/nonce"
+	cli() { # cli ERR ARGS...: run with nonce on fd 3, the double's log in $tmp/hsm.log
+		local err=$1
+		shift
+		rm -f "$tmp/hsm.log"
+		ELE_FAKE_ERR=$err ELE_FAKE_LOG="$tmp/hsm.log" run "$tmp/ele_cli" "$@" 3<"$tmp/nonce"
+	}
+	no_hsm_call() { [ ! -e "$tmp/hsm.log" ] || fail "$1: an HSM call was made"; }
+	for bad in 4294967297 1junk -1 ""; do
+		cli 0 --split-confirmed 5 3 del "$bad"
+		check "del '$bad' refused" 2 "usage"
+		no_hsm_call "del '$bad'"
+	done
+	cli 0 --split-confirmed 5 1234 gen
+	check "a nonce in argv is not accepted" 2 "usage"
+	no_hsm_call "nonce in argv"
+	cli 0 --split-confirmed 5 99 gen
+	check "an unreadable nonce descriptor is refused before the store opens" 2 "cannot read the nonce"
+	no_hsm_call "bad nonce fd"
+	cli 0 --split-confirmed 5 3 gen
+	check "gen with a confirmed split" 0 "rollback-protected"
+	cli 0 5 3 gen
+	check "gen with the split unconfirmed fails, state shown" 1 "update refused (committed-not-rollback-protected)"
+	cli 0x10 --split-confirmed 5 3 gen
+	check "counter warning: nonzero exit" 1 "update refused"
+	cli 0x10 --split-confirmed 5 3 del 7
+	check "counter warning on delete: nonzero exit" 1 "update refused"
+	cli 0xfe --split-confirmed 5 3 gen
+	check "other HSM error: nonzero exit" 1 "failed"
+	cli 0 --split-confirmed 5 3 del 7
+	check "delete: committed, not rollback-protected" 0 "deleted committed-not-rollback-protected"
 else
 	echo "skip backend constants check: ELE_SRC is not set (the build script runs it)"
 fi

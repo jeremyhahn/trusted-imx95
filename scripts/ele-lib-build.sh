@@ -165,7 +165,7 @@ for f in "$out"/libele_hsm.so.*; do
 done
 [ -n "$hsmlib" ] || die "libele_hsm is not in $out"
 "${cross}gcc" -std=gnu11 -O1 -Wall -Wextra -Werror -o "$out/ele_client" "${inc[@]}" \
-	"$cdir/ele_client.c" "$cdir/ele_hsm_backend.c" "$cdir/ele_client_cli.c" \
+	"$cdir/ele_client.c" "$cdir/ele_hsm_backend.c" "$cdir/ele_cli_args.c" "$cdir/ele_client_cli.c" \
 	-L"$out" -l:"$hsmlib" -lpthread ||
 	die "the client does not build or link against $hsmlib"
 m=$("${cross}readelf" -h "$out/ele_client" | while IFS= read -r l; do case $l in *Machine:*) echo "$l" ;; esac; done)
