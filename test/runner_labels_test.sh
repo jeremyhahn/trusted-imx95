@@ -93,6 +93,142 @@ check "a waived self-hosted list under pull_request_target is refused" 1 "(f) it
 fixture "[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason" "" "[push, workflow_dispatch]"
 check "a waived self-hosted list whose triggers exclude fork heads passes" 0 "OK:"
 
+# Verify 9 (security P1): the fork guard is per job, never file-wide, and a local
+# reusable workflow inherits its callers' triggers.
+G='github.event.pull_request.head.repo.full_name == github.repository'
+W='[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason'
+resetwf() { rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml; }
+wfwrite() { cat >"$work/.github/workflows/$1"; }
+# shellcheck disable=SC2016  # the backticks are the finding's literal text
+FORKMSG='(f) its `# self-hosted:` waiver does not cover a fork head'
+
+resetwf
+wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+stepcmd
+check "an unrelated job's guard does not exempt an unconditional waived job" 1 "$FORKMSG"
+
+for c in "$G || true" "$G || github.event_name == 'push'" "(\${{ $G }}) || always()" "!($G)"; do
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  b:
+    if: "$c"
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "a guard that a top-level || or a negation bypasses is refused: $c" 1 "$FORKMSG"
+done
+
+for c in "$G" "github.event.pull_request.state == 'open' && $G" "always() && $G"; do
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  b:
+    if: "$c"
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "a job requiring the same-repository head passes: $c" 0 "OK:"
+done
+
+for dep in "" "    if: github.event.pull_request.state == 'open'"; do
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    needs: a
+$dep
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "a job needing a guarded job passes ($dep)" 0 "OK:"
+done
+
+for dep in "always()" "failure()" "cancelled() || needs.a.result == 'success'"; do
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    needs: [a]
+    if: "$dep"
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "a dependent that runs whatever its need did is refused: $dep" 1 "$FORKMSG"
+done
+
+# Local reusable workflows: the callee inherits the callers' triggers.
+callee() { # <runs-on line> [if]
+	wfwrite callee.yml <<EOF
+name: callee
+on: workflow_call
+jobs:
+  c:
+${2:+    if: "$2"}
+    runs-on: $1
+    steps:
+      - run: true
+EOF
+}
+caller() { # <on>
+	wfwrite caller.yml <<EOF
+name: caller
+on: $1
+jobs:
+  call:
+    uses: ./.github/workflows/callee.yml
+EOF
+}
+resetwf; caller "[pull_request]"; callee "$W"; stepcmd
+check "a pull_request caller of a waived self-hosted callee is refused" 1 "$FORKMSG"
+resetwf; caller "[pull_request_target]"; callee "$W"; stepcmd
+check "a pull_request_target caller of a waived self-hosted callee is refused" 1 "$FORKMSG"
+resetwf; caller "[push, workflow_dispatch]"; callee "$W"; stepcmd
+check "a push-only caller of the same callee passes" 0 "OK:"
+resetwf; caller "[pull_request]"; callee "$W" "$G"; stepcmd
+check "a callee guarded per job passes under a pull_request caller" 0 "OK:"
+resetwf; callee "$W"; stepcmd
+check "a callee no local workflow calls is held to the fork rule" 1 "$FORKMSG"
+
 # Codex security P1s at verify 7: the release decision is an allowlist.
 # (1) head_ref is an arbitrary branch name, never simulated.
 fixture "release" "github.event_name == 'pull_request' && github.head_ref == 'topic'"

@@ -2,7 +2,11 @@
 # Local fix on top of v1.54 (#159, verify 8; to send upstream): the runner-label
 # check's `# self-hosted: hardware|oversize` waiver no longer returns before the
 # fork checks; a waived job still fails when a fork head under pull_request or
-# pull_request_target (event in `on`) gets a non-standard runs-on.
+# pull_request_target (event in `on`) gets a non-standard runs-on. Local fix 2
+# (verify 9, security P1s; to send upstream): the exemption is per job (the job's
+# own `if:` requires the same-repository head as a conjunct, or it needs such a
+# job and has no always/failure/cancelled), and a local reusable-workflow callee
+# inherits its callers' pull_request and pull_request_target triggers.
 # v1.54 (2026-11-22, Tenant Agent ruling 1137, owner order: the Dells and
 # the AMD SEV host are always used for CI, and nothing sits idle): the
 # preflight step `Balanced runner pool (ruling 1137)` replaces the hosted
@@ -2125,6 +2129,138 @@ jobs:
               return out
 
 
+          # Local fix on top of v1.54 (#159, verify 9; to send upstream): the fork
+          # exclusion is per job and follows local reusable workflows. A job is
+          # fork-safe when its own `if:` requires the same-repository head test as
+          # a conjunct (no top-level `||` branch can bypass it), or when its own
+          # `if:` has no always()/failure()/cancelled() and one job it needs is
+          # fork-safe. Anything not provable is not safe.
+          HEAD_GUARD = re.compile(r"github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository"
+                                  r"|github\.repository\s*==\s*github\.event\.pull_request\.head\.repo\.full_name")
+          STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(")
+          EXPR_OPEN = chr(36) + "{{"
+
+
+          def split_top(s, op):
+              """Split s at op outside parentheses, brackets and quotes; None when unbalanced."""
+              parts, cur, depth, q, i = [], "", 0, None, 0
+              while i < len(s):
+                  c = s[i]
+                  if q:
+                      cur += c
+                      if c == q:
+                          q = None
+                  elif c in "'\"":
+                      q = c
+                      cur += c
+                  elif c in "([":
+                      depth += 1
+                      cur += c
+                  elif c in ")]":
+                      depth -= 1
+                      if depth < 0:
+                          return None
+                      cur += c
+                  elif depth == 0 and s.startswith(op, i):
+                      parts.append(cur)
+                      cur = ""
+                      i += len(op)
+                      continue
+                  else:
+                      cur += c
+                  i += 1
+              if q or depth:
+                  return None
+              parts.append(cur)
+              return parts
+
+
+          def strip_parens(s):
+              s = s.strip()
+              while s.startswith("(") and s.endswith(")"):
+                  inner = s[1:-1]
+                  if split_top(inner, "\0") is None:  # the outer pair does not close inside
+                      break
+                  s = inner.strip()
+              return s
+
+
+          def guards(s):
+              """True only when every way the condition holds requires the same-repository head."""
+              s = s.strip()
+              if s.startswith(EXPR_OPEN) and s.endswith("}}") and s.count(EXPR_OPEN) == 1:
+                  s = s[len(EXPR_OPEN):-2]
+              s = strip_parens(s)
+              ors = split_top(s, "||")
+              if ors is None:
+                  return False
+              if len(ors) > 1:
+                  return all(guards(p) for p in ors)
+              ands = split_top(s, "&&")
+              if ands is None:
+                  return False
+              if len(ands) > 1:
+                  return any(guards(p) for p in ands)
+              return HEAD_GUARD.fullmatch(s) is not None
+
+
+          def job_cond(spec):
+              c = spec.get("if")
+              return None if c is None else str(c)
+
+
+          def fork_safe(jobs_raw, name, seen=()):
+              spec = jobs_raw.get(name)
+              if not isinstance(spec, dict) or name in seen:
+                  return False
+              cond = job_cond(spec)
+              if cond is not None and guards(cond):
+                  return True
+              if cond is not None and STATUS_FN.search(cond):
+                  return False
+              needs = spec.get("needs")
+              needs = [needs] if isinstance(needs, str) else needs
+              if not isinstance(needs, list):
+                  return False
+              return any(isinstance(n, str) and fork_safe(jobs_raw, n, seen + (name,)) for n in needs)
+
+
+          LOCAL_CALL = re.compile(r"\./\.github/workflows/([^/@\s]+\.ya?ml)\s*$")
+          CALLERS = {}            # callee file name -> [(caller triggers, caller job is fork-safe)]
+          CALLERS_UNKNOWN = False  # a workflow file could not be read, so the caller set is unknown
+
+
+          def scan_callers(files):
+              global CALLERS_UNKNOWN
+              for f in files:
+                  try:
+                      d = yaml.safe_load(open(f, encoding="utf-8").read())
+                      con, _ = structure(d)
+                      jr = d["jobs"]
+                  except Exception:
+                      CALLERS_UNKNOWN = True
+                      continue
+                  for n, spec in jr.items():
+                      u = spec.get("uses") if isinstance(spec, dict) else None
+                      m = LOCAL_CALL.match(u) if isinstance(u, str) else None
+                      if m:
+                          CALLERS.setdefault(m.group(1), []).append((con, fork_safe(jr, n)))
+
+
+          def callee_triggers(base, on):
+              """A workflow_call workflow inherits its callers' fork-reachable triggers (conservatively)."""
+              if "workflow_call" not in on:
+                  return on
+              callers = CALLERS.get(base)
+              if CALLERS_UNKNOWN or not callers:
+                  return on | {"pull_request", "pull_request_target"}
+              extra = set()
+              for con, safe in callers:
+                  if not safe:
+                      extra |= con & {"pull_request", "pull_request_target"}
+              return on | extra
+
+
           def check(abspath, path):
               text = open(abspath, encoding="utf-8").read()
               try:
@@ -2134,6 +2270,7 @@ jobs:
                   return [f"{path}: (a) is not parseable YAML ({first}), so no runs-on can be checked"]
               try:
                   on, jobs = structure(doc)
+                  on = callee_triggers(os.path.basename(path), on)
               except ValueError as e:
                   return [f"{path}: (a) {e}"]
               ro_lines = runs_on_lines(text.splitlines())
@@ -2185,12 +2322,9 @@ jobs:
                       # relaxes every event except a fork head under
                       # pull_request or pull_request_target (v1.51, v1.52).
                       waived = bool(WAIVER.search(ro_line))
-                      # The review tier (codex, qwen; code-review.yml only, see
-                      # review_finding) never takes a fork head: a job of the file
-                      # carries the same-repository head guard and the others need it.
-                      fork_guarded = bool(review_labels(ro)) and any(
-                          "github.event.pull_request.head.repo.full_name == github.repository" in (c or "")
-                          for _, _, c in jobs)
+                      # Per job (verify 9): this job's own `if:`, or a job it needs,
+                      # must provably exclude a fork head; see fork_safe.
+                      fork_guarded = fork_safe(doc["jobs"], job)
                       off = []
                       sels = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
                       if sels[0] is not None and job == PRE_JOB and PRE_READ.search(ro):
@@ -2278,6 +2412,7 @@ jobs:
               print(f"::error::runner labels: .github/workflows/ci.yml is not among the workflow files under {WF}")
               sys.exit(1)
           bad = []
+          scan_callers(files)
           for f in files:
               rel = ".github/workflows/" + os.path.basename(f)
               try:
