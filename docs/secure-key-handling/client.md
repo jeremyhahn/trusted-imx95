@@ -96,10 +96,41 @@ normal child exit) is anything but unknown. `ELE_NOT_COMMITTED` stays for failur
 *Vendor call path (citations only, pinned commit 463845060a79).* The update runs through
 `src/common/hsm_api/hsm_key_generate.c:hsm_generate_key` and `src/common/hsm_api/hsm_delete_key.c:hsm_delete_key`, which build
 the message in `src/common/sab_msg/sab_key_generate.c` and `src/common/sab_msg/sab_delete_key.c` and send it through
-`src/common/sab_msg/sab_process_msg.c:process_sab_msg`. **Open:** the line-by-line trace of what a lost or short device
-reply returns (which of the library's error codes can follow a dispatched update) was not done in this lane, whose
-tooling cannot read the fetched vendor source; it is not needed for the classification above, and it stays open for a reader
-with the source.
+`src/common/sab_msg/sab_process_msg.c:process_sab_msg`; the sign runs through `src/common/hsm_api/hsm_sign_gen.c`.
+
+*What a dispatched message whose reply is lost, short or malformed returns* (traced by lane 162-skh-next2 on the
+fetched tree, SHA-256 matching `ele-lib.lock`; paths relative to `src/common/` unless given in full). Key generate,
+delete and signature generate are not in the v2 error-handling list (`sab_msg/sab_process_msg.c:105-157`), so they take
+the legacy path:
+
+- Each API call starts with `rsp_code` set to `SAB_NO_MESSAGE_RATING` (0x00) (`hsm_api/hsm_key_generate.c:26`,
+  `hsm_api/hsm_delete_key.c:25`, `hsm_api/hsm_sign_gen.c:122`), maps the return of `process_sab_msg` and then `rsp_code`
+  through `sab_rating_to_hsm_err` (generate `:47`, `:54`, `:61`, returned at `:67`; delete `:42`, `:49`, `:55`, returned at
+  `:62`; sign `:140`, `:147`, `:153`, returned at `:159`).
+- **Lost reply, driver failure, wrong length.** `plat_os_abs_cmd_snd_rcv_rsp` fails, or the received length is 0 or
+  neither the expected length nor the header's size (`src/plat/ele/ele_utils.c:198-209`, `val_rcv_rsp_len` at `:85-107`):
+  `process_sab_msg` returns `SAB_NO_MESSAGE_RATING` (`sab_msg/sab_process_msg.c:271-278`) and `rsp_code` is not assigned.
+  Rating 0x00 is not the success tag, so `sab_rating_to_hsm_err` takes the error map, whose index 0 is
+  `HSM_GENERAL_ERROR` (`src/plat/ele/include/plat_err_def.h:14`).
+- **Cancelled wait** returns `SAB_SHE_GENERAL_ERROR_RATING` 0xDC (`sab_msg/sab_process_msg.c:288`,
+  `sab_msg/include/sab_msg_def.h:199`); **a long reply failing its CRC** returns `SAB_NO_MESSAGE_RATING`
+  (`sab_msg/sab_process_msg.c:292-302`). Both are errors.
+- **Short reply accepted by its header size** (`src/plat/ele/ele_utils.c:202-211`): the response buffer was zeroed
+  (`sab_msg/sab_process_msg.c:175`) and `rsp_code` is the reply's status word (`:313`). A one-word reply gives status 0,
+  an error. A short reply that carries the device's success tag runs the response handler on zero-filled fields, and the
+  legacy path sets the result to the success tag whatever the handler returned (`:346-350`; the handlers do not check
+  the length), so the API returns `HSM_NO_ERROR`. That needs a success-tagged word from the device itself; the fields
+  read as zero: the sign handler leaves `exp_signature_size` 0, which the backend refuses (it needs 64), and a generate
+  or delete with `HSM_NO_ERROR` is refused by `fill_ack` anyway (the counter is never acknowledged).
+- **No stale `exp_signature_size`.** The backend zeroes the argument structure before the call and accepts a signature
+  only if the call returns `HSM_NO_ERROR` and `exp_signature_size` is 64, and each child runs one operation, so a size
+  left over from an earlier call cannot be read.
+
+Result: no path returns `HSM_NO_ERROR` without a success-tagged reply word from the device, and every return code
+after the marker is already the unknown outcome (exit 3), so no code change follows. The classification after the
+marker stays "unknown for any non-verified result". **Open (narrowed):** the success tag's value comes from the kernel
+driver by ioctl (`src/plat/ele/ele_os_abs_linux.c:78`), not from this tree; the trace assumes it is neither 0x00 nor
+0xDC, which only the driver or a board can confirm.
 
 **The nonce is parsed in the locked slot.** The nonce does not go through the generic `ele_parse_u32`, whose running
 value lives in an ordinary automatic variable that is never erased. A dedicated parser, `ele_nonce_parse`, applies the
@@ -115,7 +146,9 @@ closed. This section is the one statement of it; the other sections link here.
 
 **What the pinned library cannot show.** At the pinned commit, a success-tagged reply that carries a warning rating is
 mapped to `HSM_NO_ERROR`: `hsm_api/hsm_utils.c:24-48` logs the rating (counter-warning rating 0x10 included) and
-`:223-226` returns it as `HSM_NO_ERROR`. No reply field exposes the counter acknowledgement, and the library's delete
+`:223-224` takes that branch for a success-tagged reply, so `:228` returns `HSM_NO_ERROR` (the ELE map,
+`src/plat/ele/include/plat_err_def.h:289`, names success rating 0x10 `HSM_KEY_STORE_COUNTER`; second reading,
+lane 162-skh-next2). No reply field exposes the counter acknowledgement, and the library's delete
 has no counter flag. So `fill_ack` (`ele_hsm_backend.c`) never sets `counter_acked`, and `HSM_NO_ERROR` is not taken as
 the acknowledgement.
 
@@ -292,8 +325,8 @@ and only the board can.
 | Behaviour the backend assumes | Where in the pinned source | Status |
 |---|---|---|
 | `PLAT=ele` builds with `-DPSA_COMPLIANT`, so the PSA branches of the message code are the ones compiled | `src/plat/ele/ele.mk:41` | read |
-| A success-tagged response with a warning rating maps to `HSM_NO_ERROR` (the warning is only logged), so a counter warning on a success-tagged reply is invisible to the caller | `hsm_api/hsm_utils.c:223-224`, `:24-48` (returns `HSM_NO_ERROR` at `:48`) | read |
-| `HSM_KEY_STORE_COUNTER` reaches the caller only from an error-tagged response | `hsm_api/hsm_utils.c:226` (error path), `:118` (the error case) | read |
+| A success-tagged response with a warning rating maps to `HSM_NO_ERROR` (the warning is only logged), so a counter warning on a success-tagged reply is invisible to the caller | `hsm_api/hsm_utils.c:223-224`, `:24-48` (the map lookup at `:26`; every case falls through to `HSM_NO_ERROR` at `:48`); success rating 0x10 is `HSM_KEY_STORE_COUNTER` in `src/plat/ele/include/plat_err_def.h:289` | read twice |
+| `HSM_KEY_STORE_COUNTER` reaches the caller only from an error-tagged response | `hsm_api/hsm_utils.c:226` (error path, through the error map at `:54`), `:118` (the error case); the result is returned at `:228` | read twice |
 | No per-flag acknowledgement is exposed; "both flags acknowledged" is inferred from `HSM_NO_ERROR` | no field in the argument structures; see the two rows above | **provisional** |
 | Generate writes the key id into the caller's variable whatever the rating | `sab_msg/sab_key_generate.c:94-95`; the response handler runs at `sab_msg/sab_process_msg.c:333` | read |
 | A successful sign does not update `signature_size`; the PSA build stores the response size in `exp_signature_size` instead | `sab_msg/sab_sign_gen.c:178` | read |
