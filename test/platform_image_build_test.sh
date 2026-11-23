@@ -115,6 +115,10 @@ nodebug=${sums//$dbg/}
 expect "PI_DEBUG=1: two debug files and two production files are listed" \
 	test "$(((${#sums} - ${#nodebug}) / ${#dbg}))" -eq 2
 
+rm -rf "$tmp/d" "$tmp/out"
+PLATFORM_IMAGE_BITBAKE_ARGS=-k brun "$stub:$tools"
+expect "PLATFORM_IMAGE_BITBAKE_ARGS goes before the targets" test "$(bbtargets)" = "-k trusted-imx95-image"
+
 # Failures.
 rm -rf "$tmp/d" "$tmp/out"
 BB_FAIL=1 brun "$stub:$tools"

@@ -124,8 +124,9 @@ fi
 trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 
 start=$(date +%s)
+# PLATFORM_IMAGE_BITBAKE_ARGS (for example -k) goes before the targets.
 # shellcheck disable=SC2086
-bitbake $targets
+bitbake ${PLATFORM_IMAGE_BITBAKE_ARGS:-} $targets
 elapsed=$(($(date +%s) - start))
 
 # The SOURCE_DATE_EPOCH bitbake used for the first target.
