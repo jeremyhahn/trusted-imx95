@@ -56,19 +56,20 @@ The Generic Crypto APIs are not available on the i.MX 95; nothing in this featur
 
 ## The calling side
 
-Which side calls the HSM API is the owner's choice. The i.MX 95 has six Cortex-A55, one Cortex-M33, one Cortex-M7
+Owner ruling 1234 decided that the Cortex-A55 Linux side calls the HSM API; the Cortex-M7 does not call it. The table
+below stays as the record of the alternatives. The i.MX 95 has six Cortex-A55, one Cortex-M33, one Cortex-M7
 and the EdgeLock secure enclave ([references/README.md](../references/README.md#the-device), from UM12527). The
 Cortex-M33 runs NXP's System Manager, which stays NXP's code ([SPEC.md](../SPEC.md), row `system-manager-config`).
-The candidates are the Cortex-A55 Linux side and the Cortex-M7 ([SPEC.md](../SPEC.md), row `secure-key-handling`).
+The candidates were the Cortex-A55 Linux side and the Cortex-M7 ([SPEC.md](../SPEC.md), row `secure-key-handling`).
 
 | Choice | What it needs from the references | Where the references stand |
 |---|---|---|
 | Cortex-A55, Linux | The enclave's HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from Linux to the enclave; the TrustZone configuration that decides whether the caller runs in the secure or the normal world | The HSM API is in RM00284. The A55 path to the enclave and the TrustZone configuration are under [Missing](#missing); the latter is the `secure-world` row's open question ([SPEC.md](../SPEC.md)) |
 | Cortex-M7 | The same HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from the M7 to the enclave; the resources the System Manager grants the M7 ([SPEC.md](../SPEC.md), row `system-manager-config`) | The HSM API is in RM00284. The M7 path to the enclave and the System Manager's resource grants are under [Missing](#missing) |
 
-A provisional Linux-side client, with the choice left open, is in [client.md](client.md).
+The chosen side's client (Linux, Cortex-A55) is in [client.md](client.md).
 
-Under either choice the keys stay in the enclave's key store (RM00284 §2.4, §3.2), and the rollback rule applies
+The keys stay in the enclave's key store (RM00284 §2.4, §3.2), and the rollback rule applies
 (RM00284 §2.4.2) under the caller's fail-closed checks above.
 
 ## The SE051 secure element
@@ -124,5 +125,5 @@ until the owner approves it, and the row's text is unchanged.
 
 These are the owner's. They are recorded, not answered.
 
-1. Which side calls the HSM API: the Cortex-A55 Linux side or the Cortex-M7?
+1. Closed: the Cortex-A55 Linux side calls the HSM API (owner ruling 1234).
 2. Does the SE051 hold any key, and what is its role beside the enclave?

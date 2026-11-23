@@ -108,6 +108,41 @@ same strict-hex rules and accumulates straight into the locked slot through a vo
 parser and shows the nonce path makes none. Stack residue in the optimized binary is minimised by this, not proven
 absent.
 
+## Fail-closed default (owner question open)
+
+**Provisional; the owner's to decide (TENANT ASK 5, Q2).** The coordinator's default keeps generate and delete failing
+closed. This section is the one statement of it; the other sections link here.
+
+**What the pinned library cannot show.** At the pinned commit, a success-tagged reply that carries a warning rating is
+mapped to `HSM_NO_ERROR`: `hsm_api/hsm_utils.c:24-48` logs the rating (counter-warning rating 0x10 included) and
+`:223-226` returns it as `HSM_NO_ERROR`. No reply field exposes the counter acknowledgement, and the library's delete
+has no counter flag. So `fill_ack` (`ele_hsm_backend.c`) never sets `counter_acked`, and `HSM_NO_ERROR` is not taken as
+the acknowledgement.
+
+**What that means in production.** Generate and delete never report success through the shipped backend:
+
+- the strict flag acknowledged and the counter acknowledgement unprovable: exit 1, nothing on stdout, and on stderr the
+  key id, `NOT rollback-protected` and the fixed reason `the pinned library cannot prove the monotonic-counter
+  acknowledgement (fail closed; owner question open)`;
+- any other return code after the started marker (`HSM_KEY_STORE_COUNTER` included), a lost result or a dead child:
+  exit 3, an unknown outcome (see above).
+
+**Sign is unaffected.** It is not a key-store update, so the counter acknowledgement does not gate it.
+
+**The tests.** `ele_hsm_backend_test.c` (`fail_closed_default`) drives generate and delete through the shipped backend
+over the fake for `HSM_NO_ERROR`, `HSM_KEY_STORE_COUNTER` and three other codes, with the child dying before the started
+marker and not dying: the return is nonzero, the state is never rollback-protected and the counter is never reported
+acknowledged. `test/ele_client_test.sh` runs the CLI over the shipped backend plus the fake with `HSM_NO_ERROR`: gen and
+del exit 1 with empty stdout and the three stderr items, and `rollback-protected` never appears without `NOT`. The same
+script checks that the `ele_client` link line in `scripts/ele-lib-build.sh` names neither `ele_hsm_cli_double.c` (the
+test-only double that answers every update as committed) nor `ele_hsm_fake.c`, shows the check refuses a copy of the
+script with the double added, and checks with `nm` that a host CLI built the shipped way has none of the double's symbols.
+
+**Two options not taken** (no recommendation; both are the owner's to choose):
+
+- (a) A build-time patch of the pinned library, outside the tree, to surface the raw SAB rating.
+- (b) Accept strict plus `HSM_NO_ERROR` as a committed but not rollback-protected success.
+
 ## Delete is never rollback-protected (a gap, for the owner)
 
 The library's key delete takes the strict-operation flag only: `op_delete_key_args_t` has a key identifier and
@@ -138,13 +173,9 @@ was applied. After the started marker it is an unknown outcome for generate and 
 changed; check it before retrying"), and generate never reports a key. Before the marker an error stays a plain failure.
 The result table above for a counter warning therefore applies only to a library that exposes it separately; the
 binding does not.
-**The counter flag is never reported acknowledged (fail closed, provisional).** The library maps a success-tagged
-response that carries a warning rating to `HSM_NO_ERROR` (contract table below), so `HSM_NO_ERROR` cannot show the
-counter advanced, and no per-flag acknowledgement is exposed. The backend therefore reports no operation
-rollback-protected: `generate` is refused (exit 1) with the key id and `NOT rollback-protected` on stderr, so the key
-can be reconciled or deleted, and it never prints `rollback-protected`. This keeps the SPEC statement (rollback-protected
-only when both flags are acknowledged) true and needs no SPEC change. What lifts it is evidence from the board, or a
-library that exposes the acknowledgement: the owner's decision. A test asserts it on the double.
+**The counter flag is never reported acknowledged (fail closed, provisional).** The library cannot show the counter
+acknowledgement, so the backend reports no operation rollback-protected; see
+[Fail-closed default (owner question open)](#fail-closed-default-owner-question-open).
 The counter split cannot be read through these calls, so the backend reports it configured only when the caller sets
 `counter_split_confirmed` after confirming it on the device. It is false by default, so nothing is reported
 rollback-protected on an unconfirmed split.
@@ -211,14 +242,12 @@ show what the vendor frame held.
 **Nothing runs in the parent.** Generate, sign and delete run in the same child as the key-store open, so no handle
 crosses a process boundary: the session and key-store handles are created and closed inside the one child.
 
-**Every key-store update fails closed.** The library can return `HSM_NO_ERROR` for a success-tagged response that carries
-a counter warning, so a clean return does not show the counter advanced. `ele_generate_key` and `ele_delete_key` both
-report success only with the counter acknowledgement established (counter acknowledged, no warning, split configured).
-The binding never acknowledges it, and the library's delete has no counter flag at all, so until the owner answers Q2
-(the ELE rollback gap) a delete exits 1 with `update refused (...); key N delete is NOT rollback-protected`, exactly as a
-generate does (`key N was generated and is NOT rollback-protected`); the strict flag is sent but does not decide it. The
-delete may have taken effect; its old key-store blob may stay replayable. Tests: the double returns `HSM_NO_ERROR` (not
-`HSM_KEY_STORE_COUNTER`) and the command exits 1 with that message. Memory-lock tests: the open is refused when the lock
+**Every key-store update fails closed.** `ele_generate_key` and `ele_delete_key` both report success only with the
+counter acknowledgement established (counter acknowledged, no warning, split configured), which the binding never
+establishes. The reason, the outcomes and the tests are in
+[Fail-closed default (owner question open)](#fail-closed-default-owner-question-open). A delete exits 1 with
+`update refused (...); key N delete is NOT rollback-protected`, exactly as a generate does; the delete may have taken
+effect and its old key-store blob may stay replayable. Memory-lock tests: the open is refused when the lock
 fails (a stub, and the real `mlockall` in a child with `RLIMIT_MEMLOCK` 0); `test/ele_client_test.sh` raises the soft
 memory-lock limit to the hard one and fails, naming the limit, on a host where the lock still cannot be taken. Isolation
 tests (`ele_hsm_backend_test.c`, the double records into shared memory): the vendor call runs in a different pid; a child

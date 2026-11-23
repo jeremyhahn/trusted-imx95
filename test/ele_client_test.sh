@@ -143,6 +143,7 @@ fi
 # with the acknowledgements; only this test may link it. The shipped ele_client
 # link line in the build script names neither it nor the fake.
 # link_line FILE: the ele_client link command (from its -o to its die line).
+# shellcheck disable=SC2016 # the script's own text, not to be expanded here
 link_line() {
 	local l on=0 acc=
 	while IFS= read -r l; do
@@ -166,6 +167,7 @@ link_check() {
 run link_check "$script"
 check "the shipped ele_client link line names neither the success double nor the fake" 0 "link line OK"
 # The check bites: a copy of the script with the double added is refused.
+# shellcheck disable=SC2016 # the script's own text, not to be expanded here
 while IFS= read -r line; do
 	printf '%s\n' "${line/'"$cdir/ele_client.c"'/'"$cdir/ele_hsm_cli_double.c" "$cdir/ele_client.c"'}"
 done <"$script" >"$tmp/ele-lib-build.mut.sh"
