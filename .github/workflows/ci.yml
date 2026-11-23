@@ -694,6 +694,12 @@ env:
   # lint-gates read (scripts, workflows, generated code, go.mod). The default
   # matches every file, so lint-gates runs on every PR.
   LINT_GATES_PATTERN: '.'
+  # trusted-imx95: a PR runs the secure-world-build job (image build, tool
+  # setup and `make secure-world`) only when a changed file matches this
+  # extended regex: every file the build reads, that is the lock and its
+  # directory, the script, the make target, the Dockerfile and pin file the
+  # image comes from, the unit test, and this workflow. Any doubt runs it.
+  SECURE_WORLD_PATTERN: '^(secure-world/|scripts/secure-world-build\.sh$|scripts/tool-pins\.sh$|scripts/in-toolchain-image\.sh$|scripts/image-tag\.sh$|build/docker/devcontainer/Dockerfile$|test/secure_world_build_test\.sh$|Makefile$|\.github/workflows/ci\.yml$)'
   # v1.26.1 (Company Agent m1128 (9)): the repository's releasability test, which
   # a docs-only PR still runs because make coverage skips on it. CUSTOMIZE: the
   # `go test` arguments, package and -run pattern (for example
@@ -765,6 +771,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
       lint_gates: ${{ steps.diff.outputs.lint_gates }}   # v1.30
+      secure_world: ${{ steps.diff.outputs.secure_world }}   # trusted-imx95
       verdict: ${{ steps.guard.outputs.verdict }}
       proof: ${{ steps.guard.outputs.proof }}   # v1.30
     steps:
@@ -895,19 +902,23 @@ jobs:
         run: |
           # v1.30: lint_gates is false only on a PR whose changed files all
           # miss LINT_GATES_PATTERN; any doubt runs the job.
-          docs_only=false lint_gates=true
+          docs_only=false lint_gates=true secure_world=true
           if [ "$EVENT" = pull_request ] && [ "$CI_FULL_TIER" != true ]; then
             if files=$(git diff --name-only --no-renames "$BASE...$HEAD") && [ -n "$files" ]; then
               if ! printf '%s\n' "$files" | grep -qvE "$DOCS_ONLY_PATTERN"; then
                 docs_only=true
               fi
               printf '%s\n' "$files" | grep -qE "$LINT_GATES_PATTERN" || lint_gates=false
+              printf '%s\n' "$files" | grep -qE "$SECURE_WORLD_PATTERN" || secure_world=false
               printf '%s\n' "$files"
             fi
           fi
-          echo "docs only: $docs_only; lint-gates: $lint_gates"
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "lint_gates=$lint_gates" >> "$GITHUB_OUTPUT"
+          echo "docs only: $docs_only; lint-gates: $lint_gates; secure-world: $secure_world"
+          {
+            echo "docs_only=$docs_only"
+            echo "lint_gates=$lint_gates"
+            echo "secure_world=$secure_world"
+          } >> "$GITHUB_OUTPUT"
 
       - name: No direct go-objstore import outside the storage seam
         run: |
@@ -1222,68 +1233,48 @@ jobs:
   # fetches the pinned sources, toolchain and wheels, each checked against its
   # pin, so the job has the network.
   #
-  # Host: secure-world/bsp.lock pins CPython 3.13 wheels for x86_64 glibc
-  # (cryptography cp311-abi3-manylinux_2_28, cffi cp313-manylinux2014), and
-  # Arm's toolchain is glibc-hosted, so the project's Alpine (musl) toolchain
-  # image cannot run it. The job runs in the official python:3.13 Debian
-  # bookworm image (glibc 2.36, CPython 3.13), pinned by digest.
+  # Image: the project's devcontainer Dockerfile, its `secure-world` stage
+  # (docs/SPEC.md: CI runs in the project's devcontainer image). secure-world/
+  # bsp.lock pins CPython 3.13 wheels for x86_64 glibc (cryptography
+  # cp311-abi3-manylinux_2_28, cffi cp313-manylinux2014) and Arm's toolchain is
+  # glibc-hosted, so the Alpine (musl) toolchain stage cannot run it. The stage
+  # is on a python:3.13 Debian bookworm base pinned by digest, its Debian
+  # packages come from a dated snapshot, and uv from a hash-pinned wheel; the
+  # image build itself fails when the interpreter does not accept the lock's
+  # wheel tags. No setup step runs on the runner.
   #
-  # The job runs the build only when a changed file can affect it
-  # (SECURE_WORLD_PATTERN below); otherwise its steps are skipped and the job
-  # succeeds, which the CI Gate counts as passed. A push, a schedule or a
-  # manual run always builds.
+  # Scope: the job runs only when preflight's `secure_world` output is not
+  # `false`, that is, on a push, schedule or manual run, on the full tier, or on
+  # a PR where a changed file matches SECURE_WORLD_PATTERN. Otherwise the whole
+  # job is skipped (no image build, no tool setup, no build) and CI Gate counts
+  # the skip as passed (mode `sw`).
   secure-world-build:
     name: Secure world builds twice and compares
     runs-on: ubuntu-latest
     needs: preflight
-    if: ${{ !github.event.pull_request.draft && (needs.preflight.outputs.verdict == 'run' || needs.preflight.outputs.verdict == 'proven') }}
+    if: ${{ !github.event.pull_request.draft && (needs.preflight.outputs.verdict == 'run' || needs.preflight.outputs.verdict == 'proven') && needs.preflight.outputs.secure_world != 'false' }}
     timeout-minutes: 60
-    container:
-      image: python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
-    env:
-      # Every file the build reads: the lock and its directory, the script, the
-      # make target, its unit test, and this workflow.
-      SECURE_WORLD_PATTERN: '^(secure-world/|scripts/secure-world-build\.sh$|test/secure_world_build_test\.sh$|Makefile$|\.github/workflows/ci\.yml$)'
     steps:
-      # git for the changed-files diff; curl, make and xz for the script's own
-      # checks; uv for its hash-checked wheel install (pinned below).
-      - name: Host tools
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends git ca-certificates curl make xz-utils
-          printf '%s\n' 'uv==0.13.9 --hash=sha256:d7f459fe4fd247d830351c75686d3996ace3c6f3f728eb0e85a30b7ada0cef19' > "$RUNNER_TEMP/uv-req.txt"
-          python3 -m pip install -q --require-hashes --only-binary :all: -r "$RUNNER_TEMP/uv-req.txt"
-          # What the pinned wheels need: CPython 3.13 on x86_64 glibc.
-          python3 -c 'import sys,platform; assert sys.version_info[:2]==(3,13), sys.version; print(sys.version.split()[0], platform.machine(), platform.libc_ver())'
-
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
 
-      - name: Did a changed file reach the secure-world build?
-        id: select
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          EVENT: ${{ github.event_name }}
+      # The image alone, by its content tag; a trusted run rebuilds it from
+      # source with no cache and records its ID (Makefile, docker-build-sw).
+      - name: Build the secure-world image
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          run=true
-          if [ "$EVENT" = pull_request ]; then
-            # Any doubt (no diff) runs the build.
-            if files=$(git diff --name-only --no-renames "$BASE...$HEAD") && [ -n "$files" ]; then
-              printf '%s\n' "$files"
-              printf '%s\n' "$files" | grep -qE "$SECURE_WORLD_PATTERN" || run=false
-            fi
-          fi
-          echo "secure-world inputs changed: $run"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
+          make docker-build-sw
+          echo "SW_IMAGE=$(make -s sw-ref)" >> "$GITHUB_ENV"
 
+      # The checkout is copied into the container, never bind-mounted
+      # (in-toolchain-image.sh). The build fetches the pinned sources, so the
+      # stage has the network. /src is root's: build under $TMPDIR.
       - name: make secure-world
-        if: steps.select.outputs.run == 'true'
+        env:
+          IN_IMAGE_NETWORK: bridge
         run: |
-          make secure-world SW_BASE="$RUNNER_TEMP/secure-world" SW_OUT="$RUNNER_TEMP/secure-world/out"
+          # shellcheck disable=SC2016 # the container's shell expands $TMPDIR
+          scripts/in-toolchain-image.sh "$SW_IMAGE" 'make secure-world SW_BASE="$TMPDIR/secure-world" SW_OUT="$TMPDIR/secure-world/out"'
 
   # v1.21: every stage runs in the project's own devcontainer image and no
   # other (ci-standard.md §2, devcontainer.md §7). One image job (Company Agent
@@ -2180,6 +2171,7 @@ jobs:
           PROOF: ${{ needs.preflight.outputs.proof }}
           DOCS_ONLY: ${{ needs.preflight.outputs.docs_only == 'true' }}
           LINT_GATES_SEL: ${{ needs.preflight.outputs.lint_gates != 'false' }}
+          SECURE_WORLD_SEL: ${{ needs.preflight.outputs.secure_world != 'false' }}
         run: |
           if [ "${DRAFT}" = true ]; then
             echo "FAIL draft pull request: no CI runs on a draft. Mark it ready, then push an empty commit to start its run."
@@ -2189,7 +2181,7 @@ jobs:
           echo "full tier selected: ${FULL_TIER}; nightly selected: ${NIGHTLY}"
           # trusted-imx95: an `always` job is never accepted skipped, not even
           # on a proven tree (the history secret scan, the releasability status).
-          check() { # <job> <result> <always|pr|code|scoped|full|nightly>
+          check() { # <job> <result> <always|pr|code|scoped|sw|full|nightly>
             case "$2" in
               success) echo "OK   $1";;
               skipped)
@@ -2201,6 +2193,8 @@ jobs:
                   echo "SKIP $1 (docs-only pull request)"
                 elif [ "$3" = scoped ] && [ "${LINT_GATES_SEL}" != true ]; then
                   echo "SKIP $1 (no changed file matches LINT_GATES_PATTERN)"
+                elif [ "$3" = sw ] && [ "${SECURE_WORLD_SEL}" != true ]; then
+                  echo "SKIP $1 (no changed file matches SECURE_WORLD_PATTERN)"
                 elif [ "$3" = full ] && [ "${FULL_TIER}" != true ]; then
                   echo "SKIP $1 (full tier not selected)"
                 elif [ "$3" = nightly ] && [ "${NIGHTLY}" != true ]; then
@@ -2229,7 +2223,7 @@ jobs:
           check lint        "${{ needs.lint.result }}" pr
           check history-scan "${{ needs.history-scan.result }}" always
           check system-manager-build "${{ needs.system-manager-build.result }}" pr
-          check secure-world-build "${{ needs.secure-world-build.result }}" pr
+          check secure-world-build "${{ needs.secure-world-build.result }}" sw
           check releasability "${{ needs.releasability.result }}" always
           check image       "${{ needs.image.result }}" code
           check lint-gates  "${{ needs.lint-gates.result }}" scoped
