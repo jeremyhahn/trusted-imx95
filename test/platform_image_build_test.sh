@@ -250,6 +250,11 @@ expect "two lines: the last wins" grep -q '^SOURCE_DATE_EPOCH=1700000002$' "$tmp
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT='export SOURCE_DATE_EPOCH="12ab"' brun "$stub:$tools"
 check "non-numeric SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
+# The plain form passes the old anchored sed, so only the decimal check refuses it.
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT='SOURCE_DATE_EPOCH="12ab"' brun "$stub:$tools"
+check "plain non-numeric SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
+expect "plain non-numeric SOURCE_DATE_EPOCH: no artefacts" test ! -e "$tmp/out"
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT='' brun "$stub:$tools"
 check "no SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
