@@ -321,6 +321,7 @@ check "the refused checkout PyYAML was not imported" 0
 # Releasability (push) status the producer never makes for that branch. The
 # test evaluates the preflight's own dispatch condition.
 ciy="$ROOT/.github/workflows/ci.yml"
+# shellcheck disable=SC2016 # the pattern is ci.yml's text, $EVENT is not ours
 dl=$(grep -m1 -F 'if [ "$EVENT" = workflow_dispatch ]' "$ciy")
 dl=${dl#"${dl%%[![:space:]]*}"}
 dispatch() { EVENT=workflow_dispatch REF=$1 bash -c "verdict=run; $dl verdict=refused; fi; echo verdict=\$verdict" 2>/dev/null; }
