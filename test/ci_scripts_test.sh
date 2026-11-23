@@ -797,20 +797,37 @@ case "$1 ${2:-}" in
 	case $2 in
 	version) echo "github.com/docker/buildx v0 stub" ;;
 	imagetools)
+		if [ "${3:-}" = create ]; then
+			# imagetools create --tag <tag> <repo>@<digest>: the registry tag takes that digest
+			[ -d "$r" ] || exit 1
+			echo "${6#*@}" >"$r/$(key "$5")"
+			exit 0
+		fi
 		[ "${3:-}" = inspect ] && [ -d "$r" ] || exit 1
-		d=$(cat "$r/$(key "$4")" 2>/dev/null) || exit 1
-		printf '{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"%s","size":1}\n' "$d" ;;
+		case $4 in *@*) d=${4#*@} ;; *) d=$(cat "$r/$(key "$4")" 2>/dev/null) || exit 1 ;; esac
+		case " $* " in
+		*" --raw "*) id=$(cat "$r/$(key "$d")" 2>/dev/null) || exit 1; printf '{"config":{"digest":"%s"}}\n' "$id" ;;
+		*) printf '{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"%s","size":1}\n' "$d" ;;
+		esac ;;
 	build)
-		meta= out= target=
+		meta= out= target= iid= load=
 		shift 2
 		while [ $# -gt 0 ]; do
 			case $1 in
 			--metadata-file) meta=$2; shift 2 ;;
 			--output) out=$2; shift 2 ;;
 			--target) target=$2; shift 2 ;;
+			--iidfile) iid=$2; shift 2 ;;
+			--load) load=1; shift ;;
 			*) shift ;;
 			esac
 		done
+		if [ -n "$load" ] && [ -z "$out" ]; then
+			id=sha256:$(h "$target")
+			echo "$id" >"$s/$(key "$id")"
+			printf '%s' "$id" >"$iid"
+			exit 0
+		fi
 		case $out in type=registry,name=*) name=${out#type=registry,name=} ;; *) exit 4 ;; esac
 		[ -d "$r" ] || exit 1
 		id=sha256:$(h "$target")
@@ -822,6 +839,7 @@ case "$1 ${2:-}" in
 		if [ -n "${IMG_REG_OVERWRITE:-}" ]; then echo "$DOLD" >"$r/$(key "$name")"; fi ;;
 	*) exit 3 ;;
 	esac ;;
+"save "*) while [ $# -gt 1 ]; do [ "$1" = -o ] && : >"$2"; shift; done ;;
 "create "* | "run "*)
 	echo "$*" >>"$IMG_STARTS"
 	case " $* " in *" --entrypoint du "*) printf '4\t/c\n' ;; esac ;;
@@ -1028,6 +1046,42 @@ expect "a trusted job: a refused tag starts no container" test ! -s "$IMG_STARTS
 run tc env GITHUB_EVENT_NAME=pull_request "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
 check "in-toolchain-image: a pull request may still name a tag" 0
 # publish (a checked image only, then the push) is held by test/ci_publish_test.sh.
+# Here the retag race, against this file's stateful registry: publish stages
+# the checked ID under an unguessable tag and promotes it by digest, so an
+# unchecked image never reaches the trusted tag, even when publish fails.
+pubrepo="$TMP_ROOT/pubrepo"
+mkdir -p "$pubrepo/scripts" "$pubrepo/mkbin"
+cp "$ROOT/scripts/ci-image-cache.sh" "$pubrepo/scripts/"
+echo 'FROM scratch' >"$pubrepo/Dockerfile"
+printf '#!/bin/sh\nexit 0\n' >"$pubrepo/scripts/ci-image-history.sh"
+printf '#!/bin/sh\nexit 0\n' >"$pubrepo/scripts/in-toolchain-image.sh"
+cat >"$pubrepo/mkbin/make" <<EOF
+#!/bin/sh
+case "\$*" in
+*ci-image-cache-dockerfile*) echo Dockerfile ;;
+*toolchain-image*) echo $ltag ;;
+esac
+EOF
+chmod +x "$pubrepo/scripts/"* "$pubrepo/mkbin/make"
+pubrace() { (cd "$pubrepo" && env PATH="$pubrepo/mkbin:$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main \
+	GITHUB_SERVER_URL=https://forge.example CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" \
+	RUNNER_TEMP="$rt" RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token "$@" bash scripts/ci-image-cache.sh publish); }
+trusted_cfg() { # the config digest the registry's trusted tag names, or empty
+	local d
+	d=$(cat "$IMG_STATE/registry/$(skey "$IMG_REMOTE")" 2>/dev/null) || return 0
+	cat "$IMG_STATE/registry/$(skey "$d")" 2>/dev/null || true
+}
+seed empty
+run pubrace
+check "ci-image-cache: publish promotes the checked image to the trusted tag by digest" 0 "promoted by digest"
+expect "ci-image-cache: the trusted tag's config is the built image" test "$(trusted_cfg)" = "$tc_built"
+seed empty
+run pubrace IMG_RACE_PUSH=1
+if [ "$RC" != 0 ] && [ -z "$(trusted_cfg)" ]; then
+	pass "ci-image-cache: a retag between the tag and the push never reaches the trusted tag"
+else
+	fail "ci-image-cache: a retag between the tag and the push never reaches the trusted tag" "rc $RC; trusted config '$(trusted_cfg)'; $OUT"
+fi
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,

@@ -177,12 +177,13 @@ case ${1:-} in
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     work=$(mktemp -d "$PWD/.ci-image-publish.XXXXXX")
     built_id=""
+    stage=""
     # Best effort, on every exit: remove the image this job built and the tag
     # it applied, so a runner keeps no image the job loaded. Only an ID that
     # came from this build's --iidfile is ever removed.
     cleanup() {
       if [ -n "$built_id" ]; then
-        docker image rm -f "$remote" >/dev/null 2>&1 || true
+        [ -z "$stage" ] || docker image rm -f "$stage" >/dev/null 2>&1 || true
         docker image rm -f "$built_id" >/dev/null 2>&1 || true
       fi
       rm -rf "$cfg" "$work"
@@ -203,14 +204,26 @@ case ${1:-} in
       || die "trivy refused $id; nothing was pushed"
     printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null \
       || die "the registry login for $host failed; nothing was pushed"
-    docker tag "$id" "$remote" || die "docker tag of $id failed; nothing was pushed"
-    DOCKER_CONFIG=$cfg docker push "$remote" >/dev/null || die "the push of $remote failed"
-    pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$remote" --raw 2>/dev/null \
+    # LOCAL CHANGE (#159, verify 18): the trusted $remote tag is never a daemon
+    # tag and is never pushed. The checked ID is tagged only with a staging tag
+    # no other job can guess (job-unique randomness and the run id), pushed
+    # under that tag, and the staging manifest's config digest must be the
+    # checked ID. Only then is $remote pointed at that manifest, by digest, on
+    # the registry side. A swapped staging image never reaches $remote.
+    # The staging tag stays in the registry (no CLI call deletes a tag).
+    stage="$repo:stage-${GITHUB_RUN_ID:-0}-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    docker tag "$id" "$stage" || die "docker tag of $id failed; nothing was published under $remote"
+    DOCKER_CONFIG=$cfg docker push "$stage" >/dev/null || die "the push of the staging tag failed; nothing was published under $remote"
+    mdigest=$(registry_digest "$stage") \
+      || die "the registry gave no digest for the staging tag; nothing was published under $remote"
+    pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$repo@$mdigest" --raw 2>/dev/null \
       | jq -er '.config.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' 2>/dev/null) \
-      || die "the pushed manifest of $remote has no config digest; delete the tag $remote by hand"
+      || die "the staged manifest $mdigest has no config digest; nothing was published under $remote"
     [ "$pushed" = "$id" ] \
-      || die "the pushed $remote has config $pushed, not the checked image $id; delete the tag $remote by hand"
-    echo "ci-image-cache: published $local_tag as $repo ($id, checked before the push)"
+      || die "the staged manifest $mdigest has config $pushed, not the checked image $id; nothing was published under $remote"
+    DOCKER_CONFIG=$cfg docker buildx imagetools create --tag "$remote" "$repo@$mdigest" >/dev/null \
+      || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote"
+    echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;
   *)
     die "usage: ci-image-cache.sh pull | publish [make args]"

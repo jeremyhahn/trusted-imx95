@@ -35,6 +35,7 @@ case "$1 $2 $3" in
   *) printf '{"digest":"sha256:%064d"}\n' 1 ;;
   esac
   exit 0 ;;
+"buildx imagetools create") exit "${CREATE_RC:-0}" ;;
 esac
 case $1 in
 login) cat > /dev/null; exit "${LOGIN_RC:-0}" ;;
@@ -83,13 +84,20 @@ expect "publish: trivy ran after the history check" logged '^history '
 
 run pub
 check "publish: a clean image is pushed" 0 "checked before the push"
-expect "publish: the push happened" logged '^docker push forge.example/ns/repo-toolchain:abc-main'
+expect "publish: the push happened, under a staging tag" logged '^docker push forge.example/ns/repo-toolchain:stage-[0-9]+-[0-9a-f]{16}$'
+expect "publish: no docker tag or push names the trusted tag" nolog '^docker (tag|push) .*:abc-main'
+expect "publish: the trusted tag is promoted by the staging manifest digest" \
+	logged '^docker buildx imagetools create --tag forge.example/ns/repo-toolchain:abc-main forge.example/ns/repo-toolchain@sha256:0{63}1$'
 expect "publish: the checks name the built image ID" logged "^history $ID"
 if [[ "$OUT" == *fake-token* ]]; then fail "publish: prints no credential" "$OUT"; else pass "publish: prints no credential"; fi
 
 run pub PUSHED_CONFIG="$OTHER"
 check "publish: a pushed config digest that is not the checked ID fails" 1 \
-	"not the checked image $ID" "delete the tag"
+	"not the checked image $ID" "nothing was published under forge.example/ns/repo-toolchain:abc-main"
+expect "publish: a swapped staging image never reaches the trusted tag (no create call)" nolog 'imagetools create'
+
+run pub CREATE_RC=1
+check "publish: a failed promotion fails, saying nothing was published" 1 "nothing was published under"
 
 run pub
 if grep -qE 'type=registry|--push' "$d/log"; then
@@ -124,7 +132,8 @@ run pub PUSHED_CONFIG="$OTHER"
 expect "publish: removes the built image after a config-digest mismatch" logged "$rmid"
 run pub
 expect "publish: removes the built image after success" logged "$rmid"
-expect "publish: removes the applied tag after success" logged '^docker image rm -f forge.example/ns/repo-toolchain:abc-main$'
+expect "publish: removes the staging tag after success" logged '^docker image rm -f forge.example/ns/repo-toolchain:stage-'
+expect "publish: never removes the trusted tag from the daemon" nolog '^docker image rm .*:abc-main'
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
 expect "publish: no image rm when the build gave no ID" nolog '^docker image rm'
 
