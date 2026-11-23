@@ -251,7 +251,9 @@ while IFS= read -r l; do
 done <"$TMP_ROOT/m7parse/parsed_config.yaml"
 echo "# m7: parsed image_offset values: ${all_image_offsets[*]}"
 expect "m7: the parse output records the first payload offset (got '$first_payload')" [ "${first_payload:-0}" -gt 0 ]
-offsets=$(python3 -I - "$img_out/boot-image.bin" "${first_payload:-0}" <<'PY'
+# walk_containers <image> <bound>: the 0x400-aligned offsets below <bound> that start a container header
+walk_containers() {
+	python3 -I - "$1" "$2" <<'PY'
 import sys
 f = open(sys.argv[1], "rb")
 out = []
@@ -262,7 +264,8 @@ for o in range(0, int(sys.argv[2]), 0x400):
         out.append(str(o))
 print(" ".join(out))
 PY
-)
+}
+offsets=$(walk_containers "$img_out/boot-image.bin" "${first_payload:-0}")
 read -r -a offs <<<"$offsets"
 WANT_LAST_CONTAINER_OFFSET=$((0x8000))
 # the bound must lie past the last container header, or the walk could not see it
@@ -271,6 +274,31 @@ expect "m7: the walk bound $first_payload lies past the last container header $W
 m7_offsets_ok() { [ "$#" -eq 3 ] && [ "$2" -eq "$WANT_M7_CONTAINER_OFFSET" ]; }
 expect "m7: the image holds three containers, the M7 one second, at $WANT_M7_CONTAINER_OFFSET (found: $offsets)" \
 	m7_offsets_ok "${offs[@]}"
+# patch_image <in> <out> <offset> <hex bytes>: a scratch copy with bytes written at <offset>
+patch_image() {
+	python3 -I - "$1" "$2" "$3" "$4" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+b = bytes.fromhex(sys.argv[4])
+d[int(sys.argv[3]):int(sys.argv[3]) + len(b)] = b
+open(sys.argv[2], "wb").write(d)
+PY
+}
+m7_refused() { ! m7_offsets_ok "$@"; }
+# (a) a header-shaped 0x02 ?? ?? 0x87 inside a payload, past the bound, is not a container
+planted=$((0x10000))
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/plant.bin" "$planted" "02a1b287"
+read -r -a poffs <<<"$(walk_containers "$TMP_ROOT/plant.bin" "$first_payload")"
+expect "m7: a planted 02 ?? ?? 87 at $planted, past the bound $first_payload, is not counted (found: ${poffs[*]})" \
+	m7_offsets_ok "${poffs[@]}"
+# (b) the M7 container header dropped, or moved off its offset, is refused
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/nom7.bin" "$WANT_M7_CONTAINER_OFFSET" "00000000"
+read -r -a doffs <<<"$(walk_containers "$TMP_ROOT/nom7.bin" "$first_payload")"
+expect "m7: a dropped M7 container header is refused (found: ${doffs[*]})" m7_refused "${doffs[@]}"
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/mv.bin" "$WANT_M7_CONTAINER_OFFSET" "00000000"
+patch_image "$TMP_ROOT/mv.bin" "$TMP_ROOT/mv2.bin" "$((WANT_M7_CONTAINER_OFFSET + 0x400))" "02ac0387"
+read -r -a moffs <<<"$(walk_containers "$TMP_ROOT/mv2.bin" "$first_payload")"
+expect "m7: an M7 container header moved off its offset is refused (found: ${moffs[*]})" m7_refused "${moffs[@]}"
 # One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
 python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
 import sys
