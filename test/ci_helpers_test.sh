@@ -61,12 +61,12 @@ if [ -z "$OUT" ]; then
 else
 	fail "ci-mask-lan.sh: prints nothing for an empty environment" "$OUT"
 fi
-run env -i PATH="$PATH" DEVCACHE_GOPROXY=http://10.9.8.7:3000/go \
-	CI_IMAGE_REGISTRY=registry.corp:5000 GOPROXY="https://proxy.golang.org,direct" \
+run env -i PATH="$PATH" DEVCACHE_GOPROXY=http://10.254.253.252:3000/go \
+	CI_IMAGE_REGISTRY=regcache:5000 GOPROXY="https://proxy.golang.org,direct" \
 	bash "$ROOT/scripts/ci-mask-lan.sh"
 check "ci-mask-lan.sh: an internal address and host name are masked" 0 \
-	"::add-mask::http://10.9.8.7:3000/go" "::add-mask::10.9.8.7:3000" \
-	"::add-mask::10.9.8.7" "::add-mask::registry.corp"
+	"::add-mask::http://10.254.253.252:3000/go" "::add-mask::10.254.253.252:3000" \
+	"::add-mask::10.254.253.252" "::add-mask::regcache"
 if [[ "$OUT" != *proxy.golang.org* ]]; then
 	pass "ci-mask-lan.sh: a public host is left"
 else

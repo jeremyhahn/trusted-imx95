@@ -238,7 +238,7 @@ def main():
         ("an apk mirror build argument", "RUN |1 APK_MIRROR=http://192.168.77.7:3143/alpine /bin/sh -c apk-mirror add git", CLEAN_CONFIG, "history entry 1"),
         ("an apt proxy in a later entry", CLEAN_HISTORY + "\nRUN |1 APT_PROXY=http://10.20.30.40:3142 /bin/sh -c apt-get update", CLEAN_CONFIG, "history entry 5"),
         ("a 172.16/12 address", "ENV REG=172.20.0.5:5005", CLEAN_CONFIG, "history entry 1"),
-        ("an address at the start of an entry", "192.168.1.1", CLEAN_CONFIG, "history entry 1"),
+        ("an address at the start of an entry", "192.168.254.254", CLEAN_CONFIG, "history entry 1"),
         ("an address in the config", CLEAN_HISTORY, '{"Env":["GOPROXY=http://10.0.0.7:3000|https://proxy.golang.org"]}', "config"),
         ("an address in a label", CLEAN_HISTORY, '{"Labels":{"cache":"192.168.77.7"}}', "config"),
     ]:
