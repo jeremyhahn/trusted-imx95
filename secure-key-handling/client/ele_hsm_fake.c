@@ -64,6 +64,14 @@ static hsm_err_t env_err(void)
 	return fake.err ? fake.err : (hsm_err_t)(e ? strtoul(e, NULL, 0) : 0);
 }
 
+/* ELE_FAKE_MODE sets ks_mode for the command-line tests (see ele_hsm_fake.h). */
+static uint32_t env_mode(void)
+{
+	const char *e = getenv("ELE_FAKE_MODE");
+
+	return fake.ks_mode ? fake.ks_mode : (uint32_t)(e ? strtoul(e, NULL, 0) : 0);
+}
+
 hsm_err_t hsm_open_session(open_session_args_t *args, hsm_hdl_t *session_hdl)
 {
 	(void)args;
@@ -96,9 +104,9 @@ hsm_err_t hsm_open_key_store_service(hsm_hdl_t session_hdl, open_svc_key_store_a
 	ks_seen->calls++;
 	note("key_store id=%u flags=0x%x pid=%d ppid=%d", (unsigned)args->key_store_identifier, (unsigned)args->flags,
 	     (int)getpid(), (int)getppid());
-	if (fake.ks_mode == 1)
+	if (env_mode() == 1)
 		raise(SIGKILL);
-	if (fake.ks_mode == 2)
+	if (env_mode() == 2)
 		_exit(3);
 	if (fake.ks_err)
 		return (hsm_err_t)fake.ks_err;
@@ -151,9 +159,9 @@ hsm_err_t hsm_close_signature_generation_service(hsm_hdl_t signature_gen_hdl)
  * child's "started" marker); 4: it exits 3 there. */
 static void update_dies(void)
 {
-	if (fake.ks_mode == 3)
+	if (env_mode() == 3)
 		raise(SIGKILL);
-	if (fake.ks_mode == 4)
+	if (env_mode() == 4)
 		_exit(3);
 }
 

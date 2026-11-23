@@ -193,10 +193,41 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0x10 --split-confirmed 5 3 del 7
 	check "counter warning on delete: nonzero exit" 1 "update refused"
 	cli 0xfe --split-confirmed 5 3 gen
-	check "other HSM error: nonzero exit" 1 "failed"
+	check "other HSM error after the started marker: exit 3, unknown outcome" 3 "outcome unknown"
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete with HSM_NO_ERROR (a hidden counter warning looks the same) fails closed" 1 "update refused (committed-not-rollback-protected); key 7 delete is NOT rollback-protected"
 	case $OUT in *"deleted "*) fail "del claimed success without a counter acknowledgement" ;; esac
+	# The child dies after the started marker (mode 3: SIGKILL, 4: exit 3 inside
+	# the update call): the outcome is unknown, exit 3, never a plain failure.
+	for mode in 3 4; do
+		ELE_FAKE_MODE=$mode cli 0 --split-confirmed 5 3 gen
+		check "generate, child dies after the started marker (mode $mode): exit 3" 3 "outcome unknown"
+		ELE_FAKE_MODE=$mode cli 0 --split-confirmed 5 3 del 7
+		check "delete, child dies after the started marker (mode $mode): exit 3" 3 "the key store may have changed"
+	done
+	# Any vendor error after the marker is the same unknown outcome.
+	cli 0xfe --split-confirmed 5 3 gen
+	check "generate, vendor error after the started marker: exit 3" 3 "outcome unknown"
+	cli 0xfe --split-confirmed 5 3 del 7
+	check "delete, vendor error after the started marker: exit 3" 3 "outcome unknown"
+	# A death before the marker (mode 2: the key store open) is a plain failure.
+	ELE_FAKE_MODE=2 cli 0 --split-confirmed 5 3 gen
+	check "generate, child dies before the started marker: exit 1" 1 "failed"
+	case $OUT in *"outcome unknown"*) fail "a death before the marker was reported as unknown" ;; esac
+	# Hexadecimal sign output on an unbuffered stdout that cannot be written.
+	if [ -w /dev/full ] && command -v stdbuf >/dev/null 2>&1; then
+		rc=0
+		ELE_FAKE_LOG="$tmp/hsm.log" stdbuf -o0 "$tmp/ele_cli" 5 3 sign 7 msg 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		[ "$rc" != 0 ] || fail "hex sign with an unbuffered full stdout exited 0"
+		rc=0
+		ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" 5 3 sign 7 msg 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		[ "$rc" != 0 ] || fail "hex sign with a buffered full stdout exited 0"
+		rc=0
+		ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --raw 5 3 sign 7 msg 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		[ "$rc" != 0 ] || fail "raw sign with a full stdout exited 0"
+	else
+		fail "/dev/full or stdbuf is not available here"
+	fi
 	# A result that cannot be written: exit 1, the key id and its state on stderr.
 	if [ -w /dev/full ]; then
 		rc=0
