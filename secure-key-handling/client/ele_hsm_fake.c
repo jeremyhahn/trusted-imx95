@@ -147,8 +147,19 @@ hsm_err_t hsm_close_signature_generation_service(hsm_hdl_t signature_gen_hdl)
 	return HSM_NO_ERROR;
 }
 
+/* ks_mode 3: the process dies of SIGKILL inside the update call (after the
+ * child's "started" marker); 4: it exits 3 there. */
+static void update_dies(void)
+{
+	if (fake.ks_mode == 3)
+		raise(SIGKILL);
+	if (fake.ks_mode == 4)
+		_exit(3);
+}
+
 hsm_err_t hsm_generate_key(hsm_hdl_t key_management_hdl, op_generate_key_args_t *args)
 {
+	update_dies();
 	(void)key_management_hdl;
 	fake.gen_flags = args->flags;
 	fake.gen_key_type = args->key_type;
@@ -160,6 +171,7 @@ hsm_err_t hsm_generate_key(hsm_hdl_t key_management_hdl, op_generate_key_args_t 
 
 hsm_err_t hsm_delete_key(hsm_hdl_t key_management_hdl, op_delete_key_args_t *args)
 {
+	update_dies();
 	(void)key_management_hdl;
 	fake.del_flags = args->flags;
 	fake.del_key = args->key_identifier;

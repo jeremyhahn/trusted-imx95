@@ -30,8 +30,17 @@ struct ele_ack {
 enum ele_commit {
 	ELE_NOT_COMMITTED = 0,	      /* strict-operation flag missing or not acknowledged */
 	ELE_COMMITTED_UNPROTECTED,    /* committed, but not rollback-protected */
-	ELE_ROLLBACK_PROTECTED	      /* both flags sent and acknowledged, no warning, split set */
+	ELE_ROLLBACK_PROTECTED, /* both flags sent and acknowledged, no warning, split set */
+	/* The update call may have run, but its result was lost (the child died or
+	 * the result was short after it reported "started"). The key store may have
+	 * changed: check it before any retry. Never success, never retried here. */
+	ELE_OUTCOME_UNKNOWN
 };
+
+/* An ops-table call returns this (not -1) for generate or del when the update
+ * may have run and its result is lost. ele_generate_key and ele_delete_key then
+ * set *state to ELE_OUTCOME_UNKNOWN and fail. */
+#define ELE_OP_UNKNOWN (-2)
 
 /* The decision, a pure function: rollback-protected only with both flags sent
  * and acknowledged for this operation, no counter warning and the counter

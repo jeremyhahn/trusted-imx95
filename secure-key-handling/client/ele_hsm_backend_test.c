@@ -244,12 +244,18 @@ static void child_failures(void)
 		const char *what;
 		uint32_t mode;
 		size_t short_len;
+		bool after;	/* the child reported "started" before it failed */
 	} cases[] = {
-		{ "a child killed by a signal", 1, 0 },
-		{ "a child that exits nonzero", 2, 0 },
-		{ "a short result (1 byte)", 0, 1 },
-		{ "a short result (7 bytes)", 0, 7 },
-		{ "a short result (79 bytes)", 0, 79 },
+		/* Before the started marker: a plain failure. */
+		{ "a child killed by a signal before the update", 1, 0, false },
+		{ "a child that exits nonzero before the update", 2, 0, false },
+		/* After it: the update may have run, so a generate or a delete is
+		 * an unknown outcome (a sign is not an update). */
+		{ "a child killed by a signal in the update", 3, 0, true },
+		{ "a child that exits nonzero in the update", 4, 0, true },
+		{ "a short result (1 byte)", 0, 1, true },
+		{ "a short result (7 bytes)", 0, 7, true },
+		{ "a short result (79 bytes)", 0, 79, true },
 	};
 	size_t k, o;
 
@@ -265,6 +271,8 @@ static void child_failures(void)
 			int rc;
 			char msg[96];
 
+			if (o == 0 && cases[k].mode >= 3)
+				continue;	/* the update-call faults only reach generate and delete */
 			begin(&x, &c, &nonce, true);
 			fake.ks_mode = cases[k].mode;
 			ele_hsm_result_len_override = cases[k].short_len;
@@ -276,7 +284,9 @@ static void child_failures(void)
 				rc = ele_delete_key(&c, 7, &st);
 			ele_hsm_result_len_override = 0;
 			snprintf(msg, sizeof(msg), "%s fails closed on %s", opn[o], cases[k].what);
-			CHECK(rc != 0 && st == ELE_NOT_COMMITTED && id == 0, msg);
+			CHECK(rc != 0 && id == 0 &&
+				      st == (cases[k].after && o != 0 ? ELE_OUTCOME_UNKNOWN : ELE_NOT_COMMITTED),
+			      msg);
 			snprintf(msg, sizeof(msg), "%s: the parent's nonce buffer is zero after %s", opn[o], cases[k].what);
 			CHECK(nonce == 0, msg);
 			ele_hsm_close(&x);

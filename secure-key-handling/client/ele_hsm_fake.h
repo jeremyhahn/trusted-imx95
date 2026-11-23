@@ -8,7 +8,7 @@
 
 struct ele_fake {
 	uint32_t err;	/* return code of generate and delete; 0 = HSM_NO_ERROR */
-	uint32_t ks_mode;	/* key store open: 1 = the process dies of SIGKILL, 2 = exits 3 */
+	uint32_t ks_mode;	/* key store open: 1 = the process dies of SIGKILL, 2 = exits 3; 3 and 4 the same inside the generate/delete update call */
 	uint32_t gen_flags, gen_key_type, gen_calls;
 	uint32_t del_flags, del_key, del_calls;
 	uint32_t sign_calls;

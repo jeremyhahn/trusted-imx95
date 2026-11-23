@@ -69,6 +69,23 @@ The host tests (`test/ele_client_test.sh`, run by `make test`) cover all four co
 missing split and an acknowledgement of one flag only, against a stub that holds no key. The default client sends
 both flags.
 
+## A lost result after the update started is an unknown outcome
+
+The key-store child writes a one-byte marker to the parent just before the vendor update call (`hsm_generate_key` or
+`hsm_delete_key`): `S` = started; `N` precedes a result when no update call was started. The parent tells two cases apart:
+
+- **Before the marker** (the child died, exited nonzero or sent a short result before the update call, or any setup
+  step failed): a plain failure, state `not-committed`, exit 1 (or 2 for setup).
+- **After the marker** (the child died, exited nonzero, or the result was short or unreadable, or `waitpid` failed): a
+  generate or a delete returns `ELE_OP_UNKNOWN`, the client sets `ELE_OUTCOME_UNKNOWN` (`outcome-unknown`), and the CLI
+  prints that the result was lost, that the key store may have changed and that the operator must check it before any
+  retry, then exits **3**. Success is never reported and nothing is retried. A sign is not an update and stays a plain
+  failure. If the marker itself cannot be written, the update is not run.
+
+Exit codes: 0 success, 1 failure (or an update refused), 2 usage or setup (including a lock or nonce read failure), 3
+outcome unknown. Tests: the backend test splits the child-killed, exits-nonzero and short-result cases into before-marker
+(plain failure) and after-marker (unknown) cases for generate and delete.
+
 ## Delete is never rollback-protected (a gap, for the owner)
 
 The library's key delete takes the strict-operation flag only: `op_delete_key_args_t` has a key identifier and

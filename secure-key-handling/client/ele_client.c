@@ -37,6 +37,8 @@ const char *ele_commit_name(enum ele_commit c)
 		return "committed-not-rollback-protected";
 	case ELE_ROLLBACK_PROTECTED:
 		return "rollback-protected";
+	case ELE_OUTCOME_UNKNOWN:
+		return "outcome-unknown";
 	}
 	return "unknown";
 }
@@ -52,6 +54,7 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 {
 	struct ele_ack ack = { 0 };
 	uint32_t id = 0;
+	int rc;
 
 	if (!c || !c->ops || !c->ops->generate || !key_id || !state)
 		return -1;
@@ -59,7 +62,12 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 	 * state and the identifier are reset before the backend is called. */
 	*state = ELE_NOT_COMMITTED;
 	*key_id = 0;
-	if (c->ops->generate(c->ctx, c->flags, &id, &ack) != 0)
+	rc = c->ops->generate(c->ctx, c->flags, &id, &ack);
+	if (rc == ELE_OP_UNKNOWN) {
+		*state = ELE_OUTCOME_UNKNOWN;
+		return -1;
+	}
+	if (rc != 0)
 		return -1;
 	*state = ele_classify(c->flags, &ack);
 	/* The state is kept for the caller's diagnostics even when the call fails. */
@@ -89,11 +97,17 @@ int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state
 	 * both flags for it. Send the strict flag alone and never report a delete
 	 * as rollback-protected (client.md; owner question open). */
 	uint32_t flags = c ? (c->flags & ELE_REQ_STRICT_OPERATION) : 0;
+	int rc;
 
 	if (!c || !c->ops || !c->ops->del || !state)
 		return -1;
 	*state = ELE_NOT_COMMITTED;	/* never the previous operation's evidence */
-	if (c->ops->del(c->ctx, flags, key_id, &ack) != 0)
+	rc = c->ops->del(c->ctx, flags, key_id, &ack);
+	if (rc == ELE_OP_UNKNOWN) {
+		*state = ELE_OUTCOME_UNKNOWN;
+		return -1;
+	}
+	if (rc != 0)
 		return -1;
 	*state = ele_classify(flags, &ack);
 	/* Fail closed like generate. A delete updates the key store, and the

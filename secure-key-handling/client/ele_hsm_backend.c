@@ -143,6 +143,7 @@ static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ac
 	struct ele_hsm_ctx *c = p;
 	struct op_req rq;
 	struct op_res r;
+	int rc;
 
 	if (!c->open)
 		return -1;
@@ -155,8 +156,9 @@ static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ac
 	rq.kind = OP_GEN;
 	rq.flags = flags;
 	rq.split = c->counter_split_confirmed;
-	if (run_op(c, &rq, &r) != 0)
-		return -1;
+	rc = run_op(c, &rq, &r);
+	if (rc != 0)
+		return rc == ELE_OP_UNKNOWN ? ELE_OP_UNKNOWN : -1;
 	ack_from_res(&r, ack);
 	*key_id = r.key_id;
 	return 0;
@@ -201,6 +203,7 @@ static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack
 	struct ele_hsm_ctx *c = p;
 	struct op_req rq;
 	struct op_res r;
+	int rc;
 
 	if (!c->open)
 		return -1;
@@ -209,8 +212,9 @@ static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack
 	rq.flags = flags;
 	rq.key_id = key_id;
 	rq.split = c->counter_split_confirmed;
-	if (run_op(c, &rq, &r) != 0)
-		return -1;
+	rc = run_op(c, &rq, &r);
+	if (rc != 0)
+		return rc == ELE_OP_UNKNOWN ? ELE_OP_UNKNOWN : -1;
 	ack_from_res(&r, ack);
 	return 0;
 }
@@ -219,7 +223,30 @@ const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 
 /* The service step of the child: open the service, run the one operation,
  * close the service. res->status stays -1 unless the answer is valid. */
-static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *res)
+/* The child's stream to the parent is one marker byte, then the result: 'S' is
+ * written just before the update call (generate or delete) runs; 'N' goes in
+ * front of the result when no update call was started. A parent that sees 'S'
+ * and then no complete result cannot tell whether the update took effect. If
+ * the marker cannot be written the update is not run. */
+#define MARK_STARTED 'S'
+#define MARK_NOT_STARTED 'N'
+static bool child_started;
+
+static void mark_started(int wfd)
+{
+	for (;;) {
+		ssize_t w = write(wfd, "S", 1);
+
+		if (w < 0 && errno == EINTR)
+			continue;
+		if (w != 1)
+			_exit(4);
+		break;
+	}
+	child_started = true;
+}
+
+static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *res, int wfd)
 {
 	hsm_hdl_t svc = 0;
 	struct ele_ack ack;
@@ -273,6 +300,7 @@ static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *
 			a.key_usage = HSM_KEY_USAGE_SIGN_HASH;
 			a.permitted_algo = PERMITTED_ALGO_ECDSA_SHA256;
 			a.bit_key_sz = HSM_KEY_SIZE_ECC_NIST_256;
+			mark_started(wfd);
 			err = hsm_generate_key(svc, &a);
 			if (fill_ack(err, rq->flags, rq->split, &ack)) {
 				res_ack(res, &ack);
@@ -287,6 +315,7 @@ static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *
 			a.key_identifier = rq->key_id;
 			if (rq->flags & ELE_REQ_STRICT_OPERATION)
 				a.flags = HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION;
+			mark_started(wfd);
 			err = hsm_delete_key(svc, &a);
 			if (fill_ack(err, rq->flags & ELE_REQ_STRICT_OPERATION, rq->split, &ack)) {
 				res_ack(res, &ack);
@@ -367,13 +396,24 @@ __attribute__((noreturn)) static void op_child(int wfd, int rfd, const struct op
 		ele_hsm_wipe_hook(&ks, sizeof(ks));
 	scrub_stack();
 	if (err == HSM_NO_ERROR) {
-		op_service(rq, store, &res);
+		op_service(rq, store, &res, wfd);
 		(void)hsm_close_key_store_service(store);
 	}
 	(void)hsm_close_session(sess);
 out:
 	if (ele_hsm_result_len_override && ele_hsm_result_len_override < n)
 		n = ele_hsm_result_len_override;
+	if (!child_started) {
+		for (;;) {
+			ssize_t w = write(wfd, "N", 1);
+
+			if (w < 0 && errno == EINTR)
+				continue;
+			if (w != 1)
+				_exit(4);
+			break;
+		}
+	}
 	while (n > 0) {
 		ssize_t w = write(wfd, p, n);
 
@@ -395,8 +435,10 @@ static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_r
 {
 	struct op_req rq = *rq_in;
 	struct op_res res;
-	unsigned char buf[sizeof(res) + 1], ready = 0;
-	size_t got = 0, ps = (size_t)sysconf(_SC_PAGESIZE), left = sizeof(uint32_t);
+	unsigned char buf[sizeof(res) + 2], ready = 0;
+	bool started = false;
+	int lost;
+	size_t off = 0, got = 0, ps = (size_t)sysconf(_SC_PAGESIZE), left = sizeof(uint32_t);
 	int up[2], down[2], status = 0, rd_ok = 1, sent_ok = 1, rc = -1;
 	uint32_t *slot = c->nonce;
 	volatile unsigned char *held;
@@ -493,17 +535,25 @@ static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_r
 			break;
 	}
 	close(up[0]);
+	/* The first byte is the child's marker (see mark_started). 'S' means the
+	 * update call was started: whatever goes wrong from here on is an unknown
+	 * outcome for a generate or a delete, never a plain failure. */
+	if (got >= 1 && (buf[0] == MARK_STARTED || buf[0] == MARK_NOT_STARTED)) {
+		started = buf[0] == MARK_STARTED;
+		off = 1;
+	}
+	lost = started && rq.kind != OP_SIGN ? ELE_OP_UNKNOWN : -1;
 	while (waitpid(pid, &status, 0) < 0) {
 		if (errno != EINTR) {
 			ele_secure_zero(buf, sizeof(buf));
-			return -1;
+			return lost;
 		}
 	}
-	if (!sent_ok || !rd_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || got != sizeof(res)) {
+	if (!sent_ok || !rd_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || got - off != sizeof(res)) {
 		ele_secure_zero(buf, sizeof(buf));
-		return -1;
+		return lost;
 	}
-	memcpy(&res, buf, sizeof(res));
+	memcpy(&res, buf + off, sizeof(res));
 	ele_secure_zero(buf, sizeof(buf));
 	if (res.status == 0) {
 		*out = res;

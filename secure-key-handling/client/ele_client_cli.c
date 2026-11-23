@@ -126,6 +126,15 @@ int main(int argc, char **argv)
 		}
 		break;
 	}
+	/* A lost result after the update call started: the key store may have
+	 * changed. Never success, never retried here; exit 3, distinct from a
+	 * plain failure (1) and a setup failure (2). */
+	if (rc != 0 && st == ELE_OUTCOME_UNKNOWN) {
+		fprintf(stderr, "ele_client: outcome unknown (%s): the result of the %s was lost after it started; the key store may have changed. Check the key store before any retry; nothing was retried\n",
+			ele_commit_name(st), cmd.op == ELE_CLI_GEN ? "generate" : "delete");
+		rc = 3;
+		goto done;
+	}
 	/* A failed update keeps its diagnostic state: print it, exit nonzero. */
 	if (rc != 0 && cmd.op == ELE_CLI_GEN && st != ELE_NOT_COMMITTED && id != 0)
 		/* The key exists but the update was refused: name it so it can be
