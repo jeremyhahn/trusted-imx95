@@ -1,7 +1,11 @@
 /* Host tests of the ele_client argument handling (no vendor header). */
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "ele_cli_args.h"
 
@@ -86,6 +90,28 @@ int main(void)
 	CHECK(nonce_from("\n", &v) != 0, "blank nonce refused");
 	CHECK(nonce_from("123456789012345678901234567890\n", &v) != 0, "long nonce refused");
 	CHECK(ele_read_nonce(-1, &v) != 0, "bad descriptor refused");
+
+	{
+		char *ok[] = { "x", "--raw", "1", "3", "sign", "4", "m" };
+		char *bad[] = { "x", "--raw", "1", "3", "del", "4" };
+		char *unk[] = { "x", "--rw", "1", "3", "gen" };
+		struct ele_cli_cmd cmd;
+
+		CHECK(ele_cli_parse(7, ok, &cmd) == 0 && cmd.raw && cmd.op == ELE_CLI_SIGN, "--raw sign accepted");
+		CHECK(ele_cli_parse(6, bad, &cmd) != 0, "--raw on del refused");
+		CHECK(ele_cli_parse(5, unk, &cmd) != 0, "unknown option refused");
+	}
+
+	/* The process is made non-dumpable and core dumps are disabled. */
+	CHECK(ele_harden_process() == 0, "hardening succeeds");
+#ifdef __linux__
+	CHECK(prctl(PR_GET_DUMPABLE) == 0, "process is non-dumpable");
+#endif
+	{
+		struct rlimit rl;
+
+		CHECK(getrlimit(RLIMIT_CORE, &rl) == 0 && rl.rlim_cur == 0 && rl.rlim_max == 0, "RLIMIT_CORE is 0");
+	}
 
 	if (fails)
 		return 1;

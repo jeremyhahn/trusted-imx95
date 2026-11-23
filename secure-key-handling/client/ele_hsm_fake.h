@@ -12,6 +12,7 @@ struct ele_fake {
 	uint32_t del_flags, del_key, del_calls;
 	uint32_t sign_calls;
 	uint32_t calls;
+	uint32_t session_err, ks_err;	/* nonzero: open_session / open_key_store fail with it */
 };
 
 extern struct ele_fake fake;

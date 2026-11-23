@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "hsm_api.h"
 
@@ -45,7 +48,13 @@ static hsm_err_t env_err(void)
 hsm_err_t hsm_open_session(open_session_args_t *args, hsm_hdl_t *session_hdl)
 {
 	(void)args;
+#ifdef __linux__
+	note("open_session dumpable=%d", prctl(PR_GET_DUMPABLE));
+#else
 	note("open_session");
+#endif
+	if (fake.session_err)
+		return (hsm_err_t)fake.session_err;
 	*session_hdl = 1;
 	return HSM_NO_ERROR;
 }
@@ -65,6 +74,8 @@ hsm_err_t hsm_open_key_store_service(hsm_hdl_t session_hdl, open_svc_key_store_a
 	fake.ks_id = args->key_store_identifier;
 	fake.ks_nonce = args->authentication_nonce;
 	note("key_store id=%u flags=0x%x", (unsigned)args->key_store_identifier, (unsigned)args->flags);
+	if (fake.ks_err)
+		return (hsm_err_t)fake.ks_err;
 	*key_store_hdl = 2;
 	return HSM_NO_ERROR;
 }
@@ -133,8 +144,13 @@ hsm_err_t hsm_delete_key(hsm_hdl_t key_management_hdl, op_delete_key_args_t *arg
 
 hsm_err_t hsm_generate_signature(hsm_hdl_t signature_gen_hdl, op_generate_sign_args_t *args)
 {
+	uint32_t i;
+
 	(void)signature_gen_hdl;
 	fake.sign_calls++;
+	/* Known bytes: byte i is (3*i + 1) & 0xff. */
+	for (i = 0; i < 64 && i < args->signature_size; i++)
+		args->signature[i] = (uint8_t)(3 * i + 1);
 	args->signature_size = 64;
 	note("sign key=%u", (unsigned)args->key_identifier);
 	return HSM_NO_ERROR;

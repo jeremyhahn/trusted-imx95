@@ -2,9 +2,17 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "ele_cli_args.h"
+#include "ele_secure.h"
+
+#define ELE_NONCE_BUF 18
 
 int ele_parse_u32(const char *s, uint32_t *out)
 {
@@ -34,19 +42,25 @@ int ele_parse_u32(const char *s, uint32_t *out)
 int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd)
 {
 	uint32_t fd;
-	bool split = false;
+	bool split = false, raw = false;
 
 	if (argc < 4 || !argv || !cmd)
 		return -1;
-	if (!strcmp(argv[1], "--split-confirmed")) {
-		split = true;
+	while (argc > 1 && !strncmp(argv[1], "--", 2)) {
+		if (!strcmp(argv[1], "--split-confirmed"))
+			split = true;
+		else if (!strcmp(argv[1], "--raw"))
+			raw = true;
+		else
+			return -1;
 		argc--;
 		argv++;
-		if (argc < 4)
-			return -1;
 	}
+	if (argc < 4)
+		return -1;
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->split_confirmed = split;
+	cmd->raw = raw;
 	if (ele_parse_u32(argv[1], &cmd->store_id) != 0)
 		return -1;
 	if (ele_parse_u32(argv[2], &fd) != 0 || fd > 1023)
@@ -66,18 +80,19 @@ int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd)
 	} else {
 		return -1;
 	}
+	if (raw && cmd->op != ELE_CLI_SIGN)
+		return -1;
 	return 0;
 }
 
-int ele_read_nonce(int fd, uint32_t *nonce)
+static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 {
-	char buf[18];
 	size_t n = 0;
 	ssize_t r;
 
 	if (isatty(fd))
 		return -1;
-	while (n < sizeof(buf) - 1 && (r = read(fd, buf + n, sizeof(buf) - 1 - n)) != 0) {
+	while (n < ELE_NONCE_BUF - 1 && (r = read(fd, buf + n, ELE_NONCE_BUF - 1 - n)) != 0) {
 		if (r < 0) {
 			if (errno == EINTR)
 				continue;
@@ -92,4 +107,37 @@ int ele_read_nonce(int fd, uint32_t *nonce)
 	if (n == 0 || n > 16 || memchr(buf, '\0', n))
 		return -1;
 	return ele_parse_u32(buf, nonce);
+}
+
+int ele_read_nonce(int fd, uint32_t *nonce)
+{
+	char buf[ELE_NONCE_BUF];
+	int rc;
+
+	/* The text of the credential is locked while it exists and erased on
+	 * every path. */
+	(void)mlock(buf, sizeof(buf));
+	rc = read_nonce_text(fd, buf, nonce);
+	ele_secure_zero(buf, sizeof(buf));
+	(void)munlock(buf, sizeof(buf));
+	return rc;
+}
+
+int ele_lock_secret(void *p, size_t n)
+{
+	return mlock(p, n);
+}
+
+int ele_harden_process(void)
+{
+	struct rlimit rl = { 0, 0 };
+	int rc = 0;
+
+#ifdef __linux__
+	if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0)
+		rc = -1;
+#endif
+	if (setrlimit(RLIMIT_CORE, &rl) != 0)
+		rc = -1;
+	return rc;
 }

@@ -26,10 +26,63 @@ static int fails;
 
 static void open_client(struct ele_hsm_ctx *x, struct ele_client *c, bool split)
 {
+	uint32_t nonce = 1234;
+
 	memset(&fake, 0, sizeof(fake));
-	CHECK(ele_hsm_open(x, 5, 1234) == 0, "open");
+	CHECK(ele_hsm_open(x, 5, &nonce) == 0, "open");
+	CHECK(nonce == 0, "the caller's nonce is erased after open");
 	x->counter_split_confirmed = split;
 	ele_client_init(c, &ele_hsm_ops, x);
+}
+
+/* The library argument structure that held the nonce, as the hook sees it
+ * after the backend erased it. */
+static int wiped_calls, wiped_nonzero;
+
+static void wipe_hook(const void *p, size_t n)
+{
+	const unsigned char *b = p;
+	size_t i;
+
+	wiped_calls++;
+	for (i = 0; i < n; i++)
+		if (b[i])
+			wiped_nonzero++;
+}
+
+static void nonce_erasure(void)
+{
+	struct ele_hsm_ctx x;
+	uint32_t nonce;
+
+	ele_hsm_wipe_hook = wipe_hook;
+
+	/* Success. */
+	memset(&fake, 0, sizeof(fake));
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) == 0, "open for the erasure test");
+	CHECK(fake.ks_nonce == 0xdeadbeef, "the library saw the nonce");
+	CHECK(nonce == 0, "nonce zero after a successful open");
+	CHECK(wiped_calls == 1 && wiped_nonzero == 0, "authentication_nonce copy zero after a successful open");
+	ele_hsm_close(&x);
+
+	/* The key store refuses the nonce. */
+	memset(&fake, 0, sizeof(fake));
+	fake.ks_err = OTHER_ERR;
+	wiped_calls = wiped_nonzero = 0;
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) != 0, "open fails when the key store refuses");
+	CHECK(nonce == 0, "nonce zero after a failed key store open");
+	CHECK(wiped_calls == 1 && wiped_nonzero == 0, "authentication_nonce copy zero after a failed key store open");
+
+	/* The session does not open: the key store service is never reached. */
+	memset(&fake, 0, sizeof(fake));
+	fake.session_err = OTHER_ERR;
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) != 0, "open fails when the session does not open");
+	CHECK(nonce == 0, "nonce zero after a failed session open");
+
+	ele_hsm_wipe_hook = NULL;
 }
 
 int main(void)
@@ -59,12 +112,15 @@ int main(void)
 	CHECK((fake.gen_flags & HSM_OP_KEY_GENERATION_FLAGS_PLAINTEXT_KEY) == 0, "generate never PLAINTEXT_KEY");
 	CHECK(fake.gen_key_type == HSM_KEY_TYPE_ECC_NIST, "generate asks for an ECC NIST key");
 
-	/* The split cannot be read through the API: unconfirmed means unprotected, so the call fails. */
+	/* The split cannot be read through the API: unconfirmed, the generate is
+	 * refused before any library call (it would update the store and spend
+	 * a counter step for a key nobody tracks). */
 	x.counter_split_confirmed = false;
 	st = ELE_NOT_COMMITTED;
 	id = 0;
-	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 0,
-	      "HSM_NO_ERROR, split unconfirmed: fails, state kept");
+	fake.gen_calls = 0;
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && id == 0 && fake.gen_calls == 0,
+	      "split unconfirmed: generate refused, zero generate calls");
 	x.counter_split_confirmed = true;
 
 	/* HSM_KEY_STORE_COUNTER: accepted without the counter advancing. */
@@ -98,8 +154,18 @@ int main(void)
 	/* Sign goes through. */
 	n = sizeof(sig);
 	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 64 && fake.sign_calls == 1, "sign");
+	{
+		size_t i;
+		int same = 1;
+
+		for (i = 0; i < 64; i++)
+			if (sig[i] != (uint8_t)(3 * i + 1))
+				same = 0;
+		CHECK(same, "the signature bytes reach the caller unchanged");
+	}
 
 	ele_hsm_close(&x);
+	nonce_erasure();
 	if (fails)
 		return 1;
 	printf("ele_hsm_backend_test: all passed\n");

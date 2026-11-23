@@ -9,6 +9,9 @@
 #include "hsm_api.h"
 
 #include "ele_hsm_backend.h"
+#include "ele_secure.h"
+
+void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 
 /* The request flags of the client, mapped to the library's. */
 static uint8_t gen_flags(uint32_t f)
@@ -44,6 +47,11 @@ static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ac
 	hsm_err_t err;
 
 	if (!c->open)
+		return -1;
+	/* The split cannot be read through the API. Generating while it is
+	 * unconfirmed would update the store (and may spend a finite counter
+	 * step) and then be refused, leaving an untracked key: refuse first. */
+	if (!c->counter_split_confirmed)
 		return -1;
 	memset(&a, 0, sizeof(a));
 	a.key_identifier = &id;	/* 0: the enclave picks the identifier */
@@ -105,27 +113,38 @@ static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack
 
 const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 
-int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t nonce)
+int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 {
 	open_session_args_t sa;
 	open_svc_key_store_args_t ks;
 	open_svc_key_management_args_t km;
 	open_svc_sign_gen_args_t sg;
 	hsm_hdl_t h;
+	hsm_err_t err;
 
 	memset(c, 0, sizeof(*c));
-	memset(&sa, 0, sizeof(sa));
-	if (hsm_open_session(&sa, &h) != HSM_NO_ERROR)
+	if (!nonce)
 		return -1;
+	memset(&sa, 0, sizeof(sa));
+	if (hsm_open_session(&sa, &h) != HSM_NO_ERROR) {
+		ele_secure_zero(nonce, sizeof(*nonce));
+		return -1;
+	}
 	c->session = h;
 	memset(&ks, 0, sizeof(ks));
 	ks.key_store_identifier = key_store_id;
-	ks.authentication_nonce = nonce;
+	ks.authentication_nonce = *nonce;
 	/* The store is loaded, never created here; both update flags are set so
 	 * the store's updates are strict and counted. */
 	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
 		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
-	if (hsm_open_key_store_service(c->session, &ks, &h) != HSM_NO_ERROR)
+	err = hsm_open_key_store_service(c->session, &ks, &h);
+	/* Every copy of the credential made here is erased on every path. */
+	ele_secure_zero(nonce, sizeof(*nonce));
+	ele_secure_zero(&ks, sizeof(ks));
+	if (ele_hsm_wipe_hook)
+		ele_hsm_wipe_hook(&ks, sizeof(ks));
+	if (err != HSM_NO_ERROR)
 		goto fail;
 	c->key_store = h;
 	memset(&km, 0, sizeof(km));

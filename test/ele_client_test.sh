@@ -116,7 +116,23 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 --split-confirmed 5 3 gen
 	check "gen with a confirmed split" 0 "rollback-protected"
 	cli 0 5 3 gen
-	check "gen with the split unconfirmed fails, state shown" 1 "update refused (committed-not-rollback-protected)"
+	check "gen with the split unconfirmed fails" 1 "failed"
+	if grep -q '^generate' "$tmp/hsm.log"; then fail "gen with the split unconfirmed made a generate call"; fi
+	cli 0 --split-confirmed 5 3 gen
+	check "gen with a confirmed split prints the key" 0 "key 7"
+	grep -q '^open_session dumpable=0$' "$tmp/hsm.log" || fail "the CLI did not set PR_SET_DUMPABLE 0 before opening the HSM"
+	# sign prints the double's known signature bytes, byte i = (3i+1)&0xff.
+	want=
+	for i in $(seq 0 63); do want+=$(printf '%02x' $(((3 * i + 1) & 255))); done
+	cli 0 5 3 sign 7 msg
+	check "sign prints the signature as one line of lowercase hex" 0 "$want"
+	[ "$OUT" = "$want" ] || fail "sign output is not exactly the signature hex"
+	for i in $(seq 0 63); do printf "\\x$(printf '%02x' $(((3 * i + 1) & 255)))"; done >"$tmp/sig.bin"
+	rm -f "$tmp/hsm.log"
+	ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --raw 5 3 sign 7 msg 3<"$tmp/nonce" >"$tmp/sig.out"
+	cmp -s "$tmp/sig.out" "$tmp/sig.bin" || fail "sign --raw is not exactly the signature bytes"
+	cli 0 --raw 5 3 del 7
+	check "--raw on del refused" 2 "usage"
 	cli 0x10 --split-confirmed 5 3 gen
 	check "counter warning: nonzero exit" 1 "update refused"
 	cli 0x10 --split-confirmed 5 3 del 7
@@ -125,6 +141,10 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "other HSM error: nonzero exit" 1 "failed"
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete: committed, not rollback-protected" 0 "deleted committed-not-rollback-protected"
+elif [ "${CI:-}" = true ] || [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
+	# The toolchain image carries the verified pinned source (ELE_SRC). Where
+	# it is required (CI, make test), not finding it is a failure, not a skip.
+	fail "ELE_SRC is required (CI or REQUIRE_ELE_SRC=1) and does not name the pinned source: ${ELE_SRC:-unset}"
 else
 	echo "skip backend constants check: ELE_SRC is not set (the build script runs it)"
 fi
