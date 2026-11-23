@@ -14,12 +14,14 @@ This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` r
 | [enrollment-survey.md](enrollment-survey.md) | Which enrollment protocol carries the evidence, and what authorises the first request | survey, input to the owner's choice | 5 (C1 to C5) |
 | [decommission-survey.md](decommission-survey.md) | What end of life, RMA and decommissioning mean for a board | draft survey for the owner | 7 (E1 to E7) |
 | [evidence-binding-survey.md](evidence-binding-survey.md) | How the firmware TPM's identity could be bound to the chip's own attestation | SURVEY, PROVISIONAL, pending go-trusted-platform's hsm-device-lifecycle row and the owner (#25) | 4 (B1 to B4) |
+| [evidence-bundle.md](evidence-bundle.md) | What the device hands to endorse-01 under ruling 1234 | PROPOSED, pending owner approval, go-xkms and go-trusted-platform | none (points at A2, B1, B3, B5, C2, F2) |
 | [../ftpm/README.md](../ftpm/README.md) | The firmware TPM design: components, NV storage, EK lifecycle, measured boot | NORMATIVE | 7 (B5 to B10, D2) |
 
 ## How the pieces fit
 
 - Enclave evidence: [attestation-survey.md](attestation-survey.md).
 - TPM evidence and its binding to the chip: [ftpm](../ftpm/README.md) for the TPM, [evidence-binding-survey.md](evidence-binding-survey.md) for the binding.
+- The evidence handed to endorse-01 (proposed): [evidence-bundle.md](evidence-bundle.md), with its checker, the A55 collector (`scripts/device-lifecycle/collect-evidence.sh`) and the generated verifier vectors.
 - Carriage and enrollment: [enrollment-survey.md](enrollment-survey.md).
 - End of life: [decommission-survey.md](decommission-survey.md).
 

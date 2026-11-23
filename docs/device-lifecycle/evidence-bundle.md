@@ -48,6 +48,19 @@ The checker is `scripts/device-lifecycle/evidence-bundle.py check`, offline.
 
 The signed region and the signature are treated as opaque bytes. The check does not say which root the enclave key chains to (A2).
 
+## Device collector
+
+Proposed, pending owner approval. `scripts/device-lifecycle/collect-evidence.sh --nonce HEX --response-version N --ek-handle 0xHHHHHHHH --ek-template S -o OUT` composes the bundle on the Cortex-A55, in the order ruling 1234 sets:
+
+1. It validates the nonce (32 hex digits) and the handle (persistent range 0x81000000 to 0x81FFFFFF) and refuses before running anything else.
+2. It runs the enclave attestation: `$ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT`. The command is named by the environment variable, has no default, and must write the signed region and the signature to the two given paths and exit 0. The collector refuses to run without it.
+3. Only if that succeeded, it reads the EK public area with `tpm2_readpublic -c HANDLE -f tss -o FILE`, a read-only command.
+4. It runs `evidence-bundle.py build` into a temporary file, then, only when `ELE_ATTEST_PUB` names an enclave public key PEM (a device normally has none), `check` as a self-check. OUT is written only when every step passed.
+
+The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). `EVIDENCE_PYTHON` names the interpreter (default `python3`, needs `cryptography`).
+
+It waits on two things: the enclave client's attestation command (row 162, `secure-key-handling`, has none yet, so `ELE_ATTEST_CMD` is a contract, not a binding) and the answer to B5. It is tested only against doubles for both commands (`test/device_lifecycle_collect_test.sh`); nothing here touches life cycle, which closes only at the provisioning station.
+
 ## Verifier vectors
 
 Proposed, pending owner approval. `scripts/device-lifecycle/evidence-bundle.py vectors OUTDIR` writes a labelled vector set for a verifier to test against: one bundle per case, public keys (`ele-pub.pem` and three wrong-key variants), two EK public areas, and `manifest.json`. For each file the manifest lists the `check` arguments (relative to the manifest directory), the expected exit code (0 valid, 1 invalid, 2 unusable input) and a substring naming the failed check.
