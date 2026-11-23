@@ -70,7 +70,10 @@ static bool one_child(const char *const *names, size_t n)
 	if (fake.calls != n || n > 32)
 		return false;
 	for (i = 0; i < n; i++) {
-		if (strncmp(fake.call_name[i], names[i], 15) != 0)
+		/* The double stores the call's format string, cut at 15 bytes; match the name as a prefix. */
+		size_t len = strlen(names[i]) < 15 ? strlen(names[i]) : 15;
+
+		if (strncmp(fake.call_name[i], names[i], len) != 0)
 			return false;
 		if (fake.call_pid[i] != fake.call_pid[0])
 			return false;
