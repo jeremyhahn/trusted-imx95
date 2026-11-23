@@ -81,7 +81,7 @@ cp "$LOCK" "$FXLOCK"
 
 # --- collect ---
 # the test must not pick up a real make system-manager / secure-world output
-export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw M7_OUT=$TMP_ROOT/no-m7
+export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw
 out=$TMP_ROOT/in
 run "$SCRIPT" --collect "$out" --system-manager "$TMP_ROOT/none.bin"
 check "collect: a named file that is missing is refused" nonzero "no such file"
@@ -120,16 +120,10 @@ else
 	fail "collect: three real inputs, three stand-ins" "$(cat "$TMP_ROOT/in2/inputs.txt")"
 fi
 
-# the M7 idle image of make m7-image is picked up from M7_OUT
-mkdir -p "$TMP_ROOT/m7o"
-printf 'm7idle' >"$TMP_ROOT/m7o/m7_image.bin"
-run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/sw" M7_OUT="$TMP_ROOT/m7o" "$SCRIPT" --collect "$TMP_ROOT/in2b"
-check "collect: the M7 image comes from the make m7-image output" 0 "U-Boot: STAND-IN" "ELE firmware: STAND-IN"
-if [ "$(count_in "$TMP_ROOT/in2b/inputs.txt" ' real ')" -eq 4 ] && [ "$(cat "$TMP_ROOT/in2b/m7_image.bin")" = m7idle ] &&
-	[ "$(count_in "$TMP_ROOT/in2b/inputs.txt" STAND-IN)" -eq 2 ]; then
-	pass "collect: four real inputs, two stand-ins"
+if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" 'm7_image.bin STAND-IN')" -eq 1 ]; then
+	pass "collect: with no --m7 the M7 image is a labelled stand-in (it is trusted-firmware's)"
 else
-	fail "collect: four real inputs, two stand-ins" "$(cat "$TMP_ROOT/in2b/inputs.txt")"
+	fail "collect: with no --m7 the M7 image is a labelled stand-in" "$(cat "$TMP_ROOT/in2/inputs.txt")"
 fi
 
 # --- fetch fails closed on a digest mismatch (curl stubbed, no network) ---
@@ -181,6 +175,25 @@ if [ "$extra" -eq 0 ]; then
 else
 	fail "image: the out directory holds no key or fuse script" "$(ls "$img_out")"
 fi
+
+# --no-tamper is not an option: the tamper checks cannot be skipped
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$TMP_ROOT/img-nt" --no-tamper
+check "image: --no-tamper is rejected as an unknown option" nonzero "usage: boot-image.sh"
+expect "image: --no-tamper wrote no image" [ ! -e "$TMP_ROOT/img-nt/boot-image.bin" ]
+
+# a payload changed after collection, inputs.txt left alone: refused, nothing written
+cp -r "$TMP_ROOT/in3" "$TMP_ROOT/in4"
+printf 'X' >>"$TMP_ROOT/in4/bl31.bin"
+run "$BI" --inputs "$TMP_ROOT/in4" --out "$TMP_ROOT/img-ch"
+check "image: a payload changed after collection is refused" nonzero "bl31.bin" "changed since collection"
+expect "image: the refused run wrote no image" [ ! -e "$TMP_ROOT/img-ch/boot-image.bin" ]
+# a missing inputs.txt entry is refused too
+cp -r "$TMP_ROOT/in3" "$TMP_ROOT/in5"
+: >"$TMP_ROOT/in5/inputs.txt.new"
+while IFS= read -r l; do case "$l" in tee.bin*) ;; *) echo "$l" >>"$TMP_ROOT/in5/inputs.txt.new" ;; esac; done <"$TMP_ROOT/in3/inputs.txt"
+mv "$TMP_ROOT/in5/inputs.txt.new" "$TMP_ROOT/in5/inputs.txt"
+run "$BI" --inputs "$TMP_ROOT/in5" --out "$TMP_ROOT/img-ms"
+check "image: an inputs.txt without an entry for a payload is refused" nonzero "no entry for tee.bin"
 
 run "$BI" verify "$img_out/boot-image.bin"
 check "verify: the written image verifies" 0 "verify: OK"

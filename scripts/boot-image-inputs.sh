@@ -16,9 +16,10 @@
 #       Copy the six inputs into DIR as m33_image.bin, m7_image.bin, bl31.bin,
 #       tee.bin, u-boot.bin and ele.bin, and write DIR/inputs.txt with one
 #       "name source sha256" line each. System Manager defaults to
-#       $SM_OUT/m33_image.bin (make system-manager), the M7 image to
-#       $M7_OUT/m7_image.bin (make m7-image), BL31 and tee.bin to
-#       $SW_OUT (make secure-world) when those files exist. An input with no
+#       $SM_OUT/m33_image.bin (make system-manager), BL31 and tee.bin to
+#       $SW_OUT (make secure-world) when those files exist. The M7 image is
+#       trusted-firmware's (docs/SPEC.md): --m7 FILE when given, else a
+#       STAND-IN. An input with no
 #       file is replaced by a STAND-IN payload (a labelled random blob, not a
 #       real image) and inputs.txt says "STAND-IN". The pins are checked first.
 #
@@ -157,8 +158,6 @@ mkdir -p "$dir"
 # default locations of what this repository builds
 sm_default=${SM_OUT:-$root/out/system-manager}/m33_image.bin
 sw_default=${SW_OUT:-$root/.secure-world/out}
-m7_default=${M7_OUT:-$root/out/m7-image}/m7_image.bin
-[ -n "${given[m7]:-}" ] || { [ ! -f "$m7_default" ] || given[m7]=$m7_default; }
 [ -n "${given[system-manager]:-}" ] || { [ ! -f "$sm_default" ] || given[system-manager]=$sm_default; }
 [ -n "${given[bl31]:-}" ] || { [ ! -f "$sw_default/bl31.bin" ] || given[bl31]=$sw_default/bl31.bin; }
 [ -n "${given[tee]:-}" ] || { [ ! -f "$sw_default/tee.bin" ] || given[tee]=$sw_default/tee.bin; }

@@ -14,8 +14,7 @@ writes is deleted unread. The SRK table hash it prints belongs to the test PKI o
 
 ```sh
 make boot-image-test                  # inputs, image, verify, tamper; out/boot-image/
-make m7-image                         # build the Cortex-M7 idle image; boot-image-test then takes it
-make boot-image-test BI_M7=<file>     # another Cortex-M7 image for that entry (also BI_UBOOT, BI_ELE)
+make boot-image-test BI_M7=<file>     # trusted-firmware's Cortex-M7 image for that entry (also BI_UBOOT, BI_ELE)
 make boot-image-inputs                # only collect the inputs (pins checked first)
 ```
 
@@ -52,7 +51,7 @@ then a data-only A55 container); this image does not satisfy it and is not check
 | Input | Source | Pin |
 |---|---|---|
 | System Manager `m33_image.bin` | `make system-manager`, `out/system-manager/` | `system-manager/sm.lock` |
-| Cortex-M7 image `m7_image.bin` | `make m7-image` (idle image, see below), `out/m7-image/`; or `BI_M7=<file>` | [`boot-container/m7-idle.lock`](../../boot-container/m7-idle.lock) (source digest) and the Arm toolchain pin of `system-manager/sm.lock` |
+| Cortex-M7 image `m7_image.bin` | external, trusted-firmware's: `BI_M7=<file>`, else a stand-in (see below) | none; not tied to a source |
 | BL31 `bl31.bin`, `tee.bin` | `make secure-world`, `.secure-world/out/` | `secure-world/bsp.lock` |
 | U-Boot `u-boot.bin` | a build of NXP's `uboot-imx`, branch `lf_v2026.04` | commit `bb41975a…` and the SHA-256 of its source archive, in `inputs.lock` |
 | ELE firmware `ele.bin` | NXP's `firmware-ele-imx` 2.0.7 installer | the installer's SHA-256 in `inputs.lock` |
@@ -69,14 +68,14 @@ An input with no file becomes a **STAND-IN** payload: a 4 KiB random blob whose 
 `STAND-IN <name>: not a real image`. It is signed like a real payload, so the container, signature and
 hash checks are real for it, but the image is not bootable. `inputs.txt` and the run's last lines say
 how many entries are stand-ins. The target uses `make system-manager` and `make secure-world` output
-when it is there, and `make m7-image` output likewise. The run recorded here (2026-11-23, lane #161) had four real inputs and two stand-ins:
+when it is there; the M7 image is only ever one you pass in. The run recorded here (2026-11-23, lane #161) had three real inputs and three stand-ins:
 
 | Input | State | SHA-256 |
 |---|---|---|
 | `m33_image.bin` (System Manager) | **real**, `make system-manager`, reproducible over two builds | `83d1e019f10f5b285080e83207de1450a3e381346ff6d7c7c280a1c64c878d9b` |
 | `bl31.bin` (TF-A) | **real**, `make secure-world` | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` |
 | `tee.bin` (OP-TEE, fTPM and PKCS#11 early TAs) | **real**, `make secure-world` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
-| `m7_image.bin` (M7 idle image) | **real**, `make m7-image`, reproducible over two builds | `ab43a5326db854314a98d1efbd72b448e2a5afcbe579fc8f7da9c864b0dc6e60` |
+| `m7_image.bin` | STAND-IN (trusted-firmware's image, external) | random per run |
 | `u-boot.bin` | STAND-IN | random per run |
 | `ele.bin` | STAND-IN | random per run |
 
@@ -93,38 +92,19 @@ blockers of the two stand-ins:
   person to accept NXP's licence agreement, so the script never unpacks it. Pass `BI_ELE=<file>`. On a
   device this position is NXP's own container; here it is an OEM-signed `ele` entry (see "Containers").
 
-## The Cortex-M7 idle image
+## The Cortex-M7 image is external
 
-`make m7-image` (`scripts/m7-image-build.sh`) builds [`boot-container/m7-idle/`](../../boot-container/m7-idle/):
-a vector table, a reset handler that sets the stack pointer and clears `.bss`, a default handler that sleeps
-in `WFI` for every other exception, and a `main` that sleeps in `WFI`. It is **not** the production M7
-firmware; that is the owner's choice. It exists so the M7 entry of the image holds a real ARMv7E-M program
-that the host checks can parse, sign and tamper-test. It does nothing on a board; whether it starts there is
-unconfirmed (step (c) below).
+The M7 image is trusted-firmware's `imx95` row's (`docs/SPEC.md`, the Cortex-M7 firmware bullet and the
+firmware-split rule). This repository does not build one. `boot-image-inputs.sh` takes the file given as
+`BI_M7=<file>` (`--m7`), and otherwise signs the labelled stand-in. An earlier slice of this lane added an
+in-repo idle image and a `make m7-image` target; they were removed again because the M7 firmware is outside
+this row. The lane also fetched NXP's `mcux-component` repository once while exploring a public M7 demo,
+before reading its click-through licence; it built nothing from it and deleted it, and nothing from it or
+from any other NXP-licensed repository is in this repository.
 
-- **Source**: written in this repository, no vendor code. The one public M7 demo found,
-  NXP's MCUXpresso SDK `hello_world`, needs the `mcux-component` repository, whose licence is an NXP
-  click-through: downloading it counts as acceptance. The lane fetched `mcux-component` once while exploring,
-  before reading that licence, built nothing from it and deleted it. Nothing from it, from `mcuxsdk-examples`
-  or from any other NXP-licensed repository is in this repository.
-- **Compiler**: the Arm GNU toolchain 15.2.rel1 that `system-manager/sm.lock` pins, by the same URL and
-  SHA-256 (read from that file, so the two cannot drift). The tarball is cached in `out/m7-image/cache`
-  (copied from `out/system-manager/cache` when `make system-manager` has downloaded it), checked on every
-  run, and a mismatch fails closed.
-- **Pin**: `boot-container/m7-idle.lock` holds the SHA-256 of `startup.c`, `main.c` and `m7-idle.ld`; the
-  build and `--check` refuse sources that differ.
-- **Reproducible**: the script builds twice, in two directories, with `-g0` and `--build-id=none`, and fails
-  unless both SHA-256 are equal (`ab43a532…c6e60` in the run above, 116 bytes).
-- **Addresses**: the link origin `0x00000000` is the M7's own view of its TCM, the load address in
-  [m7-load-path-survey.md](m7-load-path-survey.md) §3 and §5 and in `scripts/ahab/m7-container.yaml`; the
-  AHAB entry point `0x303C0000` is unchanged. The window is **64 KiB** at that origin, this image's own
-  budget; the real ITCM and DTCM sizes and split are **unconfirmed** (survey U2, IMX95RM not read). The stack
-  top is the end of that window, in the same flat binary. Whether the TCM needs ECC initialisation before
-  it is written is **unconfirmed** too (survey, "Left open").
-- **Test**: `test/m7_image_test.sh` checks the pins, refuses a toolchain of another SHA-256, and (when the
-  tarball is cached; it never downloads) checks that the ELF is ARMv7E-M Thumb-2, that vector word 0 is a
-  stack pointer inside the linker's window, that the reset vector is odd and inside the image, and that two
-  builds agree.
+The address facts the entry relies on stay as before: load `0x00000000`, the M7's own view of its TCM, and
+entry `0x303C0000` (survey §3, §5). The TCM size and split and whether the TCM needs ECC initialisation
+before it is written are **unconfirmed** (survey U2, IMX95RM not read).
 
 ## What the test checks
 
@@ -153,7 +133,7 @@ Security Reference Manual are read.
 ## Left open
 
 - Whether the container order, the grouping and the M7 addresses above are what the ROM expects.
-- The production Cortex-M7 firmware (owner's choice) in place of the idle image, and the TCM size and ECC.
+- trusted-firmware's Cortex-M7 image in place of the stand-in, and the TCM size and ECC.
 - Real inputs for the two stand-ins (U-Boot, ELE), and a pin that ties a built U-Boot to its source.
 - `container_version` is SPSDK's default; `fuse_version` and `sw_version` are 0 for this test image only.
 - The relation to `scripts/ahab/container-manifest.yaml` (a different split) is for #12 to settle.

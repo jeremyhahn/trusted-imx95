@@ -3,7 +3,7 @@
 # verify every container and tamper-test every signed payload
 # (docs/boot-container/boot-image.md; PROVISIONAL).
 #
-#   boot-image.sh [--inputs DIR] [--out DIR] [--no-tamper]
+#   boot-image.sh [--inputs DIR] [--out DIR]
 #       --inputs  a directory written by scripts/boot-image-inputs.sh --collect
 #                 (m33_image.bin, m7_image.bin, bl31.bin, tee.bin, u-boot.bin,
 #                 ele.bin, inputs.txt). Default: collect one into the work
@@ -78,7 +78,6 @@ fi
 
 inputs=
 out=$root/out/boot-image
-tamper=1
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--inputs)
@@ -91,8 +90,7 @@ while [ $# -gt 0 ]; do
 		out=$2
 		shift
 		;;
-	--no-tamper) tamper=0 ;;
-	*) die "usage: boot-image.sh [--inputs DIR] [--out DIR] [--no-tamper] | verify <image>" ;;
+	*) die "usage: boot-image.sh [--inputs DIR] [--out DIR] | verify <image>" ;;
 	esac
 	shift
 done
@@ -108,6 +106,26 @@ done
 "$nxpimage" --version 2>/dev/null
 cp "$here/boot-image.yaml" "$work/"
 for f in $PAYLOADS; do cp "$inputs/$f" "$work/$f"; done
+
+# Before anything is signed: every payload copied for signing must be the one
+# inputs.txt recorded ("name real|STAND-IN sha256"), one entry per payload and
+# no other. A payload changed after collection is refused.
+declare -A recorded=()
+while read -r name label digest extra; do
+	[ -n "$name" ] || continue
+	[ -z "$extra" ] || die "inputs.txt: malformed line for $name"
+	case " $PAYLOADS " in *" $name "*) ;; *) die "inputs.txt names $name, which is not a payload" ;; esac
+	[ -z "${recorded[$name]+set}" ] || die "inputs.txt lists $name twice"
+	case "$label" in real | STAND-IN) ;; *) die "inputs.txt: $name has label $label, want real or STAND-IN" ;; esac
+	[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "inputs.txt: $name has no SHA-256"
+	recorded[$name]=$digest
+done <"$inputs/inputs.txt"
+for f in $PAYLOADS; do
+	[ -n "${recorded[$f]+set}" ] || die "inputs.txt has no entry for $f"
+	got=$(sha256sum "$work/$f" | cut -d' ' -f1)
+	[ "$got" = "${recorded[$f]}" ] ||
+		die "the payload $f is $got, inputs.txt records ${recorded[$f]}: changed since collection, nothing signed"
+done
 for i in 0 1 2 3; do
 	# Writes srk$i.pem (the private key) and srk$i.pub, both in $work only.
 	"$nxpcrypto" key generate -k secp384r1 -o "$work/srk$i.pem" >/dev/null 2>"$work/keygen.log" ||
@@ -155,9 +173,8 @@ done
 echo "parse: OK, 6 payloads equal their inputs"
 
 # 3. Tamper test: one flipped byte in each signed payload must fail verify.
-if [ "$tamper" -eq 1 ]; then
-	for f in $PAYLOADS; do
-		"$py" -I - "$image" "$work/$f" "$work/tampered.bin" <<'PY' || die "cannot place $f in the image"
+for f in $PAYLOADS; do
+	"$py" -I - "$image" "$work/$f" "$work/tampered.bin" <<'PY' || die "cannot place $f in the image"
 import sys
 image, payload, out = sys.argv[1:4]
 d = bytearray(open(image, "rb").read())
@@ -168,12 +185,11 @@ if off < 0 or d.find(p, off + 1) >= 0:
 d[off + len(p) // 2] ^= 0xFF
 open(out, "wb").write(d)
 PY
-		if verify "$work/tampered.bin" "$work/tamper.log"; then
-			die "tamper: verify ACCEPTED an image with one flipped byte in $f"
-		fi
-		echo "tamper: $f, one flipped byte: verify FAILED as required"
-	done
-fi
+	if verify "$work/tampered.bin" "$work/tamper.log"; then
+		die "tamper: verify ACCEPTED an image with one flipped byte in $f"
+	fi
+	echo "tamper: $f, one flipped byte: verify FAILED as required"
+done
 
 # The SRK table hash belongs to this test PKI only.
 hash_file=$work/ahab_oem_srk0_hash.txt
