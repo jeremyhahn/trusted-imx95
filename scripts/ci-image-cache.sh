@@ -168,20 +168,38 @@ case ${1:-} in
     dockerfile=$(make -s --no-print-directory --eval 'ci-image-cache-dockerfile: ; @echo $(DOCKERFILE)' \
       ci-image-cache-dockerfile "$@") || die "make could not name the Dockerfile"
     [ -f "$dockerfile" ] || die "the Makefile's Dockerfile '$dockerfile' is not a file"
+    # LOCAL CHANGE (#159, verify 16): nothing reaches the registry before the
+    # image is checked. The build only loads the image into the daemon; its ID
+    # (the config digest, which no other job can retag) is read from the
+    # build's own --iidfile, ci-image-history.sh and trivy run on that ID, and
+    # only then does `docker push` send it. The pushed manifest's config digest
+    # must be that ID, or publish fails and the tag must be deleted by hand.
+    here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    work=$(mktemp -d "$PWD/.ci-image-publish.XXXXXX")
+    cleanup() { rm -rf "$cfg" "$work"; }
+    DOCKER_CONFIG=$cfg docker buildx build --load --no-cache --provenance=false --sbom=false \
+      --target toolchain -f "$dockerfile" --iidfile "$work/iid" . \
+      || die "the build of $remote failed; nothing was pushed"
+    id=$(cat "$work/iid" 2>/dev/null || true)
+    [[ "$id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "the build recorded no image ID for $remote; nothing was pushed"
+    docker image inspect "$id" >/dev/null 2>&1 || die "the built image $id is not in the daemon; nothing was pushed"
+    "$here/ci-image-history.sh" "$id" \
+      || die "the history check refused $id; nothing was pushed"
+    docker save -o "$work/image.tar" "$id" || die "docker save of $id failed; nothing was pushed"
+    tarname=$(basename "$work")/image.tar
+    "$here/in-toolchain-image.sh" "$id" \
+      trivy image --input "$tarname" --ignore-unfixed --skip-dirs /opt/go/mod --severity CRITICAL,HIGH --exit-code 1 \
+      || die "trivy refused $id; nothing was pushed"
     printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null
-    # The build pushes its own result: no local tag is resolved between the
-    # build and the push (v5, above).
-    DOCKER_CONFIG=$cfg docker buildx build --no-cache --provenance=false --sbom=false \
-      --target toolchain -f "$dockerfile" --metadata-file "$cfg/build.json" \
-      --output "type=registry,name=$remote" . \
-      || die "the build and push of $remote failed"
-    built=$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "$cfg/build.json" 2>/dev/null) \
-      || die "the build recorded no image digest for $remote"
-    got=$(registry_digest "$remote") || die "the registry gave no digest for $remote after the push"
-    [ "$got" = "$built" ] \
-      || die "the registry's $remote is $got, not the image this run built ($built)"
-    docker image rm "$remote" >/dev/null 2>&1 || true   # the build's local name, if its driver kept one
-    echo "ci-image-cache: published $local_tag as $repo@$built"
+    docker tag "$id" "$remote" || die "docker tag of $id failed; nothing was pushed"
+    DOCKER_CONFIG=$cfg docker push "$remote" >/dev/null || die "the push of $remote failed"
+    pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$remote" --raw 2>/dev/null \
+      | jq -er '.config.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' 2>/dev/null) \
+      || die "the pushed manifest of $remote has no config digest; delete the tag $remote by hand"
+    [ "$pushed" = "$id" ] \
+      || die "the pushed $remote has config $pushed, not the checked image $id; delete the tag $remote by hand"
+    docker image rm "$remote" >/dev/null 2>&1 || true
+    echo "ci-image-cache: published $local_tag as $repo ($id, checked before the push)"
     ;;
   *)
     die "usage: ci-image-cache.sh pull | publish [make args]"

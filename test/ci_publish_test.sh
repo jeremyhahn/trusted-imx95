@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# ci-image-cache.sh publish: an image reaches the registry only after
+# ci-image-history.sh and trivy passed on its ID, and the pushed manifest's
+# config digest must be that ID (#159, Codex security P1 from verify 16).
+# docker, make, ci-image-history.sh and in-toolchain-image.sh (which runs
+# trivy) are stubs that log each call to $d/log.
+set -uo pipefail
+# shellcheck source=test/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+ID=sha256:$(printf 'c%.0s' $(seq 64))
+OTHER=sha256:$(printf 'd%.0s' $(seq 64))
+
+d="$TMP_ROOT/pub"
+mkdir -p "$d/repo/scripts" "$d/bin"
+cp "$ROOT/scripts/ci-image-cache.sh" "$d/repo/scripts/"
+echo 'FROM scratch' > "$d/repo/Dockerfile"
+
+cat > "$d/bin/make" <<'EOF'
+#!/bin/sh
+case "$*" in
+*ci-image-cache-dockerfile*) echo Dockerfile ;;
+*toolchain-image*) echo repo-toolchain:abc ;;
+esac
+EOF
+cat > "$d/bin/docker" <<'EOF'
+#!/bin/sh
+echo "docker $*" >> "$STUB_DIR/log"
+case "$1 $2 $3" in
+"buildx version "*) exit 0 ;;
+"buildx imagetools inspect")
+  [ -f "$STUB_DIR/pushed" ] || exit 1
+  case "$*" in
+  *--raw*) printf '{"config":{"digest":"%s"}}\n' "$PUSHED_CONFIG" ;;
+  *) printf '{"digest":"sha256:%064d"}\n' 1 ;;
+  esac
+  exit 0 ;;
+esac
+case $1 in
+login) cat > /dev/null ;;
+buildx)
+  while [ $# -gt 1 ]; do
+    [ "$1" = --iidfile ] && printf '%s' "$BUILT_ID" > "$2"
+    shift
+  done ;;
+save) while [ $# -gt 1 ]; do [ "$1" = -o ] && : > "$2"; shift; done ;;
+push) : > "$STUB_DIR/pushed" ;;
+esac
+exit 0
+EOF
+cat > "$d/repo/scripts/ci-image-history.sh" <<'EOF'
+#!/bin/sh
+echo "history $*" >> "$STUB_DIR/log"
+exit "${HIST_RC:-0}"
+EOF
+cat > "$d/repo/scripts/in-toolchain-image.sh" <<'EOF'
+#!/bin/sh
+echo "trivy-in-image $*" >> "$STUB_DIR/log"
+exit "${TRIVY_RC:-0}"
+EOF
+chmod +x "$d/bin/"* "$d/repo/scripts/"*
+
+pub() { # pub [VAR=value...]: one publish run in a clean stub state
+	rm -f "$d/log" "$d/pushed"
+	: > "$d/log"
+	(cd "$d/repo" && env "PATH=$d/bin:$PATH" STUB_DIR="$d" BUILT_ID="$ID" PUSHED_CONFIG="$ID" \
+		GITHUB_SERVER_URL=https://forge.example CI_IMAGE_NAMESPACE=ns GITHUB_EVENT_NAME=push \
+		GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token \
+		HOME="$d" "$@" bash scripts/ci-image-cache.sh publish)
+}
+logged() { grep -qE "$1" "$d/log"; }
+nolog() { ! grep -qE "$1" "$d/log"; }
+
+run pub HIST_RC=1
+check "publish: a history finding fails" 1 "history check refused"
+expect "publish: a history finding makes no push call" nolog '^docker (push|tag|login)'
+expect "publish: a history finding does not reach trivy" nolog '^trivy-in-image'
+
+run pub TRIVY_RC=1
+check "publish: a trivy finding fails" 1 "trivy refused"
+expect "publish: a trivy finding makes no push call" nolog '^docker (push|tag|login)'
+expect "publish: trivy ran after the history check" logged '^history '
+
+run pub
+check "publish: a clean image is pushed" 0 "checked before the push"
+expect "publish: the push happened" logged '^docker push forge.example/ns/repo-toolchain:abc-main'
+expect "publish: the checks name the built image ID" logged "^history $ID"
+if [[ "$OUT" == *fake-token* ]]; then fail "publish: prints no credential" "$OUT"; else pass "publish: prints no credential"; fi
+
+run pub PUSHED_CONFIG="$OTHER"
+check "publish: a pushed config digest that is not the checked ID fails" 1 \
+	"not the checked image $ID" "delete the tag"
+
+run pub
+if grep -qE 'type=registry|--push' "$d/log"; then
+	fail "publish: no build call carries type=registry or --push" "$(cat "$d/log")"
+else
+	pass "publish: no build call carries type=registry or --push"
+fi
+expect "publish: the build loads the image" logged '^docker buildx build .*--load '
+# Order: the build, history and trivy all come before login, tag and push.
+order=$(grep -nE '^(docker buildx build|history|trivy-in-image|docker login|docker tag|docker push)' "$d/log" | cut -d' ' -f1-2 | sed 's/^[0-9]*://' | tr '\n' ',')
+expect "publish: build, history, trivy, then login, tag, push" \
+	test "$order" = "docker buildx,history $ID,trivy-in-image $ID,docker login,docker tag,docker push,"
+
+run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
+check "publish: a build with no image ID pushes nothing" 1 "recorded no image ID"
+expect "publish: a build with no image ID makes no push call" nolog '^docker (push|tag|login)'
+
+finish

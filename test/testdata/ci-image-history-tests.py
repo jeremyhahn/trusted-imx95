@@ -214,16 +214,14 @@ def publish_run(held=False, registry_after=GOOD):
 
 
 def publish_cases():
-    rc, log, err = publish_run()
-    login = [i for i, l in enumerate(log) if l.startswith("docker login")]
-    build = [i for i, l in enumerate(log) if l.startswith("docker buildx build")]
-    check(rc == 0 and login and build, f"a publish of a tag the registry lacks does not log in and build ({rc}): {log} {err}")
-    check(login and build and login[0] < build[0], f"publish builds before it logs in: {log}")
-    check(build and "type=registry,name=forge.example/ns/repo-toolchain:abc-main" in log[build[0]], f"publish does not push the build's result to the registry: {log}")
-    rc, log, err = publish_run(held=True)
-    check(rc == 0 and not any(l.startswith(("docker login", "docker buildx build")) for l in log), f"publish of a tag the registry holds logs in or builds ({rc}): {log} {err}")
-    rc, log, err = publish_run(registry_after=OTHER)
-    check(rc != 0, f"publish succeeds when the registry's digest is not the build's: {log}")
+    # #159 (verify 16): publish loads, checks, then pushes; the behaviour is
+    # held by test/ci_publish_test.sh with stubs. Here: the script's order.
+    src = open(CACHE).read()
+    body = src.split("  publish)", 1)[1]
+    code = "\n".join(l for l in body.split("\n") if not l.lstrip().startswith("#"))
+    check("type=registry" not in code and "--push" not in code, "publish builds with type=registry or --push")
+    check(0 < code.find("ci-image-history.sh") < code.find("trivy image") < code.find("docker push"),
+          "publish does not check the image (history, trivy) before docker push")
 
 
 def main():

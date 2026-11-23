@@ -848,7 +848,6 @@ rrepo=forge.example/ns/trusted-imx95-toolchain
 IMG_REMOTE=$rrepo:abc-main
 export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD IMG_OLD IMG_EVIL DGOOD DOLD IMG_REMOTE
 tc_built=sha256:$(printf '%s' toolchain | sha256sum | cut -c1-64)
-tc_pushed=sha256:$(printf '%s' manifest:toolchain | sha256sum | cut -c1-64)
 it_built=sha256:$(printf '%s' integration | sha256sum | cut -c1-64)
 skey() { printf '%s' "$1" | tr '/:@' '___'; }
 lkey=$(skey "$ltag")
@@ -1028,39 +1027,7 @@ check "make integration-test: an IT_IMAGE_ID that is a tag is refused" nonzero "
 expect "a trusted job: a refused tag starts no container" test ! -s "$IMG_STARTS"
 run tc env GITHUB_EVENT_NAME=pull_request "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
 check "in-toolchain-image: a pull request may still name a tag" 0
-# Finding 2: publish pushes the build's own result, never a local tag
-# another job can move, and checks the registry's digest after the push.
-pub() { GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token cache push publish; }
-reg_image() { cat "$IMG_STATE/registry/$(skey "$(cat "$IMG_STATE/registry/$rkey")")"; }
-seed empty
-run pub
-check "ci-image-cache: publish pushes the image its build made" 0 "published $ltag as $rrepo@$tc_pushed"
-expect "ci-image-cache: the registry's tag names the built image" test "$(reg_image)" = "$tc_built"
-expect "ci-image-cache: publish builds straight to the registry" \
-	grep -q "^buildx build .*--output type=registry,name=$IMG_REMOTE " "$IMG_LOG"
-if grep -qE '^(push|tag) ' "$IMG_LOG"; then
-	fail "ci-image-cache: publish resolves no local tag (no docker tag or push)" "$(cat "$IMG_LOG")"
-else
-	pass "ci-image-cache: publish resolves no local tag (no docker tag or push)"
-fi
-if [[ "$OUT" == *fake-token* ]]; then fail "ci-image-cache: publish prints no credential" "$OUT"; else pass "ci-image-cache: publish prints no credential"; fi
-seed empty
-IMG_RACE_PUSH=1 run pub
-if [ "$RC" != 0 ] || [ "$(reg_image)" = "$tc_built" ]; then
-	pass "ci-image-cache: a retag between the tag and the push never publishes another image as done"
-else
-	fail "ci-image-cache: a retag between the tag and the push never publishes another image as done" "registry $(reg_image); $OUT"
-fi
-seed empty
-IMG_REG_OVERWRITE=1 run pub
-check "ci-image-cache: publish fails when the registry's digest is not the build's" 1 \
-	"the registry's $IMG_REMOTE is $DOLD, not the image this run built ($tc_pushed)"
-seed empty
-IMG_NOBUILDX=1 run pub
-check "ci-image-cache: publish without buildx fails" 1 "publish needs the runner's docker buildx"
-seed yes
-run pub
-check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry holds $IMG_REMOTE; nothing to publish"
+# publish (a checked image only, then the push) is held by test/ci_publish_test.sh.
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,
