@@ -16,9 +16,17 @@ struct ele_fake {
 	bool sign_exp_set;	/* ... when set; otherwise 64 */
 	uint32_t calls;
 	uint32_t session_err, ks_err;	/* nonzero: open_session / open_key_store fail with it */
+	/* One entry per library call, in order: the pid it ran in and the first
+	 * 15 characters of its format string (open_session, key_store, ...). */
+	uint32_t call_pid[32];
+	char call_name[32][16];
 };
 
-extern struct ele_fake fake;
+/* The double's state lives in a MAP_SHARED mapping: the backend runs every
+ * library call of an operation in a forked child, and the parent reads the
+ * counters and the call log the child wrote. */
+extern struct ele_fake *ele_fake_p;
+#define fake (*ele_fake_p)
 
 /* What the key store open saw. The backend runs that call in a forked child,
  * so the record is in a MAP_SHARED mapping the parent can read. */
@@ -27,6 +35,7 @@ struct ele_ks_seen {
 	uint32_t pid;			/* the pid the library call ran in */
 	uint32_t calls;
 	uint32_t hook_calls, hook_nonzero;	/* the test's wipe hook, run in the child */
+	uint32_t scrubs, scrub_bytes;		/* the test's scrub hook, run in the child */
 };
 
 extern struct ele_ks_seen *ks_seen;

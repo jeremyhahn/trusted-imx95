@@ -26,8 +26,8 @@ size_t ele_hsm_result_len_override;
 
 /* The library copies the nonce into its own stack buffer (process_sab_msg's
  * cmd[MAX_CMD_WORD_SZ = 256] words, plus the response buffer and frames) and
- * does not wipe it. That call runs in a child process (ks_open_isolated),
- * which is what removes the copy. This many bytes of dead stack are also
+ * does not wipe it. Every vendor call of an operation runs in a child
+ * process (run_op), which is what removes the copy. This many bytes of dead stack are also
  * zeroed after the call, in both processes: defence in depth, best effort,
  * and not evidence that the vendor's copy is erased (client.md). */
 #define ELE_SCRUB_BYTES 16384u
@@ -85,12 +85,53 @@ static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *a
 	return true;
 }
 
+/* One CLI operation runs as one unit in one forked child (run_op): open the
+ * session, open the key store with the nonce, do the operation, close
+ * everything, write this fixed-size result to the parent, _exit. The parent
+ * holds no session or key-store handle and calls the vendor library never. */
+enum op_kind { OP_GEN = 1, OP_SIGN, OP_DEL };
+
+struct op_req {
+	enum op_kind kind;
+	uint32_t store_id;
+	uint32_t flags;
+	uint32_t key_id;
+	const uint8_t *msg;
+	size_t msg_len;
+	bool split;
+};
+
+struct op_res {
+	int32_t status;		/* 0: the operation ran and its answer is valid */
+	uint32_t key_id;	/* generate */
+	uint32_t sig_len;	/* sign: the length the library reported */
+	uint8_t strict_acked, counter_warning, counter_acked, split_configured;
+	uint8_t sig[ELE_SIG_LEN];
+};
+
+static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq, struct op_res *out);
+
+static void res_ack(struct op_res *r, const struct ele_ack *a)
+{
+	r->strict_acked = a->strict_acked;
+	r->counter_warning = a->counter_warning;
+	r->counter_acked = a->counter_acked;
+	r->split_configured = a->split_configured;
+}
+
+static void ack_from_res(const struct op_res *r, struct ele_ack *a)
+{
+	a->strict_acked = r->strict_acked != 0;
+	a->counter_warning = r->counter_warning != 0;
+	a->counter_acked = r->counter_acked != 0;
+	a->split_configured = r->split_configured != 0;
+}
+
 static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ack *ack)
 {
 	struct ele_hsm_ctx *c = p;
-	op_generate_key_args_t a;
-	uint32_t id = 0;
-	hsm_err_t err;
+	struct op_req rq;
+	struct op_res r;
 
 	if (!c->open)
 		return -1;
@@ -99,20 +140,14 @@ static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ac
 	 * step) and then be refused, leaving an untracked key: refuse first. */
 	if (!c->counter_split_confirmed)
 		return -1;
-	memset(&a, 0, sizeof(a));
-	a.key_identifier = &id;	/* 0: the enclave picks the identifier */
-	a.flags = gen_flags(flags);
-	/* No plaintext export: HSM_OP_KEY_GENERATION_FLAGS_PLAINTEXT_KEY is never set. */
-	a.key_type = HSM_KEY_TYPE_ECC_NIST;
-	a.key_group = 0;
-	a.key_lifetime = HSM_SE_KEY_STORAGE_PERSISTENT;
-	a.key_usage = HSM_KEY_USAGE_SIGN_HASH;
-	a.permitted_algo = PERMITTED_ALGO_ECDSA_SHA256;
-	a.bit_key_sz = HSM_KEY_SIZE_ECC_NIST_256;
-	err = hsm_generate_key(c->key_mgmt, &a);
-	if (!fill_ack(err, flags, c->counter_split_confirmed, ack))
+	memset(&rq, 0, sizeof(rq));
+	rq.kind = OP_GEN;
+	rq.flags = flags;
+	rq.split = c->counter_split_confirmed;
+	if (run_op(c, &rq, &r) != 0)
 		return -1;
-	*key_id = id;
+	ack_from_res(&r, ack);
+	*key_id = r.key_id;
 	return 0;
 }
 
@@ -120,31 +155,29 @@ static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len
 		    uint8_t *sig, size_t *sig_len)
 {
 	struct ele_hsm_ctx *c = p;
-	op_generate_sign_args_t a;
+	struct op_req rq;
+	struct op_res r;
+	int rc;
 
 	/* A buffer under 64 bytes (P-256 r||s, provisional) is refused before
 	 * the call: the library does not report the size back (see client.md). */
 	if (!c->open || msg_len > UINT32_MAX || *sig_len > UINT16_MAX || *sig_len < ELE_SIG_LEN)
 		return -1;
-	memset(&a, 0, sizeof(a));
-	a.key_identifier = key_id;
-	a.message = (uint8_t *)msg;
-	a.message_size = (uint32_t)msg_len;
-	a.signature = sig;
-	a.signature_size = (uint16_t)*sig_len;
-	a.scheme_id = (hsm_signature_scheme_id_t)ALGO_ECDSA_SHA256;
-	a.flags = HSM_OP_GENERATE_SIGN_FLAGS_INPUT_MESSAGE;
-	if (hsm_generate_signature(c->sign_gen, &a) != HSM_NO_ERROR) {
+	memset(&rq, 0, sizeof(rq));
+	rq.kind = OP_SIGN;
+	rq.key_id = key_id;
+	rq.msg = msg;
+	rq.msg_len = msg_len;
+	rc = run_op(c, &rq, &r);
+	/* The child refuses a length other than 64 (this binding supports P-256
+	 * only); the parent checks again and returns nothing on any mismatch. */
+	if (rc != 0 || r.sig_len != ELE_SIG_LEN) {
+		ele_secure_zero(&r, sizeof(r));
 		ele_secure_zero(sig, *sig_len);
 		return -1;
 	}
-	/* A successful sign does not update signature_size (sab_sign_gen.c:178);
-	 * the response size is exp_signature_size. This binding supports P-256
-	 * only: any length other than 64 is refused and nothing is returned. */
-	if (a.exp_signature_size != ELE_SIG_LEN) {
-		ele_secure_zero(sig, *sig_len);
-		return -1;
-	}
+	memcpy(sig, r.sig, ELE_SIG_LEN);
+	ele_secure_zero(&r, sizeof(r));
 	*sig_len = ELE_SIG_LEN;
 	return 0;
 }
@@ -155,59 +188,149 @@ static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len
 static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack)
 {
 	struct ele_hsm_ctx *c = p;
-	op_delete_key_args_t a;
-	hsm_err_t err;
+	struct op_req rq;
+	struct op_res r;
 
 	if (!c->open)
 		return -1;
-	memset(&a, 0, sizeof(a));
-	a.key_identifier = key_id;
-	if (flags & ELE_REQ_STRICT_OPERATION)
-		a.flags = HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION;
-	err = hsm_delete_key(c->key_mgmt, &a);
-	return fill_ack(err, flags & ELE_REQ_STRICT_OPERATION, c->counter_split_confirmed, ack) ? 0 : -1;
+	memset(&rq, 0, sizeof(rq));
+	rq.kind = OP_DEL;
+	rq.flags = flags;
+	rq.key_id = key_id;
+	rq.split = c->counter_split_confirmed;
+	if (run_op(c, &rq, &r) != 0)
+		return -1;
+	ack_from_res(&r, ack);
+	return 0;
 }
 
 const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 
-/* What the child reports: the library's status and the new service handle,
- * nothing else. The parent accepts exactly this many bytes. */
-struct ks_result {
-	int32_t err;
-	uint32_t handle;
-};
-
-/* The child. It owns the only live copy of the credential after the fork: it
- * is non-dumpable and locked, builds the library's arguments in its own
- * memory, makes the one vendor call, erases what it can reach, writes the
- * result and leaves with _exit() (no atexit handler, no stdio flush). Its
- * pages, the vendor stack frame included, are released when it exits. */
-__attribute__((noreturn)) static void ks_child(int wfd, hsm_hdl_t session, uint32_t key_store_id,
-					       uint32_t *nonce)
+/* The service step of the child: open the service, run the one operation,
+ * close the service. res->status stays -1 unless the answer is valid. */
+static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *res)
 {
+	hsm_hdl_t svc = 0;
+	struct ele_ack ack;
+
+	memset(&ack, 0, sizeof(ack));
+	if (rq->kind == OP_SIGN) {
+		open_svc_sign_gen_args_t sg;
+		op_generate_sign_args_t a;
+
+		memset(&sg, 0, sizeof(sg));
+		if (hsm_open_signature_generation_service(store, &sg, &svc) != HSM_NO_ERROR)
+			return;
+		memset(&a, 0, sizeof(a));
+		a.key_identifier = rq->key_id;
+		a.message = (uint8_t *)rq->msg;
+		a.message_size = (uint32_t)rq->msg_len;
+		a.signature = res->sig;
+		a.signature_size = ELE_SIG_LEN;
+		a.scheme_id = (hsm_signature_scheme_id_t)ALGO_ECDSA_SHA256;
+		a.flags = HSM_OP_GENERATE_SIGN_FLAGS_INPUT_MESSAGE;
+		/* A successful sign does not update signature_size (sab_sign_gen.c:178);
+		 * the response size is exp_signature_size. This binding supports P-256
+		 * only: any length other than 64 is refused and nothing is returned. */
+		if (hsm_generate_signature(svc, &a) == HSM_NO_ERROR && a.exp_signature_size == ELE_SIG_LEN) {
+			res->sig_len = ELE_SIG_LEN;
+			res->status = 0;
+		} else {
+			res->sig_len = a.exp_signature_size;
+			ele_secure_zero(res->sig, sizeof(res->sig));
+		}
+		(void)hsm_close_signature_generation_service(svc);
+		return;
+	} else {
+		open_svc_key_management_args_t km;
+
+		memset(&km, 0, sizeof(km));
+		if (hsm_open_key_management_service(store, &km, &svc) != HSM_NO_ERROR)
+			return;
+		if (rq->kind == OP_GEN) {
+			op_generate_key_args_t a;
+			uint32_t id = 0;
+			hsm_err_t err;
+
+			memset(&a, 0, sizeof(a));
+			a.key_identifier = &id;	/* 0: the enclave picks the identifier */
+			a.flags = gen_flags(rq->flags);
+			/* No plaintext export: HSM_OP_KEY_GENERATION_FLAGS_PLAINTEXT_KEY is never set. */
+			a.key_type = HSM_KEY_TYPE_ECC_NIST;
+			a.key_group = 0;
+			a.key_lifetime = HSM_SE_KEY_STORAGE_PERSISTENT;
+			a.key_usage = HSM_KEY_USAGE_SIGN_HASH;
+			a.permitted_algo = PERMITTED_ALGO_ECDSA_SHA256;
+			a.bit_key_sz = HSM_KEY_SIZE_ECC_NIST_256;
+			err = hsm_generate_key(svc, &a);
+			if (fill_ack(err, rq->flags, rq->split, &ack)) {
+				res_ack(res, &ack);
+				res->key_id = id;
+				res->status = 0;
+			}
+		} else {
+			op_delete_key_args_t a;
+			hsm_err_t err;
+
+			memset(&a, 0, sizeof(a));
+			a.key_identifier = rq->key_id;
+			if (rq->flags & ELE_REQ_STRICT_OPERATION)
+				a.flags = HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION;
+			err = hsm_delete_key(svc, &a);
+			if (fill_ack(err, rq->flags & ELE_REQ_STRICT_OPERATION, rq->split, &ack)) {
+				res_ack(res, &ack);
+				res->status = 0;
+			}
+		}
+		(void)hsm_close_key_management_service(svc);
+	}
+}
+
+/* The whole operation, in the child: session, key store, service, operation,
+ * close all, then the fixed-size result to the parent and _exit(). The child
+ * owns the only live copy of the credential after the fork: it is
+ * non-dumpable and locked, builds the library's arguments in its own memory,
+ * erases what it can reach, and leaves with _exit() (no atexit handler, no
+ * stdio flush); its pages, the vendor stack included, go when it exits. */
+__attribute__((noreturn)) static void op_child(int wfd, const struct op_req *rq, uint32_t *nonce)
+{
+	open_session_args_t sa;
 	open_svc_key_store_args_t ks;
-	struct ks_result res;
+	struct op_res res;
 	size_t n = sizeof(res);
 	const unsigned char *p = (const unsigned char *)&res;
-	hsm_hdl_t h = 0;
+	hsm_hdl_t sess = 0, store = 0;
+	hsm_err_t err;
 
 	if (prctl(PR_SET_DUMPABLE, 0) != 0 || lock_process() != 0)
 		_exit(3);
+	memset(&res, 0, sizeof(res));
+	res.status = -1;
+	memset(&sa, 0, sizeof(sa));
+	if (hsm_open_session(&sa, &sess) != HSM_NO_ERROR) {
+		ele_secure_zero(nonce, sizeof(*nonce));
+		scrub_stack();
+		goto out;
+	}
 	memset(&ks, 0, sizeof(ks));
-	ks.key_store_identifier = key_store_id;
+	ks.key_store_identifier = rq->store_id;
 	ks.authentication_nonce = *nonce;
 	/* The store is loaded, never created here; both update flags are set so
 	 * the store's updates are strict and counted. */
 	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
 		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
-	memset(&res, 0, sizeof(res));
-	res.err = (int32_t)hsm_open_key_store_service(session, &ks, &h);
-	res.handle = h;
+	err = hsm_open_key_store_service(sess, &ks, &store);
 	ele_secure_zero(nonce, sizeof(*nonce));
 	ele_secure_zero(&ks, sizeof(ks));
 	if (ele_hsm_wipe_hook)
 		ele_hsm_wipe_hook(&ks, sizeof(ks));
 	scrub_stack();
+	if (err == HSM_NO_ERROR) {
+		op_service(rq, store, &res);
+		(void)hsm_close_key_store_service(store);
+	}
+	(void)hsm_close_session(sess);
+out:
 	if (ele_hsm_result_len_override && ele_hsm_result_len_override < n)
 		n = ele_hsm_result_len_override;
 	while (n > 0) {
@@ -223,18 +346,26 @@ __attribute__((noreturn)) static void ks_child(int wfd, hsm_hdl_t session, uint3
 	_exit(0);
 }
 
-/* Run hsm_open_key_store_service in a forked child. Returns 0 with the handle
- * only when the child exited 0 and sent exactly one result; a signal, a
- * nonzero status, a short or long result, or any failure to fork or read is a
- * failure. *nonce is erased on every path. */
-static int ks_open_isolated(hsm_hdl_t session, uint32_t key_store_id, uint32_t *nonce, hsm_hdl_t *h)
+/* Run one whole operation in a forked child. Returns 0 with the result only
+ * when the child exited 0 and sent exactly one fixed-size result with status
+ * 0; a signal, a nonzero exit, a short or long result, or any failure to fork
+ * or read is a failure. The caller's nonce is erased on every path. */
+static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_res *out)
 {
-	struct ks_result res;
+	struct op_req rq = *rq_in;
+	struct op_res res;
 	unsigned char buf[sizeof(res) + 1];
 	size_t got = 0;
 	int fd[2], status = 0, rd_ok = 1;
+	uint32_t *nonce = c->nonce;
 	pid_t pid;
 
+	/* One operation per open: the nonce is spent by the one fork. */
+	c->open = false;
+	c->nonce = NULL;
+	if (!nonce)
+		return -1;
+	rq.store_id = c->store_id;
 	if (pipe(fd) != 0) {
 		ele_secure_zero(nonce, sizeof(*nonce));
 		return -1;
@@ -248,7 +379,7 @@ static int ks_open_isolated(hsm_hdl_t session, uint32_t key_store_id, uint32_t *
 	}
 	if (pid == 0) {
 		close(fd[0]);
-		ks_child(fd[1], session, key_store_id, nonce);
+		op_child(fd[1], &rq, nonce);
 	}
 	/* Right after the fork: the parent's copy goes before anything else. */
 	ele_secure_zero(nonce, sizeof(*nonce));
@@ -279,20 +410,17 @@ static int ks_open_isolated(hsm_hdl_t session, uint32_t key_store_id, uint32_t *
 	}
 	memcpy(&res, buf, sizeof(res));
 	ele_secure_zero(buf, sizeof(buf));
-	if (res.err != (int32_t)HSM_NO_ERROR)
+	if (res.status != 0) {
+		ele_secure_zero(&res, sizeof(res));
 		return -1;
-	*h = res.handle;
+	}
+	*out = res;
+	ele_secure_zero(&res, sizeof(res));
 	return 0;
 }
 
 int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 {
-	open_session_args_t sa;
-	open_svc_key_management_args_t km;
-	open_svc_sign_gen_args_t sg;
-	hsm_hdl_t h;
-	bool ks_ok;
-
 	memset(c, 0, sizeof(*c));
 	if (!nonce)
 		return -1;
@@ -303,50 +431,21 @@ int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 		ele_secure_zero(nonce, sizeof(*nonce));
 		return ELE_HSM_OPEN_NOLOCK;
 	}
-	memset(&sa, 0, sizeof(sa));
-	if (hsm_open_session(&sa, &h) != HSM_NO_ERROR) {
-		ele_secure_zero(nonce, sizeof(*nonce));
-		scrub_stack();
-		return -1;
-	}
-	c->session = h;
-	/* The one vendor call that marshals the credential runs in a forked
-	 * child (ks_open_isolated): the library's command buffer holds the
-	 * nonce and this code cannot reach it, so the buffer lives and dies in
-	 * the child. *nonce is erased in the parent right after the fork. */
-	ks_ok = ks_open_isolated(c->session, key_store_id, nonce, &h) == 0;
-	/* Defence in depth only; it proves nothing about the vendor's copy. */
-	scrub_stack();
-	if (!ks_ok)
-		goto fail;
-	c->key_store = h;
-	memset(&km, 0, sizeof(km));
-	if (hsm_open_key_management_service(c->key_store, &km, &h) != HSM_NO_ERROR)
-		goto fail;
-	c->key_mgmt = h;
-	memset(&sg, 0, sizeof(sg));
-	if (hsm_open_signature_generation_service(c->key_store, &sg, &h) != HSM_NO_ERROR)
-		goto fail;
-	c->sign_gen = h;
+	/* No vendor call here: the session and the key store are opened, used and
+	 * closed by the one forked child of each operation (run_op), so the
+	 * library's command buffer holding the nonce lives and dies there. The
+	 * context keeps the caller's nonce slot until that fork, which erases it. */
+	c->store_id = key_store_id;
+	c->nonce = nonce;
 	c->open = true;
 	return 0;
-fail:
-	c->open = true;	/* so close releases what was opened */
-	ele_hsm_close(c);
-	return -1;
 }
 
 void ele_hsm_close(struct ele_hsm_ctx *c)
 {
-	if (c->open) {
-		if (c->sign_gen)
-			(void)hsm_close_signature_generation_service(c->sign_gen);
-		if (c->key_mgmt)
-			(void)hsm_close_key_management_service(c->key_mgmt);
-		if (c->key_store)
-			(void)hsm_close_key_store_service(c->key_store);
-		if (c->session)
-			(void)hsm_close_session(c->session);
-	}
+	/* Nothing to release: the parent holds no vendor handle. An operation
+	 * never run leaves the nonce in the caller's slot: erase it. */
+	if (c->nonce)
+		ele_secure_zero(c->nonce, sizeof(*c->nonce));
 	memset(c, 0, sizeof(*c));
 }

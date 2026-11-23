@@ -128,23 +128,24 @@ buffer, the library argument structure's `authentication_nonce` copy and the tex
 with a non-elidable volatile erase (`ele_secure.h`) on every exit path, success or error. A test hook shows the buffer
 is zero after `ele_hsm_open` returns, on success, a key-store open failure and a session open failure.
 
-**Isolation of the vendor call, open.** The library keeps a stack copy of the nonce that this client cannot reach:
+**Isolation, one child per operation.** The library keeps a stack copy of the nonce that this client cannot reach:
 `process_sab_msg` (`src/common/sab_msg/sab_process_msg.c:170`) declares the `cmd[]` word buffer on its stack,
 `prepare_sab_msg` fills it (`sab_process_msg.c:216`, from `sab_msg/sab_key_store.c:32`,
 `cmd->password = op_args->authentication_nonce`), the message is sent from it (`:268`) and the function returns (`:368`)
-without wiping it. No vendor source is patched or copied. Instead `ele_hsm_open` runs the one vendor call that marshals
-the credential, `hsm_open_key_store_service`, in a forked child (`ks_open_isolated`, `ele_hsm_backend.c`):
+without wiping it. No vendor source is patched or copied. Each CLI operation that opens the key store (sign, generate,
+delete) runs as one unit in a single forked child (`run_op`, `ele_hsm_backend.c`): open the session, open the key store
+with the nonce, open the service, do the operation, close all of them, write one fixed-size result and `_exit()`. The
+parent holds no session or key-store handle and never calls the vendor library; `ele_hsm_open` only locks memory and
+records the store id and the caller's nonce slot (one operation per open).
 
-- the parent erases its copy of the nonce (`ele_secure_zero`) immediately after `fork`, before it does anything else; in
-  the child the arguments structure is built in the child's own memory, after the fork;
-- the child sets `PR_SET_DUMPABLE` 0, calls `mlockall(MCL_CURRENT|MCL_FUTURE)` (it fails, exit 3, if that fails), makes the
-  one vendor call, erases its nonce and arguments copies, scrubs its stack, writes one 8-byte result (the library status
-  and the new handle, nothing else) to a pipe and leaves with `_exit()`;
-- the parent reads at most one byte more than the result, waits for the child and accepts the open only when the child
-  exited normally with status 0, sent exactly 8 bytes and the status is `HSM_NO_ERROR`. A child killed by a signal, a
-  nonzero exit, a short or long result, a failed `pipe`, `fork`, `read` or `waitpid` all fail the open closed. The parent
-  first locks its own memory as before (`ELE_HSM_OPEN_NOLOCK`, exit 2, nonce erased and never handed over, when that
-  fails).
+- the parent erases its copy of the nonce (`ele_secure_zero`) immediately after `fork`; the child builds the arguments
+  in its own memory;
+- the child sets `PR_SET_DUMPABLE` 0, calls `mlockall` (exit 3 if that fails), erases its nonce and arguments copies,
+  scrubs its stack after the key-store open, and writes the result (status, and for sign the 64-byte signature) to a pipe;
+- the parent accepts only a normal exit 0, exactly one full-size result with status 0, and for sign a length of 64. A
+  signal, a nonzero exit, a short or long result, a wrong signature length, or a failed `pipe`, `fork`, `read` or
+  `waitpid` fails the operation closed. Generate and delete still fail closed on the counter acknowledgement. The
+  parent first locks its own memory (`ELE_HSM_OPEN_NOLOCK`, exit 2, nonce erased and never handed over, when that fails).
 
 **What this covers.** The vendor `cmd[]` frame exists only in the child. When the child exits its pages are released, and
 the kernel hands out pages zero-filled: an anonymous mapping is "initialized to zero" (`mmap(2)`, `MAP_ANONYMOUS`), and
@@ -157,11 +158,8 @@ the in-process stack scrub that remains (16 KiB, in both processes) is defence i
 of the vendor's copy. A hook test shows the child's arguments copy is zero and the parent's buffer is zero; it cannot
 show what the vendor frame held.
 
-**Not isolated, and why.** Only the key-store open marshals the credential: generate, sign and delete send handles, a
-key identifier and flags, never the nonce, so they run in the process. The child's service handle is used by the parent
-afterwards; whether the pinned library accepts a handle created by another process of the same session has not been read
-at the source (no second reader yet) and is board validation. If it does not, the open fails closed and the command
-exits 1.
+**Nothing runs in the parent.** Generate, sign and delete run in the same child as the key-store open, so no handle
+crosses a process boundary: the session and key-store handles are created and closed inside the one child.
 
 **Every key-store update fails closed.** The library can return `HSM_NO_ERROR` for a success-tagged response that carries
 a counter warning, so a clean return does not show the counter advanced. `ele_generate_key` and `ele_delete_key` both

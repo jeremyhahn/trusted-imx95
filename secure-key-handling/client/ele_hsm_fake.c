@@ -22,16 +22,18 @@
 
 #include "ele_hsm_fake.h"
 
-struct ele_fake fake;
+struct ele_fake *ele_fake_p;
 struct ele_ks_seen *ks_seen;
 
 static void __attribute__((constructor)) seen_init(void)
 {
 	void *m = mmap(NULL, sizeof(*ks_seen), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	void *f = mmap(NULL, sizeof(*ele_fake_p), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-	if (m == MAP_FAILED)
+	if (m == MAP_FAILED || f == MAP_FAILED)
 		abort();
 	ks_seen = m;
+	ele_fake_p = f;
 }
 
 static void note(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -41,6 +43,10 @@ static void note(const char *fmt, ...)
 	FILE *f;
 	va_list ap;
 
+	if (fake.calls < 32) {
+		fake.call_pid[fake.calls] = (uint32_t)getpid();
+		snprintf(fake.call_name[fake.calls], sizeof(fake.call_name[0]), "%s", fmt);
+	}
 	fake.calls++;
 	if (!path || !(f = fopen(path, "a")))
 		return;

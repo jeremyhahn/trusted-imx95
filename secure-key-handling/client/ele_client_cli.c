@@ -87,7 +87,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	rc = 1;
-	ele_nonce_slot_free(slot);
+	/* The slot stays until the operation's fork erases the nonce; it is
+	 * freed (and wiped) at done. */
 	ctx.counter_split_confirmed = cmd.split_confirmed;
 	ele_client_init(&cl, &ele_hsm_ops, &ctx);
 	switch (cmd.op) {
@@ -144,5 +145,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "ele_client: failed\n");
 done:
 	ele_hsm_close(&ctx);
+	ele_nonce_slot_free(slot);
 	return rc;
 }

@@ -14,11 +14,11 @@
 #include "ele_client.h"
 
 struct ele_hsm_ctx {
-	uint32_t session;
-	uint32_t key_store;
-	uint32_t key_mgmt;
-	uint32_t sign_gen;
-	bool open;
+	/* No vendor handle: each operation opens, uses and closes the session and
+	 * the key store inside its own forked child (ele_hsm_backend.c, run_op). */
+	uint32_t store_id;
+	uint32_t *nonce;	/* the caller's slot; erased by the fork of the one operation */
+	bool open;		/* one operation per open */
 	/* The caller sets this only after confirming the counter split is
 	 * configured on the device (architecture.md). It stays false until then,
 	 * so no operation is reported rollback-protected on an unconfirmed split. */
