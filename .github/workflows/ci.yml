@@ -1,4 +1,8 @@
 # ci-template: v1.54 — canonical CI for all first-party Go repos.
+# Local fix on top of v1.54 (#159, verify 8; to send upstream): the runner-label
+# check's `# self-hosted: hardware|oversize` waiver no longer returns before the
+# fork checks; a waived job still fails when a fork head under pull_request or
+# pull_request_target (event in `on`) gets a non-standard runs-on.
 # v1.54 (2026-11-22, Tenant Agent ruling 1137, owner order: the Dells and
 # the AMD SEV host are always used for CI, and nothing sits idle): the
 # preflight step `Balanced runner pool (ruling 1137)` replaces the hosted
@@ -2177,8 +2181,16 @@ jobs:
                       if rf:
                           bad.append(rf)
                           continue
-                      if WAIVER.search(ro_line):
-                          continue
+                      # Local fix on top of v1.54 (#159, verify 8): the waiver
+                      # relaxes every event except a fork head under
+                      # pull_request or pull_request_target (v1.51, v1.52).
+                      waived = bool(WAIVER.search(ro_line))
+                      # The review tier (codex, qwen; code-review.yml only, see
+                      # review_finding) never takes a fork head: a job of the file
+                      # carries the same-repository head guard and the others need it.
+                      fork_guarded = bool(review_labels(ro)) and any(
+                          "github.event.pull_request.head.repo.full_name == github.repository" in (c or "")
+                          for _, _, c in jobs)
                       off = []
                       sels = ("default", "overflow") if path.replace("\\", "/").rsplit("/", 1)[-1] in SEL_FILES else (None,)
                       if sels[0] is not None and job == PRE_JOB and PRE_READ.search(ro):
@@ -2187,7 +2199,9 @@ jobs:
                           # v1.51: under pull_request_target, a fork's head never
                           # reaches a self-hosted runner, overflow or not.
                           # v1.52: under pull_request too.
-                          fork_target = ev in PR and head == "fork/r" and ev in on
+                          fork_target = ev in PR and head == "fork/r" and ev in on and not fork_guarded
+                          if waived and not fork_target:
+                              continue
                           for sel in sels:
                               try:
                                   got = runs_on_labels(ro, ev, ref, head, sel)
@@ -2209,7 +2223,9 @@ jobs:
                                   if fork_target and got is not None:
                                       note += f", {ev}: a fork never reaches a self-hosted runner"
                                   off.append(f"{ev} ({ref}{', fork' if head == 'fork/r' else ''}{note}): {what}")
-                      if off and BARE.search(ro_line):
+                      if off and waived:
+                          bad.append(f"{where}: (f) its `# self-hosted:` waiver does not cover a fork head under pull_request or pull_request_target (v1.51, v1.52); it runs on " + "; ".join(dict.fromkeys(off)))
+                      elif off and BARE.search(ro_line):
                           bad.append(f"{where}: (e) its `# self-hosted:` reason names no category; ruling 999 allows a self-hosted job "
                                      f"only as `# self-hosted: hardware: <reason>` or `# self-hosted: oversize: <reason>`; it runs on " + "; ".join(dict.fromkeys(off)))
                       elif off:

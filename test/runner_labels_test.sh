@@ -84,8 +84,14 @@ fixture "\${{ join(fromJSON('[\"re\",\"lease\"]'), '') }} # self-hosted: oversiz
 check "a join() of an unknown with a waiver is refused" 1 "(a) its runs-on holds an expression"
 fixture "release # self-hosted: hardware: dedicated host"
 check "a literal release with a waiver is refused" 1 "(a) names \`release\`"
+# Local fix on top of v1.54 (#159, verify 8): a self-hosted waiver never admits a
+# fork head under pull_request or pull_request_target.
 fixture "[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason"
-check "a literal self-hosted list with a waiver still passes" 0 "OK:"
+check "a waived self-hosted list under default pull_request triggers is refused" 1 "(f) its \`# self-hosted:\` waiver does not cover a fork head"
+fixture "[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason" "" "[pull_request_target]"
+check "a waived self-hosted list under pull_request_target is refused" 1 "(f) its \`# self-hosted:\` waiver does not cover a fork head"
+fixture "[self-hosted, linux, x64, bigdisk] # self-hosted: hardware: a named reason" "" "[push, workflow_dispatch]"
+check "a waived self-hosted list whose triggers exclude fork heads passes" 0 "OK:"
 
 # Codex security P1s at verify 7: the release decision is an allowlist.
 # (1) head_ref is an arbitrary branch name, never simulated.
