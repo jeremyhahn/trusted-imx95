@@ -243,9 +243,10 @@ d = open(sys.argv[1], "rb").read()
 print(" ".join(str(o) for o in range(0, len(d) - 4, 0x400) if d[o] == 2 and d[o + 3] == 0x87))
 PY
 )
+read -r -a offs <<<"$offsets"
 m7_offsets_ok() { [ "$#" -eq 3 ] && [ "$2" -eq "$WANT_M7_CONTAINER_OFFSET" ]; }
 expect "m7: the image holds three containers, the M7 one second, at $WANT_M7_CONTAINER_OFFSET (found: $offsets)" \
-	m7_offsets_ok $offsets
+	m7_offsets_ok "${offs[@]}"
 # One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
 python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
 import sys
