@@ -17,9 +17,19 @@ make srk-hash-check SRK_EXPECTED=<expected-hash-file> SRK_FILES="<srk0> <srk1> <
 ```
 
 - `<expected-hash-file>` holds the expected hash as one hex string of 128 digits, any case.
-- The four SRK files are PEM public keys or PEM certificates, in SRK index order.
-- Output: `SRK table hash: <hex>`, then `srk-hash-check: match` (exit 0) or `srk-hash-check: mismatch` (exit 1).
-  A refused input exits 2.
+- The four SRK files are PEM certificates (`BEGIN CERTIFICATE`) or PEM public keys in SubjectPublicKeyInfo form
+  (`BEGIN PUBLIC KEY`), in SRK index order. Other labels are refused, including the PKCS#1 `BEGIN RSA PUBLIC KEY`.
+  Convert such a key first, for example `openssl rsa -RSAPublicKey_in -pubin -in old.pem -pubout -out spki.pem`
+  (the form `nxpcrypto key generate` writes as `.pub` is already SubjectPublicKeyInfo).
+- Output: `SRK table hash: <hex>`, then `srk-hash-check: match` or `srk-hash-check: mismatch`.
+
+The script's exit codes are 0 for a match, 1 for a mismatch and 2 for a refused input or usage error. `make` returns
+2 for any failed recipe, so through `make` a mismatch and a refused input look alike. A caller that must tell them
+apart runs the script directly:
+
+```text
+scripts/ahab/srk-hash-check.sh <expected-hash-file> <srk0> <srk1> <srk2> <srk3>
+```
 
 ## What it refuses
 
