@@ -42,7 +42,7 @@ CLEAN_HISTORY = "\n".join([
     "ADD alpine-minirootfs-3.22.1-x86_64.tar.gz / # buildkit",
 ])
 CLEAN_CONFIG = '{"Env":["PATH=/usr/bin","LISTEN=127.0.0.1:8080","PEER=172.32.0.5"],"Labels":{"v":"10.2"}}'
-ADDRESSES = ["192.168.", "10.20.30.40", "10.0.0.7", "172.20.0.5"]
+ADDRESSES = ["192.168.", "10.20.30.40", "10.0.0.7", "172.20.0.5"]  # lab-string-ok: synthetic private address the masking test needs
 
 failures = []
 
@@ -235,12 +235,12 @@ def main():
     rc, out = run(image(CLEAN_HISTORY, CLEAN_CONFIG), "a:1")
     check(rc == 0, f"a clean image fails ({rc}): {out}")
     for name, history, config, want in [
-        ("an apk mirror build argument", "RUN |1 APK_MIRROR=http://192.168.77.7:3143/alpine /bin/sh -c apk-mirror add git", CLEAN_CONFIG, "history entry 1"),
-        ("an apt proxy in a later entry", CLEAN_HISTORY + "\nRUN |1 APT_PROXY=http://10.20.30.40:3142 /bin/sh -c apt-get update", CLEAN_CONFIG, "history entry 5"),
-        ("a 172.16/12 address", "ENV REG=172.20.0.5:5005", CLEAN_CONFIG, "history entry 1"),
-        ("an address at the start of an entry", "10.11.12.14", CLEAN_CONFIG, "history entry 1"),
-        ("an address in the config", CLEAN_HISTORY, '{"Env":["GOPROXY=http://10.0.0.7:3000|https://proxy.golang.org"]}', "config"),
-        ("an address in a label", CLEAN_HISTORY, '{"Labels":{"cache":"192.168.77.7"}}', "config"),
+        ("an apk mirror build argument", "RUN |1 APK_MIRROR=http://192.168.77.7:3143/alpine /bin/sh -c apk-mirror add git", CLEAN_CONFIG, "history entry 1"),  # lab-string-ok: synthetic private address the masking test needs
+        ("an apt proxy in a later entry", CLEAN_HISTORY + "\nRUN |1 APT_PROXY=http://10.20.30.40:3142 /bin/sh -c apt-get update", CLEAN_CONFIG, "history entry 5"),  # lab-string-ok: synthetic private address the masking test needs
+        ("a 172.16/12 address", "ENV REG=172.20.0.5:5005", CLEAN_CONFIG, "history entry 1"),  # lab-string-ok: synthetic private address the masking test needs
+        ("an address at the start of an entry", "10.11.12.14", CLEAN_CONFIG, "history entry 1"),  # lab-string-ok: synthetic private address the masking test needs
+        ("an address in the config", CLEAN_HISTORY, '{"Env":["GOPROXY=http://10.0.0.7:3000|https://proxy.golang.org"]}', "config"),  # lab-string-ok: synthetic private address the masking test needs
+        ("an address in a label", CLEAN_HISTORY, '{"Labels":{"cache":"192.168.77.7"}}', "config"),  # lab-string-ok: synthetic private address the masking test needs
     ]:
         rc, out = run(image(history, config), "a:1")
         check(rc != 0, f"{name}: the image passes: {out}")
@@ -248,7 +248,7 @@ def main():
         for addr in ADDRESSES:
             check(addr not in out, f"{name}: the failure prints the address {addr}: {out}")
     two = dict(image(CLEAN_HISTORY, CLEAN_CONFIG))
-    two.update({"b_2.history": "RUN |1 APK_MIRROR=http://192.168.77.7:3143/alpine x", "b_2.config": CLEAN_CONFIG})
+    two.update({"b_2.history": "RUN |1 APK_MIRROR=http://192.168.77.7:3143/alpine x", "b_2.config": CLEAN_CONFIG})  # lab-string-ok: synthetic private address the masking test needs
     rc, out = run(two, "a:1", "b:2")
     check(rc != 0 and "b:2" in out, f"a private address in the second image passes ({rc}): {out}")
     rc, out = run(image(CLEAN_HISTORY, CLEAN_CONFIG), "a:1", "missing:1")

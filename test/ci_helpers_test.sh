@@ -61,12 +61,13 @@ if [ -z "$OUT" ]; then
 else
 	fail "ci-mask-lan.sh: prints nothing for an empty environment" "$OUT"
 fi
-run env -i PATH="$PATH" DEVCACHE_GOPROXY=http://10.11.12.13:8080/go \
+LAN_IP=10.11.12.13  # lab-string-ok: synthetic private address the masking test needs
+run env -i PATH="$PATH" DEVCACHE_GOPROXY="http://$LAN_IP:8080/go" \
 	CI_IMAGE_REGISTRY=registry.internal:5000 GOPROXY="https://proxy.golang.org,direct" \
 	bash "$ROOT/scripts/ci-mask-lan.sh"
 check "ci-mask-lan.sh: an internal address and host name are masked" 0 \
-	"::add-mask::http://10.11.12.13:8080/go" "::add-mask::10.11.12.13:8080" \
-	"::add-mask::10.11.12.13" "::add-mask::registry.internal"
+	"::add-mask::http://$LAN_IP:8080/go" "::add-mask::$LAN_IP:8080" \
+	"::add-mask::$LAN_IP" "::add-mask::registry.internal"
 if [[ "$OUT" != *proxy.golang.org* ]]; then
 	pass "ci-mask-lan.sh: a public host is left"
 else
@@ -111,16 +112,18 @@ run env PATH="$stubs:$PATH" bash "$ROOT/scripts/ci-image-history.sh"
 check "ci-image-history.sh: no image is a usage error" 2 "usage:"
 run env PATH="$stubs:$PATH" bash "$ROOT/scripts/ci-image-history.sh" img:1
 check "ci-image-history.sh: a clean image passes" 0
-run env PATH="$stubs:$PATH" STUB_HISTORY="ARG X=http://10.1.2.3:8080" \
+HIST_IP=10.1.2.3  # lab-string-ok: synthetic private address the masking test needs
+run env PATH="$stubs:$PATH" STUB_HISTORY="ARG X=http://$HIST_IP:8080" \
 	bash "$ROOT/scripts/ci-image-history.sh" img:1
 check "ci-image-history.sh: a private address in the history fails" 1 \
 	"history entry 1 carries a private address"
-if [[ "$OUT" != *10.1.2.3* ]]; then
+if [[ "$OUT" != *"$HIST_IP"* ]]; then
 	pass "ci-image-history.sh: the address is never printed"
 else
 	fail "ci-image-history.sh: the address is never printed" "$OUT"
 fi
-run env PATH="$stubs:$PATH" STUB_CONFIG='{"Env":["P=192.168.0.5"]}' \
+CONF_IP=192.168.0.5  # lab-string-ok: synthetic private address the masking test needs
+run env PATH="$stubs:$PATH" STUB_CONFIG="{\"Env\":[\"P=$CONF_IP\"]}" \
 	bash "$ROOT/scripts/ci-image-history.sh" img:1
 check "ci-image-history.sh: a private address in the config fails" 1 "its config"
 
