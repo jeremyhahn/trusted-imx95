@@ -152,7 +152,9 @@ hsm_err_t hsm_generate_signature(hsm_hdl_t signature_gen_hdl, op_generate_sign_a
 	for (i = 0; i < 64 && i < args->signature_size; i++)
 		args->signature[i] = (uint8_t)(3 * i + 1);
 	/* Like the pinned source (sab_sign_gen.c:178): signature_size is not
-	 * updated by a successful sign. */
+	 * updated by a successful sign; the response size is stored in
+	 * exp_signature_size (PSA build). */
+	args->exp_signature_size = fake.sign_exp_set ? fake.sign_exp_size : 64;
 	note("sign key=%u", (unsigned)args->key_identifier);
 	return HSM_NO_ERROR;
 }

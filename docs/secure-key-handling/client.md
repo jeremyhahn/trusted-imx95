@@ -191,8 +191,9 @@ and only the board can.
 | The signature is 64 bytes (P-256 `r\|\|s`) | not stated at the call | **provisional** |
 | The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read; open |
 
-Consequences in the backend: `hsm_sign` refuses a buffer under 64 bytes before the call and, after a success, reports
-64 rather than echoing the size it passed in. A generate that fails still returns the key id it was given. The test
+Consequences in the backend: `hsm_sign` refuses a buffer under 64 bytes before the call, reads `exp_signature_size`
+after the call and accepts only 64 (this binding supports P-256 only): any other length is refused, the caller's buffer
+is zeroed and nothing is printed; on a success it reports 64. The CLI's signature buffer starts zeroed. A generate that fails still returns the key id it was given. The test
 double (`ele_hsm_fake.c`) follows the same source: a sign leaves `signature_size` alone.
 
 ## What is left open

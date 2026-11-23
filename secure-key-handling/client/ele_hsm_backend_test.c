@@ -252,6 +252,28 @@ int main(void)
 	/* A buffer under 64 bytes is refused before the library is called. */
 	n = 63;
 	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) != 0 && fake.sign_calls == 1, "short buffer refused before the call");
+	/* The library's reported length is read (exp_signature_size): only 64 is accepted. */
+	{
+		static const uint32_t bad[] = { 0, 32, 63, 65, 72 };
+		size_t k, i;
+		int clean;
+
+		for (k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+			memset(sig, 0xaa, sizeof(sig));
+			fake.sign_exp_set = true;
+			fake.sign_exp_size = bad[k];
+			n = sizeof(sig);
+			clean = 1;
+			CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) != 0, "a length other than 64 is refused");
+			for (i = 0; i < sizeof(sig); i++)
+				if (sig[i] != 0)
+					clean = 0;
+			CHECK(clean, "no signature bytes are left in the caller's buffer after a refused length");
+		}
+		fake.sign_exp_set = false;
+	}
+	n = sizeof(sig);
+	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 64, "exp_signature_size 64: accepted");
 	n = sizeof(sig);
 	{
 		size_t i;

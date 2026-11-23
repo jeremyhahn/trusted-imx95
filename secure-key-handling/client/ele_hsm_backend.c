@@ -127,10 +127,17 @@ static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len
 	a.signature_size = (uint16_t)*sig_len;
 	a.scheme_id = (hsm_signature_scheme_id_t)ALGO_ECDSA_SHA256;
 	a.flags = HSM_OP_GENERATE_SIGN_FLAGS_INPUT_MESSAGE;
-	if (hsm_generate_signature(c->sign_gen, &a) != HSM_NO_ERROR)
+	if (hsm_generate_signature(c->sign_gen, &a) != HSM_NO_ERROR) {
+		ele_secure_zero(sig, *sig_len);
 		return -1;
-	/* A successful sign does not update signature_size: report the known
-	 * P-256 length, not the echoed buffer size. */
+	}
+	/* A successful sign does not update signature_size (sab_sign_gen.c:178);
+	 * the response size is exp_signature_size. This binding supports P-256
+	 * only: any length other than 64 is refused and nothing is returned. */
+	if (a.exp_signature_size != ELE_SIG_LEN) {
+		ele_secure_zero(sig, *sig_len);
+		return -1;
+	}
 	*sig_len = ELE_SIG_LEN;
 	return 0;
 }

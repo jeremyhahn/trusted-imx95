@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 	enum ele_commit st = ELE_NOT_COMMITTED;
 	struct ele_nonce_slot *slot;
 	uint32_t id = 0;
-	uint8_t sig[128];
+	uint8_t sig[128] = { 0 };
 	size_t n = sizeof(sig), i;
 	int rc = 1;
 
