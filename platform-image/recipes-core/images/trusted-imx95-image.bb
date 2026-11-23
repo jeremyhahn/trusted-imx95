@@ -76,3 +76,15 @@ ROOTFS_POSTPROCESS_COMMAND += "trusted_imx95_rootfs_id;"
 # its body is not otherwise part of the task signature). MISSING: no survey covers it.
 do_rootfs[vardeps] += "trusted_imx95_rootfs_id"
 do_rootfs[file-checksums] += "${THISDIR}/../../files/rootfs-id.sh:True"
+
+# The root binding token sector (first sector of the root partition) must hold a nonzero
+# "unbound" marker in the image: an all-zero sector is skipped by a sparse writer, which would
+# keep the old token and the old NV (docs/ftpm/README.md). The step writes it into the wic
+# after wic made it. MISSING: no survey covers it; unbuilt: the wic file name, the order against
+# a .bmap and any compression of the wic are unverified, no bitbake run has used this.
+trusted_imx95_mark_root () {
+    sh ${THISDIR}/../../files/root-marker.sh wic ${IMGDEPLOYDIR}/${IMAGE_NAME}.wic "$(cat ${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id)"
+}
+do_image_wic[postfuncs] += "trusted_imx95_mark_root"
+do_image_wic[vardeps] += "trusted_imx95_mark_root"
+do_image_wic[file-checksums] += "${THISDIR}/../../files/root-marker.sh:True"

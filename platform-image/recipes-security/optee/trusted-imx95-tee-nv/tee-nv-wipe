@@ -9,10 +9,12 @@
 # /data/tee, writes a fresh token to both places and records the content id.
 #
 # Why that sector: it is the boot-sector padding in front of the ext4 superblock
-# (bytes 0-1023), which ext4 does not use and which the image holds as zeros. It
-# is part of the file-system image itself, so any write of that image, whether
-# the whole partition or only the file-system bytes, replaces it with zeros, and
-# the next boot finds no token. For that, block 0 must always be written by an
+# (bytes 0-1023), which ext4 does not use. The image holds a NONZERO "unbound"
+# marker there (files/root-marker.sh: no zero byte, so no sparse writer can skip
+# the sector). It is part of the file-system image itself, so any write of that
+# image, whether the whole partition or only the file-system bytes, sparse or
+# not, replaces the token with the marker, and the next boot finds no valid token:
+# the marker, zeros or any value that is not this device's saved token is a fresh root. For that, block 0 must always be written by an
 # image copy, so the block size must be 4096 or more (the superblock then shares
 # block 0 with the padding; with 1 KiB blocks block 0 is all zeros and a sparse
 # copy may skip it): a smaller block size fails closed. The file system's end is

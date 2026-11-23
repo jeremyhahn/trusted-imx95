@@ -86,10 +86,13 @@ Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement tha
 - Any write of the root file-system image wipes the NV, the very same image included. The content id cannot tell a
   rewrite of the same image apart, so `tee-nv-wipe` also binds the NV to a **root binding token**: 32 random bytes,
   drawn on the first boot after a wipe and kept in two places, the first 512-byte sector of the root partition (the
-  boot-sector padding in front of the ext4 superblock, bytes 0-1023; ext4 does not use it and the image holds zeros
-  there) and `/data/tee-root-token` beside the NV. Because that sector is part of the file-system image itself, any
-  write of the image, the whole partition or only the file-system bytes, replaces it with zeros, whatever is left
-  untouched after the file system. Every boot compares the two tokens (with the content id). A missing, zeroed,
+  boot-sector padding in front of the ext4 superblock, bytes 0-1023; ext4 does not use it) and `/data/tee-root-token` beside the NV. Because that sector is part of the file-system image itself, any
+  write of the image, the whole partition or only the file-system bytes, replaces it, whatever is left
+  untouched after the file system. The image holds a **nonzero "unbound" marker** there, not zeros: a sparse writer
+  (GNU `dd conv=sparse`, a hole-skipping copy) skips an all-zero block and would keep the old token. The marker
+  (`platform-image/files/root-marker.sh`, written into the wic by a post-step of `do_image_wic`) is `TEEUNBND1`, the
+  build's rootfs id and `U` filler up to a final newline: no byte is zero. Zeros, the marker, or any value that is not
+  this device's saved token is a fresh root. Every boot compares the two tokens (with the content id). A missing, zeroed,
   malformed or unequal token wipes `/data/tee` and writes a fresh token to both places.
 - The check fails closed: a token sector that cannot be read, or a root that shows no ext4 superblock with a block
   size of 4096 or more, wipes the NV and stops the unit, so `tee-supplicant` does not start with old state; a token that
@@ -104,6 +107,10 @@ Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement tha
   [verified-boot survey](../platform-image/verified-boot-survey.md) §3.6). A future dm-verity over the root device
   would verify these bytes (the underlying device data) and the raw write would break it: that design would have
   to move the token out of the verified range or give it up; until then the unit simply fails closed.
+- The test rewrites a fixture with `dd bs=512 conv=sparse,notrunc` from the same image and checks that the NV is
+  wiped (and, as a control, that a zero sector would have been skipped). Unbuilt: the wic post-step (file name, order
+  against a `.bmap` or compression of the wic) was not run through bitbake; only the marker and its offset parsing are
+  tested, on fixtures. A flasher that skips the block despite its nonzero content is not a known case.
 - Provisional and unbuilt: that wic passes `--mkfs-extraopts` on to `mkfs.ext4` is not checked (no bitbake here); if it
   does not, and the image's block size is smaller than 4096, the unit fails closed on first boot. Writing the token needs
   raw write access to the root's block device while the file system is mounted read-only; a kernel without that

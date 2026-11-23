@@ -175,6 +175,7 @@ mkroot() { # mkroot FILE LOG_BLOCK_SIZE: a fresh "root partition written from an
 	printf '\123\357' | dd of="$1" bs=1 seek=1080 conv=notrunc 2>/dev/null
 	put32 "$1" 1028 1024
 	put32 "$1" 1048 "$2"
+	sh "$ROOT/platform-image/files/root-marker.sh" write "$1" 0 build-A # the image's unbound marker
 }
 rootdev=$wt/rootdev
 mkroot "$rootdev" 2
@@ -235,6 +236,33 @@ expect "token: a file-system-only identical-image rewrite runs ok" test "$(wipe_
 expect "token: a file-system-only identical-image rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
 expect "token: it writes a fresh token" test "$(tokat)" != "$t1" -a -n "$(tokat)"
 printf 'seed\n' >"$wt/data/tee/obj"
+# A sparse rewrite of the same image (GNU dd conv=sparse skips all-zero blocks): the image's token
+# sector is the nonzero unbound marker, so the old token is replaced. (A zero sector would be skipped.)
+printf 'seed\n' >"$wt/data/tee/obj"
+t2=$(tokat)
+expect "sparse: the NV is bound before the rewrite" test "$(wipe_run)$(<"$wt/data/tee/obj")" = 0seed
+cp "$wt/image" "$wt/image.zero"
+dd if=/dev/zero of="$wt/image.zero" bs=512 count=1 conv=notrunc 2>/dev/null
+dd if="$wt/image.zero" of="$rootdev" bs=512 count=2048 conv=sparse,notrunc 2>/dev/null
+expect "sparse: control, a zero token sector is skipped by a sparse writer (the old token stays)" test "$(tokat)" = "$t2"
+dd if="$wt/image" of="$rootdev" bs=512 count=2048 conv=sparse,notrunc 2>/dev/null
+expect "sparse: the image's marker replaced the token" test "$(tokat | cut -c1-10)" = "TEEUNBND1 "
+expect "sparse: the same image rewritten sparse runs ok" test "$(wipe_run)" -eq 0
+expect "sparse: the same image rewritten sparse wipes the NV" test ! -e "$wt/data/tee/obj"
+expect "sparse: a fresh bound token follows" test "$(tokat | cut -c1-9)" = "TEEBIND1 "
+rm -f "$wt/image.zero"
+# The marker the image build writes (files/root-marker.sh): 512 bytes, no zero byte, names the build.
+rm_sh=$ROOT/platform-image/files/root-marker.sh
+sh "$rm_sh" sector build-A >"$wt/marker"
+expect "marker: the sector is 512 bytes" test "$(stat -c %s "$wt/marker")" -eq 512
+expect "marker: no byte of the sector is zero (no sparse writer can skip it)" test "$(tr -d '\000' <"$wt/marker" | wc -c)" -eq 512
+expect "marker: it starts with the unbound magic and the build id" test "$(head -c 20 "$wt/marker")" = "TEEUNBND1 build-A UU"
+expect "marker: a different id gives a different sector" test "$(sh "$rm_sh" sector build-B | cmp -s - "$wt/marker"; echo $?)" -ne 0
+expect "marker: an id with a space is refused" test "$(sh "$rm_sh" sector 'a b' >/dev/null 2>&1; echo $?)" -ne 0
+expect "marker: an offset that is not a multiple of 512 is refused" test "$(sh "$rm_sh" write "$wt/marker" 100 x >/dev/null 2>&1; echo $?)" -ne 0
+printf '%s\n' 'label: gpt' 'sector-size: 512' '/dev/x1 : start=        2048, size=      524288, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="boot"' '/dev/x2 : start=      526336, size=     2097152, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"' >"$wt/dump"
+expect "marker: the root partition's byte offset is read from an sfdisk dump" test "$(sh "$rm_sh" start <"$wt/dump")" -eq $((526336 * 512))
+expect "the image build writes the marker into the wic" ncstr "$img" 'do_image_wic[postfuncs] += "trusted_imx95_mark_root"'
 mkroot "$rootdev" 2 # the whole partition rewritten from the very same image: same content id
 expect "token: a full-partition identical rewrite runs ok" test "$(wipe_run)" -eq 0
 expect "token: a full-partition identical rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
@@ -252,7 +280,7 @@ printf 'seed\n' >"$wt/data/tee/obj"
 mkroot "$rootdev" 0 # 1 KiB blocks: block 0 is all zeros and a sparse copy may skip it
 expect "token: a 1 KiB block size fails closed" test "$(wipe_run)" -ne 0
 expect "token: ... and wipes the NV" test ! -e "$wt/data/tee/obj"
-expect "token: ... and writes nothing to the partition" test -z "$(tokat)"
+expect "token: ... and writes no token to the partition (the marker stays)" test "$(tokat | cut -c1-10)" = "TEEUNBND1 "
 printf 'seed\n' >"$wt/data/tee/obj"
 mkroot "$rootdev" 2
 expect "token: a valid fixture runs ok again" test "$(wipe_run)" -eq 0
