@@ -241,7 +241,7 @@ ftpm_uuid=bc50d971-d4c9-42c4-82cb-343fb7f37896
 pkcs11_uuid=fd02c9da-306c-48c7-a49c-bbd827ae86ee
 
 # TF-A BL31, release build, with the OP-TEE dispatcher (SPD=opteed), as the
-# upstream platform imx95 (plat/imx/imx9/imx95) builds it with OP-TEE.
+# NXP imx-atf platform imx95 (plat/imx/imx9/imx95) builds it with OP-TEE.
 step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cross" \
 	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
 

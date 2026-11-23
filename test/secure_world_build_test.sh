@@ -16,14 +16,14 @@ check "help prints the usage" 0 "usage: secure-world-build.sh"
 run bash "$sw" --check-lock
 check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "toolchain 15.2.rel1"
 
-# Owner ruling 771 and docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
+# Owner ruling 1234 and docs/SPEC.md: BL31 is NXP's imx-atf, which counts as upstream TF-A.
 tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
 case "$tfa_repo" in
-https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
+https://github.com/nxp-imx/imx-atf.git)
 	tfa_ok=0 ;;
 *) tfa_ok=1 ;;
 esac
-expect "bsp.lock's TFA_REPO is upstream TF-A (ruling 771), not NXP's imx-atf: $tfa_repo" test "$tfa_ok" -eq 0
+expect "bsp.lock's TFA_REPO is NXP's imx-atf (ruling 1234): $tfa_repo" test "$tfa_ok" -eq 0
 
 run bash "$sw" --frobnicate
 check "an unknown argument fails" nonzero "unknown argument: --frobnicate"
@@ -45,6 +45,7 @@ lockcopy() {
 	printf '%s\n' "$f"
 }
 edit_unread() { [[ "$1" == TFA_COMMIT=* ]] && echo TFA_COMMIT=UNREAD || printf '%s\n' "$1"; }
+edit_branch() { [[ "$1" == TFA_COMMIT=* ]] && echo TFA_COMMIT=lf_v2.14 || printf '%s\n' "$1"; }
 edit_short() { [[ "$1" == OPTEE_COMMIT=* ]] && echo OPTEE_COMMIT=99f40897 || printf '%s\n' "$1"; }
 edit_digest() { [[ "$1" == TOOLCHAIN_SHA256=* ]] && echo TOOLCHAIN_SHA256=abc || printf '%s\n' "$1"; }
 edit_url() { [[ "$1" == FTPM_REPO=* ]] && echo FTPM_REPO=http://example.org/x.git || printf '%s\n' "$1"; }
@@ -58,6 +59,7 @@ edit_shape() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nnot a pin\n' "$1" || prin
 
 for c in \
 	"unread|is marked UNREAD" \
+	"branch|must be a 40-hex commit" \
 	"short|must be a 40-hex commit" \
 	"digest|must be a 64-hex SHA-256" \
 	"url|must be an https URL" \

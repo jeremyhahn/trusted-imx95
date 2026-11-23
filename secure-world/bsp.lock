@@ -23,12 +23,13 @@ MANIFEST_COMMIT=0c44ab18abe471b4326037b61893f4e69b6fc182
 META_IMX_REPO=https://github.com/nxp-imx/meta-imx.git
 META_IMX_COMMIT=2eb758f42cfb96042344815b7dd7755b06ba1e3b
 
-# TF-A: upstream Arm TF-A, as owner ruling 771 says. The newest release tag,
-# v2.15.0 of git.trustedfirmware.org/TF-A/trusted-firmware-a.git (its GitHub
-# mirror is the fetch URL), peeled; its tree has plat/imx/imx9/imx95, so the
-# platform name is imx95. NXP's imx-atf fork is not used (docs/secure-world/build.md).
-TFA_REPO=https://github.com/ARM-software/arm-trusted-firmware.git
-TFA_COMMIT=da738d5eae93af342fdc4995dd3c05acb4c9d757
+# TF-A BL31: NXP's imx-atf at the commit the BSP release's recipe names
+# (owner ruling 1234 counts imx-atf as upstream TF-A). meta-imx-bsp/recipes-bsp/
+# imx-atf/imx-atf_2.14.bb at the meta-imx commit above sets SRCBRANCH=lf_v2.14
+# and SRCREV to the commit below; the pin is the commit, not the branch. Its
+# tree has plat/imx/imx9/imx95, so the platform name is imx95.
+TFA_REPO=https://github.com/nxp-imx/imx-atf.git
+TFA_COMMIT=af9eb2c1748ee3abc0ead7dc76e462f50c573036
 TFA_PLAT=imx95
 
 # OP-TEE OS 4.10: meta-imx-bsp/dynamic-layers/meta-arm/recipes-security/
