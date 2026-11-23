@@ -164,11 +164,25 @@ trap 'rm -rf "$wt" "$fk"' EXIT
 mkdir -p "$wt/data/tee/sub"
 printf 'seed\n' >"$wt/data/tee/sub/obj"
 printf 'id-A\n' >"$wt/rootfs-id"
+# A fixture root partition: a regular file with an ext4 superblock (magic, block count, block size)
+# for a 2 MiB file system in a 4 MiB partition; no loop device, no real block device.
+put32() { printf '%b' "$(printf '\\%03o\\%03o\\%03o\\%03o' $(($3 & 255)) $((($3 >> 8) & 255)) $((($3 >> 16) & 255)) $((($3 >> 24) & 255)))" |
+	dd of="$1" bs=1 seek="$2" conv=notrunc 2>/dev/null; }
+mkroot() { # mkroot FILE FS_BLOCKS: a fresh "root partition written from an image"
+	rm -f "$1"
+	truncate -s 4M "$1"
+	printf '\123\357' | dd of="$1" bs=1 seek=1080 conv=notrunc 2>/dev/null
+	put32 "$1" 1028 "$2"
+	put32 "$1" 1048 0
+}
+rootdev=$wt/rootdev
+mkroot "$rootdev" 2048
 wipe_run() { # prints the exit status of the wipe script
 	local r=0
-	TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" bash "$wipe" 2>/dev/null || r=$?
+	TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" TEE_NV_ROOTDEV="$rootdev" bash "$wipe" 2>/dev/null || r=$?
 	echo "$r"
 }
+tokat() { tail -c 512 "$rootdev" | tr -d '\000'; }
 expect "wipe: a missing id wipes" test "$(wipe_run)" -eq 0
 expect "wipe: the old object is gone" test ! -e "$wt/data/tee/sub/obj"
 expect "wipe: the new id is recorded" test "$(<"$wt/data/tee-rootfs-id")" = id-A
@@ -196,6 +210,46 @@ if [ "$(id -u)" -ne 0 ]; then
 	expect "wipe: a mode 000 marker leaves the files" test "$(<"$wt/data/tee/obj")" = keep
 	chmod 600 "$wt/data/tee-rootfs-id"
 fi
+# The root binding token (Codex P1, same-image rewrite): fixture partition files only.
+rm -rf "$wt/data/tee" "$wt/data/tee-rootfs-id" "$wt/data/tee-root-token"
+mkdir -p "$wt/data/tee"
+printf 'id-A\n' >"$wt/rootfs-id"
+printf 'seed\n' >"$wt/data/tee/obj"
+expect "token: first boot runs ok" test "$(wipe_run)" -eq 0
+expect "token: first boot wipes the NV of unknown origin" test ! -e "$wt/data/tee/obj"
+expect "token: first boot writes the token to the root partition" test "$(tokat | cut -c1-9)" = "TEEBIND1 "
+expect "token: the data side holds the same token" test "$(tokat)" = "$(<"$wt/data/tee-root-token")"
+t1=$(tokat)
+printf 'seed\n' >"$wt/data/tee/obj"
+expect "token: a reboot with no rewrite runs ok" test "$(wipe_run)" -eq 0
+expect "token: a reboot with no rewrite keeps the NV" test "$(<"$wt/data/tee/obj")" = seed
+expect "token: a reboot keeps the token" test "$(tokat)" = "$t1"
+mkroot "$rootdev" 2048 # the root partition rewritten from the very same image: same content id
+expect "token: an identical-image root rewrite runs ok" test "$(wipe_run)" -eq 0
+expect "token: an identical-image root rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
+expect "token: it writes a fresh token" test "$(tokat)" != "$t1" -a -n "$(tokat)"
+printf 'seed\n' >"$wt/data/tee/obj"
+printf 'id-C\n' >"$wt/rootfs-id"
+expect "token: a different build runs ok" test "$(wipe_run)" -eq 0
+expect "token: a different build wipes the NV" test ! -e "$wt/data/tee/obj"
+printf 'seed\n' >"$wt/data/tee/obj"
+r=0
+TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" TEE_NV_ROOTDEV="$wt/no-such-device" bash "$wipe" 2>/dev/null || r=$?
+expect "token: an unreadable token region fails closed (supplicant does not start)" test "$r" -ne 0
+expect "token: an unreadable token region wipes the NV" test ! -e "$wt/data/tee/obj"
+expect "token: an unreadable token region leaves no saved token" test ! -e "$wt/data/tee-root-token"
+printf 'seed\n' >"$wt/data/tee/obj"
+mkroot "$rootdev" 4096 # a file system that covers the token sector
+expect "token: a file system over the token sector fails closed" test "$(wipe_run)" -ne 0
+expect "token: ... and wipes the NV" test ! -e "$wt/data/tee/obj"
+expect "token: ... and writes nothing to the partition" test -z "$(tokat)"
+printf 'seed\n' >"$wt/data/tee/obj"
+mkroot "$rootdev" 2048
+expect "token: a valid fixture runs ok again" test "$(wipe_run)" -eq 0
+printf 'seed\n' >"$wt/data/tee/obj"
+printf '\000\000' | dd of="$rootdev" bs=1 seek=1080 conv=notrunc 2>/dev/null
+expect "token: a root partition with no ext4 magic fails closed (status)" test "$(wipe_run)" -ne 0
+expect "token: ... and wipes the NV (no magic)" test ! -e "$wt/data/tee/obj"
 expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
 expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
 expect "unit: runs after the /data mount service" ncstr "$unit" 'After=tee-data-mount.service'
@@ -220,13 +274,14 @@ expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' 
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
 expect "README says the supported reprovision is the whole .wic" has "$ROOT/docs/ftpm/README.md" 'Writing the whole'
 expect "README says a different build is caught on boot by tee-nv-wipe" has "$ROOT/docs/ftpm/README.md" 'rewritten with a different build is caught on boot'
-expect "README states the byte-identical rewrite as an open item" has "$ROOT/docs/ftpm/README.md" 'Open item (a gap, not allowed behaviour)'
+expect "README describes the root binding token" has "$ROOT/docs/ftpm/README.md" 'root binding token'
+expect "README no longer carries the byte-identical open item" none 'Open item (a gap' "$ROOT/docs/ftpm/README.md"
 expect "README makes no claim that every root-only rewrite is caught" none 'catches that on boot' "$ROOT/docs/ftpm/README.md"
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm keeps the approved NV erasure clause" ncstr "$ROOT/docs/SPEC.md" 'is wiped with the root file system'
 expect "SPEC row ftpm lets no root rewrite keep the NV" none 'root rewrite keeps the NV' "$ROOT/docs/SPEC.md"
-expect "README names the owner proposal for the open item" ncstr "$ROOT/docs/ftpm/README.md" 'pending owner'
+expect "README says the mechanism implements the SPEC requirement" has "$ROOT/docs/ftpm/README.md" 'it implements the SPEC row'
 expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
 expect "README makes no claim that the NV survives a reflash" none 'partition is kept' "$ROOT/docs/ftpm/README.md"
 

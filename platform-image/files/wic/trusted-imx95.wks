@@ -12,6 +12,9 @@
 # boot files from IMAGE_BOOT_FILES); 256 MiB as in the BSP.
 part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot --active --align 8192 --fixed-size 256
 # Root: the BSP's line, with a fixed 1024 MiB. MISSING: no survey sizes the root; provisional.
+# The last 1 MiB of this partition is reserved: the file system must end before it, and the
+# last sector holds the root binding token that tee-nv-wipe checks (docs/ftpm/README.md).
+# Not built here: that wic leaves the file system short of the partition's end is unverified.
 part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --part-name root --align 8192 --fixed-size 1024M
 # tee-data, after the root partition. MISSING: no survey sizes it; 64 MiB is provisional.
 part /data --ondisk mmcblk --fstype=ext4 --label tee-data --part-name tee-data --no-fstab-update --fixed-size 64M

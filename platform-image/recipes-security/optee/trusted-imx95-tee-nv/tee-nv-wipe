@@ -1,42 +1,171 @@
 #!/bin/sh
-# Couple the fTPM NV to the root file system (SPEC row ftpm: the REE-FS NV is
-# wiped with the root file system). The read-only rootfs carries an identity
-# fixed at image build time; /data/tee-rootfs-id remembers the identity the NV
-# was written under. A missing or different id wipes /data/tee. It fails
-# closed: any error (an unreadable saved id included) exits non-zero, and tee-supplicant, which requires this
-# unit, then does not start.
-# TEE_NV_DATA and TEE_NV_ROOTFS_ID exist for the test (test/platform_image_ftpm_test.sh).
+# Couple the fTPM NV to every write of the root partition (SPEC row ftpm: the
+# REE-FS NV is wiped with the root file system). The content id of the image
+# (/etc/trusted-imx95-rootfs-id) cannot tell a rewrite of the very same image
+# apart, so it is only an extra condition. The binding is a random token kept
+# in two places: in the last sector of the root partition, in a region reserved
+# after the file system (the image never carries it; any write of the whole
+# partition from an image replaces it), and in /data/tee-root-token beside the
+# NV. Every boot compares them. A missing, zeroed, malformed or unequal token,
+# or a different content id, wipes /data/tee, writes a fresh token to both
+# places and records the content id. It fails closed: a region that cannot be
+# read wipes the NV and exits non-zero, a region or record that cannot be
+# written exits non-zero (after the wipe, so no old NV is left), and
+# tee-supplicant, which requires this unit, then does not start. A saved record
+# that exists but cannot be read also stops the unit and touches nothing.
+#
+# The root file system must end at least 1 MiB before the end of the partition
+# (read from the ext4 superblock): otherwise the token sector would sit inside the
+# file system, and the unit fails closed. The wks layout reserves that tail.
+#
+# TEE_NV_DATA, TEE_NV_ROOTFS_ID, TEE_NV_ROOTDEV (the root partition's device),
+# TEE_NV_MOUNTINFO, TEE_NV_SYS, TEE_NV_DEV and TEE_NV_RANDOM exist for the test
+# (test/platform_image_ftpm_test.sh).
 set -eu
 
 data=${TEE_NV_DATA:-/data}
 idfile=${TEE_NV_ROOTFS_ID:-/etc/trusted-imx95-rootfs-id}
+mountinfo=${TEE_NV_MOUNTINFO:-/proc/self/mountinfo}
+sys=${TEE_NV_SYS:-/sys}
+dev=${TEE_NV_DEV:-/dev}
+rnd=${TEE_NV_RANDOM:-/dev/urandom}
+rootdev=${TEE_NV_ROOTDEV:-}
+reserve=1048576
+magic=TEEBIND1
 
-cur=$(cat "$idfile")
-[ -n "$cur" ] || { echo "tee-nv-wipe: $idfile is empty" >&2; exit 1; }
-[ -d "$data" ] || { echo "tee-nv-wipe: $data is not a directory" >&2; exit 1; }
+die() { echo "tee-nv-wipe: $*" >&2; exit 1; }
 
-# The saved marker is read in its own checked assignment, outside any condition.
-# Absent: the NV is of unknown origin, wipe. Present but unreadable (a directory,
-# no permission, an I/O error): its content is unknown, so exit non-zero and touch
-# nothing; an I/O error must not destroy the NV.
-saved=
-if [ -e "$data/tee-rootfs-id" ] || [ -L "$data/tee-rootfs-id" ]; then
-	if ! saved=$(cat "$data/tee-rootfs-id"); then
-		echo "tee-nv-wipe: $data/tee-rootfs-id exists but cannot be read; leaving $data/tee alone" >&2
-		exit 1
+cur=$(cat "$idfile") || die "cannot read $idfile"
+[ -n "$cur" ] || die "$idfile is empty"
+[ -d "$data" ] || die "$data is not a directory"
+
+# The device that holds /, from the major:minor of the last mount on / and sysfs.
+if [ -z "$rootdev" ]; then
+	majmin=
+	while read -r _id _parent mm _root mp _rest; do
+		[ "$mp" = / ] && majmin=$mm
+	done <"$mountinfo"
+	case $majmin in '' | *[!0-9:]* | : | :* | *:) die "no usable device number for / in $mountinfo" ;; esac
+	name=
+	while IFS= read -r l; do
+		case $l in DEVNAME=*) name=${l#DEVNAME=} ;; esac
+	done <"$sys/dev/block/$majmin/uevent" || die "cannot read the uevent of $majmin"
+	case $name in '' | */* | .*) die "bad device name for $majmin" ;; esac
+	rootdev=$dev/$name
+fi
+
+wipe() {
+	rm -rf "$data/tee" "$data/tee-root-token" "$data/tee-rootfs-id"
+	mkdir -p "$data/tee"
+	chmod 0700 "$data/tee"
+	sync
+}
+
+# Read the first LEN bytes at OFFSET of $rootdev as hex bytes (one string).
+hexat() { od -An -v -tx1 -j "$1" -N "$2" "$rootdev" | tr -d ' \n'; }
+le() { # unsigned little-endian value of N bytes at OFFSET
+	out=$(od -An -v -tu1 -j "$1" -N "$2" "$rootdev") || return 1
+	v=0 sh=0
+	for b in $out; do
+		v=$((v + (b << sh)))
+		sh=$((sh + 8))
+	done
+	echo "$v"
+}
+
+if [ -b "$rootdev" ]; then
+	psize=$(blockdev --getsize64 "$rootdev") || psize=
+else
+	psize=$(stat -c %s "$rootdev") || psize=
+fi
+case $psize in '' | *[!0-9]*) psize= ;; esac
+
+# Read the token sector and check that the file system leaves it free. Any
+# failure here is a fail-closed wipe: the NV cannot be shown to belong to this root.
+rtok=
+ok=1
+if [ -z "$psize" ] || [ "$psize" -lt $((reserve + 4096)) ]; then
+	ok=0
+elif [ "$(hexat 1080 2 2>/dev/null)" != 53ef ]; then
+	ok=0
+else
+	blocks=$(le 1028 4) || ok=0
+	lbs=$(le 1048 4) || ok=0
+	inc=$(le 1120 4) || ok=0
+	if [ "$ok" = 1 ]; then
+		if [ $((inc & 128)) -ne 0 ]; then
+			hi=$(le 1360 4) || ok=0
+			blocks=$((blocks + (${hi:-0} << 32)))
+		fi
+		[ "$lbs" -le 6 ] 2>/dev/null || ok=0
+	fi
+	if [ "$ok" = 1 ]; then
+		fsbytes=$((blocks * (1024 << lbs)))
+		[ $((fsbytes + reserve)) -le "$psize" ] || ok=0
+	fi
+	if [ "$ok" = 1 ]; then
+		tmp=$data/.root-token.read
+		if dd if="$rootdev" of="$tmp" bs=512 skip=$((psize / 512 - 1)) count=1 2>/dev/null; then
+			rtok=$(tr -d '\000' <"$tmp") || ok=0
+		else
+			ok=0
+		fi
+		rm -f "$tmp"
 	fi
 fi
-if [ "$saved" = "$cur" ]; then
+if [ "$ok" = 0 ]; then
+	echo "tee-nv-wipe: the token region of $rootdev cannot be read or is not outside the file system: wiping $data/tee, failing closed" >&2
+	wipe
+	exit 1
+fi
+
+# The saved records are read in their own checked assignments, outside any
+# condition. Absent: the NV is of unknown origin, wipe. Present but unreadable
+# (a directory, no permission, an I/O error): its content is unknown, so exit
+# non-zero and touch nothing; an I/O error must not destroy the NV.
+saved=
+stok=
+for f in tee-rootfs-id tee-root-token; do
+	v=
+	if [ -e "$data/$f" ] || [ -L "$data/$f" ]; then
+		v=$(cat "$data/$f") || die "$data/$f exists but cannot be read; leaving $data/tee alone"
+	fi
+	case $f in tee-rootfs-id) saved=$v ;; *) stok=$v ;; esac
+done
+
+# A valid token is "TEEBIND1 " and 64 lowercase hex characters.
+valid=0
+case $rtok in
+"$magic "*)
+	t=${rtok#"$magic "}
+	case $t in *[!0-9a-f]*) ;; *) [ "${#t}" -eq 64 ] && valid=1 ;; esac
+	;;
+esac
+if [ "$valid" = 1 ] && [ "$rtok" = "$stok" ] && [ "$saved" = "$cur" ]; then
 	exit 0
 fi
 
-echo "tee-nv-wipe: rootfs identity changed or unknown: wiping $data/tee" >&2
-rm -rf "$data/tee"
-mkdir -p "$data/tee"
-chmod 0700 "$data/tee"
+echo "tee-nv-wipe: root token or rootfs identity changed, missing or unequal: wiping $data/tee" >&2
+wipe
+
+new=$(head -c 32 "$rnd" | od -An -v -tx1 | tr -d ' \n') || die "cannot read random bytes from $rnd"
+[ "${#new}" -eq 64 ] || die "short random read from $rnd"
+tok="$magic $new"
+# The region first, read back; the data side last, through a temporary file and
+# a rename, so a power cut in between leaves no record and the next boot wipes again.
+printf '%s\n' "$tok" | dd of="$rootdev" bs=512 seek=$((psize / 512 - 1)) count=1 conv=notrunc,sync 2>/dev/null ||
+	die "cannot write the token sector of $rootdev"
 sync
-# The identity is written last, through a temporary file and a rename, so a
-# power cut before it leaves no id and the next boot wipes again.
+tmp=$data/.root-token.check
+dd if="$rootdev" of="$tmp" bs=512 skip=$((psize / 512 - 1)) count=1 2>/dev/null || die "cannot read back the token sector"
+back=$(tr -d '\000' <"$tmp") || die "cannot read back the token sector"
+rm -f "$tmp"
+[ "$back" = "$tok" ] || die "the token sector of $rootdev did not keep the token"
+
+tmp=$data/.tee-root-token.new
+printf '%s\n' "$tok" >"$tmp"
+sync
+mv -f "$tmp" "$data/tee-root-token"
 tmp=$data/.tee-rootfs-id.new
 printf '%s\n' "$cur" >"$tmp"
 sync
