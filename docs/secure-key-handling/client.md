@@ -60,8 +60,10 @@ flags that is not rollback-protected (counter not acknowledged, or the split not
 returned and printed (`update refused (...)`), so the diagnostic is kept. A generate the enclave accepted leaves a key
 even when its update is refused (a counter warning): its identifier is returned with the failure and the command
 prints it (`key N was generated and is NOT rollback-protected`) so it can be reconciled or deleted, not presented as a
-protected key. A strict-only send (a delete) succeeds on the
-strict acknowledgement, as committed and not rollback-protected.
+protected key. A strict-only send (a delete) does **not** succeed:
+`ele_delete_key` returns failure unless the counter is acknowledged, which the binding never reports (owner Q2). The
+delete may nevertheless have taken effect on the device while failing the rollback policy, so a caller must treat the
+key as possibly deleted; the commit state is returned for that.
 
 The host tests (`test/ele_client_test.sh`, run by `make test`) cover all four combinations, a counter warning, a
 missing split and an acknowledgement of one flag only, against a stub that holds no key. The default client sends
@@ -138,10 +140,15 @@ with the nonce, open the service, do the operation, close all of them, write one
 parent holds no session or key-store handle and never calls the vendor library; `ele_hsm_open` only locks memory and
 records the store id and the caller's nonce slot (one operation per open).
 
-- the parent erases its copy of the nonce (`ele_secure_zero`) immediately after `fork`; the child builds the arguments
-  in its own memory;
-- the child sets `PR_SET_DUMPABLE` 0, calls `mlockall` (exit 3 if that fails), erases its nonce and arguments copies,
-  scrubs its stack after the key-store open, and writes the result (status, and for sign the 64-byte signature) to a pipe;
+- ordering: `mlockall` is not inherited across `fork`, so the child never inherits the credential. Before the fork the
+  parent moves the nonce into its own page (locked under the parent's `mlockall`, marked `MADV_WIPEONFORK`, so it is
+  zero in the child) and wipes the caller's slot. The child sets `PR_SET_DUMPABLE` 0 and calls `mlockall` (exit 3 if
+  that fails, before saying anything), then writes one byte `L` to the parent. Only after reading `L` does the
+  parent write the nonce over a pipe into the child's local, already locked, variable, wipe its page and close the pipe.
+  A child that cannot lock gets nothing and the operation fails closed. The backend test logs the events in order
+  (child locked, parent sending, child received) and checks a child that fails to lock never sees the nonce;
+- the child erases its nonce and arguments copies, scrubs its stack after the key-store open, and writes the result
+  (status, and for sign the 64-byte signature) to the same pipe back;
 - the parent accepts only a normal exit 0, exactly one full-size result with status 0, and for sign a length of 64. A
   signal, a nonzero exit, a short or long result, a wrong signature length, or a failed `pipe`, `fork`, `read` or
   `waitpid` fails the operation closed. Generate and delete still fail closed on the counter acknowledgement. The

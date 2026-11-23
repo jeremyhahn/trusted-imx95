@@ -62,9 +62,12 @@ void ele_client_init(struct ele_client *c, const struct ele_ops *ops, void *ctx)
 int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *state);
 int ele_sign(struct ele_client *c, uint32_t key_id, const uint8_t *msg, size_t msg_len,
 	     uint8_t *sig, size_t *sig_len);
-/* Delete a key. Returns 0 only for a committed delete. The library's delete has
- * the strict-operation flag and no monotonic-counter flag, so *state is never
- * ELE_ROLLBACK_PROTECTED for a delete: at best ELE_COMMITTED_UNPROTECTED. */
+/* Delete a key. The library's delete has the strict-operation flag and no
+ * monotonic-counter flag, so the counter is never acknowledged and *state is
+ * never ELE_ROLLBACK_PROTECTED for a delete. Until the owner answers Q2 this
+ * therefore always returns failure (nonzero). The operation can still have
+ * taken effect on the device while failing the rollback policy: on failure
+ * with *state ELE_COMMITTED_UNPROTECTED treat the key as possibly deleted. */
 int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state);
 
 #endif
