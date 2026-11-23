@@ -8,7 +8,8 @@ through go-xkms's existing TPM 2.0 workflows: endorse-01, then enroll-01, then d
 format. Issue #140. The SPEC.md row this file details was approved by the owner on 2026-11-21 (PR #138).
 
 Documentation only: nothing here is run, scripted or provisioned. In particular, no RPMB key is programmed and no
-fuse is touched; both are the owner's decision alone ([question 1](#open-questions-for-the-owner)).
+fuse is touched; the RPMB key is a provisioning-station step after OEM close (owner ruling 1234), a fuse burn the
+owner's decision alone.
 
 Sources are the documents in [references/](../references/README.md) and public upstream projects named in the
 text. Facts this repository's surveys already hold are linked, not restated. A version not yet chosen is marked
@@ -69,8 +70,10 @@ Both rest on OP-TEE's hardware unique key; whether the i.MX 95 port derives it f
 ([ta-options-survey.md](../secure-world/ta-options-survey.md), unconfirmed item 1). Wiping the NV store destroys
 the TPM's seeds, and with them the EK the issued certificate names ([EK lifecycle](#ek-lifecycle)).
 
-RPMB is used only if the owner approves programming its key; until then the stated default is REE FS with the
-limits above ([question 1](#open-questions-for-the-owner)).
+Owner ruling 1234 (2026-11-23) decides the location: on production devices the NV is in the eMMC RPMB, written
+only after OEM close; the REE file system (the root file system) holds it on development boards only. A development
+board therefore has no rollback protection, and a root rewrite wipes the NV. Programming the RPMB key is a
+provisioning-station step after OEM close and stays out of this repository: nothing here writes it.
 
 **Where the NV lives (provisional).** `tee-supplicant` (the BSP's OP-TEE client, enabled in the image) keeps OP-TEE's
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
@@ -131,7 +134,8 @@ is none or more than one. The NV is plain files that root on Linux can copy or r
    it at a persistent handle. Nothing is done before the owner approves the template.
 2. **No manufacturer certificate.** A discrete TPM ships an EK certificate from its maker; this fTPM has none, and
    nothing on the board vouches for the EK on its own.
-3. **endorse-01.** go-xkms's endorse-01 issues the EK certificate. What it checks before it signs, and where it
+3. **endorse-01.** go-xkms's endorse-01 issues the EK certificate, and certifies the fTPM EK only after an EdgeLock
+   enclave attestation (owner ruling 1234). What it checks before it signs, and where it
    stores the certificate, are go-xkms's; go-xkms was not read here.
 4. **enroll-01**, then **device-attest-01** in the `tpm` format, as go-xkms defines them.
 5. **Re-provisioning.** Anything that clears the endorsement hierarchy or wipes the NV store gives the board a new
@@ -172,10 +176,11 @@ hardware runs happen on the lab's board host, one lane at a time. The boot media
 
 ## Open questions for the owner
 
-1. **RPMB key programming.** Programming the eMMC's RPMB authentication key is a one-time, irreversible step, the
-   same class as a fuse burn, and needs the owner's explicit approval
-   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10). Is RPMB wanted for the TPM's NV, or is REE FS
-   accepted at first, with no rollback protection and NV lost on a rootfs reflash?
+1. **RPMB key programming. Decided, owner ruling 1234.** The NV is in the eMMC RPMB on production devices, written
+   only after OEM close, and in the REE file system on development boards only (no rollback protection; a root
+   rewrite wipes the NV). The key programming is a one-time, irreversible provisioning-station step after OEM close
+   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10), outside this repository. Still open
+   (TENANT ASK 4, default no): whether a byte-identical root rewrite may keep the NV.
 2. **fTPM TA source and revision.** The `ms-tpm-20-ref` TA in OP-TEE's `optee_ftpm`, or an fTPM carried in a newer
    `optee_os`; which revision; and whether the BSP's OP-TEE 4.10 builds it unchanged. Proposed and built
    ([secure-world/build.md](../secure-world/build.md#the-pins)): `optee_ftpm` 4.10.0, which the BSP's OP-TEE 4.10 builds
