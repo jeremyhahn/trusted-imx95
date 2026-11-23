@@ -27,9 +27,11 @@ struct ele_hsm_ctx {
 
 extern const struct ele_ops ele_hsm_ops;
 
-/* Open a session, the key store (identifier and nonce as the caller's
- * provisioning gave them) and the key management and signature services.
- * Returns 0 or -1. flags_load: open an existing store, never CREATE here. */
+/* Prepare an operation: lock all process memory and record the key-store
+ * identifier and the caller's nonce slot. No vendor call is made here; the
+ * session, the key store and the services are opened, used and closed by the
+ * one forked child of each operation. Returns 0, -1, or ELE_HSM_OPEN_NOLOCK.
+ * The store is only ever opened as an existing one, never CREATE here. */
 int ele_hsm_open(struct ele_hsm_ctx *ctx, uint32_t key_store_id, uint32_t *nonce);
 /* The nonce is a credential: *nonce is erased on every path, and so is the
  * library argument structure holding its copy. */
@@ -41,8 +43,8 @@ extern void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 /* Test hook, 0 in production: when nonzero and below the result size, the
  * key-store child writes only this many bytes of its result (a short read). */
 extern size_t ele_hsm_result_len_override;
-/* The key-store open, the one call that marshals the nonce, runs in a forked
- * child; the wipe hook is called in that child. */
+/* All vendor calls of an operation run in one forked child; the wipe hook is
+ * called in that child. */
 
 /* ele_hsm_open locks all process memory (mlockall) before the library sees the
  * nonce, and fails closed when that fails. Test hooks, NULL in production:
