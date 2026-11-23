@@ -13,8 +13,8 @@
 #                with its defaults) and the Cortex-M7 image (the entry laid out
 #                as scripts/ahab/m7-container.yaml lays it out).
 #   container 3  the Cortex-A55 images: BL31, U-Boot, tee.bin (SPSDK's atf,
-#                uboot and tee entries; tee at the cited 0x8C000000, atf and
-#                uboot at SPSDK's defaults, see the comments at the entries).
+#                uboot and tee entries; atf at the cited 0x8A200000, tee at the
+#                cited 0x8C000000, uboot at SPSDK's default; see the entries).
 #
 # Addresses, core ids and image types are SPSDK 3.13.0 defaults or the values of
 # m7-container.yaml; the boot ROM's order and the real load addresses are
@@ -70,17 +70,17 @@ containers:
       sw_version: 0
       signer: type=file;file_path=srk0.pem
       images:
-        # BL31: SPSDK's default address (0x8A200000). TF-A's BL31 link base for
-        # PLAT=imx95 is in plat/imx/imx9/imx95/include/platform_def.h, which this
-        # lane could not read (read guard): OPEN, not asserted from a citation.
+        # BL31 at 0x8A200000: TF-A da738d5 plat/imx/imx9/imx95/include/
+        # platform_def.h:34 (BL31_BASE U(0x8A200000)). SPSDK 3.13.0's atf default
+        # is the same address, so the shorthand stays; the test asserts it.
         - atf: bl31.bin
         # U-Boot is a stand-in here: SPSDK's default address, not a pinned value.
         - uboot: u-boot.bin
         # tee.bin (OP-TEE core/tee-raw.bin) at the address OP-TEE and TF-A name:
         # TF-A da738d5 plat/imx/imx9/imx95/platform.mk:56 (BL32_BASE ?= 0x8C000000)
         # and imx-optee-os 99f4089 core/arch/arm/plat-imx/conf.mk:729
-        # (CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000, the DRAM base being
-        # 0x80000000 on i.MX 95: not read at that commit, OPEN). Written out
+        # (CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000), with CFG_DRAM_BASE
+        # 0x80000000 for the mx95 flavours at conf.mk:299. Written out
         # because the tee shorthand cannot carry an address; every other field
         # is what the shorthand produced under SPSDK 3.13.0.
         - image_path: tee.bin

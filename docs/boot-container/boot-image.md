@@ -36,12 +36,11 @@ Container 3's addresses:
 
 - `tee` `0x8C000000` is TF-A `da738d5` `plat/imx/imx9/imx95/platform.mk:56` (`BL32_BASE ?= 0x8C000000`) and
   imx-optee-os `99f4089` `core/arch/arm/plat-imx/conf.mk:729` (`CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000`).
-  The i.MX 95 `CFG_DRAM_BASE` (taken as `0x80000000`) was not read at that commit: **open**. The entry is
+  `CFG_DRAM_BASE ?= 0x80000000` for the mx95 flavours is `conf.mk:299` at that commit. The entry is
   written out in the yaml, because the `tee` shorthand cannot carry an address; its other fields equal what
   the shorthand produced.
-- `atf` `0x8A200000` is **SPSDK 3.13.0's default, not a citation**. TF-A's BL31 base for `PLAT=imx95` is in
-  `plat/imx/imx9/imx95/include/platform_def.h`, which the lane could not read (the lane's read guard):
-  **open**. The test pins the default so a change is noticed, not endorsed.
+- `atf` `0x8A200000` is TF-A `da738d5` `plat/imx/imx9/imx95/include/platform_def.h:34`
+  (`BL31_BASE U(0x8A200000)`). SPSDK 3.13.0's `atf` default is the same address, so the shorthand stays.
 - `uboot` is a stand-in with SPSDK's default address.
 
 `test/boot_image_test.sh` reads the parse of the built image: container 3 holds three entries, all

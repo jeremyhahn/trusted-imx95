@@ -363,10 +363,10 @@ done
 # Cited constants (read at the pins of secure-world/bsp.lock, 2026-11-23):
 #  tee: TF-A da738d5eae93 plat/imx/imx9/imx95/platform.mk:56, BL32_BASE ?= 0x8C000000, and
 #       imx-optee-os 99f40897 core/arch/arm/plat-imx/conf.mk:729, CFG_TZDRAM_START =
-#       CFG_DRAM_BASE + 0x0C000000 (the DRAM base itself not read: OPEN).
-#  atf: no citation. TF-A's BL31 base is in plat/imx/imx9/imx95/include/platform_def.h,
-#       which the lane could not read: OPEN. The value pinned here is SPSDK 3.13.0's
-#       default for the atf entry, so a change of it is noticed, not endorsed.
+#       CFG_DRAM_BASE + 0x0C000000, with CFG_DRAM_BASE ?= 0x80000000 for the mx95
+#       flavours at conf.mk:299.
+#  atf: TF-A da738d5eae93 plat/imx/imx9/imx95/include/platform_def.h:34,
+#       BL31_BASE U(0x8A200000); SPSDK 3.13.0's atf default is the same address.
 #  uboot: a stand-in, SPSDK's default, not asserted.
 WANT_ATF_LOAD=0x8a200000 WANT_ATF_ENTRY=0x8a200000
 WANT_TEE_LOAD=0x8c000000 WANT_TEE_ENTRY=0x8c000000
