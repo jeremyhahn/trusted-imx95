@@ -33,7 +33,9 @@ head -c 4096 /dev/urandom >"$work/ref/payload.bin"
 (cd "$work/ref" && "$venv/bin/nxpimage" ahab export -c container.yaml) >"$work/ref.log" 2>&1 ||
 	{ tail -n 5 "$work/ref.log" >&2; echo "FAIL: reference export" >&2; exit 1; }
 tr -d '[:space:]' <"$work/ref/ahab_oem0_srk0_hash.txt" >"$work/expected.txt"
-printf 'AAAA%s\n' "$(tr -d '[:space:]' <"$work/expected.txt" | tail -c 124)" >"$work/wrong.txt"
+exp=$(tr -d '[:space:]' <"$work/expected.txt")
+case "${exp:0:1}" in 0) first=1 ;; *) first=0 ;; esac
+printf '%s\n' "$first${exp:1}" >"$work/wrong.txt"
 tr 'A-F' 'a-f' <"$work/expected.txt" >"$work/expected-lower.txt"
 pub=("$work/srk0.pub" "$work/srk1.pub" "$work/srk2.pub" "$work/srk3.pub")
 
@@ -65,9 +67,32 @@ run bad-expected-file 2 "not a hex string" -- "$work/bad-hex.txt" "${pub[@]}"
 
 # PEM certificate input: disposable self-signed certificates over the same test
 # keys; the reference hash is an AHAB export that names those certificates.
+cat >"$work/mkcert.py" <<'PYEOF'
+import datetime
+import sys
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.x509.oid import NameOID
+
+key = serialization.load_pem_private_key(open(sys.argv[1], "rb").read(), password=None)
+name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, sys.argv[3])])
+now = datetime.datetime.now(datetime.timezone.utc)
+cert = (
+    x509.CertificateBuilder()
+    .subject_name(name)
+    .issuer_name(name)
+    .public_key(key.public_key())
+    .serial_number(x509.random_serial_number())
+    .not_valid_before(now - datetime.timedelta(days=1))
+    .not_valid_after(now + datetime.timedelta(days=2))
+    .sign(key, hashes.SHA384())
+)
+open(sys.argv[2], "wb").write(cert.public_bytes(serialization.Encoding.PEM))
+PYEOF
 for i in 0 1 2 3 4; do
-	openssl req -x509 -new -key "$work/srk$i.pem" -subj "/CN=srk-hash-check-test-$i" -days 2 -out "$work/srk$i.crt" >/dev/null 2>&1 ||
-		{ echo "FAIL: openssl could not make test certificate $i" >&2; exit 1; }
+	"$venv/bin/python" -I "$work/mkcert.py" "$work/srk$i.pem" "$work/srk$i.crt" "srk-hash-check-test-$i" >/dev/null 2>"$work/mkcert.log" ||
+		{ tail -n 3 "$work/mkcert.log" >&2; echo "FAIL: could not make test certificate $i" >&2; exit 1; }
 done
 mkdir "$work/refc"
 cfg=$(<"$root/scripts/ahab/container.yaml")
