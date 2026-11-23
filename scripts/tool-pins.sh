@@ -12,6 +12,15 @@
 ALPINE_VERSION=3.24.4
 ALPINE_DIGEST=sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
+# The secure-world stage's glibc base (python:<version>-slim-bookworm, glibc 2.36),
+# the Debian snapshot its packages come from, and uv from its manylinux wheel.
+# Changing one means changing the Dockerfile's ARG defaults to match.
+SW_PYTHON_VERSION=3.13
+SW_PYTHON_DIGEST=sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
+SW_DEBIAN_SNAPSHOT=20261122T000000Z
+SW_UV_VERSION=0.13.9
+SW_UV_SHA256=d7f459fe4fd247d830351c75686d3996ace3c6f3f728eb0e85a30b7ada0cef19
+
 SHELLCHECK_VERSION=0.11.0
 SHELLCHECK_REPO=koalaman/shellcheck
 SHELLCHECK_URL=https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz
