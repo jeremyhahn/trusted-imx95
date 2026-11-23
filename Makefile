@@ -48,7 +48,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	ahab-m7-test ahab-policy-test ahab-tamper-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
 	@echo "Targets:"
@@ -177,6 +177,9 @@ secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from se
 	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
 
 ## --- The platform image (docs/platform-image/build.md) ---
+
+platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing)
+	@scripts/platform-image-build.sh $(ARGS)
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock
