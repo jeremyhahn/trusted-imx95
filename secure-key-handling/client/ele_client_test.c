@@ -51,6 +51,32 @@ static void case_flags(const char *name, uint32_t sent, bool strict_ack, bool co
 	}
 }
 
+/* A success followed by a failure on the same variables must not carry the
+ * earlier operation's evidence: the state is not pre-initialised by hand, the
+ * first (successful) call is what leaves it protected. */
+static void case_success_then_failure(void)
+{
+	struct ele_stub s = make(true, true, false, true);
+	struct ele_client c;
+	enum ele_commit st;
+	uint32_t id;
+
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED && id != 0,
+	      "first generate succeeds and is protected");
+	s.fail = 1;
+	CHECK(ele_generate_key(&c, &id, &st) != 0, "second generate fails");
+	CHECK(st == ELE_NOT_COMMITTED, "a failed generate reports not committed, not the previous state");
+	CHECK(id == 0, "a failed generate returns no key id");
+
+	s.fail = 0;
+	CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED, "generate again");
+	CHECK(ele_delete_key(&c, id, &st) == 0 && st == ELE_COMMITTED_UNPROTECTED, "delete succeeds");
+	s.fail = 1;
+	CHECK(ele_delete_key(&c, id, &st) != 0, "failed delete");
+	CHECK(st == ELE_NOT_COMMITTED, "a failed delete reports not committed, not the previous state");
+}
+
 int main(void)
 {
 	const uint32_t both = ELE_REQ_STRICT_OPERATION | ELE_REQ_MONOTONIC_COUNTER;
@@ -121,6 +147,7 @@ int main(void)
 		CHECK(ele_classify(both, NULL) == ELE_NOT_COMMITTED, "null ack");
 	}
 
+	case_success_then_failure();
 	CHECK(strcmp(ele_commit_name(ELE_ROLLBACK_PROTECTED), "rollback-protected") == 0, "name");
 
 	if (fails)

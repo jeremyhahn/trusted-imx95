@@ -55,6 +55,10 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 
 	if (!c || !c->ops || !c->ops->generate || !key_id || !state)
 		return -1;
+	/* A failure must never carry the previous operation's evidence: the
+	 * state and the identifier are reset before the backend is called. */
+	*state = ELE_NOT_COMMITTED;
+	*key_id = 0;
 	if (c->ops->generate(c->ctx, c->flags, &id, &ack) != 0)
 		return -1;
 	*state = ele_classify(c->flags, &ack);
@@ -88,6 +92,7 @@ int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state
 
 	if (!c || !c->ops || !c->ops->del || !state)
 		return -1;
+	*state = ELE_NOT_COMMITTED;	/* never the previous operation's evidence */
 	if (c->ops->del(c->ctx, flags, key_id, &ack) != 0)
 		return -1;
 	*state = ele_classify(flags, &ack);
