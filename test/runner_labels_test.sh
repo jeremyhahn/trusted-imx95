@@ -316,4 +316,24 @@ check "a PyYAML that would load from inside the checkout is refused" 1 "imports 
 run bash -c "[ ! -e '$rl/marker-yaml' ]"
 check "the refused checkout PyYAML was not imported" 0
 
+# v1.54 local change (#159, verify 16): a workflow_dispatch on ci/deps-bump is
+# refused, as on main's v1.35.2 file, so no full-tier run waits on a
+# Releasability (push) status the producer never makes for that branch. The
+# test evaluates the preflight's own dispatch condition.
+ciy="$ROOT/.github/workflows/ci.yml"
+dl=$(grep -m1 -F 'if [ "$EVENT" = workflow_dispatch ]' "$ciy")
+dl=${dl#"${dl%%[![:space:]]*}"}
+dispatch() { EVENT=workflow_dispatch REF=$1 bash -c "verdict=run; $dl verdict=refused; fi; echo verdict=\$verdict" 2>/dev/null; }
+run dispatch refs/heads/ci/deps-bump
+check "preflight: a dispatch on ci/deps-bump is refused" 0 "verdict=refused"
+run dispatch refs/heads/topic
+check "preflight: a dispatch on another branch is refused" 0 "verdict=refused"
+run dispatch refs/heads/main
+check "preflight: a dispatch on main still runs" 0 "verdict=run"
+if grep -qE "github\.ref == 'refs/heads/ci/deps-bump'" "$ciy"; then
+	fail "ci.yml: no full-tier expression admits ci/deps-bump" "$(grep -nE "github\.ref == 'refs/heads/ci/deps-bump'" "$ciy")"
+else
+	pass "ci.yml: no full-tier expression admits ci/deps-bump"
+fi
+
 finish

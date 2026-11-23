@@ -1041,7 +1041,7 @@ env:
   # pull_request run, is.
   # Steps read it as env.CI_FULL_TIER; a job-level `if:` cannot read env, so
   # the integration job repeats this expression. Keep them equal.
-  CI_FULL_TIER: ${{ github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/deps-bump' }}
+  CI_FULL_TIER: ${{ github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
   # v1.41: `ci:full` on a PR turns off the docs-only and lint-gates path
   # scopes; it selects no tier.
   CI_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
@@ -1228,12 +1228,14 @@ jobs:
           # v1.30 (fixes 3 and 5): the refusals come first.
           # v1.39 (ruling 640): deps-bump.yml dispatches this workflow on
           # ci/deps-bump, because the PR it opens with GITHUB_TOKEN starts no
-          # pull_request run. That dispatch is the full tier (v1.41,
-          # CI_FULL_TIER), so it is not refused. v1.42: scans.yml (which
-          # replaces deps-bump.yml, ruling 742 (1)) dispatches it the same way.
-          if [ "$EVENT" = workflow_dispatch ] && [ "$REF" != refs/heads/main ] && [ "$REF" != refs/heads/ci/deps-bump ]; then
+          # pull_request run. LOCAL CHANGE (#159, verify 16): v1.41 let that
+          # dispatch run the full tier; here it is refused, as on main's
+          # v1.35.2 file, because a full run on ci/deps-bump would wait on a
+          # Releasability (push) status the producer never makes for that
+          # branch. The PR tier covers the bump through the pull_request run.
+          if [ "$EVENT" = workflow_dispatch ] && [ "$REF" != refs/heads/main ]; then
             verdict=refused
-            echo "::error::workflow_dispatch on $REF: a dispatch runs on main and ci/deps-bump only (ci-template v1.30, v1.41); every job skips and CI Gate fails"
+            echo "::error::workflow_dispatch on $REF: a dispatch runs on main only (ci-template v1.30; ci/deps-bump is refused, #159); every job skips and CI Gate fails"
           elif [ "$EVENT" = pull_request ] && [ "${HEAD_REF#lane-ckpt/}" != "$HEAD_REF" ]; then
             verdict=refused
             echo "::error::a pull request from checkpoint branch $HEAD_REF: a checkpoint branch never opens a PR (ci-template v1.30); every job skips and CI Gate fails"
@@ -2014,7 +2016,7 @@ jobs:
           # is left out of the dump, its `run` replaced by a marker), and (c) the
           # reading job listing that job in its own `needs`.
           PRODUCER_JOB = "preflight"
-          PRODUCER_SHA256 = "6f7b2b95460b2c3f3162810d422ec90993f5908ad143cbe0f07dcafda23d2d9d"
+          PRODUCER_SHA256 = "d19a35824f5fd2efc5b927f13b2d46a480d80828a60d7c093c9519270c54fb5e"
           SELF_STEP = "Runner labels (ruling 633)"
 
 
@@ -3146,7 +3148,7 @@ jobs:
     needs: preflight   # v1.34
     # v1.41 (ruling 742 (2)): every PR, as main; a docs-only PR skips it, as
     # it skips build and make coverage, and CI Gate reads it as `code`.
-    if: ${{ (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/deps-bump') && !github.event.pull_request.draft && needs.preflight.outputs.verdict == 'run' && needs.preflight.outputs.docs_only != 'true' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') && !github.event.pull_request.draft && needs.preflight.outputs.verdict == 'run' && needs.preflight.outputs.docs_only != 'true' }}
     runs-on: ${{ github.server_url == 'https://github.com' && fromJSON(needs.preflight.outputs.runner_docker) || 'bigdisk' }}   # v1.48
     timeout-minutes: 60       # CUSTOMIZE: ceil(1.5 x this job's 72-hour p95), ci-standard.md §12
     env:
