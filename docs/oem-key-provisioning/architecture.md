@@ -69,7 +69,7 @@ A host-side check compares the SRK table hash of a public SRK set with an expect
 ([srk-hash-check.md](srk-hash-check.md), provisional). Programming the hash is the owner's decision alone.
 
 A host-side test builds and verifies a key-exchange signed message on a test SRK set; it sends nothing to a device
-([key-exchange-msg.md](key-exchange-msg.md), provisional).
+([key-exchange-msg.md](key-exchange-msg.md); wrapped-key blob format on test keys: [key-import-tlv.md](key-import-tlv.md), provisional).
 
 ## Order of the steps
 

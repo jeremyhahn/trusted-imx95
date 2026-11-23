@@ -47,7 +47,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test \
+	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -208,6 +208,9 @@ ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used S
 
 okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a throwaway test SRK set (pinned SPSDK; message format only, sends nothing, no board, no fuse)
 	@test/key_exchange_test.sh
+
+okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
+	@test/key_import_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
