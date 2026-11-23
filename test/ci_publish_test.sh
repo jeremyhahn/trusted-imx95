@@ -39,7 +39,8 @@ case "$1 $2 $3" in
 "buildx imagetools create")
   # Promotion makes $remote visible: a consumer on the shared daemon pulls it
   # and records the published ID (TOOLCHAIN_VERIFIED_ID) before this job exits.
-  if [ "${CREATE_RC:-0}" = 0 ]; then echo "$BUILT_ID" > "$STUB_DIR/consumer"; fi
+  # PROMOTE_VISIBLE=1 with CREATE_RC!=0: the registry accepted it, the response was lost.
+  if [ "${CREATE_RC:-0}" = 0 ] || [ "${PROMOTE_VISIBLE:-0}" = 1 ]; then echo "$BUILT_ID" > "$STUB_DIR/consumer"; fi
   exit "${CREATE_RC:-0}" ;;
 "image rm -f")
   # Removing an ID a consumer recorded is what the publisher must not do.
@@ -249,6 +250,15 @@ expect "publish: the daemon never holds a staging tag, so none is removed" nolog
 expect "publish: never removes the trusted tag from the daemon" nolog '^docker image rm .*:abc-main'
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
 expect "publish: no image rm when the build gave no ID" nolog '^docker image rm'
+
+# Codex round 5 (P1): the promotion becomes visible and a consumer records the
+# ID, but imagetools returns nonzero (lost response). Ownership is released
+# before the promotion, so the failed publish still never removes that image.
+run pub CREATE_RC=1 PROMOTE_VISIBLE=1
+check "publish: an ambiguous promotion failure still fails" 1 "nothing was published under"
+expect "publish: the consumer recorded the ID despite the failed promotion" test "$(cat "$d/consumer" 2>/dev/null)" = "$ID"
+expect "publish: an ambiguous promotion failure removes no image" nolog '^docker image (rm|rmi)'
+expect "publish: an ambiguous promotion failure never removes the consumer's ID" nolog 'consumer-image-removed'
 
 # v1.54 (Codex P1): the release job is the only job on its pool, so it runs the
 # reaper itself, after the publish step, whether that step published, found the

@@ -247,16 +247,21 @@ case ${1:-} in
       || die "the staged manifest $mdigest has no config digest; nothing was published under $remote"
     [ "$pushed" = "$id" ] \
       || die "the staged manifest $mdigest has config $pushed, not the checked image $id; nothing was published under $remote"
-    DOCKER_CONFIG=$cfg docker buildx imagetools create --tag "$remote" "$repo@$mdigest" >/dev/null \
-      || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote"
-    # LOCAL CHANGE (#159, verify 5): once $remote is visible another job on the
-    # shared daemon may pull it and record this same ID. The image is then no
-    # longer this job's alone, so cleanup leaves it to the age-aware reaper. The
+    # LOCAL CHANGE (#159, verify 5; Codex round 5): the registry may accept the
+    # promotion before imagetools reports success, and a lost response or a
+    # cancel looks like a failure. Once $remote may be visible another job on
+    # the shared daemon may pull it and record this same ID. The image is then
+    # no longer this job's alone, so cleanup ownership is released BEFORE the
+    # promotion starts: whether it succeeds, fails or is cancelled, the image
+    # is left to the age-aware reaper. A failure before this point (build,
+    # verify, upload) still removes the image. The
     # build above carries the Makefile's ci.reap.repository label (the local
     # toolchain repository), which is how the reaper finds this untagged image.
     # The publish-images job runs reap-stale-ci-stacks.sh in an `if: always()`
     # step after this one (v1.54), so the release daemon is reaped too.
     built_id=""
+    DOCKER_CONFIG=$cfg docker buildx imagetools create --tag "$remote" "$repo@$mdigest" >/dev/null \
+      || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote (the built image is left to the reaper)"
     echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;
   *)
