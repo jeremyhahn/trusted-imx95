@@ -727,7 +727,7 @@ check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a l
 # job on the shared daemon can run:
 #   IMG_RACE_PULL   after any pull, the toolchain's remote tag is moved to an
 #                   older image the registry still holds ($IMG_OLD, $DOLD)
-#   IMG_RACE_PUSH   a push first finds the tag moved to $IMG_EVIL
+#   IMG_RACE_PUSH   on every call, each daemon tag is moved to $IMG_EVIL
 #   IMG_REG_OVERWRITE  after a buildx push, the registry's tag names $DOLD
 #   IMG_NOBUILDX    the runner has no buildx plugin
 mkdir -p "$TMP_ROOT/imgbin"
@@ -738,6 +738,12 @@ key() { printf '%s' "$1" | tr '/:@' '___'; }
 s=$IMG_STATE
 r=$s/registry
 h() { printf '%s' "$1" | sha256sum | cut -c1-64; }
+if [ -n "${IMG_RACE_PUSH:-}" ]; then
+	# another job on the shared daemon moves every tag it can see (an image ID is immutable)
+	for f in "$s"/*; do
+		case ${f##*/} in sha256_* | *.digests) ;; *) [ -f "$f" ] && echo "$IMG_EVIL" >"$f" ;; esac
+	done
+fi
 case "$1 ${2:-}" in
 "image inspect")
 	ref=${*: -1}
@@ -823,7 +829,7 @@ case "$1 ${2:-}" in
 			esac
 		done
 		if [ -n "$load" ] && [ -z "$out" ]; then
-			id=sha256:$(h "$target")
+			id=sha256:$(h "$PUB_CONFIG_JSON")
 			echo "$id" >"$s/$(key "$id")"
 			printf '%s' "$id" >"$iid"
 			exit 0
@@ -839,7 +845,13 @@ case "$1 ${2:-}" in
 		if [ -n "${IMG_REG_OVERWRITE:-}" ]; then echo "$DOLD" >"$r/$(key "$name")"; fi ;;
 	*) exit 3 ;;
 	esac ;;
-"save "*) while [ $# -gt 1 ]; do [ "$1" = -o ] && : >"$2"; shift; done ;;
+"save "*)
+	# an archive whose config member is $PUB_CONFIG_JSON, as `docker save` writes one
+	while [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done
+	t=$(mktemp -d); mkdir -p "$t/blobs/sha256"
+	printf '%s' "$PUB_CONFIG_JSON" >"$t/blobs/sha256/cfg"
+	printf '[{"Config":"blobs/sha256/cfg"}]' >"$t/manifest.json"
+	tar -C "$t" -cf "$out" manifest.json blobs; rm -rf "$t" ;;
 "create "* | "run "*)
 	echo "$*" >>"$IMG_STARTS"
 	case " $* " in *" --entrypoint du "*) printf '4\t/c\n' ;; esac ;;
@@ -866,6 +878,9 @@ rrepo=forge.example/ns/trusted-imx95-toolchain
 IMG_REMOTE=$rrepo:abc-main
 export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD IMG_OLD IMG_EVIL DGOOD DOLD IMG_REMOTE
 tc_built=sha256:$(printf '%s' toolchain | sha256sum | cut -c1-64)
+PUB_CONFIG_JSON=$(printf '%s' '{"stub":"the built toolchain config"}')
+pub_built=sha256:$(printf '%s' "$PUB_CONFIG_JSON" | sha256sum | cut -c1-64)
+export PUB_CONFIG_JSON
 it_built=sha256:$(printf '%s' integration | sha256sum | cut -c1-64)
 skey() { printf '%s' "$1" | tr '/:@' '___'; }
 lkey=$(skey "$ltag")
@@ -1062,7 +1077,33 @@ case "\$*" in
 *toolchain-image*) echo $ltag ;;
 esac
 EOF
-chmod +x "$pubrepo/scripts/"* "$pubrepo/mkbin/make"
+# The pinned registry client is a stub crane in a tarball the stub curl serves.
+# It reads the archive it is given (as crane push does) and writes the
+# registry stub: the staging tag names a manifest whose config is the
+# archive's config member.
+mkdir -p "$pubrepo/cranepkg"
+cat >"$pubrepo/cranepkg/crane" <<'EOF'
+#!/bin/sh
+echo "crane $*" >>"$IMG_LOG"
+[ "$1" = push ] || exit 2
+r=$IMG_STATE/registry
+[ -d "$r" ] || exit 1
+cp=$(tar -xOf "$2" manifest.json | jq -er '.[0].Config') || exit 1
+cfg=sha256:$(tar -xOf "$2" "$cp" | sha256sum | cut -c1-64)
+d=sha256:$(printf '%s' "pushed:$cfg" | sha256sum | cut -c1-64)
+key() { printf '%s' "$1" | tr '/:@' '___'; }
+echo "$d" >"$r/$(key "$3")"
+echo "$cfg" >"$r/$(key "$d")"
+EOF
+chmod +x "$pubrepo/cranepkg/crane"
+tar -czf "$pubrepo/crane.tgz" -C "$pubrepo/cranepkg" crane
+cat >"$pubrepo/mkbin/curl" <<'EOF'
+#!/bin/sh
+while [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done
+cp "$(dirname "$0")/../crane.tgz" "$out"
+EOF
+sed -i "s/crane_sha256=[0-9a-f]*\$/crane_sha256=$(sha256sum "$pubrepo/crane.tgz" | cut -c1-64)/" "$pubrepo/scripts/ci-image-cache.sh"
+chmod +x "$pubrepo/scripts/"* "$pubrepo/mkbin/make" "$pubrepo/mkbin/curl"
 pubrace() { (cd "$pubrepo" && env PATH="$pubrepo/mkbin:$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main \
 	GITHUB_SERVER_URL=https://forge.example CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" \
 	RUNNER_TEMP="$rt" RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token "$@" bash scripts/ci-image-cache.sh publish); }
@@ -1071,16 +1112,26 @@ trusted_cfg() { # the config digest the registry's trusted tag names, or empty
 	d=$(cat "$IMG_STATE/registry/$(skey "$IMG_REMOTE")" 2>/dev/null) || return 0
 	cat "$IMG_STATE/registry/$(skey "$d")" 2>/dev/null || true
 }
+regcontains() { grep -rqF "$1" "$IMG_STATE/registry" 2>/dev/null; }
 seed empty
+: >"$IMG_LOG"
 run pubrace
 check "ci-image-cache: publish promotes the checked image to the trusted tag by digest" 0 "promoted by digest"
-expect "ci-image-cache: the trusted tag's config is the built image" test "$(trusted_cfg)" = "$tc_built"
+expect "ci-image-cache: the trusted tag's config is the built image" test "$(trusted_cfg)" = "$pub_built"
+nodaemonpush() { ! grep -qE '^(tag|push) ' "$IMG_LOG"; }
+expect "ci-image-cache: publish made no docker tag or docker push call" nodaemonpush
+# The race: another job moves every tag the shared daemon holds. Publish
+# keeps no tag there and uploads the archive it checked, so the swapped image
+# reaches the registry under no tag and no digest.
 seed empty
+: >"$IMG_LOG"
 run pubrace IMG_RACE_PUSH=1
-if [ "$RC" != 0 ] && [ -z "$(trusted_cfg)" ]; then
-	pass "ci-image-cache: a retag between the tag and the push never reaches the trusted tag"
+check "ci-image-cache: publish still succeeds while another job retags the daemon's tags" 0 "promoted by digest"
+expect "ci-image-cache: the trusted tag still holds the built image under the race" test "$(trusted_cfg)" = "$pub_built"
+if regcontains "$IMG_EVIL"; then
+	fail "ci-image-cache: the swapped image reaches the registry under no tag and no digest" "$(grep -r . "$IMG_STATE/registry")"
 else
-	fail "ci-image-cache: a retag between the tag and the push never reaches the trusted tag" "rc $RC; trusted config '$(trusted_cfg)'; $OUT"
+	pass "ci-image-cache: the swapped image reaches the registry under no tag and no digest"
 fi
 cd "$here" || exit 1
 

@@ -172,18 +172,16 @@ case ${1:-} in
     # image is checked. The build only loads the image into the daemon; its ID
     # (the config digest, which no other job can retag) is read from the
     # build's own --iidfile, ci-image-history.sh and trivy run on that ID, and
-    # only then does `docker push` send it. The pushed manifest's config digest
-    # must be that ID, or publish fails and the tag must be deleted by hand.
+    # only then is the archive of it uploaded (below). The uploaded manifest's
+    # config digest must be that ID, or publish fails and $remote is unwritten.
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     work=$(mktemp -d "$PWD/.ci-image-publish.XXXXXX")
     built_id=""
-    stage=""
-    # Best effort, on every exit: remove the image this job built and the tag
-    # it applied, so a runner keeps no image the job loaded. Only an ID that
-    # came from this build's --iidfile is ever removed.
+    # Best effort, on every exit: remove the image this job built, so a runner
+    # keeps no image the job loaded. Only an ID that came from this build's
+    # --iidfile is ever removed.
     cleanup() {
       if [ -n "$built_id" ]; then
-        [ -z "$stage" ] || docker image rm -f "$stage" >/dev/null 2>&1 || true
         docker image rm -f "$built_id" >/dev/null 2>&1 || true
       fi
       rm -rf "$cfg" "$work"
@@ -198,23 +196,50 @@ case ${1:-} in
     "$here/ci-image-history.sh" "$id" \
       || die "the history check refused $id; nothing was pushed"
     docker save -o "$work/image.tar" "$id" || die "docker save of $id failed; nothing was pushed"
+    # The archive is what is uploaded, so its own config must be the checked
+    # ID: one image, and the sha256 of its config member is the ID.
+    [ "$(tar -xOf "$work/image.tar" manifest.json 2>/dev/null | jq -r 'length' 2>/dev/null)" = 1 ] \
+      || die "the saved archive of $id does not hold exactly one image; nothing was published under $remote"
+    cfgpath=$(tar -xOf "$work/image.tar" manifest.json 2>/dev/null | jq -er '.[0].Config | select(type == "string")' 2>/dev/null) \
+      || die "the saved archive of $id names no config; nothing was published under $remote"
+    case $cfgpath in /* | *..*) die "the saved archive of $id names an unsafe config path; nothing was published under $remote" ;; esac
+    archive_id=sha256:$(tar -xOf "$work/image.tar" "$cfgpath" 2>/dev/null | sha256sum | cut -c1-64)
+    [ "$archive_id" = "$id" ] \
+      || die "the saved archive's config is $archive_id, not the checked image $id; nothing was published under $remote"
     tarname=$(basename "$work")/image.tar
     "$here/in-toolchain-image.sh" "$id" \
       trivy image --input "$tarname" --ignore-unfixed --skip-dirs /opt/go/mod --severity CRITICAL,HIGH --exit-code 1 \
       || die "trivy refused $id; nothing was pushed"
+    # The registry client: crane, pinned by exact version and SHA-256 and
+    # failing closed on a mismatch. It runs on the host, never inside the image
+    # under check, and is fetched before the login so no credential exists yet.
+    crane_version=0.22.1
+    crane_url=https://github.com/google/go-containerregistry/releases/download/v$crane_version/go-containerregistry_Linux_x86_64.tar.gz
+    crane_sha256=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+    curl -fsSL --proto '=https' --tlsv1.2 --max-time 180 -o "$work/crane.tgz" "$crane_url" \
+      || die "the download of the pinned registry client (crane $crane_version) failed; nothing was published under $remote"
+    echo "$crane_sha256  $work/crane.tgz" | sha256sum -c - >/dev/null 2>&1 \
+      || die "the SHA-256 of the registry client download is not the pinned one; nothing was published under $remote"
+    mkdir -m 700 "$work/bin"
+    tar -xzf "$work/crane.tgz" -C "$work/bin" crane \
+      || die "the pinned registry client archive holds no crane; nothing was published under $remote"
+    crane=$work/bin/crane
     printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null \
       || die "the registry login for $host failed; nothing was pushed"
-    # LOCAL CHANGE (#159, verify 18): the trusted $remote tag is never a daemon
-    # tag and is never pushed. The checked ID is tagged only with a staging tag
-    # no other job can guess (job-unique randomness and the run id), pushed
-    # under that tag, and the staging manifest's config digest must be the
-    # checked ID. Only then is $remote pointed at that manifest, by digest, on
-    # the registry side. A swapped staging image never reaches $remote.
-    # The staging tag stays in the registry (no CLI call deletes a tag).
-    stage="$repo:stage-${GITHUB_RUN_ID:-0}-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-    docker tag "$id" "$stage" || die "docker tag of $id failed; nothing was published under $remote"
-    DOCKER_CONFIG=$cfg docker push "$stage" >/dev/null || die "the push of the staging tag failed; nothing was published under $remote"
-    mdigest=$(registry_digest "$stage") \
+    # LOCAL CHANGE (#159, verify 19): publish makes no `docker tag` and no
+    # `docker push`; nothing of the shared daemon's tag namespace is on its
+    # path. The checked artifact is the job-private archive saved above (in
+    # the mode-700 work directory) and its config digest, read from the
+    # archive itself, must be the checked ID. That archive is uploaded by a
+    # pinned registry client that reads the file, not the daemon, to a staging
+    # tag no other job can guess (it needs our credentials to write at all).
+    # The staged manifest's config digest must be the checked ID. Only then is
+    # $remote pointed at that manifest, by digest, on the registry side. The
+    # staging tag stays in the registry: it can only ever hold checked content.
+    staged="$repo:stage-${GITHUB_RUN_ID:-0}-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    DOCKER_CONFIG=$cfg "$crane" push "$work/image.tar" "$staged" >/dev/null \
+      || die "the upload of the checked archive failed; nothing was published under $remote"
+    mdigest=$(registry_digest "$staged") \
       || die "the registry gave no digest for the staging tag; nothing was published under $remote"
     pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$repo@$mdigest" --raw 2>/dev/null \
       | jq -er '.config.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' 2>/dev/null) \
