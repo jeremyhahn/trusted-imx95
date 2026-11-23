@@ -33,6 +33,7 @@ static void open_client(struct ele_hsm_ctx *x, struct ele_client *c, bool split)
 	uint32_t nonce = 1234;
 
 	memset(&fake, 0, sizeof(fake));
+	memset(ks_seen, 0, sizeof(*ks_seen));
 	CHECK(ele_hsm_open(x, 5, &nonce) == 0, "open");
 	CHECK(nonce == 0, "the caller's nonce is erased after open");
 	x->counter_split_confirmed = split;
@@ -40,18 +41,17 @@ static void open_client(struct ele_hsm_ctx *x, struct ele_client *c, bool split)
 }
 
 /* The library argument structure that held the nonce, as the hook sees it
- * after the backend erased it. */
-static int wiped_calls, wiped_nonzero;
-
+ * after the backend erased it. The hook runs in the key-store child, so it
+ * records into the shared mapping. */
 static void wipe_hook(const void *p, size_t n)
 {
 	const unsigned char *b = p;
 	size_t i;
 
-	wiped_calls++;
+	ks_seen->hook_calls++;
 	for (i = 0; i < n; i++)
 		if (b[i])
-			wiped_nonzero++;
+			ks_seen->hook_nonzero++;
 }
 
 static int lock_ok(void)
@@ -104,9 +104,10 @@ static void lock_and_scrub(void)
 	ele_hsm_lockall_override = lock_fails;
 	scrubs = 0;
 	memset(&fake, 0, sizeof(fake));
+	memset(ks_seen, 0, sizeof(*ks_seen));
 	nonce = 0xdeadbeef;
 	CHECK(ele_hsm_open(&x, 5, &nonce) == ELE_HSM_OPEN_NOLOCK, "open refused when the process cannot be locked");
-	CHECK(nonce == 0 && fake.ks_nonce == 0 && fake.ks_id == 0, "the nonce is erased and never reached the library");
+	CHECK(nonce == 0 && ks_seen->nonce == 0 && ks_seen->calls == 0, "the nonce is erased and never reached the library");
 	ele_hsm_lockall_override = lock_ok;
 	ele_hsm_scrub_hook = NULL;
 }
@@ -120,21 +121,24 @@ static void nonce_erasure(void)
 
 	/* Success. */
 	memset(&fake, 0, sizeof(fake));
+	memset(ks_seen, 0, sizeof(*ks_seen));
 	nonce = 0xdeadbeef;
 	CHECK(ele_hsm_open(&x, 5, &nonce) == 0, "open for the erasure test");
-	CHECK(fake.ks_nonce == 0xdeadbeef, "the library saw the nonce");
-	CHECK(nonce == 0, "nonce zero after a successful open");
-	CHECK(wiped_calls == 1 && wiped_nonzero == 0, "authentication_nonce copy zero after a successful open");
+	CHECK(ks_seen->nonce == 0xdeadbeef, "the library saw the nonce");
+	CHECK(nonce == 0, "the parent's nonce buffer is zero after a successful open");
+	CHECK(ks_seen->hook_calls == 1 && ks_seen->hook_nonzero == 0,
+	      "the child's authentication_nonce copy is zero after a successful open");
 	ele_hsm_close(&x);
 
 	/* The key store refuses the nonce. */
 	memset(&fake, 0, sizeof(fake));
+	memset(ks_seen, 0, sizeof(*ks_seen));
 	fake.ks_err = OTHER_ERR;
-	wiped_calls = wiped_nonzero = 0;
 	nonce = 0xdeadbeef;
 	CHECK(ele_hsm_open(&x, 5, &nonce) != 0, "open fails when the key store refuses");
-	CHECK(nonce == 0, "nonce zero after a failed key store open");
-	CHECK(wiped_calls == 1 && wiped_nonzero == 0, "authentication_nonce copy zero after a failed key store open");
+	CHECK(nonce == 0, "the parent's nonce buffer is zero after a failed key store open");
+	CHECK(ks_seen->hook_calls == 1 && ks_seen->hook_nonzero == 0,
+	      "the child's authentication_nonce copy is zero after a failed key store open");
 
 	/* The session does not open: the key store service is never reached. */
 	memset(&fake, 0, sizeof(fake));
@@ -162,15 +166,58 @@ static void nonce_erasure(void)
 			if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0)
 				_exit(77);
 			memset(&fake, 0, sizeof(fake));
+			memset(ks_seen, 0, sizeof(*ks_seen));
 			if (ele_hsm_open(&x, 5, &nn) == 0)
 				_exit(77); /* lock is not limited here */
-			_exit(nn == 0 && fake.ks_nonce == 0 ? 0 : 1);
+			_exit(nn == 0 && ks_seen->nonce == 0 ? 0 : 1);
 		}
 		CHECK(pid > 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status), "mlock child ran");
 		if (WIFEXITED(status) && WEXITSTATUS(status) == 77)
 			printf("skip: memory locking is not limited for this user\n");
 		else
 			CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "open fails closed when the nonce page cannot be locked");
+	}
+}
+
+/* The child that makes the vendor call can die or lie: every such outcome is
+ * a failed open, and the parent's nonce buffer is zero regardless. */
+static void child_failures(void)
+{
+	static const struct {
+		const char *what;
+		uint32_t mode;
+		size_t short_len;
+	} cases[] = {
+		{ "a child killed by a signal", 1, 0 },
+		{ "a child that exits nonzero", 2, 0 },
+		{ "a short result (0 bytes)", 0, 1 },
+		{ "a short result (7 of 8 bytes)", 0, 7 },
+	};
+	size_t k;
+
+	for (k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+		struct ele_hsm_ctx x;
+		uint32_t nonce = 0xdeadbeef;
+		char msg[96];
+
+		memset(&fake, 0, sizeof(fake));
+		memset(ks_seen, 0, sizeof(*ks_seen));
+		fake.ks_mode = cases[k].mode;
+		ele_hsm_result_len_override = cases[k].short_len;
+		snprintf(msg, sizeof(msg), "open fails closed on %s", cases[k].what);
+		CHECK(ele_hsm_open(&x, 5, &nonce) != 0 && !x.open && x.key_store == 0, msg);
+		snprintf(msg, sizeof(msg), "the parent's nonce buffer is zero after %s", cases[k].what);
+		CHECK(nonce == 0, msg);
+		ele_hsm_result_len_override = 0;
+	}
+	/* A refusal by the library, sent intact, also fails. */
+	{
+		struct ele_hsm_ctx x;
+		uint32_t nonce = 0xdeadbeef;
+
+		memset(&fake, 0, sizeof(fake));
+		fake.ks_err = OTHER_ERR;
+		CHECK(ele_hsm_open(&x, 5, &nonce) != 0 && nonce == 0, "a library refusal fails the open");
 	}
 }
 
@@ -189,11 +236,13 @@ int main(void)
 
 	/* The store is loaded with strict and counted updates, never created. */
 	open_client(&x, &c, true);
-	CHECK(fake.ks_id == 5 && fake.ks_nonce == 1234, "store id and nonce passed");
-	CHECK(fake.ks_flags == (HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
-				HSM_SVC_KEY_STORE_FLAGS_MONOTONIC),
+	CHECK(ks_seen->id == 5 && ks_seen->nonce == 1234, "store id and nonce passed");
+	CHECK(ks_seen->flags == (HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
+				 HSM_SVC_KEY_STORE_FLAGS_MONOTONIC),
 	      "key store opened LOAD|STRICT_OPERATION|MONOTONIC");
-	CHECK((fake.ks_flags & HSM_SVC_KEY_STORE_FLAGS_CREATE) == 0, "key store never CREATE");
+	CHECK((ks_seen->flags & HSM_SVC_KEY_STORE_FLAGS_CREATE) == 0, "key store never CREATE");
+	CHECK(ks_seen->pid != 0 && ks_seen->pid != (uint32_t)getpid(),
+	      "the vendor call that marshals the credential runs in a different pid");
 
 	/* Generate: strict and counter flags, no plaintext key. */
 	st = ELE_NOT_COMMITTED;
@@ -287,7 +336,10 @@ int main(void)
 
 	ele_hsm_close(&x);
 	lock_and_scrub();
+	ele_hsm_wipe_hook = wipe_hook;
 	nonce_erasure();
+	child_failures();
+	ele_hsm_wipe_hook = NULL;
 	if (fails)
 		return 1;
 	printf("ele_hsm_backend_test: all passed\n");

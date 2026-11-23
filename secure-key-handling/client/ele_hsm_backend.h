@@ -38,6 +38,11 @@ int ele_hsm_open(struct ele_hsm_ctx *ctx, uint32_t key_store_id, uint32_t *nonce
  * nonce) has been erased, with its address and size, so a test can check the
  * erasure. NULL in production. */
 extern void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
+/* Test hook, 0 in production: when nonzero and below the result size, the
+ * key-store child writes only this many bytes of its result (a short read). */
+extern size_t ele_hsm_result_len_override;
+/* The key-store open, the one call that marshals the nonce, runs in a forked
+ * child; the wipe hook is called in that child. */
 
 /* ele_hsm_open locks all process memory (mlockall) before the library sees the
  * nonce, and fails closed when that fails. Test hooks, NULL in production:

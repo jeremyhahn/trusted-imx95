@@ -9,8 +9,11 @@
  */
 #include <stdarg.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
@@ -20,6 +23,16 @@
 #include "ele_hsm_fake.h"
 
 struct ele_fake fake;
+struct ele_ks_seen *ks_seen;
+
+static void __attribute__((constructor)) seen_init(void)
+{
+	void *m = mmap(NULL, sizeof(*ks_seen), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
+	if (m == MAP_FAILED)
+		abort();
+	ks_seen = m;
+}
 
 static void note(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void note(const char *fmt, ...)
@@ -70,10 +83,17 @@ hsm_err_t hsm_open_key_store_service(hsm_hdl_t session_hdl, open_svc_key_store_a
 				     hsm_hdl_t *key_store_hdl)
 {
 	(void)session_hdl;
-	fake.ks_flags = args->flags;
-	fake.ks_id = args->key_store_identifier;
-	fake.ks_nonce = args->authentication_nonce;
-	note("key_store id=%u flags=0x%x", (unsigned)args->key_store_identifier, (unsigned)args->flags);
+	ks_seen->flags = args->flags;
+	ks_seen->id = args->key_store_identifier;
+	ks_seen->nonce = args->authentication_nonce;
+	ks_seen->pid = (uint32_t)getpid();
+	ks_seen->calls++;
+	note("key_store id=%u flags=0x%x pid=%d ppid=%d", (unsigned)args->key_store_identifier, (unsigned)args->flags,
+	     (int)getpid(), (int)getppid());
+	if (fake.ks_mode == 1)
+		raise(SIGKILL);
+	if (fake.ks_mode == 2)
+		_exit(3);
 	if (fake.ks_err)
 		return (hsm_err_t)fake.ks_err;
 	*key_store_hdl = 2;

@@ -5,8 +5,12 @@
  * internal/hsm_key_store.h, hsm_key_generate.h, hsm_delete_key.h, hsm_utils.h
  * at the pinned commit; ele_hsm_consts_check.c asserts their values.
  */
+#include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "hsm_api.h"
@@ -18,11 +22,14 @@ void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 
 int (*ele_hsm_lockall_override)(void);
 void (*ele_hsm_scrub_hook)(size_t len);
+size_t ele_hsm_result_len_override;
 
 /* The library copies the nonce into its own stack buffer (process_sab_msg's
  * cmd[MAX_CMD_WORD_SZ = 256] words, plus the response buffer and frames) and
- * does not wipe it. This many bytes of dead stack below the caller are zeroed
- * after the library call returns: best effort, see client.md. */
+ * does not wipe it. That call runs in a child process (ks_open_isolated),
+ * which is what removes the copy. This many bytes of dead stack are also
+ * zeroed after the call, in both processes: defence in depth, best effort,
+ * and not evidence that the vendor's copy is erased (client.md). */
 #define ELE_SCRUB_BYTES 16384u
 
 static int lock_process(void)
@@ -163,16 +170,128 @@ static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack
 
 const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 
+/* What the child reports: the library's status and the new service handle,
+ * nothing else. The parent accepts exactly this many bytes. */
+struct ks_result {
+	int32_t err;
+	uint32_t handle;
+};
+
+/* The child. It owns the only live copy of the credential after the fork: it
+ * is non-dumpable and locked, builds the library's arguments in its own
+ * memory, makes the one vendor call, erases what it can reach, writes the
+ * result and leaves with _exit() (no atexit handler, no stdio flush). Its
+ * pages, the vendor stack frame included, are released when it exits. */
+__attribute__((noreturn)) static void ks_child(int wfd, hsm_hdl_t session, uint32_t key_store_id,
+					       uint32_t *nonce)
+{
+	open_svc_key_store_args_t ks;
+	struct ks_result res;
+	size_t n = sizeof(res);
+	const unsigned char *p = (const unsigned char *)&res;
+	hsm_hdl_t h = 0;
+
+	if (prctl(PR_SET_DUMPABLE, 0) != 0 || lock_process() != 0)
+		_exit(3);
+	memset(&ks, 0, sizeof(ks));
+	ks.key_store_identifier = key_store_id;
+	ks.authentication_nonce = *nonce;
+	/* The store is loaded, never created here; both update flags are set so
+	 * the store's updates are strict and counted. */
+	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
+		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
+	memset(&res, 0, sizeof(res));
+	res.err = (int32_t)hsm_open_key_store_service(session, &ks, &h);
+	res.handle = h;
+	ele_secure_zero(nonce, sizeof(*nonce));
+	ele_secure_zero(&ks, sizeof(ks));
+	if (ele_hsm_wipe_hook)
+		ele_hsm_wipe_hook(&ks, sizeof(ks));
+	scrub_stack();
+	if (ele_hsm_result_len_override && ele_hsm_result_len_override < n)
+		n = ele_hsm_result_len_override;
+	while (n > 0) {
+		ssize_t w = write(wfd, p, n);
+
+		if (w < 0 && errno == EINTR)
+			continue;
+		if (w <= 0)
+			_exit(4);
+		p += w;
+		n -= (size_t)w;
+	}
+	_exit(0);
+}
+
+/* Run hsm_open_key_store_service in a forked child. Returns 0 with the handle
+ * only when the child exited 0 and sent exactly one result; a signal, a
+ * nonzero status, a short or long result, or any failure to fork or read is a
+ * failure. *nonce is erased on every path. */
+static int ks_open_isolated(hsm_hdl_t session, uint32_t key_store_id, uint32_t *nonce, hsm_hdl_t *h)
+{
+	struct ks_result res;
+	unsigned char buf[sizeof(res) + 1];
+	size_t got = 0;
+	int fd[2], status = 0, rd_ok = 1;
+	pid_t pid;
+
+	if (pipe(fd) != 0) {
+		ele_secure_zero(nonce, sizeof(*nonce));
+		return -1;
+	}
+	pid = fork();
+	if (pid < 0) {
+		close(fd[0]);
+		close(fd[1]);
+		ele_secure_zero(nonce, sizeof(*nonce));
+		return -1;
+	}
+	if (pid == 0) {
+		close(fd[0]);
+		ks_child(fd[1], session, key_store_id, nonce);
+	}
+	/* Right after the fork: the parent's copy goes before anything else. */
+	ele_secure_zero(nonce, sizeof(*nonce));
+	close(fd[1]);
+	for (;;) {
+		ssize_t r = read(fd[0], buf + got, sizeof(buf) - got);
+
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r < 0)
+			rd_ok = 0;
+		if (r <= 0)
+			break;
+		got += (size_t)r;
+		if (got == sizeof(buf))
+			break;
+	}
+	close(fd[0]);
+	while (waitpid(pid, &status, 0) < 0) {
+		if (errno != EINTR) {
+			ele_secure_zero(buf, sizeof(buf));
+			return -1;
+		}
+	}
+	if (!rd_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || got != sizeof(res)) {
+		ele_secure_zero(buf, sizeof(buf));
+		return -1;
+	}
+	memcpy(&res, buf, sizeof(res));
+	ele_secure_zero(buf, sizeof(buf));
+	if (res.err != (int32_t)HSM_NO_ERROR)
+		return -1;
+	*h = res.handle;
+	return 0;
+}
+
 int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 {
 	open_session_args_t sa;
-	open_svc_key_store_args_t *ks;
-	size_t pg = (size_t)sysconf(_SC_PAGESIZE);
-	void *page;
 	open_svc_key_management_args_t km;
 	open_svc_sign_gen_args_t sg;
 	hsm_hdl_t h;
-	hsm_err_t err;
+	bool ks_ok;
 
 	memset(c, 0, sizeof(*c));
 	if (!nonce)
@@ -191,42 +310,14 @@ int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 		return -1;
 	}
 	c->session = h;
-	/* The open-key-store args hold the nonce: they live in a mapping of
-	 * their own that is locked, so no stack copy of the nonce is made here.
-	 * When the lock fails the credential is never copied (fail closed). */
-	page = mmap(NULL, pg, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (page == MAP_FAILED) {
-		ele_secure_zero(nonce, sizeof(*nonce));
-		goto fail;
-	}
-	if (mlock(page, sizeof(*ks)) != 0) {
-		munmap(page, pg);
-		ele_secure_zero(nonce, sizeof(*nonce));
-		goto fail;
-	}
-#ifdef MADV_DONTDUMP
-	(void)madvise(page, pg, MADV_DONTDUMP);
-#endif
-	ks = page;
-	memset(ks, 0, sizeof(*ks));
-	ks->key_store_identifier = key_store_id;
-	ks->authentication_nonce = *nonce;
-	/* The store is loaded, never created here; both update flags are set so
-	 * the store's updates are strict and counted. */
-	ks->flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
-		    HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
-	err = hsm_open_key_store_service(c->session, ks, &h);
-	/* Every copy of the credential made here is erased on every path, and
-	 * only then is the page unlocked and unmapped. */
-	ele_secure_zero(nonce, sizeof(*nonce));
-	ele_secure_zero(ks, pg);
-	if (ele_hsm_wipe_hook)
-		ele_hsm_wipe_hook(ks, sizeof(*ks));
-	munlock(page, sizeof(*ks));
-	munmap(page, pg);
-	/* The library's own stack copy of the nonce, on every exit of the call. */
+	/* The one vendor call that marshals the credential runs in a forked
+	 * child (ks_open_isolated): the library's command buffer holds the
+	 * nonce and this code cannot reach it, so the buffer lives and dies in
+	 * the child. *nonce is erased in the parent right after the fork. */
+	ks_ok = ks_open_isolated(c->session, key_store_id, nonce, &h) == 0;
+	/* Defence in depth only; it proves nothing about the vendor's copy. */
 	scrub_stack();
-	if (err != HSM_NO_ERROR)
+	if (!ks_ok)
 		goto fail;
 	c->key_store = h;
 	memset(&km, 0, sizeof(km));

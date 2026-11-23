@@ -128,26 +128,54 @@ buffer, the library argument structure's `authentication_nonce` copy and the tex
 with a non-elidable volatile erase (`ele_secure.h`) on every exit path, success or error. A test hook shows the buffer
 is zero after `ele_hsm_open` returns, on success, a key-store open failure and a session open failure.
 
-`ele_hsm_open` builds the library's open-key-store arguments (the structure that holds `authentication_nonce`) in a
-mapping of its own too: an anonymous page, locked with `mlock` (and excluded from dumps), so the backend leaves no stack
-copy of the nonce. When the lock fails the open fails closed before the nonce is copied, and a test (a child with
-`RLIMIT_MEMLOCK` 0) asserts it. The page is zeroed, unlocked and unmapped on every exit path.
+**Isolation of the vendor call, open.** The library keeps a stack copy of the nonce that this client cannot reach:
+`process_sab_msg` (`src/common/sab_msg/sab_process_msg.c:170`) declares the `cmd[]` word buffer on its stack,
+`prepare_sab_msg` fills it (`sab_process_msg.c:216`, from `sab_msg/sab_key_store.c:32`,
+`cmd->password = op_args->authentication_nonce`), the message is sent from it (`:268`) and the function returns (`:368`)
+without wiping it. No vendor source is patched or copied. Instead `ele_hsm_open` runs the one vendor call that marshals
+the credential, `hsm_open_key_store_service`, in a forked child (`ks_open_isolated`, `ele_hsm_backend.c`):
 
-**Residual copy, open.** The library keeps a stack copy of its own that this client cannot erase: `process_sab_msg`
-(`src/common/sab_msg/sab_process_msg.c:170`) declares the `cmd[]` word buffer on its stack, `prepare_sab_msg` fills it
-(`sab_process_msg.c:216`, from `sab_msg/sab_key_store.c:32`, `cmd->password = op_args->authentication_nonce`), the
-message is sent from it (`:268`) and the function returns (`:368`) without wiping it. Only a vendor patch removes that
-copy. Without editing the vendor source, `ele_hsm_open` narrows it: (1) it calls `mlockall(MCL_CURRENT|MCL_FUTURE)`
-before the library sees the nonce and refuses to open (`ELE_HSM_OPEN_NOLOCK`, the command exits 2, the nonce is erased and
-never handed over) when that fails, so the copy can never reach swap; (2) after the library call returns, on every exit
-(success, key-store failure, session failure) a `noinline` function zeroes 16 KiB of the stack below the caller with the
-non-elidable erase, which covers the `cmd` buffer (256 words, `sab_process_msg.h:16`), the response buffer and the
-frames. **The stack scrub is best effort**: the compiler and the library's own frames are not under this client's control,
-and registers and a page already written to disk before the lock are out of reach. The sound fix is a patch to the pinned
-library that wipes `cmd` before `process_sab_msg` returns, applied at build time and pinned by SHA-256; that is the owner's
-decision and is not done here. Tests: the open is refused when the lock fails (a stub, and the real `mlockall` in a child
-with `RLIMIT_MEMLOCK` 0), and a hook shows the scrub ran on the three exits. `test/ele_client_test.sh` raises the soft memory-lock limit to the
-hard one and fails, naming the limit, on a host where the lock still cannot be taken.
+- the parent erases its copy of the nonce (`ele_secure_zero`) immediately after `fork`, before it does anything else; in
+  the child the arguments structure is built in the child's own memory, after the fork;
+- the child sets `PR_SET_DUMPABLE` 0, calls `mlockall(MCL_CURRENT|MCL_FUTURE)` (it fails, exit 3, if that fails), makes the
+  one vendor call, erases its nonce and arguments copies, scrubs its stack, writes one 8-byte result (the library status
+  and the new handle, nothing else) to a pipe and leaves with `_exit()`;
+- the parent reads at most one byte more than the result, waits for the child and accepts the open only when the child
+  exited normally with status 0, sent exactly 8 bytes and the status is `HSM_NO_ERROR`. A child killed by a signal, a
+  nonzero exit, a short or long result, a failed `pipe`, `fork`, `read` or `waitpid` all fail the open closed. The parent
+  first locks its own memory as before (`ELE_HSM_OPEN_NOLOCK`, exit 2, nonce erased and never handed over, when that
+  fails).
+
+**What this covers.** The vendor `cmd[]` frame exists only in the child. When the child exits its pages are released, and
+the kernel hands out pages zero-filled: an anonymous mapping is "initialized to zero" (`mmap(2)`, `MAP_ANONYMOUS`), and
+the kernel clears a page before it reaches another process. The credential is never in a swappable or dumpable page (the
+child is locked and non-dumpable). The parent process never holds a vendor copy at all, so a later core, `ptrace` or
+stack inspection of the long-lived process finds none. **What it does not cover:** a freed physical page keeps its bytes
+until the kernel reuses and zeroes it (unless the host boots with `init_on_free`, which is not assumed), so root or a
+physical-memory attacker in that window still sees them; registers and the device driver's own buffers are out of reach;
+the in-process stack scrub that remains (16 KiB, in both processes) is defence in depth and **is not evidence of erasure**
+of the vendor's copy. A hook test shows the child's arguments copy is zero and the parent's buffer is zero; it cannot
+show what the vendor frame held.
+
+**Not isolated, and why.** Only the key-store open marshals the credential: generate, sign and delete send handles, a
+key identifier and flags, never the nonce, so they run in the process. The child's service handle is used by the parent
+afterwards; whether the pinned library accepts a handle created by another process of the same session has not been read
+at the source (no second reader yet) and is board validation. If it does not, the open fails closed and the command
+exits 1.
+
+**Every key-store update fails closed.** The library can return `HSM_NO_ERROR` for a success-tagged response that carries
+a counter warning, so a clean return does not show the counter advanced. `ele_generate_key` and `ele_delete_key` both
+report success only with the counter acknowledgement established (counter acknowledged, no warning, split configured).
+The binding never acknowledges it, and the library's delete has no counter flag at all, so until the owner answers Q2
+(the ELE rollback gap) a delete exits 1 with `update refused (...); key N delete is NOT rollback-protected`, exactly as a
+generate does (`key N was generated and is NOT rollback-protected`); the strict flag is sent but does not decide it. The
+delete may have taken effect; its old key-store blob may stay replayable. Tests: the double returns `HSM_NO_ERROR` (not
+`HSM_KEY_STORE_COUNTER`) and the command exits 1 with that message. Memory-lock tests: the open is refused when the lock
+fails (a stub, and the real `mlockall` in a child with `RLIMIT_MEMLOCK` 0); `test/ele_client_test.sh` raises the soft
+memory-lock limit to the hard one and fails, naming the limit, on a host where the lock still cannot be taken. Isolation
+tests (`ele_hsm_backend_test.c`, the double records into shared memory): the vendor call runs in a different pid; a child
+killed by a signal, a nonzero child exit, and a short result (0 and 7 of 8 bytes) each fail the open; the parent's nonce
+buffer is zero after every outcome; the 64-byte signature length check is unchanged.
 
 **A result that cannot be written.** `gen` and `del` check `printf` and `fflush`. When stdout cannot be written (a full
 disk, a closed pipe) the command exits 1 and prints the key id and its commit state on stderr
@@ -193,7 +221,7 @@ and only the board can.
 | Generate writes the key id into the caller's variable whatever the rating | `sab_msg/sab_key_generate.c:94-95`; the response handler runs at `sab_msg/sab_process_msg.c:333` | read |
 | A successful sign does not update `signature_size`; the PSA build stores the response size in `exp_signature_size` instead | `sab_msg/sab_sign_gen.c:178` | read |
 | The signature is 64 bytes (P-256 `r\|\|s`) | not stated at the call | **provisional** |
-| The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read; open |
+| The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read; the call runs in a child process |
 
 Consequences in the backend: `hsm_sign` refuses a buffer under 64 bytes before the call, reads `exp_signature_size`
 after the call and accepts only 64 (this binding supports P-256 only): any other length is refused, the caller's buffer
