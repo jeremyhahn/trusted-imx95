@@ -412,7 +412,7 @@ expect "good: a bmap range covers the marker block" has "$wt/good/chk.log" 'OK (
 # The bmap's own file checksum: a copy of the good deploy with that field altered fails the checker.
 cp -a "$wt/good/deploy" "$wt/bm-tamper"
 sed -i 's|\(<BmapFileChecksum> \)[0-9a-f]|\1z|' "$wt/bm-tamper/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.bmap"
-expect "bmap: a bad file checksum fails the checker" test "$(sh "$chk" "$wt/bm-tamper" >"$wt/bm-tamper.log" 2>&1; echo $?)" -ne 0
+expect "bmap: a bad file checksum fails the checker" test "$(PATH="$wt/good/bin:$PATH" sh "$chk" "$wt/bm-tamper" >"$wt/bm-tamper.log" 2>&1; echo $?)" -ne 0
 expect "bmap: ... and the log names the file checksum" has "$wt/bm-tamper.log" 'file checksum'
 rm -rf "$wt/bm-tamper"
 expect "checker: a directory with no image fails" test "$(sh "$chk" "$wt/geom-none" >/dev/null 2>&1; echo $?)" -ne 0
