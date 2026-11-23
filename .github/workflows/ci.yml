@@ -2136,12 +2136,16 @@ jobs:
           # exclusion is per job and follows local reusable workflows. A job is
           # fork-safe when its own `if:` requires the same-repository head test as
           # a conjunct (no top-level `||` branch can bypass it), or when its own
-          # `if:` has no always()/failure()/cancelled() and one job it needs is
+          # `if:` has no status function (success, always, failure, cancelled) and one job it needs is
           # fork-safe. Anything not provable is not safe.
           HEAD_GUARD = re.compile(r"github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository"
                                   r"|github\.repository\s*==\s*github\.event\.pull_request\.head\.repo\.full_name",
                                   re.I)  # verify 10: expression names are case-insensitive
-          STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(", re.I)
+          # verify 12: ANY status function in a dependent's own `if:` (success() too: an
+          # explicit one replaces Actions' implicit success() dependency guard) means no
+          # inheritance. Deliberately conservative: success() && x is refused as well; the
+          # job then carries the same-repository guard itself.
+          STATUS_FN = re.compile(r"\b(success|always|failure|cancelled)\s*\(", re.I)
           EXPR_OPEN = chr(36) + "{{"
 
 

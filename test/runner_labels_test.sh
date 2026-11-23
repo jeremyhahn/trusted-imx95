@@ -349,6 +349,35 @@ jobs:
 EOF
 stepcmd
 check "a mixed-case but correct guard is still recognised" 0 "OK:"
+# Verify 12: any status function, success() included, in a dependent's if: ends inheritance.
+dep() { # <if: of the dependent, or empty> <expected status> <expected text> <label>
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    needs: a
+${1:+    if: "$1"}
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "$4" "$2" "$3"
+}
+dep "success() || true" 1 "$FORKMSG" "a dependent using success() || true is refused"
+dep "SUCCESS() && true" 1 "$FORKMSG" "a dependent using SUCCESS() && true is refused"
+dep "success() && github.ref == 'refs/heads/main'" 1 "$FORKMSG" "a dependent using success() && x is refused"
+dep "" 0 "OK:" "a dependent with no if: inherits the guard"
+dep "github.ref == 'refs/heads/main'" 0 "OK:" "a dependent whose if: has no status function inherits the guard"
+chain "[pull_request]" "success() || true"; stepcmd
+check "success() || true on a calling job is refused on the reusable-workflow edge" 1 "$FORKMSG"
 
 # Codex security P1s at verify 7: the release decision is an allowlist.
 # (1) head_ref is an arbitrary branch name, never simulated.
