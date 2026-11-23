@@ -220,13 +220,13 @@ expect "the rootfs identity uses no DATETIME, DATE or TIME" test "$(printf '%s' 
 expect "README says the wipe is a unit coupled to the rootfs" has "$ROOT/docs/ftpm/README.md" 'tee-nv-wipe'
 expect "README says the supported reprovision is the whole .wic" has "$ROOT/docs/ftpm/README.md" 'Writing the whole'
 expect "README says a different build is caught on boot by tee-nv-wipe" has "$ROOT/docs/ftpm/README.md" 'rewritten with a different build is caught on boot'
-expect "README says a byte-identical root rewrite keeps the NV" has "$ROOT/docs/ftpm/README.md" 'A byte-identical root rewrite'
+expect "README states the byte-identical rewrite as an open item" has "$ROOT/docs/ftpm/README.md" 'Open item (a gap, not allowed behaviour)'
 expect "README makes no claim that every root-only rewrite is caught" none 'catches that on boot' "$ROOT/docs/ftpm/README.md"
 
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
-expect "SPEC row ftpm carries the proposed NV lifecycle" ncstr "$ROOT/docs/SPEC.md" 'a byte-identical root rewrite keeps the NV (proposed, pending owner approval)'
-expect "SPEC row ftpm no longer says the NV is wiped with the root file system" none 'wiped with the root file system' "$ROOT/docs/SPEC.md"
-expect "README marks the lifecycle wording as proposed, pending owner approval" ncstr "$ROOT/docs/ftpm/README.md" 'pending owner'
+expect "SPEC row ftpm keeps the approved NV erasure clause" ncstr "$ROOT/docs/SPEC.md" 'is wiped with the root file system'
+expect "SPEC row ftpm lets no root rewrite keep the NV" none 'root rewrite keeps the NV' "$ROOT/docs/SPEC.md"
+expect "README names the owner proposal for the open item" ncstr "$ROOT/docs/ftpm/README.md" 'pending owner'
 expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
 expect "README makes no claim that the NV survives a reflash" none 'partition is kept' "$ROOT/docs/ftpm/README.md"
 

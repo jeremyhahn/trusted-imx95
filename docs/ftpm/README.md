@@ -60,7 +60,7 @@ objects, in the storage `CFG_FTPM_TA_TEE_STORAGE_ID` selects
 | | RPMB on the board's eMMC | REE file system |
 |---|---|---|
 | Rollback | The eMMC's write counter anchors the state ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §2) | None: root on Linux can restore an older copy of the files |
-| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | A full-image flash recreates `tee-data` empty (wiped); a root rewrite with a different build is wiped on boot; a byte-identical root rewrite keeps the NV (proposed lifecycle, see below) |
+| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | A full-image flash recreates `tee-data` empty (wiped); a root rewrite with a different build is wiped on boot; a byte-identical hand rewrite of the root is not detected (open item, see below) |
 | Use from U-Boot | U-Boot can serve OP-TEE's RPMB requests itself (unconfirmed for this board) | No `tee-supplicant` before Linux, so U-Boot cannot reach the TPM's NV |
 | Precondition | The eMMC's RPMB authentication key is programmed: once, irreversibly ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5) | None |
 | Confidentiality | OP-TEE encrypts objects with keys derived from the hardware unique key | The same |
@@ -76,15 +76,19 @@ limits above ([question 1](#open-questions-for-the-owner)).
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system
 stays read-only, which is why the NV cannot live on it. The NV therefore persists across a reboot.
-Lifecycle (SPEC row `ftpm` carries this wording as a proposal, pending owner approval):
+Lifecycle (SPEC row `ftpm`: the NV is wiped with the root file system):
 - Writing the whole `.wic` is the supported way to reprovision: it recreates `tee-data` empty, so the NV is wiped.
 - A root partition rewritten with a different build is caught on boot. The rootfs carries a build identity
   (`/etc/trusted-imx95-rootfs-id`) and the oneshot `tee-nv-wipe.service` runs after the `/data` mount and before
   `tee-supplicant`, which requires it. If `/data/tee-rootfs-id` is missing or differs, it removes everything under
   `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
   `tee-supplicant` from starting.
-- A byte-identical root rewrite carries the same identity, is not told apart, and keeps the NV. Not every root-only
-  rewrite is caught.
+- **Open item (a gap, not allowed behaviour):** a byte-identical root rewrite by hand carries the same identity, so the
+  boot check cannot tell it from the original and the NV stays. That does not meet the SPEC rule that the NV is wiped
+  with the root file system. Closing it needs a root identity the NV is bound to that a rewrite cannot reproduce (for
+  example a per-device value written to the root at provisioning), which is a proposal in `docs/plans/140.md`,
+  pending owner approval. The check is otherwise fail-closed: a missing identity wipes, a different one wipes, and an
+  unreadable record stops `tee-supplicant` and leaves the NV untouched.
 There is no root-only flasher. `/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on
 the same disk as `/` (never a global partition label, which could name another medium's NV) and fails closed if there
 is none or more than one. The NV is plain files that root on Linux can copy or roll back.
