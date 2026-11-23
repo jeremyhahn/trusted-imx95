@@ -45,7 +45,7 @@ Planned, undated. No issue is filed yet; each line gets its issue once the owner
 - **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **hsm-device-protocol** — the device side of go-xkms's xkmsd-to-device protocol over 1 GbE and 10 GbE — no issue yet — blocked: owner approval; owner-queue item 160 (`go-xkms#1521`)
 - **device-lifecycle** — the device side of go-trusted-platform's provisioning, enrollment and attestation — no issue yet — blocked: owner approval; evidence open
-- **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — no issue yet — blocked: owner approval; A55 side open
+- **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — issue #26 — blocked: owner approval; A55 side proposed, pending owner approval
 
 ## Future
 
