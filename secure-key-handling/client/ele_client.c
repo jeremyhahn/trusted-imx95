@@ -61,11 +61,16 @@ int ele_sign(struct ele_client *c, uint32_t key_id, const uint8_t *msg, size_t m
 int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state)
 {
 	struct ele_ack ack = { 0 };
+	/* The library's delete offers the strict-operation flag only: there is no
+	 * monotonic-counter flag on a delete, so the enclave can never acknowledge
+	 * both flags for it. Send the strict flag alone and never report a delete
+	 * as rollback-protected (client.md; owner question open). */
+	uint32_t flags = c ? (c->flags & ELE_REQ_STRICT_OPERATION) : 0;
 
 	if (!c || !c->ops || !c->ops->del || !state)
 		return -1;
-	if (c->ops->del(c->ctx, c->flags, key_id, &ack) != 0)
+	if (c->ops->del(c->ctx, flags, key_id, &ack) != 0)
 		return -1;
-	*state = ele_classify(c->flags, &ack);
+	*state = ele_classify(flags, &ack);
 	return *state == ELE_NOT_COMMITTED ? -1 : 0;
 }

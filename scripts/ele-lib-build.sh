@@ -149,4 +149,28 @@ for f in "$out"/*.so.*; do
 	m=$("${cross}readelf" -h "$f" | while IFS= read -r l; do case $l in *Machine:*) echo "$l" ;; esac; done)
 	case $m in *AArch64*) ;; *) die "$f is not aarch64: $m" ;; esac
 done
-echo "ele-lib-build: OK ($n libraries in $out)"
+# The client: first the constants check on the host compiler (a mismatch of a
+# flag or return-code value against the library's headers fails the build),
+# then the aarch64 client linked against the libele_hsm just built.
+cdir=$root/secure-key-handling/client
+inc=(-I"$work/src/include" -I"$work/src/include/hsm" -I"$work/src/include/common"
+	-I"$work/src/include/she" -I"$work/src/include/crrm" -I"$work/src/include/prime"
+	-I"$work/src/src/plat/${pin[ELE_PLAT]}/include" -I"$work/src/src/common/include"
+	-I"$cdir" -DPSA_COMPLIANT)
+cc -std=gnu11 -fsyntax-only "${inc[@]}" "$cdir/ele_hsm_consts_check.c" ||
+	die "the library's flag or return-code values differ from the client's (ele_hsm_consts_check.c)"
+hsmlib=
+for f in "$out"/libele_hsm.so.*; do
+	[ -f "$f" ] && { hsmlib=$(basename "$f"); break; }
+done
+[ -n "$hsmlib" ] || die "libele_hsm is not in $out"
+"${cross}gcc" -std=gnu11 -O1 -Wall -Wextra -Werror -o "$out/ele_client" "${inc[@]}" \
+	"$cdir/ele_client.c" "$cdir/ele_hsm_backend.c" "$cdir/ele_client_cli.c" \
+	-L"$out" -l:"$hsmlib" -lpthread ||
+	die "the client does not build or link against $hsmlib"
+m=$("${cross}readelf" -h "$out/ele_client" | while IFS= read -r l; do case $l in *Machine:*) echo "$l" ;; esac; done)
+case $m in *AArch64*) ;; *) die "ele_client is not aarch64: $m" ;; esac
+needed=$("${cross}readelf" -d "$out/ele_client" | while IFS= read -r l; do case $l in *NEEDED*"[libele_hsm.so."*) echo "$l" ;; esac; done)
+[ -n "$needed" ] || die "ele_client does not need libele_hsm (its soname)"
+(cd "$out" && sha256sum -- *.so.* ele_client >SHA256SUMS)
+echo "ele-lib-build: OK ($n libraries and ele_client in $out)"

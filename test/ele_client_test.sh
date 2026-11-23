@@ -57,4 +57,26 @@ else
 	fail "client policy tests: no C compiler (cc) on PATH"
 fi
 
+# The backend's flag constants against the library's headers. Needs the fetched
+# source (ELE_SRC=<work>/src from scripts/ele-lib-build.sh), which `make test`
+# does not fetch: without it the check is reported as skipped, not passed.
+# The build script runs the same check on every build.
+if [ -n "${ELE_SRC:-}" ] && [ -d "$ELE_SRC/include/hsm" ]; then
+	inc=(-I"$ELE_SRC/include" -I"$ELE_SRC/include/hsm" -I"$ELE_SRC/include/common" -I"$ELE_SRC/include/she"
+		-I"$ELE_SRC/include/crrm" -I"$ELE_SRC/include/prime" -I"$ELE_SRC/src/plat/ele/include"
+		-I"$ELE_SRC/src/common/include" -I"$d" -DPSA_COMPLIANT)
+	run cc -std=gnu11 -fsyntax-only "${inc[@]}" "$d/ele_hsm_consts_check.c"
+	check "backend flag constants equal the library header's (strict 1<<7, counter 1<<5, delete strict only)" 0
+	# The check bites: a wrong expected value fails the compile.
+	python3 -I -c 'import sys
+s=open(sys.argv[1]).read().replace("HSM_OP_KEY_GENERATION_FLAGS_MONOTONIC_COUNTER == (1u << 5)","HSM_OP_KEY_GENERATION_FLAGS_MONOTONIC_COUNTER == (1u << 6)")
+open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
+	run cc -std=gnu11 -fsyntax-only "${inc[@]}" "$tmp/bad_consts.c"
+	check "a wrong constant fails the check" nonzero "static assertion failed"
+	run cc -std=gnu11 -fsyntax-only "${inc[@]}" "$d/ele_hsm_backend.c"
+	check "backend compiles against the library headers" 0
+else
+	echo "skip backend constants check: ELE_SRC is not set (the build script runs it)"
+fi
+
 finish

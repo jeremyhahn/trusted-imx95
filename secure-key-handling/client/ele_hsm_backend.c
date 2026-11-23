@@ -1,0 +1,160 @@
+/* See ele_hsm_backend.h. PROVISIONAL.
+ *
+ * The flag and return-code names are the library's own, from hsm_api.h and
+ * internal/hsm_key_store.h, hsm_key_generate.h, hsm_delete_key.h, hsm_utils.h
+ * at the pinned commit; ele_hsm_consts_check.c asserts their values.
+ */
+#include <string.h>
+
+#include "hsm_api.h"
+
+#include "ele_hsm_backend.h"
+
+/* The request flags of the client, mapped to the library's. */
+static uint8_t gen_flags(uint32_t f)
+{
+	uint8_t o = 0;
+
+	if (f & ELE_REQ_STRICT_OPERATION)
+		o |= HSM_OP_KEY_GENERATION_FLAGS_STRICT_OPERATION;
+	if (f & ELE_REQ_MONOTONIC_COUNTER)
+		o |= HSM_OP_KEY_GENERATION_FLAGS_MONOTONIC_COUNTER;
+	return o;
+}
+
+/* Fill the acknowledgement from the library's return code. A counter warning
+ * (HSM_KEY_STORE_COUNTER) means the update was accepted without the counter
+ * advancing: the strict operation is acknowledged, the counter flag is not. */
+static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *ack)
+{
+	if (err != HSM_NO_ERROR && err != HSM_KEY_STORE_COUNTER)
+		return false;
+	ack->strict_acked = (sent & ELE_REQ_STRICT_OPERATION) != 0;
+	ack->counter_warning = err == HSM_KEY_STORE_COUNTER;
+	ack->counter_acked = (sent & ELE_REQ_MONOTONIC_COUNTER) != 0 && !ack->counter_warning;
+	ack->split_configured = split;
+	return true;
+}
+
+static int hsm_generate(void *p, uint32_t flags, uint32_t *key_id, struct ele_ack *ack)
+{
+	struct ele_hsm_ctx *c = p;
+	op_generate_key_args_t a;
+	uint32_t id = 0;
+	hsm_err_t err;
+
+	if (!c->open)
+		return -1;
+	memset(&a, 0, sizeof(a));
+	a.key_identifier = &id;	/* 0: the enclave picks the identifier */
+	a.flags = gen_flags(flags);
+	/* No plaintext export: HSM_OP_KEY_GENERATION_FLAGS_PLAINTEXT_KEY is never set. */
+	a.key_type = HSM_KEY_TYPE_ECC_NIST;
+	a.key_group = 0;
+	a.key_lifetime = HSM_SE_KEY_STORAGE_PERSISTENT;
+	a.key_usage = HSM_KEY_USAGE_SIGN_HASH;
+	a.permitted_algo = PERMITTED_ALGO_ECDSA_SHA256;
+	a.bit_key_sz = HSM_KEY_SIZE_ECC_NIST_256;
+	err = hsm_generate_key(c->key_mgmt, &a);
+	if (!fill_ack(err, flags, c->counter_split_confirmed, ack))
+		return -1;
+	*key_id = id;
+	return 0;
+}
+
+static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len,
+		    uint8_t *sig, size_t *sig_len)
+{
+	struct ele_hsm_ctx *c = p;
+	op_generate_sign_args_t a;
+
+	if (!c->open || msg_len > UINT32_MAX || *sig_len > UINT16_MAX)
+		return -1;
+	memset(&a, 0, sizeof(a));
+	a.key_identifier = key_id;
+	a.message = (uint8_t *)msg;
+	a.message_size = (uint32_t)msg_len;
+	a.signature = sig;
+	a.signature_size = (uint16_t)*sig_len;
+	a.scheme_id = (hsm_signature_scheme_id_t)ALGO_ECDSA_SHA256;
+	a.flags = HSM_OP_GENERATE_SIGN_FLAGS_INPUT_MESSAGE;
+	if (hsm_generate_signature(c->sign_gen, &a) != HSM_NO_ERROR)
+		return -1;
+	*sig_len = a.signature_size;
+	return 0;
+}
+
+/* The library's delete has HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION and no
+ * monotonic-counter flag: only the strict flag is sent, and the counter flag
+ * is never acknowledged for a delete (client.md). */
+static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack)
+{
+	struct ele_hsm_ctx *c = p;
+	op_delete_key_args_t a;
+	hsm_err_t err;
+
+	if (!c->open)
+		return -1;
+	memset(&a, 0, sizeof(a));
+	a.key_identifier = key_id;
+	if (flags & ELE_REQ_STRICT_OPERATION)
+		a.flags = HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION;
+	err = hsm_delete_key(c->key_mgmt, &a);
+	return fill_ack(err, flags & ELE_REQ_STRICT_OPERATION, c->counter_split_confirmed, ack) ? 0 : -1;
+}
+
+const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
+
+int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t nonce)
+{
+	open_session_args_t sa;
+	open_svc_key_store_args_t ks;
+	open_svc_key_management_args_t km;
+	open_svc_sign_gen_args_t sg;
+	hsm_hdl_t h;
+
+	memset(c, 0, sizeof(*c));
+	memset(&sa, 0, sizeof(sa));
+	if (hsm_open_session(&sa, &h) != HSM_NO_ERROR)
+		return -1;
+	c->session = h;
+	memset(&ks, 0, sizeof(ks));
+	ks.key_store_identifier = key_store_id;
+	ks.authentication_nonce = nonce;
+	/* The store is loaded, never created here; both update flags are set so
+	 * the store's updates are strict and counted. */
+	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
+		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
+	if (hsm_open_key_store_service(c->session, &ks, &h) != HSM_NO_ERROR)
+		goto fail;
+	c->key_store = h;
+	memset(&km, 0, sizeof(km));
+	if (hsm_open_key_management_service(c->key_store, &km, &h) != HSM_NO_ERROR)
+		goto fail;
+	c->key_mgmt = h;
+	memset(&sg, 0, sizeof(sg));
+	if (hsm_open_signature_generation_service(c->key_store, &sg, &h) != HSM_NO_ERROR)
+		goto fail;
+	c->sign_gen = h;
+	c->open = true;
+	return 0;
+fail:
+	c->open = true;	/* so close releases what was opened */
+	ele_hsm_close(c);
+	return -1;
+}
+
+void ele_hsm_close(struct ele_hsm_ctx *c)
+{
+	if (c->open) {
+		if (c->sign_gen)
+			(void)hsm_close_signature_generation_service(c->sign_gen);
+		if (c->key_mgmt)
+			(void)hsm_close_key_management_service(c->key_mgmt);
+		if (c->key_store)
+			(void)hsm_close_key_store_service(c->key_store);
+		if (c->session)
+			(void)hsm_close_session(c->session);
+	}
+	memset(c, 0, sizeof(*c));
+}

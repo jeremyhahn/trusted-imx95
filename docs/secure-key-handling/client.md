@@ -50,18 +50,58 @@ split configured (owner decision 241; [architecture.md](architecture.md#key-stor
 | Monotonic counter only | n/a | not committed (the call fails) |
 | Neither | n/a | not committed (the call fails) |
 
+The table is for an update that can carry both flags (key generate). A delete cannot, so it is at best committed, never
+rollback-protected ([below](#delete-is-never-rollback-protected-a-gap-for-the-owner)).
+
 The host tests (`test/ele_client_test.sh`, run by `make test`) cover all four combinations, a counter warning, a
 missing split and an acknowledgement of one flag only, against a stub that holds no key. The default client sends
 both flags.
 
+## Delete is never rollback-protected (a gap, for the owner)
+
+The library's key delete takes the strict-operation flag only: `op_delete_key_args_t` has a key identifier and
+flags, and its one flag is `HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION` (`internal/hsm_delete_key.h`). There is no
+monotonic-counter flag on a delete, so the enclave can never acknowledge both flags for one. Decision 241 is not
+weakened: the client sends the strict flag alone on a delete and reports every delete as committed but **not
+rollback-protected**, and a test asserts it. The consequence is that a deleted key can come back if the key store is
+rolled back to an earlier copy. **Provisional; this is the owner's to decide** (for example: accept it, delete by
+another route, or ask NXP). It is recorded here, not solved.
+
+## What is bound
+
+[`ele_hsm_backend.c`](../../secure-key-handling/client/ele_hsm_backend.c) is the ops-table backend over the pinned
+library's HSM API (`include/hsm/hsm_api.h` and `include/hsm/internal/*.h` at the pinned commit), built with
+`PSA_COMPLIANT` as the library's `PLAT=ele` build is (its build log). It calls:
+
+- session and key store: `hsm_open_session`, `hsm_open_key_store_service` (flags `LOAD`, `STRICT_OPERATION`,
+  `MONOTONIC`; never `CREATE` here), `hsm_close_key_store_service`, `hsm_close_session`;
+- key management: `hsm_open_key_management_service`, `hsm_generate_key` (flags `STRICT_OPERATION` 1<<7 and
+  `MONOTONIC_COUNTER` 1<<5; `PLAINTEXT_KEY` is never set, so no key leaves the enclave), `hsm_delete_key` (strict
+  only), `hsm_close_key_management_service`;
+- signing: `hsm_open_signature_generation_service`, `hsm_generate_signature` (ECDSA P-256 with SHA-256),
+  `hsm_close_signature_generation_service`.
+
+The return code maps to the acknowledgement: `HSM_NO_ERROR` acknowledges the flags sent; `HSM_KEY_STORE_COUNTER` is a
+counter warning (accepted, counter not advanced: strict acknowledged, counter not); any other code fails the call.
+The counter split cannot be read through these calls, so the backend reports it configured only when the caller sets
+`counter_split_confirmed` after confirming it on the device. It is false by default, so nothing is reported
+rollback-protected on an unconfirmed split.
+
+`scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s pin the flag and return-code
+values to the library's headers (a mismatch fails the build), then cross-builds `ele_client` for aarch64 and links it
+against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same
+check when `ELE_SRC` names the fetched source, and shows that a wrong value fails it. No vendor header or text is
+copied into this repository.
+
 ## What is left open
 
-- **Owner:** which side calls the HSM API (above). The SE051's role is also open.
-- **The binding to the library's real calls.** The client's ops table is bound to a stub only. Binding it to the
-  library's key-store, key-generation, signing and key-deletion calls, and mapping their return codes and flags to
-  the acknowledgement fields, needs the library's headers read by a reader against RM00284; this session did not
-  read them. The check that the i.MX 95 firmware behaves as the architecture assumes stays **unconfirmed** until it
-  runs on the board ([architecture.md](architecture.md#key-store-rollback-protection)).
+- **Owner:** which side calls the HSM API (above); the delete gap (above); the SE051's role.
+- **Needs the board, none run here:** the client was built and linked, never run. The key-store identifier, nonce,
+  the key store's creation and its counter split are provisioning (`oem-key-provisioning` row); the structure
+  members and key attributes the backend sets (ECC NIST P-256, persistent, sign-hash) are taken from the library's
+  headers by compilation and are untested against the enclave. Whether the i.MX 95 firmware acknowledges the two
+  flags as the architecture assumes stays **unconfirmed**
+  ([architecture.md](architecture.md#key-store-rollback-protection)).
 - **The Linux path to the enclave** (the library's daemon and device, and the TrustZone configuration) is under
   Missing in [architecture.md](architecture.md#missing).
 - The counter fuse split is provisioning, the `oem-key-provisioning` row's; nothing here sets it.

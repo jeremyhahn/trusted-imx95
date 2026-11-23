@@ -44,8 +44,10 @@ static void case_flags(const char *name, uint32_t sent, bool strict_ack, bool co
 	if (want_ok)
 		CHECK(st == want, name);
 	if (want_ok) {
+		/* A delete is never rollback-protected: strict flag only. */
 		rc = ele_delete_key(&c, id, &st);
-		CHECK(rc == 0 && st == want, name);
+		CHECK(rc == 0 && st == ELE_COMMITTED_UNPROTECTED, name);
+		CHECK((s.last_flags & ELE_REQ_MONOTONIC_COUNTER) == 0, "delete sends no counter flag");
 	}
 }
 
@@ -83,7 +85,8 @@ int main(void)
 		CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED, "default generate");
 		CHECK(s.last_flags == both, "stub saw both flags");
 		CHECK(ele_sign(&c, id, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 1, "sign");
-		CHECK(ele_delete_key(&c, id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED, "default delete");
+		CHECK(ele_delete_key(&c, id, &st) == 0 && st == ELE_COMMITTED_UNPROTECTED,
+		      "default delete is committed, never rollback-protected");
 		CHECK(ele_sign(&c, 99, (const uint8_t *)"m", 1, sig, &n) != 0, "sign unknown key fails");
 	}
 
