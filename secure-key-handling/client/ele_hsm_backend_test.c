@@ -429,6 +429,58 @@ static void nonce_order(void)
 	ele_hsm_event_hook = NULL;
 }
 
+/* TENANT ASK 5, fail closed: through the shipped backend no generate or delete
+ * returns success or reports ELE_ROLLBACK_PROTECTED, for any vendor return code,
+ * before and after the started marker. */
+static void fail_closed_default(void)
+{
+	static const uint32_t codes[] = { HSM_NO_ERROR, HSM_KEY_STORE_COUNTER, HSM_NVM_ERROR, HSM_GENERAL_ERROR,
+					  OTHER_ERR };
+	/* ks_mode 0: the update runs (after the marker); 1, 2: the child dies before it. */
+	static const uint32_t modes[] = { 0, 1, 2 };
+	size_t k, m, o;
+
+	for (k = 0; k < sizeof(codes) / sizeof(codes[0]); k++) {
+		for (m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
+			for (o = 0; o < 2; o++) {
+				struct ele_hsm_ctx x;
+				struct ele_client c;
+				enum ele_commit st = ELE_NOT_COMMITTED;
+				uint32_t nonce, id = 0;
+				int rc;
+				char msg[96];
+
+				begin(&x, &c, &nonce, true);
+				fake.err = codes[k];
+				fake.ks_mode = modes[m];
+				rc = o == 0 ? ele_generate_key(&c, &id, &st) : ele_delete_key(&c, 7, &st);
+				snprintf(msg, sizeof(msg), "%s code 0x%x mode %u: never success, never protected",
+					 o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
+				CHECK(rc != 0 && st != ELE_ROLLBACK_PROTECTED, msg);
+				/* The backend's own acknowledgement is never set. */
+				{
+					struct ele_ack ack = { .strict_acked = false, .counter_acked = true };
+					uint32_t kid = 0;
+					int orc;
+
+					fake.err = codes[k];
+					fake.ks_mode = modes[m];
+					/* ack starts "true": a path that reports success must
+					 * overwrite it with false; a failing path never fills it. */
+					if (o == 0)
+						orc = ele_hsm_ops.generate(&x, c.flags, &kid, &ack);
+					else
+						orc = ele_hsm_ops.del(&x, c.flags, 7, &ack);
+					snprintf(msg, sizeof(msg), "%s code 0x%x mode %u: counter_acked stays false",
+						 o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
+					CHECK(orc != 0 ? true : !ack.counter_acked, msg);
+				}
+				ele_hsm_close(&x);
+			}
+		}
+	}
+}
+
 int main(void)
 {
 	/* A unit test cannot count on its host's memory-lock limit: the real
@@ -442,6 +494,7 @@ int main(void)
 	nonce_erasure();
 	lock_failures();
 	nonce_order();
+	fail_closed_default();
 	if (fails)
 		return 1;
 	printf("ele_hsm_backend_test: all passed\n");

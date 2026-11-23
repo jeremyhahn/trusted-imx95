@@ -256,6 +256,26 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete with HSM_NO_ERROR (a hidden counter warning looks the same) fails closed" 1 "update refused (committed-not-rollback-protected); key 7 delete is NOT rollback-protected"
 	case $OUT in *"deleted "*) fail "del claimed success without a counter acknowledgement" ;; esac
+	# TENANT ASK 5, the fail-closed default: over the shipped backend plus the
+	# fake returning HSM_NO_ERROR, gen and del exit 1, stdout is empty, and
+	# stderr names the key, "NOT rollback-protected" and the fixed reason.
+	ctr_reason='the pinned library cannot prove the monotonic-counter acknowledgement (fail closed; owner question open)'
+	for op in "gen" "del 7"; do
+		rc=0
+		# shellcheck disable=SC2086
+		ELE_FAKE_ERR=0 ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --split-confirmed 5 3 $op 3<"$tmp/nonce" >"$tmp/fc.out" 2>"$tmp/fc.err" || rc=$?
+		[ "$rc" = 1 ] || fail "$op over the shipped backend (HSM_NO_ERROR): exit $rc, want 1"
+		[ ! -s "$tmp/fc.out" ] || fail "$op over the shipped backend: stdout is not empty"
+		grep -q 'key 7' "$tmp/fc.err" || fail "$op fail-closed: the key id is missing on stderr"
+		grep -q 'NOT rollback-protected' "$tmp/fc.err" || fail "$op fail-closed: 'NOT rollback-protected' is missing on stderr"
+		grep -qF "$ctr_reason" "$tmp/fc.err" || fail "$op fail-closed: the fixed reason is missing on stderr"
+		if python3 -I -c 'import re,sys
+t=open(sys.argv[1]).read()
+sys.exit(0 if re.search(r"(?<!NOT )(?<!not-)rollback-protected", t) else 1)' "$tmp/fc.err"; then
+			fail "$op fail-closed: stderr says rollback-protected without NOT"
+		fi
+		pass "$op over the shipped backend and HSM_NO_ERROR: exit 1, empty stdout, key id, NOT rollback-protected, fixed reason"
+	done
 	# The child dies after the started marker (mode 3: SIGKILL, 4: exit 3 inside
 	# the update call): the outcome is unknown, exit 3, never a plain failure.
 	for mode in 3 4; do
