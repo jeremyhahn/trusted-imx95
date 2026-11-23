@@ -220,8 +220,12 @@ def publish_cases():
     body = src.split("  publish)", 1)[1]
     code = "\n".join(l for l in body.split("\n") if not l.lstrip().startswith("#"))
     check("type=registry" not in code and "--push" not in code, "publish builds with type=registry or --push")
-    check(0 < code.find("ci-image-history.sh") < code.find("trivy image") < code.find("docker push"),
-          "publish does not check the image (history, trivy) before docker push")
+    check("docker push" not in code and "docker tag" not in code,
+          "publish calls docker push or docker tag (a daemon tag can be retagged)")
+    hist, trivy = code.find("ci-image-history.sh"), code.find("trivy image")
+    upload, promote = code.find('"$crane" push'), code.find("imagetools create")
+    check(0 < hist < trivy < upload < promote,
+          "publish does not run history, trivy, the crane upload, then the digest promotion in order")
 
 
 def main():
