@@ -108,9 +108,13 @@ Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement tha
   would verify these bytes (the underlying device data) and the raw write would break it: that design would have
   to move the token out of the verified range or give it up; until then the unit simply fails closed.
 - The test rewrites a fixture with `dd bs=512 conv=sparse,notrunc` from the same image and checks that the NV is
-  wiped (and, as a control, that a zero sector would have been skipped). Unbuilt: the wic post-step (file name, order
-  against a `.bmap` or compression of the wic) was not run through bitbake; only the marker and its offset parsing are
-  tested, on fixtures. A flasher that skips the block despite its nonzero content is not a known case.
+  wiped (and, as a control, that a zero sector would have been skipped). The wic post-step is run by the test too: its shell body, cut out of the recipe, on a synthetic sparse wic
+  with the wks's geometry, followed by a gzip and a `.bmap` made in the order the image class gives, with
+  `scripts/platform-image-check-root-marker.sh` checking every variant and the bmap (each of five mutations fails it).
+  Unbuilt: no bitbake run has produced the wic, so the real file name, the real order against a `.bmap` or compression,
+  and the bmap's real format are not confirmed. The real build is pending the owner's EULA decision, and its first run
+  must be followed by `scripts/platform-image-check-root-marker.sh <deploy-dir>` (the build's `DEPLOY_DIR_IMAGE` for the
+  image), which exits nonzero on any variant without the marker or any `.bmap` that does not map it. A flasher that skips the block despite its nonzero content is not a known case.
 - Provisional and unbuilt: that wic passes `--mkfs-extraopts` on to `mkfs.ext4` is not checked (no bitbake here); if it
   does not, and the image's block size is smaller than 4096, the unit fails closed on first boot. Writing the token needs
   raw write access to the root's block device while the file system is mounted read-only; a kernel without that

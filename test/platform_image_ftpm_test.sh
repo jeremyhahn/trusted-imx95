@@ -262,7 +262,192 @@ expect "marker: an id with a space is refused" test "$(sh "$rm_sh" sector 'a b' 
 expect "marker: an offset that is not a multiple of 512 is refused" test "$(sh "$rm_sh" write "$wt/marker" 100 x >/dev/null 2>&1; echo $?)" -ne 0
 printf '%s\n' 'label: gpt' 'sector-size: 512' '/dev/x1 : start=        2048, size=      524288, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="boot"' '/dev/x2 : start=      526336, size=     2097152, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"' >"$wt/dump"
 expect "marker: the root partition's byte offset is read from an sfdisk dump" test "$(sh "$rm_sh" start <"$wt/dump")" -eq $((526336 * 512))
-expect "the image build writes the marker into the wic" ncstr "$img" 'do_image_wic[postfuncs] += "trusted_imx95_mark_root"'
+expect "the image build registers the marker step as a postfunc of the wic task" ncstr "$img" 'do_image_wic[postfuncs] += "trusted_imx95_mark_root"'
+expect "marker: write refuses a file that does not exist (dd would create one)" test "$(sh "$rm_sh" write "$wt/no-such-file" 0 x >/dev/null 2>&1; echo $?)" -ne 0
+expect "marker: write left no file behind" test ! -e "$wt/no-such-file"
+
+# Behavioural test of the image's post-step and of root-marker.sh's wic mode, on synthetic build
+# artifacts in scratch directories: plain files, dd conv=notrunc, no loop device, no bitbake. The
+# hook's shell body is cut out of the .bb by its function name and run with stubbed bitbake variables.
+# IMAGE_FSTYPES: the image adds only "wic" (machine defaults are not readable without a build), so the
+# variants are .wic, .wic.gz (a compressed variant, in case a build adds one) and a .wic.bmap.
+# The order is the one the image class gives the post-step: it is a postfunc of do_image_wic, so it
+# runs inside that task, before any compression or bmap conversion, which then run on its output;
+# do_image_complete copies the result to the deploy directory. UNBUILT: that order is read from the
+# postfunc registration, not observed in a build.
+chk=$ROOT/scripts/platform-image-check-root-marker.sh
+hookfn=trusted_imx95_mark_root
+expect "the hook function is in the image recipe" has "$img" "$hookfn () {"
+# The wks geometry: --fixed-size (MiB) and --align (KiB) of each part line, in order.
+align=
+sizes=()
+while IFS= read -r l; do
+	case $l in 'part '*)
+		[[ $l =~ --align\ ([0-9]+) ]] && align=${BASH_REMATCH[1]}
+		[[ $l =~ --fixed-size\ ([0-9]+) ]] && sizes+=("${BASH_REMATCH[1]}")
+		;;
+	esac
+done <"$wks"
+expect "wks: three partitions with fixed sizes and an alignment" test "${#sizes[@]}" -eq 3 -a -n "$align"
+mib=$((1024 * 1024))
+pos=$((align * 1024))
+starts=()
+for s in "${sizes[@]}"; do
+	pos=$(((pos + align * 1024 - 1) / (align * 1024) * (align * 1024)))
+	starts+=("$pos")
+	pos=$((pos + s * mib))
+done
+imgsize=$((pos + mib))
+rootoff=${starts[1]}
+expect "wks: the root partition starts on a 4096-byte block" test $((rootoff % 4096)) -eq 0
+printf '%s\n' 'label: gpt' 'sector-size: 512' \
+	"/dev/x1 : start=$((starts[0] / 512)), size=$((sizes[0] * 2048)), name=\"boot\"" \
+	"/dev/x2 : start=$((starts[1] / 512)), size=$((sizes[1] * 2048)), name=\"root\"" \
+	"/dev/x3 : start=$((starts[2] / 512)), size=$((sizes[2] * 2048)), name=\"tee-data\"" >"$wt/geom-dump"
+cat >"$wt/genbmap.py" <<'PY'
+import hashlib, sys
+p, bs = sys.argv[1], 4096
+ranges, i, z = [], 0, bytes(4096)
+with open(p, "rb") as f:
+    while True:
+        buf = f.read(bs * 256)
+        if not buf:
+            break
+        for o in range(0, len(buf), bs):
+            blk = buf[o:o + bs]
+            if blk != z[:len(blk)]:
+                if ranges and ranges[-1][1] == i - 1:
+                    ranges[-1][1] = i
+                else:
+                    ranges.append([i, i])
+            i += 1
+rl = []
+with open(p, "rb") as f:
+    for a, b in ranges:
+        f.seek(a * bs)
+        d = f.read((b - a + 1) * bs)
+        rl.append('    <Range chksum="%s"> %d-%d </Range>' % (hashlib.sha256(d).hexdigest(), a, b))
+mapped = sum(b - a + 1 for a, b in ranges)
+head = ['<?xml version="1.0" ?>', '<bmap version="2.0">', '  <ImageSize> %d </ImageSize>' % (i * bs),
+        '  <BlockSize> %d </BlockSize>' % bs, '  <BlocksCount> %d </BlocksCount>' % i,
+        '  <MappedBlocksCount> %d </MappedBlocksCount>' % mapped, '  <ChecksumType> sha256 </ChecksumType>']
+fc = "<BmapFileChecksum> %s </BmapFileChecksum>"
+body = ['  <BlockMap>'] + rl + ['  </BlockMap>', '</bmap>']
+text = "\n".join(head + ["  " + fc % ("0" * 64)] + body) + "\n"
+real = hashlib.sha256(text.encode()).hexdigest()
+sys.stdout.write(text.replace(fc % ("0" * 64), fc % real))
+PY
+# mkwic FILE SUPERBLOCK: a sparse image with the wks geometry; GPT header, boot and (SUPERBLOCK=1)
+# an ext4 superblock's magic, which lives in the root's block 0, so that block is mapped before the marker.
+mkwic() {
+	truncate -s "$imgsize" "$1"
+	printf 'EFI PART' | dd of="$1" bs=1 seek=512 conv=notrunc 2>/dev/null
+	printf 'boot' | dd of="$1" bs=1 seek="${starts[0]}" conv=notrunc 2>/dev/null
+	printf 'data' | dd of="$1" bs=1 seek="${starts[2]}" conv=notrunc 2>/dev/null
+	if [ "$2" = 1 ]; then
+		printf '\123\357' | dd of="$1" bs=1 seek=$((rootoff + 1080)) conv=notrunc 2>/dev/null
+	fi
+}
+# mktree DIR [SED-SCRIPT-FOR-BB [SED-SCRIPT-FOR-ROOT-MARKER]]: a copy of the recipe and its script.
+mktree() {
+	mkdir -p "$1/platform-image/recipes-core/images" "$1/platform-image/files"
+	sed "${2:-}" "$img" >"$1/platform-image/recipes-core/images/trusted-imx95-image.bb"
+	sed "${3:-}" "$ROOT/platform-image/files/root-marker.sh" >"$1/platform-image/files/root-marker.sh"
+}
+# scen NAME ORDER TREE SUPERBLOCK: one synthetic build. ORDER is the sequence of steps run:
+# h = the hook (extracted from TREE's recipe), g = gzip of the wic, b = bmap of the wic.
+# Sets hook_rc and chk_rc; the artifacts are in $wt/NAME/deploy.
+scen() {
+	local d=$wt/$1 order=$2 tree=$3 st n=trusted-imx95-image-frdm-imx95-pro.rootfs-20250101 l body=0 w
+	rm -rf "$d"
+	mkdir -p "$d/imgdeploy" "$d/deploy" "$d/bin" "$d/rootfs/etc"
+	printf 'build-A\n' >"$d/rootfs/etc/trusted-imx95-rootfs-id"
+	cp "$wt/geom-dump" "$d/dump"
+	# a stand-in for sfdisk (absent here): it dumps the geometry, and fails on a file that is not there
+	# shellcheck disable=SC2016 # the script's own $1 and $2
+	printf '#!/bin/sh\n[ "$1" = -d ] && [ -f "$2" ] && cat "%s"\n' "$d/dump" >"$d/bin/sfdisk"
+	chmod +x "$d/bin/sfdisk"
+	: >"$d/hook.sh"
+	while IFS= read -r l; do
+		case $l in "$hookfn () {"*) body=1 ;; '}'*) body=0 ;; *) [ "$body" -eq 1 ] && printf '%s\n' "$l" >>"$d/hook.sh" ;; esac
+	done <"$tree/platform-image/recipes-core/images/trusted-imx95-image.bb"
+	w=$d/imgdeploy/$n.wic
+	mkwic "$w" "$4"
+	hook_rc=0
+	for st in $(printf '%s' "$order" | tr ',' ' '); do
+		case $st in
+		h) env -i PATH="$d/bin:$PATH" THISDIR="$tree/platform-image/recipes-core/images" IMGDEPLOYDIR="$d/imgdeploy" \
+			IMAGE_NAME="$n" IMAGE_ROOTFS="$d/rootfs" sysconfdir=/etc sh -e "$d/hook.sh" >"$d/hook.log" 2>&1 || hook_rc=$? ;;
+		g) gzip -c "$w" >"$w.gz" ;;
+		b) python3 -I "$wt/genbmap.py" "$w" >"$w.bmap" ;;
+		esac
+	done
+	# do_image_complete: copy to the deploy directory, with the unversioned link names
+	cp -a "$d/imgdeploy/." "$d/deploy/"
+	for n in wic wic.gz wic.bmap; do
+		[ -e "$d/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.$n" ] &&
+			ln -s "trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.$n" "$d/deploy/trusted-imx95-image-frdm-imx95-pro.$n"
+	done
+	chk_rc=0
+	PATH="$d/bin:$PATH" sh "$chk" "$d/deploy" >"$d/chk.log" 2>&1 || chk_rc=$?
+	return 0
+}
+mktree "$wt/tree-good"
+expect "scenario tree: the extracted recipe equals the real one" cmp -s "$img" "$wt/tree-good/platform-image/recipes-core/images/trusted-imx95-image.bb"
+expect "scenario tree: the hook function body was cut out" test "$(grep -c . <(sed -n "/^$hookfn () {/,/^}/p" "$img"))" -gt 2
+
+# The real order: hook, then gzip, then bmap.
+scen good h,g,b "$wt/tree-good" 1
+expect "hook: runs ok on the synthetic wic" test "$hook_rc" -eq 0
+expect "good deploy: the wic, the gz and the bmap are there" test -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic" -a -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.gz" -a -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.bmap"
+expect "good deploy: the checker passes" test "$chk_rc" -eq 0
+sh "$rm_sh" sector build-A >"$wt/marker"
+dw=$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic
+expect "good: the root sector of the plain wic is exactly the marker" test "$(dd if="$dw" bs=512 skip=$((rootoff / 512)) count=1 2>/dev/null | cmp -s - "$wt/marker"; echo $?)" -eq 0
+gzip -dc "$dw.gz" | dd of="$wt/good/plain" bs=1M conv=sparse 2>/dev/null
+expect "good: the root sector of the decompressed gz is exactly the marker" test "$(dd if="$wt/good/plain" bs=512 skip=$((rootoff / 512)) count=1 2>/dev/null | cmp -s - "$wt/marker"; echo $?)" -eq 0
+expect "good: the symlinked variant is checked too" has "$wt/good/chk.log" 'trusted-imx95-image-frdm-imx95-pro.wic.gz: marker'
+rm -f "$wt/good/plain"
+expect "good: a bmap range covers the marker block" has "$wt/good/chk.log" 'OK ('
+# The bmap's own file checksum: a copy of the good deploy with that field altered fails the checker.
+cp -a "$wt/good/deploy" "$wt/bm-tamper"
+sed -i 's|\(<BmapFileChecksum> \)[0-9a-f]|\1z|' "$wt/bm-tamper/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.bmap"
+expect "bmap: a bad file checksum fails the checker" test "$(sh "$chk" "$wt/bm-tamper" >"$wt/bm-tamper.log" 2>&1; echo $?)" -ne 0
+expect "bmap: ... and the log names the file checksum" has "$wt/bm-tamper.log" 'file checksum'
+rm -rf "$wt/bm-tamper"
+expect "checker: a directory with no image fails" test "$(sh "$chk" "$wt/geom-none" >/dev/null 2>&1; echo $?)" -ne 0
+mkdir "$wt/empty-deploy"
+expect "checker: an empty deploy directory fails" test "$(sh "$chk" "$wt/empty-deploy" >/dev/null 2>&1; echo $?)" -ne 0
+
+# Mutation 1: the hook names a file the wic task does not produce.
+# shellcheck disable=SC2016 # sed scripts, the $ are literal
+mktree "$wt/tree-m1" 's|\${IMAGE_NAME}\.wic |${IMAGE_NAME}.rootfs.wic |'
+expect "mutation 1: the scratch recipe differs from the real one" test "$(cmp -s "$img" "$wt/tree-m1/platform-image/recipes-core/images/trusted-imx95-image.bb"; echo $?)" -ne 0
+scen m1 h,g,b "$wt/tree-m1" 1
+expect "mutation 1 (hook targets a nonexistent file): the hook fails" test "$hook_rc" -ne 0
+expect "mutation 1: the checker fails" test "$chk_rc" -ne 0
+expect "mutation 1: the checker says the root sector holds no marker" has "$wt/m1/chk.log" 'not 512 nonzero bytes'
+# Mutation 2: wic mode writes nothing.
+# shellcheck disable=SC2016 # a sed script, the $ are literal
+mktree "$wt/tree-m2" '' 's|^\tput "\$2" "\$off" "\$3"$|\t:|'
+expect "mutation 2: the scratch script differs from the real one" test "$(cmp -s "$rm_sh" "$wt/tree-m2/platform-image/files/root-marker.sh"; echo $?)" -ne 0
+scen m2 h,g,b "$wt/tree-m2" 1
+expect "mutation 2 (wic mode writes nothing): the hook itself exits ok" test "$hook_rc" -eq 0
+expect "mutation 2: the checker fails" test "$chk_rc" -ne 0
+expect "mutation 2: the checker says the root sector holds no marker" has "$wt/m2/chk.log" 'not 512 nonzero bytes'
+# Mutation 3: the hook runs after the compression (the gz holds the old sector).
+scen m3 g,h,b "$wt/tree-good" 1
+expect "mutation 3 (hook after compression): the checker fails" test "$chk_rc" -ne 0
+expect "mutation 3: it names the compressed variant" has "$wt/m3/chk.log" '.wic.gz: the root sector'
+# Mutation 4: the hook runs after the bmap, and the root block was a hole when the bmap was made.
+scen m4 b,h "$wt/tree-good" 0
+expect "mutation 4 (hook after bmap, block unmapped): the checker fails" test "$chk_rc" -ne 0
+expect "mutation 4: the bmap does not cover the marker" has "$wt/m4/chk.log" 'no mapped range covers the marker'
+# Mutation 5: the same, with the block mapped (the superblock): the range checksum is stale.
+scen m5 b,h "$wt/tree-good" 1
+expect "mutation 5 (hook after bmap, block mapped): the checker fails" test "$chk_rc" -ne 0
+expect "mutation 5: the range checksum does not match" has "$wt/m5/chk.log" 'does not match the image'
+rm -rf "$wt"/good "$wt"/m[1-5] "$wt"/tree-* "$wt/empty-deploy" "$wt/genbmap.py"
 mkroot "$rootdev" 2 # the whole partition rewritten from the very same image: same content id
 expect "token: a full-partition identical rewrite runs ok" test "$(wipe_run)" -eq 0
 expect "token: a full-partition identical rewrite wipes the NV" test ! -e "$wt/data/tee/obj"

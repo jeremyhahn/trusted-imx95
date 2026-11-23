@@ -48,7 +48,14 @@ start() {
 put() { # FILE OFFSET ID
 	case $2 in '' | *[!0-9]*) die "bad offset" ;; esac
 	[ $(($2 % 512)) -eq 0 ] || die "the offset is not a multiple of 512"
-	sector "$3" | dd of="$1" bs=512 seek=$(($2 / 512)) count=1 conv=notrunc 2>/dev/null || die "cannot write $1"
+	[ -f "$1" ] || die "no such file: $1 (dd would create it)"
+	# Through a file, not a pipe: dd count=1 on a pipe stops after the first read(), which
+	# is the short head of the sector, not the 512 bytes (found by the synthetic-wic test).
+	t=$(mktemp) || die "cannot make a temporary file"
+	sector "$3" >"$t" || { rm -f "$t"; die "cannot make the sector"; }
+	[ "$(wc -c <"$t")" -eq 512 ] || { rm -f "$t"; die "the sector is not 512 bytes"; }
+	dd if="$t" of="$1" bs=512 seek=$(($2 / 512)) count=1 conv=notrunc 2>/dev/null || { rm -f "$t"; die "cannot write $1"; }
+	rm -f "$t"
 }
 
 case ${1:-} in
