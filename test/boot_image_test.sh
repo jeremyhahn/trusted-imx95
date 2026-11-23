@@ -81,7 +81,7 @@ cp "$LOCK" "$FXLOCK"
 
 # --- collect ---
 # the test must not pick up a real make system-manager / secure-world output
-export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw
+export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw M7_OUT=$TMP_ROOT/no-m7
 out=$TMP_ROOT/in
 run "$SCRIPT" --collect "$out" --system-manager "$TMP_ROOT/none.bin"
 check "collect: a named file that is missing is refused" nonzero "no such file"
@@ -118,6 +118,18 @@ if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" ' real ')" -eq 3 ] && [ "$(cat "$TMP
 	pass "collect: three real inputs, three stand-ins"
 else
 	fail "collect: three real inputs, three stand-ins" "$(cat "$TMP_ROOT/in2/inputs.txt")"
+fi
+
+# the M7 idle image of make m7-image is picked up from M7_OUT
+mkdir -p "$TMP_ROOT/m7o"
+printf 'm7idle' >"$TMP_ROOT/m7o/m7_image.bin"
+run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/sw" M7_OUT="$TMP_ROOT/m7o" "$SCRIPT" --collect "$TMP_ROOT/in2b"
+check "collect: the M7 image comes from the make m7-image output" 0 "U-Boot: STAND-IN" "ELE firmware: STAND-IN"
+if [ "$(count_in "$TMP_ROOT/in2b/inputs.txt" ' real ')" -eq 4 ] && [ "$(cat "$TMP_ROOT/in2b/m7_image.bin")" = m7idle ] &&
+	[ "$(count_in "$TMP_ROOT/in2b/inputs.txt" STAND-IN)" -eq 2 ]; then
+	pass "collect: four real inputs, two stand-ins"
+else
+	fail "collect: four real inputs, two stand-ins" "$(cat "$TMP_ROOT/in2b/inputs.txt")"
 fi
 
 # --- fetch fails closed on a digest mismatch (curl stubbed, no network) ---

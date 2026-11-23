@@ -1,0 +1,5 @@
+# Pins of the Cortex-M7 idle image (scripts/m7-image-build.sh).
+# The toolchain pin is system-manager/sm.lock's (toolchain_url, toolchain_sha256).
+# sources_sha256: SHA-256 of startup.c, main.c and m7-idle.ld, concatenated in
+# that order (boot-container/m7-idle/). Change a source, change this line.
+sources_sha256=40c2682d950153c07baea25b555b6cbced44da8b01dcaf1056e55c287974acf6

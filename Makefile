@@ -46,7 +46,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager m7-image secure-world ahab-sign-test \
 	ahab-m7-test ahab-policy-test ahab-tamper-test boot-image-inputs boot-image-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
@@ -158,6 +158,9 @@ tools: ## Install the pinned, digest-checked tools of scripts/tool-pins.sh into 
 system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in clean trees; fail unless identical
 	@scripts/sm-build.sh system-manager/sm.lock
 
+m7-image: ## Build the Cortex-M7 idle image (boot-container/m7-idle/, Arm toolchain of sm.lock) twice; fail unless identical; out/m7-image/m7_image.bin is then BI_M7's default
+	@scripts/m7-image-build.sh
+
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
 	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
 
@@ -211,7 +214,7 @@ ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used S
 BI_OUT ?= $(CURDIR)/out/boot-image
 export BI_M7
 
-boot-image-inputs: ## Collect the boot image inputs into BI_OUT/inputs (stand-ins, labelled, for what is not built; BI_M7=<file> for the Cortex-M7 image)
+boot-image-inputs: ## Collect the boot image inputs into BI_OUT/inputs (stand-ins, labelled, for what is not built; the Cortex-M7 image is out/m7-image/ after make m7-image, or BI_M7=<file>)
 	@scripts/boot-image-inputs.sh --check
 	@scripts/boot-image-inputs.sh --collect "$(BI_OUT)/inputs" $${BI_M7:+--m7 "$$BI_M7"} $${BI_UBOOT:+--uboot "$$BI_UBOOT"} $${BI_ELE:+--ele "$$BI_ELE"}
 
