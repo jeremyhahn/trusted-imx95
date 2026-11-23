@@ -42,7 +42,7 @@ Planned, undated. No issue is filed yet; each line gets its issue once the owner
   - (d) Provisioning: go-xkms endorse-01 issues the EK certificate, then enroll-01, then device-attest-01 in the `tpm` format.
   - (e) Measured boot: each stage that can extend the fTPM PCRs does, and each gap in [docs/ftpm/](docs/ftpm/README.md#measured-boot) is closed or accepted by the owner.
 - **secure-key-handling** — keys held in the EdgeLock key store, never in the clear — no issue yet — blocked: owner approval; calling side and SE051 role open
-- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
+- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave, closed only at the provisioning station and never on a development board (owner ruling 1234) — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **hsm-device-protocol** — the device side of go-xkms's xkmsd-to-device protocol over 1 GbE and 10 GbE — no issue yet — blocked: owner approval; owner-queue item 160 (`go-xkms#1521`)
 - **device-lifecycle** — the device side of go-trusted-platform's provisioning, enrollment and attestation — no issue yet — blocked: owner approval; evidence open
 - **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — no issue yet — blocked: owner approval; A55 side open

@@ -47,9 +47,12 @@ The vendor's flow has two steps, in this order ([SPEC.md](../SPEC.md), `oem-key-
 
 - The device's life cycle moves from OEM open to OEM closed through the enclave (RM00284 §3.23).
 - **Irreversible. Needs the owner's explicit approval before it is run on any device.** Closing the life cycle is a
-  one-way step; this project treats it as irreversible, and when it is closed is the owner's question
-  ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
-  No lane and no build target closes it.
+  one-way step; this project treats it as irreversible.
+- **Owner ruling 1234:** the life cycle is closed only at the provisioning station, never on a development board.
+  Provisioning runs at that station. RPMB key programming for the [ftpm](../ftpm/README.md) row follows OEM close
+  at that station; it is the owner's decision alone and nothing in this repository performs it.
+  No lane and no build target closes the life cycle; `test/no_lifecycle_close_test.sh` fails the build if a script,
+  make target or workflow in this repository runs a life-cycle change or a fuse write.
 - What closing the life cycle enforces on the i.MX 95, at boot and in the enclave, comes from IMX95RM and the
   i.MX 95 Security Reference Manual, both missing (see [Missing](#missing)). The boot-side effect on container
   verification is the `boot-container` row's concern ([SPEC.md](../SPEC.md)).
@@ -118,8 +121,6 @@ SPEC row's citations (see [Missing](#missing)); the table lists them in the SPEC
 
 ## Open questions
 
-- When the life cycle is closed: the owner's ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
-- Where provisioning runs: the owner's ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
 - Whether provisioning uses NXP's SPSDK enclave tools or another path: the owner's.
 - Which side calls the enclave's HSM API, the Cortex-A55 Linux side or the Cortex-M7: the owner's, under
   `secure-key-handling` ([SPEC.md](../SPEC.md)).
