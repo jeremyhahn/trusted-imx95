@@ -236,11 +236,28 @@ got=$(m7_field load_address)
 expect "m7: the M7 entry's load address is $WANT_M7_LOAD (parsed '$got')" m7_num_eq "$got" "$WANT_M7_LOAD"
 got=$(m7_field entry_point)
 expect "m7: the M7 entry's entry point is $WANT_M7_ENTRY (parsed '$got')" m7_num_eq "$got" "$WANT_M7_ENTRY"
-# the container offsets, from the image bytes: version 2 at +0, AHAB tag 0x87 at +3, every 0x400
-offsets=$(python3 -I - "$img_out/boot-image.bin" <<'PY'
+# the container offsets: the container headers sit below the first image payload, so walk only
+# [0, first image_offset) from the parse output, 0x400-aligned, version 2 at +0 and AHAB tag 0x87 at +3;
+# no payload byte is ever read
+first_payload=0
+while IFS= read -r l; do
+	if [[ "$l" =~ image_offset:\ \'(0x[0-9a-f]+)\' ]]; then
+		m=${BASH_REMATCH[1]}
+		v=$((m))
+		if [ "$first_payload" -eq 0 ] || [ "$v" -lt "$first_payload" ]; then first_payload=$v; fi
+	fi
+done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+expect "m7: the parse output records the first payload offset (got '$first_payload')" [ "${first_payload:-0}" -gt 0 ]
+offsets=$(python3 -I - "$img_out/boot-image.bin" "${first_payload:-0}" <<'PY'
 import sys
-d = open(sys.argv[1], "rb").read()
-print(" ".join(str(o) for o in range(0, len(d) - 4, 0x400) if d[o] == 2 and d[o + 3] == 0x87))
+f = open(sys.argv[1], "rb")
+out = []
+for o in range(0, int(sys.argv[2]), 0x400):
+    f.seek(o)
+    h = f.read(4)
+    if len(h) == 4 and h[0] == 2 and h[3] == 0x87:
+        out.append(str(o))
+print(" ".join(out))
 PY
 )
 read -r -a offs <<<"$offsets"
