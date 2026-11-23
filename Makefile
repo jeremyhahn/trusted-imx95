@@ -50,7 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools platform-image
 
 help: ## List the targets
 	@echo "Targets:"
@@ -196,6 +196,9 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image: ## Build trusted-imx95-image and its debug image on a build host, then write SHA-256 digests of the deploy artefacts outside the clone; never sets ACCEPT_FSL_EULA, lists the EULA-gated recipes on a stop (needs bitbake and network; not in CI)
+	@scripts/platform-image-build.sh
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
