@@ -378,6 +378,31 @@ dep "" 0 "OK:" "a dependent with no if: inherits the guard"
 dep "github.ref == 'refs/heads/main'" 0 "OK:" "a dependent whose if: has no status function inherits the guard"
 chain "[pull_request]" "success() || true"; stepcmd
 check "success() || true on a calling job is refused on the reusable-workflow edge" 1 "$FORKMSG"
+# Verify 12 (edge): a calling job that needs a guarded job inherits its exclusion
+# only when its if: is absent or holds no status function.
+edge() { # <if: of the calling job b, or empty> <expected status> <expected text> <label>
+	resetwf
+	callee "$W"
+	wfwrite caller.yml <<EOF
+name: caller
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    needs: a
+${1:+    if: "$1"}
+    uses: ./.github/workflows/callee.yml
+EOF
+	stepcmd
+	check "$4" "$2" "$3"
+}
+edge "" 0 "OK:" "a calling job with no if: inherits the needed job's exclusion"
+edge "success() || true" 1 "$FORKMSG" "a calling job using success() || true is refused on the edge"
+edge "github.ref == 'refs/heads/main'" 0 "OK:" "a calling job whose if: has no status function inherits the exclusion"
 
 # Codex security P1s at verify 7: the release decision is an allowlist.
 # (1) head_ref is an arbitrary branch name, never simulated.
