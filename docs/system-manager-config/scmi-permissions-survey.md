@@ -463,8 +463,11 @@ states it.
 
 ## 8. Does the M7 need a `PERF_M7` API line? (#167; provisional)
 
-Status: provisional survey. No `.cfg` patch is made. The #13 delta is
-still pending owner approval.
+Status: provisional and open. The PRO generated table gives ALL
+(`configs/mx95frdm-pro/config_scmi.h:96`, by the command in 8.0); the
+question stays open until a second reader repeats the reads at the
+pinned revision. No `.cfg` patch is made. The #13 delta is still
+pending owner approval.
 
 Source: NXP `imx-sm` at the revision pinned in `system-manager/sm.lock`
 (tag `lf-6.18.37-2.1.0`, commit `eec232878ab7`). It was fetched as
@@ -501,17 +504,18 @@ order (`git apply`, as `scripts/sm-build.sh` does): run
 copied here. Its SHA-256 is not pinned, so a reviewer compares the one
 line cited, not a digest.
 
-Section 8 stays provisional because no second reader has yet repeated
-the vendor-tree reads. It no longer relies on the EVK's table.
+Section 8 stays provisional and open because no second reader has yet
+repeated the vendor-tree reads. It no longer relies on the EVK's table.
 
 ### 8.1 Answer
 
-**No `PERF_M7` API line is needed for the M7 to set its own performance
-level.** Ownership of `M7P` already gives the M7 agent all rights on
+**Provisional, open: no `PERF_M7` API line appears to be needed for the
+M7 to set its own performance level.** Ownership of `M7P` already gives the M7 agent all rights on
 the `PERF_M7` domain, and `PERFORMANCE_LEVEL_SET` needs only PRIV. The
 PRO's own generated table, regenerated from the pinned, patched file
 (8.0), gives the M7 agent ALL on `PERF_M7` (item 2). The `PERF_M7  PRIV`
-line is therefore not required, and the open row is closed. An explicit
+line is therefore not required on this reading, and the row stays open
+until a second reader confirms it. An explicit
 line would not even lower the grant (item 7).
 
 ### 8.2 Evidence
