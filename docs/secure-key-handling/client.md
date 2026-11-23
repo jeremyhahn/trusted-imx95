@@ -320,18 +320,18 @@ copied into this repository.
 
 Paths are in the pinned tree (`ele-lib.lock`), under `src/common/` unless stated; line numbers are 1-based and were
 re-checked against the fetched source. Nothing here is copied from it. "Provisional" means the source does not settle it
-and only the board can.
+and only the board can. "Read twice" means a second reader (lane 162-skh-next2) re-read the row in a tree fetched by
+`scripts/ele-lib-build.sh --src-only`, whose archive SHA-256 matched `ELE_ARCHIVE_SHA256` in `ele-lib.lock`.
 
 | Behaviour the backend assumes | Where in the pinned source | Status |
 |---|---|---|
-| `PLAT=ele` builds with `-DPSA_COMPLIANT`, so the PSA branches of the message code are the ones compiled | `src/plat/ele/ele.mk:41` | read |
-| A success-tagged response with a warning rating maps to `HSM_NO_ERROR` (the warning is only logged), so a counter warning on a success-tagged reply is invisible to the caller | `hsm_api/hsm_utils.c:223-224`, `:24-48` (the map lookup at `:26`; every case falls through to `HSM_NO_ERROR` at `:48`); success rating 0x10 is `HSM_KEY_STORE_COUNTER` in `src/plat/ele/include/plat_err_def.h:289` | read twice |
-| `HSM_KEY_STORE_COUNTER` reaches the caller only from an error-tagged response | `hsm_api/hsm_utils.c:226` (error path, through the error map at `:54`), `:118` (the error case); the result is returned at `:228` | read twice |
-| No per-flag acknowledgement is exposed; "both flags acknowledged" is inferred from `HSM_NO_ERROR` | no field in the argument structures; see the two rows above | **provisional** |
-| Generate writes the key id into the caller's variable whatever the rating | `sab_msg/sab_key_generate.c:94-95`; the response handler runs at `sab_msg/sab_process_msg.c:333` | read |
-| A successful sign does not update `signature_size`; the PSA build stores the response size in `exp_signature_size` instead | `sab_msg/sab_sign_gen.c:178` | read |
-| The signature is 64 bytes (P-256 `r\|\|s`) | not stated at the call | **provisional** |
-| The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read; the call runs in a child process |
+| `PLAT=ele` builds with `-DPSA_COMPLIANT`, so the PSA branches of the message code are the ones compiled | `src/plat/ele/ele.mk:41` | read twice |
+| No per-flag acknowledgement is exposed; "both flags acknowledged" is inferred from `HSM_NO_ERROR` | no field in the argument structures; see the two rows above and the next row | **provisional** (the inference itself; the absence of a field is read twice, next row) |
+| No reply field, accessor or delete flag carries the counter acknowledgement for one operation | searched `include/hsm/`, `src/common/hsm_api/`, `src/common/sab_msg/` and `include/common/` for monotonic, counter, rollback and acknowledge: `include/hsm/internal/hsm_delete_key.h:29-34` (key id and flags; the only flag, strict, at `:54`); `include/hsm/internal/hsm_key_generate.h:28-30` (the counter flag is a request, documented as completing only when the counter is updated); `include/hsm/internal/hsm_utils.h:68-70` (the `HSM_KEY_STORE_COUNTER` code). Two indicators that are not a per-operation acknowledgement: `hsm_get_info` returns the device-wide `chip_monotonic_counter` (`include/common/get_info.h:25`, filled at `src/common/sab_msg/sab_get_info.c:57`), a value, not a per-call result; `hsm_dev_mono_counter` (`include/hsm/internal/hsm_dev_mono_counter.h:17-57`) partitions counter fuse words, a provisioning step, never run here. The counter-exhausted warning is documented as returned on each key-store export to the NVM (`include/hsm/mainpage.h:71`, `:148`); the export status is handled on the NVM manager's path (`src/common/sab_msg/sab_storage_export_finish.c:43-52`), not in the client's reply | read twice; for the owner (see "What is left open") |
+| Generate writes the key id into the caller's variable whatever the rating | `sab_msg/sab_key_generate.c:94-95` (the handler does not check the rating); the response handler runs at `sab_msg/sab_process_msg.c:333` | read twice |
+| A successful sign does not update `signature_size`; the PSA build stores the response size in `exp_signature_size` instead | `sab_msg/sab_sign_gen.c:178` | read twice |
+| The signature is 64 bytes (P-256 `r\|\|s`) | not stated at the call; the reply carries a 16-bit `signature_size` (`sab_msg/include/sab_sign_gen.h:75-82`) and the backend refuses any size but 64 | **provisional** (size not fixed by the library; board) |
+| The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read twice; the call runs in a child process |
 
 Consequences in the backend: `hsm_sign` refuses a buffer under 64 bytes before the call, reads `exp_signature_size`
 after the call and accepts only 64 (this binding supports P-256 only): any other length is refused, the caller's buffer
@@ -341,6 +341,11 @@ double (`ele_hsm_fake.c`) follows the same source: a sign leaves `signature_size
 ## What is left open
 
 - **Owner:** Q2, the counter acknowledgement (default (c), fail closed, provisional); the delete gap (above); the SE051's role. The calling side is decided (owner ruling 1234).
+  From the second reading, for Q2 (no code change made on it): the counter-flag request is documented as completing
+  only once the counter is updated, but the exhausted-counter warning reaches the caller as `HSM_NO_ERROR` on a
+  success-tagged reply and is otherwise documented on the NVM export path, which the NVM manager handles, not the
+  client; a before-and-after read of `chip_monotonic_counter` through `hsm_get_info` would be indirect evidence only
+  (see the contract table).
 - **Needs the board, none run here:** the client was built and linked, never run. The key-store identifier, nonce,
   the key store's creation and its counter split are provisioning (`oem-key-provisioning` row); the structure
   members and key attributes the backend sets (ECC NIST P-256, persistent, sign-hash) are taken from the library's
