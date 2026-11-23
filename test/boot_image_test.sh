@@ -2,7 +2,7 @@
 # test/boot_image_test.sh: the boot image inputs (scripts/boot-image-inputs.sh)
 # and, from the assembly slice on, the signed image. Offline; no board.
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 SCRIPT=$ROOT/scripts/boot-image-inputs.sh
