@@ -47,7 +47,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	ahab-m7-test ahab-policy-test ahab-tamper-test \
+	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -205,6 +205,10 @@ ahab-policy-test: ## Check a test-PKI container against a policy file written fr
 
 ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
 	@test/ahab_tamper_test.sh
+
+srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
+	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
+	@scripts/ahab/srk-hash-check.sh "$$SRK_EXPECTED" $$SRK_FILES
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
