@@ -118,15 +118,41 @@ tamper() {
 }
 size=$(wc -c <"$work/msg.bin")
 [ "$size" -gt 600 ] || die "the message is only $size bytes"
-# Offsets 200 and 560 fall in the message body and in the SRK table of the
-# 728-byte message the pinned SPSDK builds from this configuration.
-for spec in "200 body" "560 srk-table"; do
-	read -r off part <<<"$spec"
-	tamper "$off" "tampered-$part"
-	if verify "tampered-$part.bin"; then bad "tampered $part accepted"; else ok "tampered $part rejected"; fi
-done
-# Not asserted: signed-msg verify of the pinned SPSDK accepted a flipped byte at
-# every probed offset of the signature (see docs/oem-key-provisioning/key-exchange-msg.md).
+
+# u16 <file> <offset>: little-endian 16-bit value.
+u16() {
+	local lo hi
+	read -r lo hi < <(od -An -tu1 -j "$2" -N 2 "$1")
+	echo $((lo + hi * 256))
+}
+# Offsets come from the message itself: the container header (byte 12) gives the
+# signature block, whose header gives the SRK table (+6) and the signature (+8).
+block=$(u16 "$work/msg.bin" 12)
+srk_off=$((block + $(u16 "$work/msg.bin" $((block + 6)))))
+sig_off=$((block + $(u16 "$work/msg.bin" $((block + 8)))))
+{ [ "$block" -gt 16 ] && [ "$srk_off" -gt "$block" ] && [ "$sig_off" -gt "$srk_off" ] &&
+	[ $((sig_off + 8 + 96)) -le "$size" ]; } ||
+	die "implausible offsets in the message header ($block $srk_off $sig_off, size $size)"
+body_off=$((16 + (block - 16) / 2))
+echo "offsets from the header: signature block $block, SRK table $srk_off, signature $sig_off, size $size"
+sig_data_off=$((sig_off + 8 + 10)) # a byte inside the r value of the signature
+tamper "$((srk_off + 20))" tampered-srk-table
+if verify tampered-srk-table.bin; then bad "tampered srk-table accepted"; else ok "tampered srk-table rejected"; fi
+# A flipped byte inside the message body (the command fields) is not rejected by
+# SPSDK verify; the signature covers it, which the independent check below shows.
+tamper "$body_off" tampered-body
+if verify tampered-body.bin; then ok "SPSDK verify accepts a flipped body byte (the signature check below rejects it)"; else ok "SPSDK verify rejects a flipped body byte"; fi
+
+# The signature is checked independently of SPSDK: nxpimage signed-msg verify of
+# the pinned SPSDK accepted a flipped signature byte (see
+# docs/oem-key-provisioning/key-exchange-msg.md).
+sigcheck() { "$venv/bin/python" -I "$here/msg-sig-check.py" "$1" "$2" >"$work/sigcheck.log" 2>&1; }
+if sigcheck "$work/msg.bin" "$work/srk0.pub"; then ok "signature valid (independent check)"; else tail -n 3 "$work/sigcheck.log" >&2; bad "signature of the message is not valid"; fi
+tamper "$sig_data_off" tampered-signature
+if sigcheck "$work/tampered-signature.bin" "$work/srk0.pub"; then bad "flipped signature byte accepted by the independent check"; else ok "flipped signature byte rejected (independent check)"; fi
+tamper "$body_off" tampered-body-sig
+if sigcheck "$work/tampered-body-sig.bin" "$work/srk0.pub"; then bad "flipped body byte accepted by the independent check"; else ok "flipped body byte rejected (independent check)"; fi
+if sigcheck "$work/msg.bin" "$work/srk1.pub"; then bad "signature accepted under another SRK"; else ok "signature rejected under another SRK"; fi
 
 # A message signed under another SRK set. parse writes the SRK hash of the
 # table inside the message; srk-hash-check must agree with it for the right
