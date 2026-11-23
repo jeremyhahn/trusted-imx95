@@ -37,14 +37,14 @@ case "$1 $2 $3" in
   exit 0 ;;
 esac
 case $1 in
-login) cat > /dev/null ;;
+login) cat > /dev/null; exit "${LOGIN_RC:-0}" ;;
 buildx)
   while [ $# -gt 1 ]; do
     [ "$1" = --iidfile ] && printf '%s' "$BUILT_ID" > "$2"
     shift
   done ;;
 save) while [ $# -gt 1 ]; do [ "$1" = -o ] && : > "$2"; shift; done ;;
-push) : > "$STUB_DIR/pushed" ;;
+push) [ "${PUSH_RC:-0}" = 0 ] || exit 1; : > "$STUB_DIR/pushed" ;;
 esac
 exit 0
 EOF
@@ -106,5 +106,26 @@ expect "publish: build, history, trivy, then login, tag, push" \
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
 check "publish: a build with no image ID pushes nothing" 1 "recorded no image ID"
 expect "publish: a build with no image ID makes no push call" nolog '^docker (push|tag|login)'
+
+# The job removes the image it loaded, on every exit path (Codex finding on
+# verify 17), and only when the build gave it an ID.
+rmid='^docker image rm -f '"$ID"'$'
+run pub HIST_RC=1
+expect "publish: removes the built image after a history rejection" logged "$rmid"
+run pub TRIVY_RC=1
+expect "publish: removes the built image after a trivy rejection" logged "$rmid"
+run pub LOGIN_RC=1
+check "publish: a login failure fails" 1 "login for"
+expect "publish: removes the built image after a login failure" logged "$rmid"
+run pub PUSH_RC=1
+check "publish: a push failure fails" 1 "the push of"
+expect "publish: removes the built image after a push failure" logged "$rmid"
+run pub PUSHED_CONFIG="$OTHER"
+expect "publish: removes the built image after a config-digest mismatch" logged "$rmid"
+run pub
+expect "publish: removes the built image after success" logged "$rmid"
+expect "publish: removes the applied tag after success" logged '^docker image rm -f forge.example/ns/repo-toolchain:abc-main$'
+run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
+expect "publish: no image rm when the build gave no ID" nolog '^docker image rm'
 
 finish

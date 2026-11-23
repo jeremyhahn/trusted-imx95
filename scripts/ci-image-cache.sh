@@ -176,12 +176,23 @@ case ${1:-} in
     # must be that ID, or publish fails and the tag must be deleted by hand.
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     work=$(mktemp -d "$PWD/.ci-image-publish.XXXXXX")
-    cleanup() { rm -rf "$cfg" "$work"; }
+    built_id=""
+    # Best effort, on every exit: remove the image this job built and the tag
+    # it applied, so a runner keeps no image the job loaded. Only an ID that
+    # came from this build's --iidfile is ever removed.
+    cleanup() {
+      if [ -n "$built_id" ]; then
+        docker image rm -f "$remote" >/dev/null 2>&1 || true
+        docker image rm -f "$built_id" >/dev/null 2>&1 || true
+      fi
+      rm -rf "$cfg" "$work"
+    }
     DOCKER_CONFIG=$cfg docker buildx build --load --no-cache --provenance=false --sbom=false \
       --target toolchain -f "$dockerfile" --iidfile "$work/iid" . \
       || die "the build of $remote failed; nothing was pushed"
     id=$(cat "$work/iid" 2>/dev/null || true)
     [[ "$id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "the build recorded no image ID for $remote; nothing was pushed"
+    built_id=$id
     docker image inspect "$id" >/dev/null 2>&1 || die "the built image $id is not in the daemon; nothing was pushed"
     "$here/ci-image-history.sh" "$id" \
       || die "the history check refused $id; nothing was pushed"
@@ -190,7 +201,8 @@ case ${1:-} in
     "$here/in-toolchain-image.sh" "$id" \
       trivy image --input "$tarname" --ignore-unfixed --skip-dirs /opt/go/mod --severity CRITICAL,HIGH --exit-code 1 \
       || die "trivy refused $id; nothing was pushed"
-    printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null
+    printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null \
+      || die "the registry login for $host failed; nothing was pushed"
     docker tag "$id" "$remote" || die "docker tag of $id failed; nothing was pushed"
     DOCKER_CONFIG=$cfg docker push "$remote" >/dev/null || die "the push of $remote failed"
     pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$remote" --raw 2>/dev/null \
@@ -198,7 +210,6 @@ case ${1:-} in
       || die "the pushed manifest of $remote has no config digest; delete the tag $remote by hand"
     [ "$pushed" = "$id" ] \
       || die "the pushed $remote has config $pushed, not the checked image $id; delete the tag $remote by hand"
-    docker image rm "$remote" >/dev/null 2>&1 || true
     echo "ci-image-cache: published $local_tag as $repo ($id, checked before the push)"
     ;;
   *)
