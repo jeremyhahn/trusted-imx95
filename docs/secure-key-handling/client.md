@@ -1,17 +1,17 @@
 # secure-key-handling: the enclave HSM API client
 
-> **Status: PROVISIONAL, awaiting the owner's answer** · Scope: trusted-imx95 · Last verified: 2026-11-23
+> **Status: the Linux-side client is the chosen design (owner ruling 1234); other defaults below stay PROVISIONAL, awaiting the owner's answer** · Scope: trusted-imx95 · Last verified: 2026-11-23
 
 A minimal key-store client over the EdgeLock enclave's HSM API, built from NXP's public secure-enclave user library
-at a pinned revision. It follows [architecture.md](architecture.md). Every default below is provisional and can be
-reversed without losing the work.
+at a pinned revision. It follows [architecture.md](architecture.md). The calling side is decided; every other default
+marked provisional below can be reversed without losing the work.
 
-## The default taken, and the question left open
+## The calling side, and what is left open
 
-The client runs on the Cortex-A55 Linux side. That is a **provisional default**; the owner's question is still open:
-does the Cortex-A55 Linux side or the Cortex-M7 call the HSM API
-([architecture.md](architecture.md#open-questions), question 1). The policy code does not depend on the answer: it
-reaches the library through an ops table, so a Cortex-M7 caller would reuse the policy and replace the binding.
+The client runs on the Cortex-A55 Linux side: owner ruling 1234 decided that the Cortex-A55 Linux side calls the HSM
+API. The policy code reaches the library through an ops table. The owner's counter-acknowledgement question (Q2) is
+not decided by that ruling and stays open; its default is (c), fail closed (provisional): no update is reported
+rollback-protected.
 
 ## The library, pinned
 
@@ -278,7 +278,7 @@ double (`ele_hsm_fake.c`) follows the same source: a sign leaves `signature_size
 
 ## What is left open
 
-- **Owner:** which side calls the HSM API (above); the delete gap (above); the SE051's role.
+- **Owner:** Q2, the counter acknowledgement (default (c), fail closed, provisional); the delete gap (above); the SE051's role. The calling side is decided (owner ruling 1234).
 - **Needs the board, none run here:** the client was built and linked, never run. The key-store identifier, nonce,
   the key store's creation and its counter split are provisioning (`oem-key-provisioning` row); the structure
   members and key attributes the backend sets (ECC NIST P-256, persistent, sign-hash) are taken from the library's
