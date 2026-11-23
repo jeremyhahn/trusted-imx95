@@ -48,6 +48,13 @@ void ele_nonce_slot_free(struct ele_nonce_slot *s);
  * Returns 0 or -1. */
 int ele_nonce_slot_read(int fd, struct ele_nonce_slot *s);
 
+/* The nonce's own strict parser: the rules of ele_parse_u32, but it
+ * accumulates straight into *acc (the locked slot's value) and never calls
+ * ele_parse_u32. ele_parse_u32_calls counts calls to the generic parser, for
+ * a test of that. */
+int ele_nonce_parse(const char *text, uint32_t *acc);
+extern volatile unsigned long ele_parse_u32_calls;
+
 /* The one entry the CLI uses to obtain the nonce. Order: PR_SET_DUMPABLE 0,
  * mlockall(MCL_CURRENT|MCL_FUTURE), the locked slot, and only then the first
  * read of the descriptor. A failed lock returns ELE_CLI_NONCE_NOLOCK and reads

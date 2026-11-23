@@ -103,6 +103,36 @@ int main(void)
 	CHECK(nonce_from("0x0x7\n", &v) != 0, "nonce 0x0x7 refused");
 	CHECK(ele_parse_u32(NULL, &v) != 0, "null refused");
 
+	/* The nonce has its own parser: the same strict cases, and the nonce
+	 * path never calls the generic ele_parse_u32. */
+	{
+		static const struct { const char *t; int ok; uint32_t v; } c[] = {
+			{ "7", 1, 7 }, { "0x7", 1, 7 }, { "0X7", 1, 7 },
+			{ "4294967295", 1, 4294967295u }, { "0xFFFFFFFF", 1, 0xffffffffu },
+			{ "0x0x7", 0, 0 }, { "0X0x7", 0, 0 }, { "0x", 0, 0 }, { "", 0, 0 },
+			{ "+7", 0, 0 }, { " 7", 0, 0 }, { "7 ", 0, 0 }, { "-1", 0, 0 },
+			{ "4294967296", 0, 0 }, { "0x100000000", 0, 0 },
+			{ "99999999999999999999999", 0, 0 }, { "0xg", 0, 0 },
+		};
+		unsigned long before;
+		uint32_t acc;
+		size_t i;
+
+		before = ele_parse_u32_calls;
+		for (i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
+			acc = 0xdeadbeefu;
+			if (c[i].ok)
+				CHECK(ele_nonce_parse(c[i].t, &acc) == 0 && acc == c[i].v, c[i].t);
+			else
+				CHECK(ele_nonce_parse(c[i].t, &acc) != 0 && acc == 0, c[i].t);
+		}
+		CHECK(nonce_from("0x7\n", &v) == 0 && v == 7, "nonce via the slot accepted");
+		CHECK(nonce_from("+7\n", &v) != 0, "nonce via the slot +7 refused");
+		CHECK(ele_parse_u32_calls == before, "the nonce path never calls ele_parse_u32");
+		(void)ele_parse_u32("1", &v);
+		CHECK(ele_parse_u32_calls == before + 1, "the call counter counts the generic parser");
+	}
+
 	CHECK(parse("1", "3", "gen", NULL, NULL) == 0, "gen accepted");
 	CHECK(parse("1", "3", "del", "4", NULL) == 0, "del accepted");
 	CHECK(parse("1", "3", "sign", "4", "m") == 0, "sign accepted");

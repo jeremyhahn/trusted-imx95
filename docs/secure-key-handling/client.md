@@ -86,6 +86,13 @@ Exit codes: 0 success, 1 failure (or an update refused), 2 usage or setup (inclu
 outcome unknown. Tests: the backend test splits the child-killed, exits-nonzero and short-result cases into before-marker
 (plain failure) and after-marker (unknown) cases for generate and delete.
 
+**The nonce is parsed in the locked slot.** The nonce does not go through the generic `ele_parse_u32`, whose running
+value lives in an ordinary automatic variable that is never erased. A dedicated parser, `ele_nonce_parse`, applies the
+same strict-hex rules and accumulates straight into the locked slot through a volatile pointer; its one other local
+(a digit) is erased on every path, and the slot value is zeroed on every refusal. A test counts calls to the generic
+parser and shows the nonce path makes none. Stack residue in the optimized binary is minimised by this, not proven
+absent.
+
 ## Delete is never rollback-protected (a gap, for the owner)
 
 The library's key delete takes the strict-operation flag only: `op_delete_key_args_t` has a key identifier and

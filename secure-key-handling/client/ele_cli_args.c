@@ -21,6 +21,7 @@ int ele_parse_u32(const char *s, uint32_t *out)
 	unsigned int base = 10, d;
 	const char *p = s;
 
+	ele_parse_u32_calls++;
 	if (!s || !out)
 		return -1;
 	if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
@@ -95,6 +96,57 @@ int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd)
 	return 0;
 }
 
+/* Calls to the generic ele_parse_u32, counted so a test can show the nonce
+ * path never makes one (the generic parser keeps its value in an ordinary
+ * automatic variable that is never erased). */
+volatile unsigned long ele_parse_u32_calls;
+
+/* The nonce parser: the same strict rules as ele_parse_u32 (one optional 0x/0X
+ * prefix, then only digits of the base, no empty rest, no overflow), but the
+ * running value is accumulated straight into *acc, which the caller points at
+ * the locked slot, through a volatile pointer. The only other locals are the
+ * text pointer and one digit, and the digit is erased on every path. *acc is
+ * zeroed on every refusal. Stack residue in the optimised binary is minimised
+ * by this, not proven absent. */
+int ele_nonce_parse(const char *text, uint32_t *acc)
+{
+	volatile uint32_t *a = acc;
+	volatile unsigned int d = 0;
+	unsigned int base = 10;
+	const char *p = text;
+	int rc = -1;
+
+	if (!text || !acc)
+		return -1;
+	*a = 0;
+	if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+		base = 16;
+		p += 2;
+	}
+	if (*p == '\0')
+		goto out;
+	for (; *p; p++) {
+		if (*p >= '0' && *p <= '9')
+			d = (unsigned int)(*p - '0');
+		else if (base == 16 && *p >= 'a' && *p <= 'f')
+			d = (unsigned int)(*p - 'a') + 10;
+		else if (base == 16 && *p >= 'A' && *p <= 'F')
+			d = (unsigned int)(*p - 'A') + 10;
+		else
+			goto out;
+		/* value*base + d must fit in 32 bits, checked before the multiply */
+		if (*a > (UINT32_MAX - d) / base)
+			goto out;
+		*a = *a * base + d;
+	}
+	rc = 0;
+out:
+	d = 0;
+	if (rc != 0)
+		*a = 0;
+	return rc;
+}
+
 static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 {
 	size_t n = 0;
@@ -128,7 +180,8 @@ static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 	/* Anything longer than the buffer holds is not a 32-bit number. */
 	if (bad || n == 0 || n > 16 || memchr(buf, '\0', n))
 		return -1;
-	return ele_parse_u32(buf, nonce);
+	/* Not ele_parse_u32: that keeps the value in an unerased automatic. */
+	return ele_nonce_parse(buf, nonce);
 }
 
 /* The slot owns whole pages of its own (an anonymous mapping), so locking and
