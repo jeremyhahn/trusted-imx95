@@ -1216,6 +1216,28 @@ expect "reap-stale-ci-stacks: the current toolchain tag's image is kept, however
 expect "reap-stale-ci-stacks: an old toolchain tag no container uses is removed" grep -qx "$(rid tc-stale-tag)" "$RP/removed"
 expect "reap-stale-ci-stacks: a toolchain tag made within the image age is kept" grep -q "^$(rid tc-fresh-tag) " "$RP/images"
 
+# --- reap-stale-ci-stacks.sh v8: the secure-world image family (Codex P2: the
+# Makefile labels docker-build-sw images for reaping, but the reaper scanned
+# only the integration and toolchain repositories). Stub docker, images this
+# test made up.
+sw_tag=$(make -s --no-print-directory -C "$ROOT" sw-image)
+sw_repo=${sw_tag%%:*}
+: >"$RP/images" && : >"$RP/containers" && : >"$RP/removed" && : >"$RP/log"
+{
+	echo "$(rid sw-current) $old $sw_repo $sw_tag"
+	echo "$(rid sw-stale-tag) $old $sw_repo ${sw_repo}:0000000000000000"
+	echo "$(rid sw-used-tag) $old $sw_repo ${sw_repo}:2222222222222222"
+	echo "$(rid sw-fresh-tag) $new $sw_repo ${sw_repo}:1111111111111111"
+} >>"$RP/images"
+echo "running-job $(rid sw-used-tag)" >"$RP/containers"
+run env PATH="$TMP_ROOT/reapbin:$PATH" "$ROOT/scripts/reap-stale-ci-stacks.sh" "$REAP_PREFIX"
+check "reap-stale-ci-stacks: the secure-world repository is scanned" 0 \
+	"keep  image $sw_tag (the current secure-world tag)" "reap  image ${sw_repo}:0000000000000000"
+expect "reap-stale-ci-stacks: an old secure-world tag no container uses is removed" grep -qx "$(rid sw-stale-tag)" "$RP/removed"
+expect "reap-stale-ci-stacks: the current secure-world tag's image is kept, however old" grep -q "^$(rid sw-current) " "$RP/images"
+expect "reap-stale-ci-stacks: a secure-world tag a container uses is kept" grep -q "^$(rid sw-used-tag) " "$RP/images"
+expect "reap-stale-ci-stacks: a secure-world tag made within the image age is kept" grep -q "^$(rid sw-fresh-tag) " "$RP/images"
+
 # --- the toolchain image carries ssh-keygen ------------------------------------
 # (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's
 # git package does not supply it.)

@@ -63,6 +63,14 @@ The vendor's flow has two steps, in this order ([SPEC.md](../SPEC.md), `oem-key-
   `boot-container` row). Which fuses hold the counter on the i.MX 95, and their layout, come from the fuse map in
   IMX95RM, which is missing (see [Missing](#missing)).
 
+## Host-side SRK hash check
+
+A host-side check compares the SRK table hash of a public SRK set with an expected value; it programs nothing
+([srk-hash-check.md](srk-hash-check.md), provisional). Programming the hash is the owner's decision alone.
+
+A host-side test builds and verifies a key-exchange signed message on a test SRK set; it sends nothing to a device
+([key-exchange-msg.md](key-exchange-msg.md); wrapped-key blob format on test keys: [key-import-tlv.md](key-import-tlv.md), provisional).
+
 ## Order of the steps
 
 The steps that cannot be undone are marked; each needs the owner's explicit approval. The row is blocked on that
