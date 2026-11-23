@@ -60,7 +60,7 @@ objects, in the storage `CFG_FTPM_TA_TEE_STORAGE_ID` selects
 | | RPMB on the board's eMMC | REE file system |
 |---|---|---|
 | Rollback | The eMMC's write counter anchors the state ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §2) | None: root on Linux can restore an older copy of the files |
-| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | A full-image flash recreates `tee-data` empty (wiped); a root rewrite with a different build is wiped on boot; so is any other write of the root partition, the same image included (root binding token, see below) |
+| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | A full-image flash recreates `tee-data` empty (wiped); a root rewrite with a different build is wiped on boot; so is any other write of the root file-system image, the same image included (root binding token, see below) |
 | Use from U-Boot | U-Boot can serve OP-TEE's RPMB requests itself (unconfirmed for this board) | No `tee-supplicant` before Linux, so U-Boot cannot reach the TPM's NV |
 | Precondition | The eMMC's RPMB authentication key is programmed: once, irreversibly ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5) | None |
 | Confidentiality | OP-TEE encrypts objects with keys derived from the hardware unique key | The same |
@@ -83,22 +83,32 @@ Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement tha
   `tee-supplicant`, which requires it. If `/data/tee-rootfs-id` is missing or differs, it removes everything under
   `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
   `tee-supplicant` from starting.
-- Any write of the root partition wipes the NV, the very same image included. The content id cannot tell a rewrite of
-  the same image apart, so `tee-nv-wipe` also binds the NV to a **root binding token**: 32 random bytes, drawn on the
-  first boot after a wipe and kept in two places, the last 512-byte sector of the root partition (a region reserved after
-  the file system, outside the read-only file system and any future dm-verity hash area, which the image never
-  carries) and `/data/tee-root-token` beside the NV. Every boot compares them (with the content id). A missing,
-  zeroed, malformed or unequal token wipes `/data/tee` and writes a fresh token to both places; a write of the whole
-  partition from an image replaces the sector. The check fails closed: a token sector that cannot be read, or a file
-  system (read from the ext4 superblock) that does not end at least 1 MiB before the end of the partition, wipes the
-  NV and stops the unit, so `tee-supplicant` does not start with old state; a token that cannot be written stops it too
-  (after the wipe); a saved record that exists but cannot be read stops it and touches nothing.
-- The 1 MiB tail is reserved in the layout (`trusted-imx95.wks`). Provisional and unbuilt: whether wic leaves the
-  root file system short of the partition's end with the current wks line is not checked (no bitbake here), and until
-  it does the unit fails closed on first boot. Writing the token needs raw write access to the root's block device
-  while the file system is mounted read-only; a kernel without that access stops the unit (fail closed), so it is a
-  boot test item. A raw write that stops short of the last sector, such as copying only a file-system image smaller
-  than the partition, keeps the token: write the whole partition (the `.wic`'s root partition is full size).
+- Any write of the root file-system image wipes the NV, the very same image included. The content id cannot tell a
+  rewrite of the same image apart, so `tee-nv-wipe` also binds the NV to a **root binding token**: 32 random bytes,
+  drawn on the first boot after a wipe and kept in two places, the first 512-byte sector of the root partition (the
+  boot-sector padding in front of the ext4 superblock, bytes 0-1023; ext4 does not use it and the image holds zeros
+  there) and `/data/tee-root-token` beside the NV. Because that sector is part of the file-system image itself, any
+  write of the image, the whole partition or only the file-system bytes, replaces it with zeros, whatever is left
+  untouched after the file system. Every boot compares the two tokens (with the content id). A missing, zeroed,
+  malformed or unequal token wipes `/data/tee` and writes a fresh token to both places.
+- The check fails closed: a token sector that cannot be read, or a root that shows no ext4 superblock with a block
+  size of 4096 or more, wipes the NV and stops the unit, so `tee-supplicant` does not start with old state; a token that
+  cannot be written stops it too (after the wipe); a saved record that exists but cannot be read stops it and
+  touches nothing. The block size matters because with 4096-byte blocks the superblock shares block 0 with the
+  padding, so a sparse image copy (which skips all-zero blocks) always writes it; with 1 KiB blocks block 0 is all
+  zeros and may be skipped. The wks pins the size (`--mkfs-extraopts "-b 4096"`). No space is reserved: the file
+  system fills the partition, and `test/platform_image_ftpm_test.sh` builds one with the wks's own size and options in
+  a sparse file and runs the unit on it.
+- What was checked for something that covers those bytes: this repository's image has no dm-verity, no signature
+  and no digest over the root partition (the root is mounted read-only; dm-verity is only proposed, in the
+  [verified-boot survey](../platform-image/verified-boot-survey.md) §3.6). A future dm-verity over the root device
+  would verify these bytes (the underlying device data) and the raw write would break it: that design would have
+  to move the token out of the verified range or give it up; until then the unit simply fails closed.
+- Provisional and unbuilt: that wic passes `--mkfs-extraopts` on to `mkfs.ext4` is not checked (no bitbake here); if it
+  does not, and the image's block size is smaller than 4096, the unit fails closed on first boot. Writing the token needs
+  raw write access to the root's block device while the file system is mounted read-only; a kernel without that
+  access stops the unit (fail closed), so it is a boot test item. Where `mke2fs` is absent the test writes the
+  fixture's superblock fields by hand instead.
 There is no root-only flasher. `/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on
 the same disk as `/` (never a global partition label, which could name another medium's NV) and fails closed if there
 is none or more than one. The NV is plain files that root on Linux can copy or roll back.

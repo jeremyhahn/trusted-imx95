@@ -3,20 +3,27 @@
 # REE-FS NV is wiped with the root file system). The content id of the image
 # (/etc/trusted-imx95-rootfs-id) cannot tell a rewrite of the very same image
 # apart, so it is only an extra condition. The binding is a random token kept
-# in two places: in the last sector of the root partition, in a region reserved
-# after the file system (the image never carries it; any write of the whole
-# partition from an image replaces it), and in /data/tee-root-token beside the
-# NV. Every boot compares them. A missing, zeroed, malformed or unequal token,
-# or a different content id, wipes /data/tee, writes a fresh token to both
-# places and records the content id. It fails closed: a region that cannot be
-# read wipes the NV and exits non-zero, a region or record that cannot be
-# written exits non-zero (after the wipe, so no old NV is left), and
-# tee-supplicant, which requires this unit, then does not start. A saved record
-# that exists but cannot be read also stops the unit and touches nothing.
+# in two places: in the first 512-byte sector of the root partition, and in
+# /data/tee-root-token beside the NV. Every boot compares them. A missing,
+# zeroed, malformed or unequal token, or a different content id, wipes
+# /data/tee, writes a fresh token to both places and records the content id.
 #
-# The root file system must end at least 1 MiB before the end of the partition
-# (read from the ext4 superblock): otherwise the token sector would sit inside the
-# file system, and the unit fails closed. The wks layout reserves that tail.
+# Why that sector: it is the boot-sector padding in front of the ext4 superblock
+# (bytes 0-1023), which ext4 does not use and which the image holds as zeros. It
+# is part of the file-system image itself, so any write of that image, whether
+# the whole partition or only the file-system bytes, replaces it with zeros, and
+# the next boot finds no token. For that, block 0 must always be written by an
+# image copy, so the block size must be 4096 or more (the superblock then shares
+# block 0 with the padding; with 1 KiB blocks block 0 is all zeros and a sparse
+# copy may skip it): a smaller block size fails closed. The file system's end is
+# not looked at, so the layout needs no reserved space.
+#
+# It fails closed: a sector that cannot be read, or a root that does not show an
+# ext4 superblock with a block size of 4096 or more, wipes the NV and exits
+# non-zero; a sector or record that cannot be written exits non-zero (after the
+# wipe, so no old NV is left); tee-supplicant, which requires this unit, then
+# does not start. A saved record that exists but cannot be read also stops the
+# unit and touches nothing.
 #
 # TEE_NV_DATA, TEE_NV_ROOTFS_ID, TEE_NV_ROOTDEV (the root partition's device),
 # TEE_NV_MOUNTINFO, TEE_NV_SYS, TEE_NV_DEV and TEE_NV_RANDOM exist for the test
@@ -30,7 +37,6 @@ sys=${TEE_NV_SYS:-/sys}
 dev=${TEE_NV_DEV:-/dev}
 rnd=${TEE_NV_RANDOM:-/dev/urandom}
 rootdev=${TEE_NV_ROOTDEV:-}
-reserve=1048576
 magic=TEEBIND1
 
 die() { echo "tee-nv-wipe: $*" >&2; exit 1; }
@@ -63,49 +69,23 @@ wipe() {
 
 # Read the first LEN bytes at OFFSET of $rootdev as hex bytes (one string).
 hexat() { od -An -v -tx1 -j "$1" -N "$2" "$rootdev" | tr -d ' \n'; }
-le() { # unsigned little-endian value of N bytes at OFFSET
-	out=$(od -An -v -tu1 -j "$1" -N "$2" "$rootdev") || return 1
-	v=0 sh=0
-	for b in $out; do
-		v=$((v + (b << sh)))
-		sh=$((sh + 8))
-	done
-	echo "$v"
-}
 
-if [ -b "$rootdev" ]; then
-	psize=$(blockdev --getsize64 "$rootdev") || psize=
-else
-	psize=$(stat -c %s "$rootdev") || psize=
-fi
-case $psize in '' | *[!0-9]*) psize= ;; esac
-
-# Read the token sector and check that the file system leaves it free. Any
-# failure here is a fail-closed wipe: the NV cannot be shown to belong to this root.
+# Read the token sector. Any failure here is a fail-closed wipe: the NV cannot be
+# shown to belong to this root.
 rtok=
 ok=1
-if [ -z "$psize" ] || [ "$psize" -lt $((reserve + 4096)) ]; then
-	ok=0
-elif [ "$(hexat 1080 2 2>/dev/null)" != 53ef ]; then
-	ok=0
+if [ "$(hexat 1080 2 2>/dev/null)" != 53ef ]; then
+	ok=0 # no ext4 superblock magic
 else
-	blocks=$(le 1028 4) || ok=0
-	lbs=$(le 1048 4) || ok=0
-	inc=$(le 1120 4) || ok=0
-	if [ "$ok" = 1 ]; then
-		if [ $((inc & 128)) -ne 0 ]; then
-			hi=$(le 1360 4) || ok=0
-			blocks=$((blocks + (${hi:-0} << 32)))
-		fi
-		[ "$lbs" -le 6 ] 2>/dev/null || ok=0
-	fi
-	if [ "$ok" = 1 ]; then
-		fsbytes=$((blocks * (1024 << lbs)))
-		[ $((fsbytes + reserve)) -le "$psize" ] || ok=0
-	fi
-	if [ "$ok" = 1 ]; then
+	lbs=$(od -An -v -tu1 -j 1048 -N 4 "$rootdev" 2>/dev/null) || lbs=
+	# s_log_block_size, little endian: block size is 1024 << value; 4096 is 2.
+	# shellcheck disable=SC2086 # four small integers, split on purpose
+	set -- $lbs
+	if [ "$#" -ne 4 ] || [ "$2" -ne 0 ] || [ "$3" -ne 0 ] || [ "$4" -ne 0 ] || [ "$1" -lt 2 ] || [ "$1" -gt 6 ]; then
+		ok=0
+	else
 		tmp=$data/.root-token.read
-		if dd if="$rootdev" of="$tmp" bs=512 skip=$((psize / 512 - 1)) count=1 2>/dev/null; then
+		if dd if="$rootdev" of="$tmp" bs=512 skip=0 count=1 2>/dev/null; then
 			rtok=$(tr -d '\000' <"$tmp") || ok=0
 		else
 			ok=0
@@ -114,7 +94,7 @@ else
 	fi
 fi
 if [ "$ok" = 0 ]; then
-	echo "tee-nv-wipe: the token region of $rootdev cannot be read or is not outside the file system: wiping $data/tee, failing closed" >&2
+	echo "tee-nv-wipe: the token sector of $rootdev cannot be read or the root shows no ext4 block size of 4096 or more: wiping $data/tee, failing closed" >&2
 	wipe
 	exit 1
 fi
@@ -151,13 +131,13 @@ wipe
 new=$(head -c 32 "$rnd" | od -An -v -tx1 | tr -d ' \n') || die "cannot read random bytes from $rnd"
 [ "${#new}" -eq 64 ] || die "short random read from $rnd"
 tok="$magic $new"
-# The region first, read back; the data side last, through a temporary file and
+# The sector first, read back; the data side last, through a temporary file and
 # a rename, so a power cut in between leaves no record and the next boot wipes again.
-printf '%s\n' "$tok" | dd of="$rootdev" bs=512 seek=$((psize / 512 - 1)) count=1 conv=notrunc,sync 2>/dev/null ||
+printf '%s\n' "$tok" | dd of="$rootdev" bs=512 seek=0 count=1 conv=notrunc,sync 2>/dev/null ||
 	die "cannot write the token sector of $rootdev"
 sync
 tmp=$data/.root-token.check
-dd if="$rootdev" of="$tmp" bs=512 skip=$((psize / 512 - 1)) count=1 2>/dev/null || die "cannot read back the token sector"
+dd if="$rootdev" of="$tmp" bs=512 skip=0 count=1 2>/dev/null || die "cannot read back the token sector"
 back=$(tr -d '\000' <"$tmp") || die "cannot read back the token sector"
 rm -f "$tmp"
 [ "$back" = "$tok" ] || die "the token sector of $rootdev did not keep the token"

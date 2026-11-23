@@ -164,25 +164,26 @@ trap 'rm -rf "$wt" "$fk"' EXIT
 mkdir -p "$wt/data/tee/sub"
 printf 'seed\n' >"$wt/data/tee/sub/obj"
 printf 'id-A\n' >"$wt/rootfs-id"
-# A fixture root partition: a regular file with an ext4 superblock (magic, block count, block size)
-# for a 2 MiB file system in a 4 MiB partition; no loop device, no real block device.
+# A fixture root partition: a regular file with an ext4 superblock (magic, block size, 4096 bytes);
+# no loop device, no real block device. The 4 MiB file only stands in for the tests of the token
+# logic; the layout the image really produces is tested further down, from the wks itself.
 put32() { printf '%b' "$(printf '\\%03o\\%03o\\%03o\\%03o' $(($3 & 255)) $((($3 >> 8) & 255)) $((($3 >> 16) & 255)) $((($3 >> 24) & 255)))" |
 	dd of="$1" bs=1 seek="$2" conv=notrunc 2>/dev/null; }
-mkroot() { # mkroot FILE FS_BLOCKS: a fresh "root partition written from an image"
+mkroot() { # mkroot FILE LOG_BLOCK_SIZE: a fresh "root partition written from an image"
 	rm -f "$1"
 	truncate -s 4M "$1"
 	printf '\123\357' | dd of="$1" bs=1 seek=1080 conv=notrunc 2>/dev/null
-	put32 "$1" 1028 "$2"
-	put32 "$1" 1048 0
+	put32 "$1" 1028 1024
+	put32 "$1" 1048 "$2"
 }
 rootdev=$wt/rootdev
-mkroot "$rootdev" 2048
+mkroot "$rootdev" 2
 wipe_run() { # prints the exit status of the wipe script
 	local r=0
 	TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" TEE_NV_ROOTDEV="$rootdev" bash "$wipe" 2>/dev/null || r=$?
 	echo "$r"
 }
-tokat() { tail -c 512 "$rootdev" | tr -d '\000'; }
+tokat() { head -c 512 "$rootdev" | tr -d '\000'; }
 expect "wipe: a missing id wipes" test "$(wipe_run)" -eq 0
 expect "wipe: the old object is gone" test ! -e "$wt/data/tee/sub/obj"
 expect "wipe: the new id is recorded" test "$(<"$wt/data/tee-rootfs-id")" = id-A
@@ -224,10 +225,19 @@ printf 'seed\n' >"$wt/data/tee/obj"
 expect "token: a reboot with no rewrite runs ok" test "$(wipe_run)" -eq 0
 expect "token: a reboot with no rewrite keeps the NV" test "$(<"$wt/data/tee/obj")" = seed
 expect "token: a reboot keeps the token" test "$(tokat)" = "$t1"
-mkroot "$rootdev" 2048 # the root partition rewritten from the very same image: same content id
-expect "token: an identical-image root rewrite runs ok" test "$(wipe_run)" -eq 0
-expect "token: an identical-image root rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
+# An image write that replaces only the file-system bytes (here the first 1 MiB of the partition) and
+# leaves the rest of the partition untouched, the very same image (same content id).
+mkroot "$wt/image" 2
+printf 'T' | dd of="$rootdev" bs=1 seek=$((4 * 1024 * 1024 - 1)) conv=notrunc 2>/dev/null
+dd if="$wt/image" of="$rootdev" bs=4096 count=256 conv=notrunc 2>/dev/null
+expect "token: a file-system-only rewrite left the partition tail alone" test "$(tail -c 1 "$rootdev")" = T
+expect "token: a file-system-only identical-image rewrite runs ok" test "$(wipe_run)" -eq 0
+expect "token: a file-system-only identical-image rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
 expect "token: it writes a fresh token" test "$(tokat)" != "$t1" -a -n "$(tokat)"
+printf 'seed\n' >"$wt/data/tee/obj"
+mkroot "$rootdev" 2 # the whole partition rewritten from the very same image: same content id
+expect "token: a full-partition identical rewrite runs ok" test "$(wipe_run)" -eq 0
+expect "token: a full-partition identical rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
 printf 'seed\n' >"$wt/data/tee/obj"
 printf 'id-C\n' >"$wt/rootfs-id"
 expect "token: a different build runs ok" test "$(wipe_run)" -eq 0
@@ -239,17 +249,64 @@ expect "token: an unreadable token region fails closed (supplicant does not star
 expect "token: an unreadable token region wipes the NV" test ! -e "$wt/data/tee/obj"
 expect "token: an unreadable token region leaves no saved token" test ! -e "$wt/data/tee-root-token"
 printf 'seed\n' >"$wt/data/tee/obj"
-mkroot "$rootdev" 4096 # a file system that covers the token sector
-expect "token: a file system over the token sector fails closed" test "$(wipe_run)" -ne 0
+mkroot "$rootdev" 0 # 1 KiB blocks: block 0 is all zeros and a sparse copy may skip it
+expect "token: a 1 KiB block size fails closed" test "$(wipe_run)" -ne 0
 expect "token: ... and wipes the NV" test ! -e "$wt/data/tee/obj"
 expect "token: ... and writes nothing to the partition" test -z "$(tokat)"
 printf 'seed\n' >"$wt/data/tee/obj"
-mkroot "$rootdev" 2048
+mkroot "$rootdev" 2
 expect "token: a valid fixture runs ok again" test "$(wipe_run)" -eq 0
 printf 'seed\n' >"$wt/data/tee/obj"
 printf '\000\000' | dd of="$rootdev" bs=1 seek=1080 conv=notrunc 2>/dev/null
 expect "token: a root partition with no ext4 magic fails closed (status)" test "$(wipe_run)" -ne 0
 expect "token: ... and wipes the NV (no magic)" test ! -e "$wt/data/tee/obj"
+
+# The layout the image really produces: size and mkfs options read from the wks itself, a sparse
+# file system built with them (a regular file, no loop device), tee-nv-wipe run against it.
+rsize=
+ropts=
+while IFS= read -r l; do
+	case $l in 'part / '*)
+		[[ $l =~ --fixed-size\ ([0-9]+)M ]] && rsize=${BASH_REMATCH[1]}
+		[[ $l =~ --mkfs-extraopts\ \"([^\"]*)\" ]] && ropts=${BASH_REMATCH[1]}
+		;;
+	esac
+done <"$wks"
+expect "wks: the root partition has a fixed size in MiB" test -n "$rsize"
+expect "wks: the root partition pins the block size to 4096" test "$ropts" = "-b 4096"
+real=$wt/real-root
+rm -f "$real"
+truncate -s "${rsize:-1}M" "$real"
+if mk=$(PATH="$PATH:/sbin:/usr/sbin" command -v mke2fs); then
+	# wic fills the partition with the file system: the whole fixed size, the options from the wks.
+	# shellcheck disable=SC2086 # the options are a word list from the wks
+	"$mk" -t ext4 -F -q -E lazy_itable_init=1,lazy_journal_init=1 $ropts "$real" >/dev/null 2>&1 || echo "mke2fs failed" >&2
+else
+	echo "note: mke2fs is absent here; the fixture's superblock fields are written by hand"
+	printf '\123\357' | dd of="$real" bs=1 seek=1080 conv=notrunc 2>/dev/null
+	put32 "$real" 1028 $((rsize * 256))
+	put32 "$real" 1048 2
+fi
+expect "real layout: the file system fills the partition" test "$(stat -c %s "$real")" -eq $((${rsize:-0} * 1024 * 1024))
+rootdev_small=$rootdev
+rootdev=$real
+rm -rf "$wt/data/tee" "$wt/data/tee-rootfs-id" "$wt/data/tee-root-token"
+mkdir -p "$wt/data/tee"
+printf 'id-A\n' >"$wt/rootfs-id"
+printf 'seed\n' >"$wt/data/tee/obj"
+expect "real layout: a first boot runs ok (tee-supplicant would start)" test "$(wipe_run)" -eq 0
+expect "real layout: a first boot writes the token" test "$(tokat | cut -c1-9)" = "TEEBIND1 "
+printf 'seed\n' >"$wt/data/tee/obj"
+expect "real layout: a reboot runs ok" test "$(wipe_run)" -eq 0
+expect "real layout: a reboot keeps the NV" test "$(<"$wt/data/tee/obj")" = seed
+# The same image rewritten over the first 8 MiB only (the rest of the partition left alone).
+cp --sparse=always "$real" "$wt/image.real"
+dd if=/dev/zero of="$wt/image.real" bs=512 count=1 conv=notrunc 2>/dev/null # the image holds zeros there
+dd if="$wt/image.real" of="$real" bs=1M count=8 conv=notrunc 2>/dev/null
+expect "real layout: a file-system-only rewrite runs ok" test "$(wipe_run)" -eq 0
+expect "real layout: a file-system-only rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
+rootdev=$rootdev_small
+rm -f "$real" "$wt/image.real"
 expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
 expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
 expect "unit: runs after the /data mount service" ncstr "$unit" 'After=tee-data-mount.service'
