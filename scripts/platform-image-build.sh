@@ -29,7 +29,9 @@ while [ $# -gt 0 ]; do
 	shift
 done
 dir=${dir:-${PLATFORM_IMAGE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/trusted-imx95/platform-image}}
-out=${PLATFORM_IMAGE_OUT:-$root/.platform-image/out}
+out_marker=.platform-image-out
+# A set but empty PLATFORM_IMAGE_OUT is an error, not the default.
+out=${PLATFORM_IMAGE_OUT-$root/.platform-image/out}
 targets=trusted-imx95-image
 [ "${PI_DEBUG:-0}" != 1 ] || targets="$targets trusted-imx95-image-debug"
 force=${PLATFORM_IMAGE_BUILD_FORCE:-0}
@@ -52,6 +54,49 @@ while [ ! -d "$anc" ]; do
 done
 phys=$(cd "$anc" && pwd -P)$rest
 case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
+
+# canon PATH: the absolute, symlink-free path of PATH, which need not exist.
+canon() {
+	local a=$1 d r=
+	case $a in /*) ;; *) a=$PWD/$a ;; esac
+	while [ ! -d "$a" ]; do
+		[ ! -L "$a" ] || { echo "$a"; return 0; }
+		r=/$(basename "$a")$r
+		a=$(dirname "$a")
+	done
+	d=$(cd "$a" && pwd -P)
+	[ "$d" != / ] || d=
+	echo "$d$r"
+}
+# check_out: refuse an artefacts directory that rm -rf must not touch. Run
+# before anything is fetched or built, and again before the removal.
+check_out() {
+	local o
+	[ -n "$out" ] || die "PLATFORM_IMAGE_OUT is empty; refusing to use it as the artefacts directory"
+	[ ! -L "$out" ] || die "$out is a symbolic link; refusing to use it as the artefacts directory"
+	o=$(canon "$out")
+	[ -n "$o" ] && [ "$o" != / ] || die "$out is the root directory; refusing"
+	[ "$o" != "$root" ] || die "$out is this clone; refusing"
+	case "$root/" in "$o"/*) die "$out contains this clone; refusing" ;; esac
+	case "$o/" in
+	"$root/.platform-image/"*) ;;
+	"$root"/*) die "$out is inside this clone outside .platform-image/; refusing" ;;
+	esac
+	case "$o/" in "$phys"/*) die "$out is the platform-image directory or inside it ($phys); refusing" ;; esac
+	case "$phys/" in "$o"/*) die "$out contains the platform-image directory ($phys); refusing" ;; esac
+	if [ -e "$o" ]; then
+		[ -d "$o" ] || die "$out exists and is not a directory; refusing"
+		local f any=0
+		for f in "$o"/* "$o"/.[!.]* "$o"/..?*; do
+			if [ -e "$f" ] || [ -L "$f" ]; then any=1; fi
+		done
+		if [ "$any" -eq 1 ] && { [ ! -f "$o/$out_marker" ] || [ -L "$o/$out_marker" ]; }; then
+			die "$out exists and was not written by this script (no $out_marker); remove it yourself or choose another PLATFORM_IMAGE_OUT"
+		fi
+	fi
+	out=$o
+}
+check_out
 
 # Host tools: every missing one is named, not only the first.
 missing=
@@ -123,6 +168,23 @@ if [ -e "$build/bitbake.sock" ]; then
 fi
 trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 
+# This checkout's own layer (platform-image/: layer, templates) as the build
+# sees it: the commit, and when the tree differs from it, the sha256 of the
+# status and the diff (recorded, not refused).
+checkout_commit=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
+[ -n "$checkout_commit" ] || checkout_commit=unknown
+inputs_status=$(git -C "$root" status --porcelain --untracked-files=all -- platform-image 2>/dev/null || echo unknown)
+if [ -z "$inputs_status" ]; then
+	inputs_dirty=no
+	inputs_sha=-
+else
+	inputs_dirty=yes
+	inputs_sha=$({
+		echo "$inputs_status"
+		git -C "$root" diff HEAD -- platform-image 2>/dev/null || true
+	} | sha256sum | sed 's/ .*//')
+fi
+
 start=$(date +%s)
 # PLATFORM_IMAGE_BITBAKE_ARGS (for example -k) goes before the targets.
 # shellcheck disable=SC2086
@@ -136,8 +198,10 @@ sde=$(bitbake -e ${targets%% *} | sed -n 's/^SOURCE_DATE_EPOCH="\(.*\)"$/\1/p' |
 
 deploy=$build/tmp/deploy/images/$machine
 [ -d "$deploy" ] || die "no deploy directory $deploy after the build"
+check_out
 rm -rf "$out"
 mkdir -p "$out"
+printf '%s\n' "written by scripts/platform-image-build.sh; the script may delete this directory" >"$out/$out_marker"
 n=0
 for t in $targets; do
 	# Real files only (the deploy directory links the latest build by a plain
@@ -163,6 +227,9 @@ done
 	echo "targets=$targets"
 	echo "SOURCE_DATE_EPOCH=$sde"
 	echo "build_seconds=$elapsed"
+	echo "checkout_commit=$checkout_commit"
+	echo "platform_image_dirty=$inputs_dirty"
+	echo "platform_image_dirty_sha256=$inputs_sha"
 	echo "manifest_commit=$(sed -n 's/^manifest_commit=//p' "$lock")"
 	sed -n 's/^\(layer_[A-Za-z0-9_]*_commit=.*\)$/\1/p' "$lock"
 } >"$out/build-info.txt"

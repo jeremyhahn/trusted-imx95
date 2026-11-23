@@ -177,8 +177,13 @@ arguments such as `-k` go in `PLATFORM_IMAGE_BITBAKE_ARGS`), then copies the
 real wic and rootfs files of the deploy directory (not the plain-name links)
 to `.platform-image/out/` (git-ignored; `PLATFORM_IMAGE_OUT` overrides it),
 with `SHA256SUMS` and `build-info.txt` (machine, distro, targets,
-`SOURCE_DATE_EPOCH`, build seconds, the manifest commit and every layer
-commit). Its stub test is `test/platform_image_build_test.sh`, in `make test`.
+`SOURCE_DATE_EPOCH`, build seconds, this checkout's commit, whether
+`platform-image/` differs from it (`platform_image_dirty=yes`, with the sha256
+of the status and diff; dirty inputs are recorded, not refused), the manifest
+commit and every layer commit). The script deletes `PLATFORM_IMAGE_OUT` only
+when it carries the `.platform-image-out` marker it wrote, and refuses an empty
+value, `/`, the checkout or an ancestor, a path outside `.platform-image/`
+inside the checkout, and any path overlapping the fetch directory. Its stub test is `test/platform_image_build_test.sh`, in `make test`.
 It is not in CI.
 
 **Result: no image was built.** The build stopped on the NXP EULA, which is

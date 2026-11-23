@@ -23,6 +23,7 @@ for t in env sed cp mkdir dirname basename cat rm git date sha256sum ln; do
 	ln -s "$(command -v "$t")" "$tools/$t"
 done
 for t in $hosttools; do
+	[ "$t" != git ] || continue # the real git (in $tools) records the checkout
 	printf '#!/bin/sh\nexit 0\n' >"$stub/$t"
 	chmod +x "$stub/$t"
 done
@@ -146,6 +147,64 @@ OUT=$(PATH="$stub:$tools" PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_MAC
 	PLATFORM_IMAGE_OUT=$tmp/out "$real_bash" "$script" "$inside" 2>&1) || RC=$?
 check "a directory inside the clone: refused" nonzero "is inside this clone"
 expect "a directory inside the clone: nothing created" test ! -e "$inside"
+
+# The artefacts directory is checked before anything is removed: a full run
+# (no stub bitbake is reached) with each bad PLATFORM_IMAGE_OUT is refused.
+orun() {
+	rm -f "$tmp/log"
+	RC=0
+	OUT=$(PATH="$stub:$tools" PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_MACHINE=$want \
+		PLATFORM_IMAGE_OUT=$1 "$real_bash" "$script" "$tmp/d" 2>&1) || RC=$?
+}
+rm -rf "$tmp/d" "$tmp/out" "$tmp/un"
+mkdir -p "$tmp/d/sub" "$tmp/un"
+: >"$tmp/d/sentinel"
+: >"$tmp/d/sub/sentinel"
+: >"$tmp/un/sentinel"
+orun "$ROOT"
+check "OUT = the checkout: refused" nonzero "is this clone"
+expect "OUT = the checkout: Makefile survives" test -f "$ROOT/Makefile"
+orun "$(dirname "$ROOT")"
+check "OUT = an ancestor of the checkout: refused" nonzero "contains this clone"
+expect "OUT = an ancestor: the checkout survives" test -f "$ROOT/Makefile"
+orun "$tmp/d"
+check "OUT = PLATFORM_IMAGE_DIR: refused" nonzero "platform-image directory"
+expect "OUT = PLATFORM_IMAGE_DIR: sentinel survives" test -f "$tmp/d/sentinel"
+orun "$tmp/d/sub"
+check "OUT inside PLATFORM_IMAGE_DIR: refused" nonzero "platform-image directory"
+expect "OUT inside PLATFORM_IMAGE_DIR: sentinel survives" test -f "$tmp/d/sub/sentinel"
+orun "$tmp"
+check "OUT containing PLATFORM_IMAGE_DIR: refused" nonzero "contains"
+expect "OUT containing PLATFORM_IMAGE_DIR: sentinel survives" test -f "$tmp/d/sentinel"
+orun "$tmp/un"
+check "an unmarked existing dir: refused" nonzero "not written by this script"
+expect "an unmarked existing dir: sentinel survives" test -f "$tmp/un/sentinel"
+orun ""
+check "an empty OUT: refused" nonzero "PLATFORM_IMAGE_OUT is empty"
+orun /
+check "OUT = /: refused" nonzero "root directory"
+orun "$ROOT/docs"
+check "OUT inside the checkout, outside .platform-image: refused" nonzero "outside .platform-image"
+expect "OUT inside the checkout: docs survive" test -d "$ROOT/docs"
+# A fresh dir and a marked dir are accepted (check mode, then a full run).
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools" --check
+check "a fresh OUT: accepted" 0 "check: OK"
+brun "$stub:$tools"
+check "build writes the marker" 0 "OK, 2 artefacts"
+expect "the output dir carries the ownership marker" test -f "$tmp/out/.platform-image-out"
+expect "the marker is not in SHA256SUMS" test "$(wc -l <"$tmp/out/SHA256SUMS")" -eq 2
+: >"$tmp/out/stale"
+brun "$stub:$tools"
+check "a marked OUT: accepted" 0 "OK, 2 artefacts"
+expect "a marked OUT is rebuilt: the stale file is gone" test ! -e "$tmp/out/stale"
+
+# build-info names this checkout's commit and whether platform-image/ is dirty.
+info=$(cat "$tmp/out/build-info.txt")
+head=$(git -C "$ROOT" rev-parse HEAD)
+expect "build-info holds checkout_commit" test "${info##*"checkout_commit=$head"*}" != "$info"
+expect "build-info holds the dirty marker" test "${info##*"platform_image_dirty="*}" != "$info"
+expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_sha256="*}" != "$info"
 
 # Options.
 brun "$stub:$tools" --bogus
