@@ -379,7 +379,8 @@ done
 # that input's bytes
 for spec in "0 bl31.bin" "1 u-boot.bin" "2 tee.bin"; do
 	read -r ii nm <<<"$spec"
-	pf=$(ls "$TMP_ROOT/m7parse/container2_image${ii}_"*.bin 2>/dev/null | head -n 1)
+	pf=
+	for f in "$TMP_ROOT/m7parse/container2_image${ii}_"*.bin; do [ -f "$f" ] && { pf=$f; break; }; done
 	expect "a55: container 3 entry $ii carries $nm" a55_carries "$pf" "$TMP_ROOT/in3/$nm"
 done
 # One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
