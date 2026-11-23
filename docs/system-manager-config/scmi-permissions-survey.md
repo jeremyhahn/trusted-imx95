@@ -464,9 +464,11 @@ states it.
 ## 8. Does the M7 need a `PERF_M7` API line? (#167; provisional)
 
 Status: provisional and open. The PRO generated table gives ALL
-(`configs/mx95frdm-pro/config_scmi.h:96`, by the command in 8.0); the
-question stays open until a second reader repeats the reads at the
-pinned revision. No `.cfg` patch is made. The #13 delta is still
+(`configs/mx95frdm-pro/config_scmi.h:96`, by the command in 8.0), and
+`make system-manager` now checks that on every build
+(`scripts/sm-perf-check.sh`); the other vendor-cited items (1 and 3-7 of
+8.2) stay cited and open, because reviewers cannot confirm them under the
+cite-only rule (8.0). No `.cfg` patch is made. The #13 delta is still
 pending owner approval.
 
 Source: NXP `imx-sm` at the revision pinned in `system-manager/sm.lock`
@@ -480,6 +482,13 @@ in `build.md`.
 
 ### 8.0 What a reviewer can and cannot confirm
 
+**Review inputs.** Vendor documents and source are never copied into this
+repository or supplied as review inputs; a claim about them cites the file
+and line at the pinned revision (`lf-6.18.37-2.1.0`, `eec232878ab7`).
+Proposed, pending owner approval (TENANT ASK 1: may vendor sources be review
+inputs?). Under it, what decides the answer is made checkable by this
+repository's own CI, and the rest is marked as cited only.
+
 Every upstream claim below cites a path under the imx-sm tree and a
 line at commit `eec232878ab7` (tag `lf-6.18.37-2.1.0`, pinned in
 `system-manager/sm.lock`). The imx-sm source is not in this repository,
@@ -487,36 +496,52 @@ and no vendor text is copied here. To check a claim, fetch that tag
 the way `scripts/sm-build.sh` does (lines 135-144, which fail closed if
 the commit differs) and open the cited line.
 
+(i) **Checked by this repository on every build.** Item 2 of 8.2: the
+generated PRO `config_scmi.h` gives the M7 agent ALL on `PERF_M7`, and no
+other agent holds it. `scripts/sm-perf-check.sh` (expected value at line
+21, checks at lines 64-71) reads the file that `make cfg` writes in each of
+the two build trees, and `scripts/sm-build.sh` (lines 189-190) fails the
+build when it does not hold. It prints `sm-perf-check: M7 PERF_M7=ALL, no
+other agent` and the manifest gets the line `m7_perf_m7=ALL` (line 208).
+The CI job "System Manager build with the pinned Arm toolchain" runs it
+through `scripts/sm-toolchain-check.sh`, the script behind
+`make sm-toolchain-check`, which builds with `make system-manager`. The CI result is not recorded yet; the
+coordinator records it after the PR's run. `bash test/sm_build_test.sh`
+covers the check offline, on synthetic tables written in the test.
+
+(ii) **Cited, not confirmable by review under the cite-only rule.** Items 1
+and 3-7 of 8.2 and the citations of 8.3 and 8.4: the `rpc_scmi_perf.c`,
+`lmm_perf.c`, `configtool.pl`, `m7mix.cfg`, `mx95frdm-pro.cfg` and
+`mx95evk.cfg` lines. They were read once by the lane and have not been
+reviewed independently; they stay provisional and open.
+
 - Confirmable from this repository alone: the lock pins, the patch
-  contents, and that `system-manager/patches/` leaves `M7P` and
-  `PERF_M7` alone.
-- **Not confirmable without the imx-sm tree**: all `rpc_scmi_perf.c`,
-  `lmm_perf.c`, `m7mix.cfg`, `mx95frdm-pro.cfg`, `mx95evk.cfg` and
-  `config_scmi.h` citations in 8.1 to 8.4. They were read once by the
-  lane and have not been reviewed independently.
+  contents, that `system-manager/patches/` leaves `M7P` and `PERF_M7`
+  alone, and (i).
 - **Not read**: the M7 level values and frequencies (device code).
 
-To regenerate the PRO table that item 2 reads, from a checkout of the
-pinned commit with `system-manager/patches/*.patch` applied in name
-order (`git apply`, as `scripts/sm-build.sh` does): run
-`make config=mx95frdm-pro cfg`. The file is then
-`configs/mx95frdm-pro/config_scmi.h`; it is generated output and is not
-copied here. Its SHA-256 is not pinned, so a reviewer compares the one
-line cited, not a digest.
-
-Section 8 stays provisional and open because no second reader has yet
-repeated the vendor-tree reads. It no longer relies on the EVK's table.
+To regenerate the PRO table by hand, from a checkout of the pinned commit
+with `system-manager/patches/*.patch` applied in name order (`git apply`,
+as `scripts/sm-build.sh` does): run `make config=mx95frdm-pro cfg`. The
+file is then `configs/mx95frdm-pro/config_scmi.h`; it is generated output
+and is not copied here. Its SHA-256 is not pinned, so the check compares
+what it matches, not a digest. The real table at the pinned revision
+matched the check's expectations as written: the record header, the single
+line and the value ALL (line 96); it differed from this section nowhere.
 
 ### 8.1 Answer
 
 **Provisional, open: no `PERF_M7` API line appears to be needed for the
-M7 to set its own performance level.** Ownership of `M7P` already gives the M7 agent all rights on
-the `PERF_M7` domain, and `PERFORMANCE_LEVEL_SET` needs only PRIV. The
-PRO's own generated table, regenerated from the pinned, patched file
-(8.0), gives the M7 agent ALL on `PERF_M7` (item 2). The `PERF_M7  PRIV`
-line is therefore not required on this reading, and the row stays open
-until a second reader confirms it. An explicit
-line would not even lower the grant (item 7).
+M7 to set its own performance level.** The answer rests on (i) of 8.0:
+the PRO's generated table, from the pinned, patched file, gives the M7
+agent ALL on `PERF_M7` and no other agent holds it, and every
+`make system-manager` checks that (`scripts/sm-perf-check.sh`, item 2).
+The `PERF_M7  PRIV` line is therefore not required on this reading.
+It stays provisional and open for (ii): why the table says ALL
+(ownership of `M7P`, item 1), that `PERFORMANCE_LEVEL_SET` needs only
+PRIV (item 3), and that an explicit line would not lower the grant
+(item 7) are cited at the pinned revision, not confirmable by review
+under the cite-only rule.
 
 ### 8.2 Evidence
 
@@ -535,7 +560,12 @@ line would not even lower the grant (item 7).
    (M7)" (`configs/mx95frdm-pro/config_scmi.h:57`), sets
    `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
    the only line naming `PERF_M7` in the file, so no other agent holds
-   it. The tool derives such a line in `get_perms`
+   it. This is checked by this repository on every build:
+   `scripts/sm-perf-check.sh` (lines 21 and 64-71), called from
+   `scripts/sm-build.sh` (lines 189-190), fails unless the M7 record
+   holds the one line at ALL; CI runs it through the job named in 8.0;
+   the manifest line is `m7_perf_m7=ALL`. The rest of this item is
+   cited only (ii). The tool derives such a line in `get_perms`
    (`configs/configtool.pl:2410`): it takes each protocol's `perf=<perm>`
    word on the agent's lines (`:2461-2463`), keeps one value per
    resource (`:2474`) and writes `<proto>Perms[<resource>] =
@@ -608,10 +638,11 @@ file.
   `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM
   (item 7); in the API list it changes nothing. Proposed, pending owner
   approval, and not needed for the M7 to set its level.
-- Check for the image build: read the generated PRO `config_scmi.h`
-  and assert that the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is ALL
-  (or the owner's chosen value) and that no other agent holds one.
-  This would keep item 2 true across an imx-sm bump and fits section
-  5.2. Proposed, pending owner approval.
+- Check for the image build: done by #167 (`scripts/sm-perf-check.sh`,
+  run by `scripts/sm-build.sh` on every build, 8.0 (i)). It asserts that
+  the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is ALL and that no other
+  agent holds one, so item 2 stays true across an imx-sm bump; the
+  expected value is one named variable, to change if the owner chooses
+  another.
 - Open, for the M7 firmware rather than the SM: whether the firmware
   needs to change its level at all.
