@@ -42,6 +42,9 @@ IMAGE_INSTALL:append = " optee-client trusted-imx95-tee-nv"
 WKS_FILE = "trusted-imx95.wks"
 # MISSING: no survey names a disk image format; the wic is provisional, as above.
 IMAGE_FSTYPES += "wic"
+# MISSING: provisional. A rootfs archive, the file-by-file input of the reproducible-build check
+# (scripts/platform-image-repro-check.sh); the machine's own IMAGE_FSTYPES are unreadable without a build.
+IMAGE_FSTYPES += "tar"
 # The Freescale EULA is the owner's to accept (docs/ftpm/build.md), so the image
 # does not accept it. NXP's wic flow pulls in imx-boot, and with it
 # imx-m7-demos, which needs the EULA. This image's wks has no boot container

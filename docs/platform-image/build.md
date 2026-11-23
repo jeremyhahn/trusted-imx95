@@ -112,6 +112,20 @@ security-relevant attribute (`docs/plans/140.md`, entry 19). A release is
 identified by its published image digest; to compare two builds, exclude that
 one file.
 
+`make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>`
+(`scripts/platform-image-repro-check.sh`) does that comparison. On the build
+host: build the image twice from clean (separate `TMPDIR`s, same inputs), then
+pass the two deploy directories (`tmp/deploy/images/<machine>`). It needs no
+network and is not in CI. It compares byte for byte the fTPM TA's stripped ELF,
+`tee.bin`, `Image` and the `imx95-19x19-frdm-pro*.dtb` files, and the `.wic`'s
+`boot` and `tee-data` partitions (by GPT name) with the GPT entries' names,
+starts and sizes; and from the rootfs archive (`IMAGE_FSTYPES += "tar"`,
+provisional, added for this check) each member's name, type, mode, owner, link
+target and content hash. It excludes the id file and what carries it: the root
+partition (its marker sector), so the `.wic` digest, and the GPT GUIDs. It
+prints each difference with both SHA-256s and exits nonzero. Paths and GUID
+behaviour are unconfirmed by a build: [docs/ftpm/build.md](../ftpm/build.md#reproducible-build).
+
 Open, MISSING, and deliberately not set: the `BBFILES += recipes-*/*/*.bbappend`
 line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, hash equivalence, the
 `SPDX_INCLUDE_*`, `SPDX_INVOKED_BY` and `SPDX_ON_BEHALF_OF` fields

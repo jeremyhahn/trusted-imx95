@@ -120,6 +120,23 @@ The image therefore appends the marker step to `IMAGE_CMD:wic` (`image_types_wic
 that creates `${IMAGE_NAME}.wic`), so it runs before every conversion. That is the smallest change the class supports: no
 change to the wks, and the root partition image is not touched. Unbuilt: this order is read from the classes, not observed.
 
+### Reproducible build
+
+ROADMAP `ftpm` (b) asks for a byte-for-byte rebuild check. `make platform-image-repro-check REPRO_A=<dir> REPRO_B=<dir>`
+([what it compares](../platform-image/build.md)) is that check. It was tested only on synthetic
+deploy directories (`test/platform_image_repro_test.sh`); **no two-build run was made** (no bitbake in this lane).
+Unconfirmed until one is:
+
+- The deploy paths: `optee-ftpm/<uuid>.stripped.elf` (from the recipe's `do_deploy`), `tee.bin`, `Image` and
+  `imx95-19x19-frdm-pro*.dtb` directly in the deploy directory (the machine's names; the checker fails if one is absent).
+- That the image emits one rootfs archive: the image adds `IMAGE_FSTYPES += "tar"` (provisional); the check refuses
+  zero or several `*.rootfs*.tar*` files.
+- Whether wic draws the GPT GUIDs per build (they are not compared), and the disk GUID.
+- Whether the FAT `boot` partition is reproducible (volume ID and directory timestamps are the suspects); the check
+  fails if it is not, which would show it.
+- Whether `tee.bin`, the kernel and the DTBs embed anything per build (the fallback `SOURCE_DATE_EPOCH` is expected to
+  hold them).
+
 Still open:
 
 - The board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
