@@ -7,6 +7,9 @@
 # own `if:` requires the same-repository head as a conjunct, or it needs such a
 # job and has no always/failure/cancelled), and a local reusable-workflow callee
 # inherits its callers' pull_request and pull_request_target triggers.
+# Local fix 3 (verify 10; to send upstream): that inheritance is transitive over
+# nested local callees (a cycle or an uncalled callee counts as reachable), and
+# the status functions and the head test match case-insensitively.
 # v1.54 (2026-11-22, Tenant Agent ruling 1137, owner order: the Dells and
 # the AMD SEV host are always used for CI, and nothing sits idle): the
 # preflight step `Balanced runner pool (ruling 1137)` replaces the hosted
@@ -2136,8 +2139,9 @@ jobs:
           # `if:` has no always()/failure()/cancelled() and one job it needs is
           # fork-safe. Anything not provable is not safe.
           HEAD_GUARD = re.compile(r"github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository"
-                                  r"|github\.repository\s*==\s*github\.event\.pull_request\.head\.repo\.full_name")
-          STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(")
+                                  r"|github\.repository\s*==\s*github\.event\.pull_request\.head\.repo\.full_name",
+                                  re.I)  # verify 10: expression names are case-insensitive
+          STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(", re.I)
           EXPR_OPEN = chr(36) + "{{"
 
 
@@ -2226,13 +2230,19 @@ jobs:
 
 
           LOCAL_CALL = re.compile(r"\./\.github/workflows/([^/@\s]+\.ya?ml)\s*$")
-          CALLERS = {}            # callee file name -> [(caller triggers, caller job is fork-safe)]
           CALLERS_UNKNOWN = False  # a workflow file could not be read, so the caller set is unknown
+          PR_EV = {"pull_request", "pull_request_target"}
+          EFFECTIVE = {}           # workflow_call file name -> fork-reachable events it inherits
 
 
           def scan_callers(files):
+              """Fixed point over the local `uses:` graph (verify 10): a callee inherits the
+              fork-reachable triggers of every caller whose calling job is not fork-safe,
+              transitively; a cycle, an uncalled callee or an unreadable file is reachable."""
               global CALLERS_UNKNOWN
+              own, edges = {}, []
               for f in files:
+                  base = os.path.basename(f)
                   try:
                       d = yaml.safe_load(open(f, encoding="utf-8").read())
                       con, _ = structure(d)
@@ -2240,25 +2250,42 @@ jobs:
                   except Exception:
                       CALLERS_UNKNOWN = True
                       continue
+                  own[base] = con
                   for n, spec in jr.items():
                       u = spec.get("uses") if isinstance(spec, dict) else None
                       m = LOCAL_CALL.match(u) if isinstance(u, str) else None
                       if m:
-                          CALLERS.setdefault(m.group(1), []).append((con, fork_safe(jr, n)))
+                          edges.append((base, m.group(1), fork_safe(jr, n)))
+              eff = {b: set(c) & PR_EV for b, c in own.items()}
+              changed = True
+              while changed:
+                  changed = False
+                  for caller, callee, safe in edges:
+                      if safe or callee not in own or "workflow_call" not in own[callee]:
+                          continue
+                      if not eff[caller] <= eff[callee]:
+                          eff[callee] |= eff[caller]
+                          changed = True
+              called = {callee for _, callee, _ in edges}
+              for b in own:
+                  # on a cycle: b reaches itself through the call edges (safe ones too)
+                  seen, todo = set(), [b]
+                  while todo:
+                      x = todo.pop()
+                      for caller, callee, _ in edges:
+                          if caller == x and callee not in seen:
+                              seen.add(callee)
+                              todo.append(callee)
+                  if "workflow_call" in own[b] and (CALLERS_UNKNOWN or b not in called or b in seen):
+                      eff[b] |= PR_EV
+              EFFECTIVE.update(eff)
 
 
           def callee_triggers(base, on):
-              """A workflow_call workflow inherits its callers' fork-reachable triggers (conservatively)."""
+              """A workflow_call workflow inherits the fork-reachable triggers of its callers."""
               if "workflow_call" not in on:
                   return on
-              callers = CALLERS.get(base)
-              if CALLERS_UNKNOWN or not callers:
-                  return on | {"pull_request", "pull_request_target"}
-              extra = set()
-              for con, safe in callers:
-                  if not safe:
-                      extra |= con & {"pull_request", "pull_request_target"}
-              return on | extra
+              return on | EFFECTIVE.get(base, PR_EV)
 
 
           def check(abspath, path):

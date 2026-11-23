@@ -229,6 +229,100 @@ check "a callee guarded per job passes under a pull_request caller" 0 "OK:"
 resetwf; callee "$W"; stepcmd
 check "a callee no local workflow calls is held to the fork rule" 1 "$FORKMSG"
 
+# Verify 10: triggers propagate through nested local callees; expression names are
+# case-insensitive.
+chain() { # <a's on> <condition on the a->b calling job, or empty>
+	resetwf
+	wfwrite a.yml <<EOF
+name: a
+on: $1
+jobs:
+  call:
+${2:+    if: "$2"}
+    uses: ./.github/workflows/b.yml
+EOF
+	wfwrite b.yml <<EOF
+name: b
+on: workflow_call
+jobs:
+  call:
+    uses: ./.github/workflows/c.yml
+EOF
+	wfwrite c.yml <<EOF
+name: c
+on: workflow_call
+jobs:
+  c:
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+}
+chain "[pull_request]"; stepcmd
+check "a pull_request a -> b -> c chain refuses the waived job in c" 1 "$FORKMSG"
+chain "[push]"; stepcmd
+check "the same chain from a push-only a passes" 0 "OK:"
+chain "[pull_request]" "$G"; stepcmd
+check "a guarded a -> b edge carries no pull_request" 0 "OK:"
+resetwf
+wfwrite a.yml <<EOF
+name: a
+on: [pull_request]
+jobs:
+  call:
+    uses: ./.github/workflows/b.yml
+EOF
+for pair in b:c c:b; do
+	wfwrite "${pair%%:*}.yml" <<EOF
+name: n
+on: workflow_call
+jobs:
+  call:
+    uses: ./.github/workflows/${pair##*:}.yml
+  w:
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+done
+stepcmd
+check "a b <-> c cycle reached from a pull_request caller is refused" 1 "$FORKMSG"
+
+for fn in "ALWAYS()" "Always()" "Failure()" "Cancelled()" "aLwAyS ()"; do
+	resetwf
+	wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  a:
+    if: "$G"
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+  b:
+    needs: a
+    if: "$fn"
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+	stepcmd
+	check "a dependent using $fn is refused" 1 "$FORKMSG"
+done
+resetwf
+wfwrite t.yml <<EOF
+name: t
+on: [pull_request]
+jobs:
+  b:
+    if: "GitHub.Event.Pull_Request.Head.Repo.Full_Name == GITHUB.repository"
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+stepcmd
+check "a mixed-case but correct guard is still recognised" 0 "OK:"
+
 # Codex security P1s at verify 7: the release decision is an allowlist.
 # (1) head_ref is an arbitrary branch name, never simulated.
 fixture "release" "github.event_name == 'pull_request' && github.head_ref == 'topic'"
