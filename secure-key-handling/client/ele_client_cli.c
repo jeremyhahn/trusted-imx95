@@ -62,11 +62,17 @@ int main(int argc, char **argv)
 		fprintf(stderr, "ele_client: cannot read the nonce from fd %d\n", cmd.nonce_fd);
 		return 2;
 	}
-	if (ele_hsm_open(&ctx, cmd.store_id, &slot->value) != 0) {
+	rc = ele_hsm_open(&ctx, cmd.store_id, &slot->value);
+	if (rc != 0) {
 		ele_nonce_slot_free(slot);
+		if (rc == ELE_HSM_OPEN_NOLOCK) {
+			fprintf(stderr, "ele_client: cannot lock the process memory (mlockall; check RLIMIT_MEMLOCK); the nonce was not used\n");
+			return 2;
+		}
 		fprintf(stderr, "ele_client: cannot open the key store\n");
 		return 1;
 	}
+	rc = 1;
 	ele_nonce_slot_free(slot);
 	ctx.counter_split_confirmed = cmd.split_confirmed;
 	ele_client_init(&cl, &ele_hsm_ops, &ctx);

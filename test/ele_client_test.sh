@@ -120,6 +120,12 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		ELE_FAKE_ERR=$err ELE_FAKE_LOG="$tmp/hsm.log" run "$tmp/ele_cli" "$@" 3<"$tmp/nonce"
 	}
 	no_hsm_call() { [ ! -e "$tmp/hsm.log" ] || fail "$1: an HSM call was made"; }
+	# ele_hsm_open locks all process memory before the library sees the nonce.
+	# Try to raise the soft limit to the hard one; the command is refused (exit 2)
+	# when the lock still fails, so a host that cannot lock is reported here.
+	ulimit -S -l "$(ulimit -H -l)" 2>/dev/null || true
+	cli 0 --split-confirmed 5 3 del 7
+	case $OUT in *"cannot lock the process memory"*) fail "the host cannot mlockall this process (RLIMIT_MEMLOCK $(ulimit -l)): the CLI tests cannot run" ;; esac
 	for bad in 4294967297 1junk -1 ""; do
 		cli 0 --split-confirmed 5 3 del "$bad"
 		check "del '$bad' refused" 2 "usage"

@@ -54,6 +54,63 @@ static void wipe_hook(const void *p, size_t n)
 			wiped_nonzero++;
 }
 
+static int lock_ok(void)
+{
+	return 0;
+}
+
+static int lock_fails(void)
+{
+	return -1;
+}
+
+static int scrubs, scrub_bytes;
+
+static void scrub_hook(size_t n)
+{
+	scrubs++;
+	scrub_bytes = (int)n;
+}
+
+/* The library's stack copy of the nonce: the process is locked before the
+ * call (fail closed) and the stack is scrubbed after it, on every exit. */
+static void lock_and_scrub(void)
+{
+	struct ele_hsm_ctx x;
+	uint32_t nonce;
+
+	ele_hsm_scrub_hook = scrub_hook;
+
+	scrubs = 0;
+	memset(&fake, 0, sizeof(fake));
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) == 0 && scrubs == 1, "the stack is scrubbed after a successful open");
+	CHECK(scrub_bytes >= 4096, "the scrub covers at least the SAB command and response buffers");
+	ele_hsm_close(&x);
+
+	scrubs = 0;
+	memset(&fake, 0, sizeof(fake));
+	fake.ks_err = OTHER_ERR;
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) != 0 && scrubs == 1, "the stack is scrubbed after a failed key store open");
+
+	scrubs = 0;
+	memset(&fake, 0, sizeof(fake));
+	fake.session_err = OTHER_ERR;
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) != 0 && scrubs == 1, "the stack is scrubbed after a failed session open");
+
+	/* mlockall fails: nothing is opened, the library never sees the nonce. */
+	ele_hsm_lockall_override = lock_fails;
+	scrubs = 0;
+	memset(&fake, 0, sizeof(fake));
+	nonce = 0xdeadbeef;
+	CHECK(ele_hsm_open(&x, 5, &nonce) == ELE_HSM_OPEN_NOLOCK, "open refused when the process cannot be locked");
+	CHECK(nonce == 0 && fake.ks_nonce == 0 && fake.ks_id == 0, "the nonce is erased and never reached the library");
+	ele_hsm_lockall_override = lock_ok;
+	ele_hsm_scrub_hook = NULL;
+}
+
 static void nonce_erasure(void)
 {
 	struct ele_hsm_ctx x;
@@ -101,6 +158,7 @@ static void nonce_erasure(void)
 			struct rlimit rl = { 0, 0 };
 			uint32_t nn = 0xdeadbeef;
 
+			ele_hsm_lockall_override = NULL; /* the real mlockall */
 			if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0)
 				_exit(77);
 			memset(&fake, 0, sizeof(fake));
@@ -124,6 +182,10 @@ int main(void)
 	uint32_t id;
 	uint8_t sig[128];
 	size_t n;
+
+	/* A unit test cannot count on its host's memory-lock limit: the real
+	 * mlockall is exercised in a child with the limit at 0 (nonce_erasure). */
+	ele_hsm_lockall_override = lock_ok;
 
 	/* The store is loaded with strict and counted updates, never created. */
 	open_client(&x, &c, true);
@@ -202,6 +264,7 @@ int main(void)
 	}
 
 	ele_hsm_close(&x);
+	lock_and_scrub();
 	nonce_erasure();
 	if (fails)
 		return 1;

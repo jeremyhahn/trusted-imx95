@@ -16,6 +16,31 @@
 
 void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 
+int (*ele_hsm_lockall_override)(void);
+void (*ele_hsm_scrub_hook)(size_t len);
+
+/* The library copies the nonce into its own stack buffer (process_sab_msg's
+ * cmd[MAX_CMD_WORD_SZ = 256] words, plus the response buffer and frames) and
+ * does not wipe it. This many bytes of dead stack below the caller are zeroed
+ * after the library call returns: best effort, see client.md. */
+#define ELE_SCRUB_BYTES 16384u
+
+static int lock_process(void)
+{
+	if (ele_hsm_lockall_override)
+		return ele_hsm_lockall_override();
+	return mlockall(MCL_CURRENT | MCL_FUTURE);
+}
+
+__attribute__((noinline)) static void scrub_stack(void)
+{
+	volatile unsigned char buf[ELE_SCRUB_BYTES];
+
+	ele_secure_zero((void *)buf, sizeof(buf));
+	if (ele_hsm_scrub_hook)
+		ele_hsm_scrub_hook(sizeof(buf));
+}
+
 /* P-256 r||s; provisional, the library does not report the length. */
 #define ELE_SIG_LEN 64u
 
@@ -145,9 +170,17 @@ int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 	memset(c, 0, sizeof(*c));
 	if (!nonce)
 		return -1;
+	/* The library keeps an unwiped stack copy of the nonce; with all memory
+	 * locked it can never reach swap. When the lock fails the credential is
+	 * never handed over (fail closed). */
+	if (lock_process() != 0) {
+		ele_secure_zero(nonce, sizeof(*nonce));
+		return ELE_HSM_OPEN_NOLOCK;
+	}
 	memset(&sa, 0, sizeof(sa));
 	if (hsm_open_session(&sa, &h) != HSM_NO_ERROR) {
 		ele_secure_zero(nonce, sizeof(*nonce));
+		scrub_stack();
 		return -1;
 	}
 	c->session = h;
@@ -184,6 +217,8 @@ int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 		ele_hsm_wipe_hook(ks, sizeof(*ks));
 	munlock(page, sizeof(*ks));
 	munmap(page, pg);
+	/* The library's own stack copy of the nonce, on every exit of the call. */
+	scrub_stack();
 	if (err != HSM_NO_ERROR)
 		goto fail;
 	c->key_store = h;

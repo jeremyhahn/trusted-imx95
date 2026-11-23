@@ -38,6 +38,15 @@ int ele_hsm_open(struct ele_hsm_ctx *ctx, uint32_t key_store_id, uint32_t *nonce
  * nonce) has been erased, with its address and size, so a test can check the
  * erasure. NULL in production. */
 extern void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
+
+/* ele_hsm_open locks all process memory (mlockall) before the library sees the
+ * nonce, and fails closed when that fails. Test hooks, NULL in production:
+ * ele_hsm_lockall_override replaces the mlockall call (a unit test cannot
+ * count on the memory-lock limit of its host); ele_hsm_scrub_hook is called
+ * with the number of stack bytes zeroed each time the stack is scrubbed. */
+#define ELE_HSM_OPEN_NOLOCK (-2) /* ele_hsm_open: the memory could not be locked */
+extern int (*ele_hsm_lockall_override)(void);
+extern void (*ele_hsm_scrub_hook)(size_t len);
 void ele_hsm_close(struct ele_hsm_ctx *ctx);
 
 #endif

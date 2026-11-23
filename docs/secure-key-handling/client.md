@@ -137,7 +137,17 @@ copy of the nonce. When the lock fails the open fails closed before the nonce is
 (`src/common/sab_msg/sab_process_msg.c:170`) declares the `cmd[]` word buffer on its stack, `prepare_sab_msg` fills it
 (`sab_process_msg.c:216`, from `sab_msg/sab_key_store.c:32`, `cmd->password = op_args->authentication_nonce`), the
 message is sent from it (`:268`) and the function returns (`:368`) without wiping it. Only a vendor patch removes that
-copy; it is recorded here, not solved.
+copy. Without editing the vendor source, `ele_hsm_open` narrows it: (1) it calls `mlockall(MCL_CURRENT|MCL_FUTURE)`
+before the library sees the nonce and refuses to open (`ELE_HSM_OPEN_NOLOCK`, the command exits 2, the nonce is erased and
+never handed over) when that fails, so the copy can never reach swap; (2) after the library call returns, on every exit
+(success, key-store failure, session failure) a `noinline` function zeroes 16 KiB of the stack below the caller with the
+non-elidable erase, which covers the `cmd` buffer (256 words, `sab_process_msg.h:16`), the response buffer and the
+frames. **The stack scrub is best effort**: the compiler and the library's own frames are not under this client's control,
+and registers and a page already written to disk before the lock are out of reach. The sound fix is a patch to the pinned
+library that wipes `cmd` before `process_sab_msg` returns, applied at build time and pinned by SHA-256; that is the owner's
+decision and is not done here. Tests: the open is refused when the lock fails (a stub, and the real `mlockall` in a child
+with `RLIMIT_MEMLOCK` 0), and a hook shows the scrub ran on the three exits. `test/ele_client_test.sh` raises the soft memory-lock limit to the
+hard one and fails, naming the limit, on a host where the lock still cannot be taken.
 
 **A result that cannot be written.** `gen` and `del` check `printf` and `fflush`. When stdout cannot be written (a full
 disk, a closed pipe) the command exits 1 and prints the key id and its commit state on stderr
