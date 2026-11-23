@@ -179,7 +179,7 @@ key=${dir##*/}
 case "$key" in
 tfa) mkdir -p "$bb/$plat/release" && echo bl31 >"$bb/$plat/release/bl31.bin" ;;
 ftpm) mkdir -p "$o" && echo ta >"$o/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf" ;;
-optee) mkdir -p "$o/core" && echo tee >"$o/core/tee-raw.bin" ;;
+optee) mkdir -p "$o/core" && echo "tee${STUB_DIFF_TEE:+$([[ "$o" == */build-2/* ]] && echo -2)}" >"$o/core/tee-raw.bin" ;;
 esac
 EOF
 cat >"$fs/cp" <<'EOF'
@@ -243,10 +243,31 @@ all_optee_no_secstor_pta() {
 }
 expect "every OP-TEE make call sets CFG_SECSTOR_TA_MGMT_PTA=n" all_optee_no_secstor_pta "$mlog"
 expect "early TAs are on" has "$optee_line" "CFG_EARLY_TA=y"
-expect "the fTPM TA is an early TA" has "$optee_line" "EARLY_TA_PATHS=$TMP_ROOT/ok/work/build/ftpm/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
+expect "the fTPM TA is an early TA" has "$optee_line" "EARLY_TA_PATHS=$TMP_ROOT/ok/work/build-1/build/ftpm/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
 expect "the PKCS#11 TA is an early TA" has "$optee_line" "CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee"
 expect "the fTPM TA keeps its NV in REE FS storage" has "$ftpm_line" "CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE"
 expect "PKCS#11 is built" has "$optee_line" "CFG_PKCS11_TA=y"
+
+has_line() {
+	local l
+	while IFS= read -r l; do
+		[[ "$l" == "$1"* ]] && return 0
+	done <"$2"
+	return 1
+}
+two_builds() { local n; n=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ "$l" == *"/build-1/src/tfa "* || "$l" == *"/build-2/src/tfa "* ]] && echo x; done | wc -l); [ "$n" -eq 2 ]; }
+expect "TF-A is built twice, once in each clean build directory" two_builds
+expect "the reproducibility result is recorded" has_line 'reproducible: yes' "$TMP_ROOT/ok/out/build-info.txt"
+expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/build-1" -a -d "$TMP_ROOT/ok/work/build-2"
+
+# A difference between the two builds: the second build's tee.bin differs.
+fullrun differ "$oklock" STUB_DIFF_TEE=1
+check "builds that differ fail naming the artefact and both hashes" nonzero "tee.bin differs: build 1" "build 2" "not reproducible"
+expect "builds that differ publish nothing" nothing_published differ
+bl31_same() { [ "$(sha256sum <"$TMP_ROOT/differ/work/out-1/bl31.bin")" = "$(sha256sum <"$TMP_ROOT/differ/work/out-2/bl31.bin")" ]; }
+expect "the matching artefact is not blamed" bl31_same
+no_bl31_blame() { [[ "$OUT" != *"bl31.bin differs"* ]]; }
+expect "bl31.bin is not reported as differing" no_bl31_blame
 
 fullrun baddigest "$badlock"
 check "a wrong archive digest stops the build" nonzero "toolchain failed" "toolchain SHA-256"

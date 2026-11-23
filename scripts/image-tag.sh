@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# image-tag.sh <toolchain|integration> <repo-name>
+# image-tag.sh <toolchain|secure-world|integration> <repo-name>
 #
 # Prints a CI image tag named by its content (handbook ci-standard.md §9):
 #   toolchain    <repo>-toolchain:<hash of the Dockerfile and every file it
 #                COPYs as a pin: tool and SPSDK pins, and the ele-src stage's
 #                ele-lib-build.sh, ele-lib.lock and bsp.lock>
+#   secure-world <repo>-secure-world:<hash of the Dockerfile and scripts/tool-pins.sh>
 #   integration  <repo>-ci-it:<hash of the commit's tree, on a dirty checkout
 #                the diff and every untracked file .gitignore keeps, and
 #                APK_INDEX_SUM>
 set -euo pipefail
 
-family=${1:?usage: image-tag.sh <toolchain|integration> <repo-name>}
-name=${2:?usage: image-tag.sh <toolchain|integration> <repo-name>}
+family=${1:?usage: image-tag.sh <toolchain|secure-world|integration> <repo-name>}
+name=${2:?usage: image-tag.sh <toolchain|secure-world|integration> <repo-name>}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$root"
 
@@ -21,6 +22,10 @@ toolchain)
 		scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt \
 		scripts/ele-lib-build.sh secure-key-handling/ele-lib.lock secure-world/bsp.lock | sha256sum)
 	echo "${name}-toolchain:${hash:0:16}"
+	;;
+secure-world)
+	hash=$(cat build/docker/devcontainer/Dockerfile scripts/tool-pins.sh | sha256sum)
+	echo "${name}-secure-world:${hash:0:16}"
 	;;
 integration)
 	hash=$({
@@ -32,7 +37,7 @@ integration)
 	echo "${name}-ci-it:${hash:0:16}"
 	;;
 *)
-	echo "image-tag: unknown family '$family' (toolchain or integration)" >&2
+	echo "image-tag: unknown family '$family' (toolchain, secure-world or integration)" >&2
 	exit 2
 	;;
 esac
