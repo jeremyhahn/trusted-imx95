@@ -46,14 +46,9 @@ distro=$(sed -n 's/^DISTRO[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "
 # The directory is never inside this clone (the fetcher repeats the check).
 abs=$dir
 case $abs in /*) ;; *) abs=$PWD/$abs ;; esac
-anc=$abs
-rest=
-while [ ! -d "$anc" ]; do
-	rest=/$(basename "$anc")$rest
-	anc=$(dirname "$anc")
-done
-phys=$(cd "$anc" && pwd -P)$rest
-case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
+# A ".." under a missing parent cannot be resolved by cd; refuse it, as
+# check_out does for PLATFORM_IMAGE_OUT, so phys is a canonical path.
+case "/$abs/" in */../*) die "$dir contains a '..' component; refusing" ;; esac
 
 # canon PATH: the absolute, symlink-free path of PATH, which need not exist.
 canon() {
@@ -76,6 +71,8 @@ canon() {
 	[ "$d" != / ] || d=
 	echo "$d$r"
 }
+phys=$(canon "$abs")
+case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
 # check_out: refuse an artefacts directory that rm -rf must not touch. Run
 # before anything is fetched or built, and again before the removal.
 check_out() {
@@ -203,7 +200,8 @@ elapsed=$(($(date +%s) - start))
 
 # The SOURCE_DATE_EPOCH bitbake used for the first target.
 # shellcheck disable=SC2086
-sde=$(bitbake -e ${targets%% *} | sed -n 's/^SOURCE_DATE_EPOCH="\(.*\)"$/\1/p' | sed -n '$p')
+sde=$(bitbake -e ${targets%% *} | sed -n 's/^\(export[[:space:]][[:space:]]*\)\{0,1\}SOURCE_DATE_EPOCH="\(.*\)"$/\2/p' | sed -n '$p')
+case $sde in '' | *[!0-9]*) sde= ;; esac
 [ -n "$sde" ] || die "no SOURCE_DATE_EPOCH in bitbake -e"
 
 deploy=$build/tmp/deploy/images/$machine

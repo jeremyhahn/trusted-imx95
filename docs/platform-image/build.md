@@ -185,7 +185,11 @@ when it carries the `.platform-image-out` marker it wrote, and refuses an empty
 value, a relative path, any path with a `..` component (`.`, `//` and a
 trailing slash are collapsed first, so the path checked is the one used), `/`,
 the checkout or an ancestor, a path outside `.platform-image/`
-inside the checkout, and any path overlapping the fetch directory. Its stub test is `test/platform_image_build_test.sh`, in `make test`.
+inside the checkout, and any path overlapping the fetch directory. The fetch
+directory is canonicalised the same way before that comparison, and one with a
+`..` component is refused. `SOURCE_DATE_EPOCH` is read from `bitbake -e`
+(plain or `export`ed, last value, decimal integer only; anything else stops
+the script). Its stub test is `test/platform_image_build_test.sh`, in `make test`.
 It is not in CI.
 
 **Result: no image was built.** The build stopped on the NXP EULA, which is

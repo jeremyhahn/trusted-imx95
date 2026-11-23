@@ -45,7 +45,7 @@ cat >"$stub/bitbake" <<'EOF'
 #!/bin/sh
 case $1 in
 -m) exit 0 ;;
--e) echo "SOURCE_DATE_EPOCH=\"1700000000\""; exit 0 ;;
+-e) printf '%s\n' "${BB_E_OUT-export SOURCE_DATE_EPOCH=\"1700000000\"}"; exit 0 ;;
 esac
 echo "bitbake $*" >>"$BB_LOG"
 [ -z "${BB_FAIL:-}" ] || exit 1
@@ -217,6 +217,45 @@ expect "the marker is not in SHA256SUMS" test "$(wc -l <"$tmp/out/SHA256SUMS")" 
 brun "$stub:$tools"
 check "a marked OUT: accepted" 0 "OK, 2 artefacts"
 expect "a marked OUT is rebuilt: the stale file is gone" test ! -e "$tmp/out/stale"
+
+# The fetch directory is canonical before the overlap guard: a ".." under a
+# missing parent is refused, and the marked OUT it names survives.
+rm -rf "$tmp/d" "$tmp/out" "$tmp/missing" "$tmp/result"
+mkdir -p "$tmp/result"
+: >"$tmp/result/.platform-image-out"
+: >"$tmp/result/sentinel"
+rm -f "$tmp/log"
+RC=0
+OUT=$(PATH="$stub:$tools" PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_MACHINE=$want \
+	PLATFORM_IMAGE_OUT=$tmp/result "$real_bash" "$script" "$tmp/missing/../result" 2>&1) || RC=$?
+check "DIR with '..' under a missing parent: refused" nonzero "contains a '..' component"
+expect "DIR with '..': nothing fetched or built" test ! -e "$tmp/log"
+expect "DIR with '..': the marked OUT sentinel survives" test -f "$tmp/result/sentinel"
+rm -rf "$tmp/result"
+
+# bitbake -e prints SOURCE_DATE_EPOCH exported (OE-core) or plain; the last
+# value wins; only a decimal integer is accepted.
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT='export SOURCE_DATE_EPOCH="1700000000"' brun "$stub:$tools"
+check "exported SOURCE_DATE_EPOCH: build ok" 0 "OK, 2 artefacts"
+expect "exported SOURCE_DATE_EPOCH: in build-info" grep -q '^SOURCE_DATE_EPOCH=1700000000$' "$tmp/out/build-info.txt"
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT='SOURCE_DATE_EPOCH="1700000001"' brun "$stub:$tools"
+check "plain SOURCE_DATE_EPOCH: build ok" 0 "OK, 2 artefacts"
+expect "plain SOURCE_DATE_EPOCH: in build-info" grep -q '^SOURCE_DATE_EPOCH=1700000001$' "$tmp/out/build-info.txt"
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT=$(printf '%s\n' 'SOURCE_DATE_EPOCH="1"' 'export SOURCE_DATE_EPOCH="1700000002"') brun "$stub:$tools"
+check "two SOURCE_DATE_EPOCH lines: build ok" 0 "OK, 2 artefacts"
+expect "two lines: the last wins" grep -q '^SOURCE_DATE_EPOCH=1700000002$' "$tmp/out/build-info.txt"
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT='export SOURCE_DATE_EPOCH="12ab"' brun "$stub:$tools"
+check "non-numeric SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
+rm -rf "$tmp/d" "$tmp/out"
+BB_E_OUT='' brun "$stub:$tools"
+check "no SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools"
+check "default stub (exported form): build ok" 0 "OK, 2 artefacts"
 
 # build-info names this checkout's commit and whether platform-image/ is dirty.
 info=$(cat "$tmp/out/build-info.txt")
