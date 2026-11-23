@@ -779,6 +779,11 @@ jobs:
 check "a duplicate top-level key is refused" 1 "duplicate key 'on'"
 # In-memory mutants of the step: the strict loader swapped for safe_load, and
 # the duplicate-key check removed. Each must let a fixture above through.
+# Which mutant proves which case: (iii), a duplicate key, is proven by mut-dup.
+# (i), `yes:` followed by `on:`, cannot fail when only the duplicate check is
+# removed, because with source-string keys `yes` and `on` are different keys;
+# its guard is the source-string loader, so mut-safe (safe_load collapses them)
+# is the mutant that proves (i).
 python3 -I - "$work/step.py" "$work/mut-safe.py" "$work/mut-dup.py" <<'PY'
 import sys
 s = open(sys.argv[1], encoding="utf-8").read()
