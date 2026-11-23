@@ -25,6 +25,27 @@ https://github.com/nxp-imx/imx-atf.git)
 esac
 expect "bsp.lock's TFA_REPO is NXP's imx-atf (ruling 1234): $tfa_repo" test "$tfa_ok" -eq 0
 
+# The documents follow ruling 1234: no tag of upstream Arm TF-A pins BL31, and the
+# release criterion names imx-atf and the ruling.
+file_has() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == *$2* ]] && return 0; done <"$1"; return 1; }
+file_lacks() { ! file_has "$@"; }
+criterion_ok() { # <file>: the BL31 release criterion line names imx-atf and ruling 1234
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == "- BL31 is pinned"* && "$l" == *imx-atf* && "$l" == *"ruling 1234"* && "$l" != *"tagged upstream"* ]] && return 0
+	done <"$1"
+	return 1
+}
+expect "docs/SPEC.md has no 'tagged upstream Arm TF-A' text" file_lacks "$ROOT/docs/SPEC.md" "tagged upstream Arm TF-A"
+expect "docs/SPEC.md's BL31 release criterion names imx-atf and ruling 1234" criterion_ok "$ROOT/docs/SPEC.md"
+expect "docs/secure-world/architecture.md has no 'tagged upstream release'" file_lacks "$ROOT/docs/secure-world/architecture.md" "tagged upstream release"
+expect "ROADMAP.md has no 'tagged upstream release'" file_lacks "$ROOT/ROADMAP.md" "tagged upstream release"
+planted=$TMP_ROOT/planted-spec.md
+printf '%s\n' '- BL31 is pinned to a tagged upstream Arm TF-A release (owner ruling 771), imx-atf ruling 1234.' >"$planted"
+expect "a planted 'tagged upstream Arm TF-A' criterion is flagged by the wording check" file_has "$planted" "tagged upstream Arm TF-A"
+criterion_flagged() { ! criterion_ok "$1"; }
+expect "a planted 'tagged upstream' criterion fails the criterion check" criterion_flagged "$planted"
+
 run bash "$sw" --frobnicate
 check "an unknown argument fails" nonzero "unknown argument: --frobnicate"
 
