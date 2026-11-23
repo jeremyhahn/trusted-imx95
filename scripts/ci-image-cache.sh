@@ -254,6 +254,8 @@ case ${1:-} in
     # longer this job's alone, so cleanup leaves it to the age-aware reaper. The
     # build above carries the Makefile's ci.reap.repository label (the local
     # toolchain repository), which is how the reaper finds this untagged image.
+    # The publish-images job runs reap-stale-ci-stacks.sh in an `if: always()`
+    # step after this one (v1.54), so the release daemon is reaped too.
     built_id=""
     echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;

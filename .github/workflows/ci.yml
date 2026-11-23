@@ -2571,6 +2571,7 @@ jobs:
     timeout-minutes: 60       # CUSTOMIZE: ceil(1.5 x a cold toolchain build's p95)
     env:
       CI_IMAGE_NAMESPACE: ${{ vars.CI_IMAGE_NAMESPACE }}   # m2101: a repository variable; ci-standard.md §9 (ruling 217(4))
+      CI_STACK_PREFIX: ${{ github.event.repository.name }}-ci-
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -2617,6 +2618,17 @@ jobs:
             bp="GO_BUILD_PROXY=$DEVCACHE_GOPROXY|https://proxy.golang.org"
           fi
           scripts/ci-image-cache.sh publish ${bp:+"$bp"} MODULE_ENV_FILE="$RUNNER_TEMP/gomodauth.env"
+
+      # v1.54 (Codex P1, #159): publish clears its built_id and leaves the
+      # image to the age-aware reaper, but this is the only job on the release
+      # pool and it never ran the reaper, so every new toolchain hash left an
+      # image on the release daemon for good. The reaper runs here too, after
+      # the publish step whether it published, found the tag in the registry or
+      # failed. It keeps an image newer than REAP_IMAGE_MIN_AGE and one a
+      # container or a lease holds (image-lock).
+      - name: Reap stale CI stacks
+        if: always()
+        run: scripts/reap-stale-ci-stacks.sh "$CI_STACK_PREFIX"
 
       - name: Tear down
         if: always()

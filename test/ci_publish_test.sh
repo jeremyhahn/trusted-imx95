@@ -250,4 +250,30 @@ expect "publish: never removes the trusted tag from the daemon" nolog '^docker i
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
 expect "publish: no image rm when the build gave no ID" nolog '^docker image rm'
 
+# v1.54 (Codex P1): the release job is the only job on its pool, so it runs the
+# reaper itself, after the publish step, whether that step published, found the
+# tag in the registry or failed (`if: always()`), with the other jobs' prefix.
+cat > "$TMP_ROOT/reapstep.py" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^  publish-images:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n)", text, re.S | re.M)
+if not m:
+    sys.exit("no publish-images job")
+body = m.group(1)
+head, _, rest = body.partition("\n    steps:\n")
+steps = re.split(r"^      - ", rest, flags=re.M)[1:]
+pub = [i for i, s in enumerate(steps) if "ci-image-cache.sh publish" in s]
+reap = [i for i, s in enumerate(steps) if re.search(r"^\s+run: scripts/reap-stale-ci-stacks\.sh \"\$CI_STACK_PREFIX\"$", s, re.M)]
+if len(pub) != 1 or len(reap) != 1 or reap[0] <= pub[0]:
+    sys.exit("publish-images needs one reaper step after the publish step")
+c = re.search(r"^        if: (.*)$", steps[reap[0]], re.M)
+cond = c.group(1).replace("${{", "").replace("}}", "").strip() if c else ""
+if cond != "always()":
+    sys.exit("the reaper step's if: must be always(), got %r" % cond)
+if not re.search(r"^      CI_STACK_PREFIX: ", head, re.M):
+    sys.exit("the job needs CI_STACK_PREFIX")
+PY
+expect "publish-images: runs the reaper after publish under if: always()" \
+	python3 -I "$TMP_ROOT/reapstep.py" "$ROOT/.github/workflows/ci.yml"
+
 finish
