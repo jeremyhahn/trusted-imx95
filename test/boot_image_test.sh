@@ -138,4 +138,47 @@ else
 	fail "fetch: nothing is left behind after a mismatch" "$(ls "$TMP_ROOT/fetch")"
 fi
 
+# --- assembly, signing, verification and tamper (scripts/ahab/boot-image.sh) ---
+BI=$ROOT/scripts/ahab/boot-image.sh
+img_out=$TMP_ROOT/img
+run "$BI" --inputs "$TMP_ROOT/none" --out "$img_out"
+check "image: a missing inputs directory is refused" nonzero "has no ele.bin"
+
+run "$SCRIPT" --collect "$TMP_ROOT/in3"
+expect "image: stand-in inputs collected" [ -s "$TMP_ROOT/in3/inputs.txt" ]
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$img_out"
+check "image: assemble, verify every container, tamper every payload" 0 \
+	"3 of 3 containers authenticate" "6 payloads equal their inputs" \
+	"tamper: ele.bin" "tamper: m33_image.bin" "tamper: m7_image.bin" \
+	"tamper: bl31.bin" "tamper: u-boot.bin" "tamper: tee.bin" \
+	"STAND-IN payloads in this image: 6" "boot-image-test: OK"
+expect "image: boot-image.bin and SHA256SUMS written" [ -s "$img_out/boot-image.bin" ] && [ -s "$img_out/SHA256SUMS" ]
+if (cd "$img_out" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
+	pass "image: SHA256SUMS verifies"
+else
+	fail "image: SHA256SUMS verifies"
+fi
+extra=0
+for f in "$img_out"/*; do
+	case "${f##*/}" in boot-image.bin | inputs.txt | SHA256SUMS) ;; *) extra=$((extra + 1)) ;; esac
+done
+if [ "$extra" -eq 0 ]; then
+	pass "image: the out directory holds no key or fuse script"
+else
+	fail "image: the out directory holds no key or fuse script" "$(ls "$img_out")"
+fi
+
+run "$BI" verify "$img_out/boot-image.bin"
+check "verify: the written image verifies" 0 "verify: OK"
+# One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
+python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+off = d.find(b"STAND-IN ELE firmware") + 100
+d[off] ^= 0xFF
+open(sys.argv[2], "wb").write(d)
+PY
+run "$BI" verify "$TMP_ROOT/bad.bin"
+check "verify: an image with one changed payload byte is rejected" 1 "verify: FAILED"
+
 finish

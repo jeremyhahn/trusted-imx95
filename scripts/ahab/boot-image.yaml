@@ -1,0 +1,76 @@
+# nxpimage ahab export configuration for make boot-image-test (SPSDK 3.13.0).
+# PROVISIONAL (docs/boot-container/boot-image.md). The full i.MX 95 B0 (SPSDK
+# family mimx9596, revision b0) boot image as three OEM containers signed with
+# a throwaway ECDSA P-384 test SRK; scripts/ahab/boot-image.sh copies this file
+# and the inputs into its mktemp -d work directory, where every relative path
+# below lives. Nothing here describes a real device or a real key.
+#
+#   container 1  the ELE firmware image (ele.bin). On a device this position
+#                is NXP's own container; here it is an OEM-signed entry
+#                (core ele, image type ele), because the NXP container is NXP's
+#                binary and not in this repository.
+#   container 2  System Manager (core cortex-m33, SPSDK's system_manager entry
+#                with its defaults) and the Cortex-M7 image (the entry laid out
+#                as scripts/ahab/m7-container.yaml lays it out).
+#   container 3  the Cortex-A55 images: BL31, U-Boot, tee.bin (SPSDK's atf,
+#                uboot and tee entries with their default addresses).
+#
+# Addresses, core ids and image types are SPSDK 3.13.0 defaults or the values of
+# m7-container.yaml; the boot ROM's order and the real load addresses are
+# MISSING (IMX95RM, docs/boot-container/architecture.md "Missing"). The
+# fuse_version and sw_version are 0 for this test image only.
+family: mimx9596
+revision: b0
+target_memory: standard
+output: boot-image.bin
+containers:
+  - container:
+      srk_set: oem
+      used_srk_id: 0
+      srk_revoke_mask: '0x00'
+      fuse_version: 0
+      sw_version: 0
+      signer: type=file;file_path=srk0.pem
+      images:
+        - image_path: ele.bin
+          load_address: '0x00000000'
+          entry_point: '0x00000000'
+          image_type: ele
+          core_id: ele
+          hash_type: sha384
+      srk_table:
+        srk_array: &srk
+          - srk0.pub
+          - srk1.pub
+          - srk2.pub
+          - srk3.pub
+  - container:
+      srk_set: oem
+      used_srk_id: 0
+      srk_revoke_mask: '0x00'
+      fuse_version: 0
+      sw_version: 0
+      signer: type=file;file_path=srk0.pem
+      images:
+        - system_manager: m33_image.bin
+        - image_path: m7_image.bin
+          load_address: '0x00000000'
+          entry_point: '0x303C0000'
+          image_type: executable
+          core_id: cortex-m7-1
+          hash_type: sha384
+      srk_table:
+        srk_array: *srk
+  - container:
+      srk_set: oem
+      used_srk_id: 0
+      srk_revoke_mask: '0x00'
+      fuse_version: 0
+      sw_version: 0
+      signer: type=file;file_path=srk0.pem
+      images:
+        - atf: bl31.bin
+        - uboot: u-boot.bin
+        - tee: tee.bin
+      srk_table:
+        srk_array: *srk
