@@ -13,7 +13,8 @@
 #                with its defaults) and the Cortex-M7 image (the entry laid out
 #                as scripts/ahab/m7-container.yaml lays it out).
 #   container 3  the Cortex-A55 images: BL31, U-Boot, tee.bin (SPSDK's atf,
-#                uboot and tee entries with their default addresses).
+#                uboot and tee entries; tee at the cited 0x8C000000, atf and
+#                uboot at SPSDK's defaults, see the comments at the entries).
 #
 # Addresses, core ids and image types are SPSDK 3.13.0 defaults or the values of
 # m7-container.yaml; the boot ROM's order and the real load addresses are

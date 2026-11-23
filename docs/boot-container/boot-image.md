@@ -30,7 +30,23 @@ a four-key table:
 |---|---|---|---|
 | 1 | ELE | `ele`, core `ele` | `ele.bin` |
 | 2 | System Manager and M7 | `system_manager`, `cortex-m33`; `executable`, `cortex-m7-1`, load `0x00000000`, entry `0x303C0000` | `m33_image.bin`, `m7_image.bin` |
-| 3 | Cortex-A55 | `atf`, `uboot`, `tee`, all `cortex-a55` at SPSDK's default addresses | `bl31.bin`, `u-boot.bin`, `tee.bin` |
+| 3 | Cortex-A55 | `atf`, `uboot`, `tee`, all `cortex-a55`; `atf` load and entry `0x8A200000`; `tee` load and entry `0x8C000000`; `uboot` at SPSDK's default | `bl31.bin`, `u-boot.bin`, `tee.bin` |
+
+Container 3's addresses:
+
+- `tee` `0x8C000000` is TF-A `da738d5` `plat/imx/imx9/imx95/platform.mk:56` (`BL32_BASE ?= 0x8C000000`) and
+  imx-optee-os `99f4089` `core/arch/arm/plat-imx/conf.mk:729` (`CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000`).
+  The i.MX 95 `CFG_DRAM_BASE` (taken as `0x80000000`) was not read at that commit: **open**. The entry is
+  written out in the yaml, because the `tee` shorthand cannot carry an address; its other fields equal what
+  the shorthand produced.
+- `atf` `0x8A200000` is **SPSDK 3.13.0's default, not a citation**. TF-A's BL31 base for `PLAT=imx95` is in
+  `plat/imx/imx9/imx95/include/platform_def.h`, which the lane could not read (the lane's read guard):
+  **open**. The test pins the default so a change is noticed, not endorsed.
+- `uboot` is a stand-in with SPSDK's default address.
+
+`test/boot_image_test.sh` reads the parse of the built image: container 3 holds three entries, all
+`cortex-a55`, carrying `bl31.bin`, `u-boot.bin`, `tee.bin` in that order, and the `atf` and `tee`
+load address and entry point equal the values above.
 
 The M7 entry is laid out as `scripts/ahab/m7-container.yaml` lays it out
 ([m7-load-path-survey.md](m7-load-path-survey.md) §3, §5). The order and the grouping into containers
@@ -55,6 +71,12 @@ then a data-only A55 container); this image does not satisfy it and is not check
 | BL31 `bl31.bin`, `tee.bin` | `make secure-world`, `.secure-world/out/` | `secure-world/bsp.lock` |
 | U-Boot `u-boot.bin` | a build of NXP's `uboot-imx`, branch `lf_v2026.04` | commit `bb41975a…` and the SHA-256 of its source archive, in `inputs.lock` |
 | ELE firmware `ele.bin` | NXP's `firmware-ele-imx` 2.0.7 installer | the installer's SHA-256 in `inputs.lock` |
+
+`bl31.bin` and `tee.bin` count as real only if they come from a verified `make secure-world` output: when
+they are taken from `.secure-world/out/` (not given with `--bl31` or `--tee`), `--collect` requires
+`SHA256SUMS` there to list both files with the files' SHA-256, and the `lock:` line of `build-info.txt` to
+equal the SHA-256 of this tree's `secure-world/bsp.lock`. A miss fails closed, naming the file, and
+writes no `inputs.txt`. A file passed with `--bl31` or `--tee` is not checked.
 
 `inputs.lock` also records that `meta_imx_commit` equals `META_IMX_COMMIT` of `secure-world/bsp.lock`;
 `--check` fails if the two differ. The U-Boot and ELE values were read from the meta-imx recipes at
