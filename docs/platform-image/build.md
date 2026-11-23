@@ -158,3 +158,41 @@ the fetch, `bitbake -p` and `bitbake -e` of both images, and the kernel
 
 Not verified: no image or kernel build; the NXP EULA
 (`ACCEPT_FSL_EULA`) is left to the owner.
+
+## make platform-image
+
+```sh
+make platform-image            # DIR defaults to the cache dir; OUT to DIR/out
+scripts/platform-image-build.sh DIR OUT
+```
+
+On a Yocto build host ([build-host-check.md](build-host-check.md)), with the
+network, this fetches the layers the lock pins, writes the build conf from the
+templates (it refuses a conf that differs), and runs
+`bitbake trusted-imx95-image trusted-imx95-image-debug`. DIR and OUT must be
+outside the clone. The bitbake log is `DIR/platform-image-build.log`.
+
+Outputs: `OUT/SHA256SUMS`, the SHA-256 of the wic image, kernel, dtbs and
+rootfs tarballs in `DEPLOY_DIR_IMAGE` (plain files, sorted, relative names, so
+`sha256sum -c` runs in that directory). Nothing is flashed.
+
+The EULA gap: the script never sets `ACCEPT_FSL_EULA` and has no switch that
+does; it refuses the variable in its environment and in the conf. The owner
+has not accepted the NXP EULA (#14). When the build stops on a recipe the EULA
+gates, the script prints `EULA-gated recipe: <name>` for each, says the owner
+has not accepted the EULA, and exits nonzero (if no name can be read from the
+log, it prints the EULA lines). Until the owner answers, expect that stop.
+
+Reproducibility check (written, **unrun**: it needs a build host and a build
+that passes the EULA). Build twice into separate trees and compare:
+
+```sh
+scripts/platform-image-build.sh DIR1 OUT1
+scripts/platform-image-build.sh DIR2 OUT2
+cmp OUT1/SHA256SUMS OUT2/SHA256SUMS && echo reproducible
+```
+
+Different DIR values give different `DEPLOY_DIR_IMAGE` paths but the manifest
+holds relative names, so equal contents give equal manifests. The offline test
+`test/platform_image_build_test.sh` checks that property with a stub bitbake
+only. The gaps are listed in [../plans/160.md](../plans/160.md).

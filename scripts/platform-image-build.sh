@@ -31,7 +31,7 @@ die() {
 
 # outside_clone PATH: fails if PATH, resolved, is inside this clone.
 outside_clone() {
-	local abs=$1 anc rest= phys
+	local abs=$1 anc rest='' phys
 	case $abs in /*) ;; *) abs=$PWD/$abs ;; esac
 	anc=$abs
 	while [ ! -d "$anc" ]; do
