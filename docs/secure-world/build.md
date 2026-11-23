@@ -131,10 +131,34 @@ The hashes below are of the final configuration: both OP-TEE builds set `CFG_REE
 `ree_fs_check_update_ta_version`, which `CFG_REE_FS_TA=n` leaves out, so the image did not link without it. The secure
 storage TA management PTA installs TAs into REE FS storage, which this build does not load from.
 
-Verified on 2026-11-21: two clean `make secure-world` builds of this script at the upstream TF-A v2.15.0 pin
-(`da738d5e`; the earlier hashes were of the imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each with an empty work,
-output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' artefacts are identical byte for byte
-(`cmp`).
+`make secure-world` checks this itself (#166). It runs the build twice, each in its own clean directory
+(`work/build-1`, `work/build-2`; the work directory is recreated on each run, the pinned source and toolchain cache is
+shared and hash-checked), and compares `bl31.bin` and `tee.bin` by SHA-256. Only when both are byte-identical does it
+publish them, with `SHA256SUMS` (the agreed hashes) and `build-info.txt` (which ends with the `reproducible: yes` line
+and both hashes). On a difference it publishes nothing and fails naming the artefact and both hashes:
+
+```text
+secure-world-build: tee.bin build 1 <sha256-of-build-1>, build 2 <sha256-of-build-2>
+secure-world-build: tee.bin differs: build 1 <sha256-of-build-1>, build 2 <sha256-of-build-2>
+secure-world-build: not reproducible: the two clean builds differ; nothing published
+```
+
+On a match the end of the output is:
+
+```text
+secure-world-build: bl31.bin build 1 <sha256>, build 2 <sha256>
+secure-world-build: tee.bin build 1 <sha256>, build 2 <sha256>
+secure-world-build: reproducible, two clean builds identical, <out>:
+<sha256>  bl31.bin
+<sha256>  tee.bin
+```
+
+`test/secure_world_build_test.sh` covers a match and a difference with stubbed builds (no network). The hashes below
+were first matched by hand on 2026-11-21, at the upstream TF-A v2.15.0 pin (`da738d5e`; the earlier hashes were of the
+imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each build with an
+empty work, output and cache directory and the default `SOURCE_DATE_EPOCH`; the scripted check has not yet been run
+against the real sources and toolchain (provisional until a host with network access runs it). The BSP stays
+provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 
 | Build | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
 |---|---|---|
@@ -177,7 +201,7 @@ The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md
 not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
-- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds at the upstream TF-A v2.15.0 pin
-  and the final OP-TEE configuration were identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
+- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; builds twice in clean directories and fails unless both
+  artefacts are byte-identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.
