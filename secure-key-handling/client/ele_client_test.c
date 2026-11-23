@@ -46,7 +46,7 @@ static void case_flags(const char *name, uint32_t sent, bool strict_ack, bool co
 	if (want_ok) {
 		/* A delete is never rollback-protected: strict flag only. */
 		rc = ele_delete_key(&c, id, &st);
-		CHECK(rc == 0 && st == ELE_COMMITTED_UNPROTECTED, name);
+		CHECK(rc != 0 && st == ELE_COMMITTED_UNPROTECTED, name);
 		CHECK((s.last_flags & ELE_REQ_MONOTONIC_COUNTER) == 0, "delete sends no counter flag");
 	}
 }
@@ -71,7 +71,8 @@ static void case_success_then_failure(void)
 
 	s.fail = 0;
 	CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED, "generate again");
-	CHECK(ele_delete_key(&c, id, &st) == 0 && st == ELE_COMMITTED_UNPROTECTED, "delete succeeds");
+	CHECK(ele_delete_key(&c, id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
+	      "delete fails closed: the counter acknowledgement cannot be established");
 	s.fail = 1;
 	CHECK(ele_delete_key(&c, id, &st) != 0, "failed delete");
 	CHECK(st == ELE_NOT_COMMITTED, "a failed delete reports not committed, not the previous state");
@@ -129,8 +130,8 @@ int main(void)
 		CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED, "default generate");
 		CHECK(s.last_flags == both, "stub saw both flags");
 		CHECK(ele_sign(&c, id, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 1, "sign");
-		CHECK(ele_delete_key(&c, id, &st) == 0 && st == ELE_COMMITTED_UNPROTECTED,
-		      "default delete is committed, never rollback-protected");
+		CHECK(ele_delete_key(&c, id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
+		      "default delete fails closed, never rollback-protected");
 		CHECK(ele_sign(&c, 99, (const uint8_t *)"m", 1, sig, &n) != 0, "sign unknown key fails");
 	}
 

@@ -96,5 +96,15 @@ int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state
 	if (c->ops->del(c->ctx, flags, key_id, &ack) != 0)
 		return -1;
 	*state = ele_classify(flags, &ack);
-	return ele_update_ok(flags, &ack, *state) ? 0 : -1;
+	/* Fail closed like generate. A delete updates the key store, and the
+	 * library can return HSM_NO_ERROR for a success-tagged counter warning,
+	 * so a clean return does not show the counter advanced: success needs
+	 * the counter acknowledgement itself, with no warning and the split
+	 * configured. The library's delete cannot supply it (no counter flag),
+	 * so until the owner answers Q2 (the ELE rollback gap) every delete is
+	 * refused here, the diagnostic state kept. The strict flag is not what
+	 * decides this. */
+	if (*state == ELE_NOT_COMMITTED || !ack.counter_acked || ack.counter_warning || !ack.split_configured)
+		return -1;
+	return 0;
 }

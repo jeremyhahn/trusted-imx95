@@ -234,8 +234,8 @@ int main(void)
 
 	/* Delete: the strict flag only; never rollback-protected. */
 	fake.err = 0;
-	CHECK(ele_delete_key(&c, 7, &st) == 0 && st == ELE_COMMITTED_UNPROTECTED,
-	      "HSM_NO_ERROR on delete: committed, never rollback-protected");
+	CHECK(ele_delete_key(&c, 7, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
+	      "HSM_NO_ERROR on delete (also a success-tagged warning): fails closed, never rollback-protected");
 	CHECK(fake.del_flags == HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION && fake.del_key == 7,
 	      "delete sends STRICT_OPERATION only");
 	fake.err = HSM_KEY_STORE_COUNTER;
