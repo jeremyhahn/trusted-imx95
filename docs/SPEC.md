@@ -18,7 +18,7 @@ Every design and change about the hardware cites a document and section in [refe
 - Never defines the wire protocol and never implements xkmsd: go-xkms owns both and runs xkmsd on the board's Linux side.
 - Never owns device enrollment, the device registry, fleet policy or attestation verification: go-trusted-platform and go-xkms own them.
 - The Cortex-M7 firmware: trusted-firmware's `imx95` row (trusted-firmware #49, closed 2026-10-25) holds the M7 firmware core and its `frdm-imx95-m7` board profile, on its `cortex-m` port. Owner ruling 771 keeps trusted-firmware as the Cortex-M (TrustZone-M) product, which on the i.MX 95 is the M7.
-- The Cortex-A55 secure world is upstream TF-A and the NXP BSP's OP-TEE, configured and built here; this repository writes no TF-A or OP-TEE OS code of its own (owner ruling 771, `secure-world` row).
+- The Cortex-A55 secure world is TF-A (NXP's `imx-atf` per owner ruling 1234) and the NXP BSP's OP-TEE, configured and built here; this repository writes no TF-A or OP-TEE OS code of its own (owner ruling 771, `secure-world` row).
 - Never replaces NXP's System Manager on the Cortex-M33: the System Manager stays NXP's, and this repository holds only its configuration.
 - The board's image is built here, never by go-trusted-platform's image pipeline.
 - The CompuLab UCM-iMX95 material in [references/](references/README.md) and `resources/` is reference only; it is not the device.
@@ -51,8 +51,8 @@ Every design and change about the hardware cites a document and section in [refe
 - `docs/SPEC.md` and `ROADMAP.md` exist in the handbook's shapes and agree.
 - The owner approves the whole of both files.
 - CI conforms to the handbook's `software/conventions/ci-standard.md`: build, unit tests, integration tests, security scans and the latest-version check, all in the project's devcontainer image.
-- The firmware split follows owner ruling 771: the Cortex-A55 secure world is upstream TF-A and the NXP BSP's OP-TEE, built here; trusted-firmware's `imx95` row owns the Cortex-M7 firmware and its board profile; the Cortex-M33 stays NXP's System Manager.
-- BL31 is pinned to a tagged upstream Arm TF-A release (owner ruling 771), and OP-TEE OS to the revision one named NXP Linux BSP release carries, that BSP release provisional until the owner chooses the baseline (#14) (`secure-world` row).
+- The firmware split follows owner ruling 771: the Cortex-A55 secure world is TF-A (NXP's `imx-atf`, owner ruling 1234) and the NXP BSP's OP-TEE, built here; trusted-firmware's `imx95` row owns the Cortex-M7 firmware and its board profile; the Cortex-M33 stays NXP's System Manager.
+- BL31 is pinned to the NXP `imx-atf` revision that the named NXP Linux BSP release carries (owner ruling 1234, `secure-world/bsp.lock`), and OP-TEE OS to the revision that same BSP release carries, that BSP release provisional until the owner chooses the baseline (#14) (`secure-world` row).
 - The `ftpm` row's fTPM TA source revision is pinned, and the open questions in [ftpm/](ftpm/README.md#open-questions-for-the-owner) are answered, the RPMB key question first.
 - The owner decides how the platform image is built; the CompuLab Yocto image is reference only.
 - The open questions in the Features rows are answered: the side that calls the HSM API, the SE051's role, the provisioning place and life-cycle close, the attestation evidence beyond the firmware TPM's `tpm`-format device-attest-01 (`ftpm` row), and the A55 side of `hsm-self-defence`.
