@@ -31,7 +31,7 @@ None yet.
 Planned, undated. No issue is filed yet; each line gets its issue once the owner approves this file.
 
 - **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — no issue yet — blocked: owner approval; image build open
-- **secure-world** — the Cortex-A55 secure world of owner ruling 771: upstream TF-A (BL31) and the NXP BSP's OP-TEE with the PKCS#11 TA, hosting the `ftpm` entry's firmware TPM TA, configured and built here — no issue yet — blocked: owner approval; needs platform-image, and boot-container to sign the BL31 and OP-TEE images; go-xkms's PKCS#11 backend and go-trusted-platform consume it
+- **secure-world** — the Cortex-A55 secure world of owner ruling 771, with BL31 per ruling 1234: NXP's `imx-atf` from the BSP release and the NXP BSP's OP-TEE with the PKCS#11 TA, hosting the `ftpm` entry's firmware TPM TA, configured and built here — no issue yet — blocked: owner approval; needs platform-image, and boot-container to sign the BL31 and OP-TEE images; go-xkms's PKCS#11 backend and go-trusted-platform consume it
   - (a) Pin the BSP: the NXP Linux BSP release tag, and the OP-TEE and `imx-optee-os` revisions it carries; BL31 is NXP's `imx-atf` at the BSP's revision (owner ruling 1234, which counts `imx-atf` as upstream TF-A and drops ruling 771's upstream v2.15.0 pin). State: sources pinned in `secure-world/bsp.lock`, with the BSP release `lf-6.18.37-2.1.0` PROVISIONAL until the owner chooses the baseline (#14 Q2); not complete.
   - (b) Reproducible build: pinned sources, toolchain and build command; a byte-for-byte rebuild check; the OP-TEE configuration flags that enable the PKCS#11 TA (the fTPM TA's flags are the `ftpm` entry's). State: `make secure-world` builds both artefacts with a SHA-256 manifest; `scripts/secure-world-build.sh` builds twice in clean directories and fails unless both outputs are identical, and the `secure-world-build` CI job runs it. Nothing has run on the board.
   - (c) Verification on the board: TF-A and OP-TEE banners in the boot log; `/dev/tee0` present; `pkcs11-tool --list-slots` against the OP-TEE PKCS#11 TA; `xtest` if the BSP ships it. Hardware runs happen on the lab's board host, one lane at a time, with any boot-media change announced first.
@@ -59,7 +59,7 @@ Upstream:
 - go-trusted-platform provisions and attests the device, `hsm-device-lifecycle` — `go-trusted-platform#884`.
 - trusted-firmware's Cortex-M7 firmware on the board: its `imx95` row (`trusted-firmware#49`, closed 2026-10-25, the `frdm-imx95-m7` board) and its `hsm-self-defence` row (`trusted-firmware#50`, closed 2026-10-27); both sit on its open Cortex-M port, `trusted-firmware#161`, and its Phase 5 epic, `trusted-firmware#22`.
 - The vendor documents listed as missing in [docs/references/](docs/references/README.md).
-- Upstream Arm TF-A and NXP's Linux BSP release, which carries the OP-TEE OS the `secure-world` row builds (owner ruling 771); the release is provisional (#14).
+- NXP's Linux BSP release, which carries the `imx-atf` BL31 (owner ruling 1234) and the OP-TEE OS (owner ruling 771) the `secure-world` row builds; the release is provisional (#14).
 - OP-TEE's `optee_ftpm` TA and Microsoft's `ms-tpm-20-ref`, at a revision to be pinned (`ftpm` row, owner ruling 927).
 - go-xkms's endorse-01, enroll-01 and device-attest-01 workflows, which provision the board through its firmware TPM (`ftpm` row).
 
