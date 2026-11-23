@@ -124,8 +124,10 @@ and runs the command over the double. These need the fetched source, `ELE_SRC`. 
 image it comes from the Dockerfile's `ele-src` stage, which runs `scripts/ele-lib-build.sh --src-only`: the commit and
 archive digest pinned by `ele-lib.lock` are checked, and the source is unpacked to `/opt/ele-src` (`ENV ELE_SRC`).
 Outside the image, set `ELE_SRC=<work>/src` from a `--src-only` run. With `ELE_SRC` unset the test prints that these
-parts were skipped, unless `CI=true` or `REQUIRE_ELE_SRC=1` is set (`make test` and `make coverage` set the latter),
-in which case it fails instead of skipping. The build script runs the constants check on every build. Whether the firmware acknowledges the flags as assumed is board validation, below.
+parts were skipped (`skip: ELE_SRC unset`), unless `REQUIRE_ELE_SRC=1` is set, in which case it fails instead. The
+toolchain image sets `REQUIRE_ELE_SRC=1` beside `ELE_SRC`, so the GitHub CI job that runs `make coverage` in that image
+(`scripts/in-toolchain-image.sh`) fails when the source is missing; `make test` and `make coverage` themselves do not set
+it, so they skip on a host without the image. `CI=true` alone does not require it. The build script runs the constants check on every build. Whether the firmware acknowledges the flags as assumed is board validation, below.
 
 `scripts/ele-lib-build.sh` then cross-builds `ele_client` for aarch64 and links it
 against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same

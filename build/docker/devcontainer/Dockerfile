@@ -58,6 +58,8 @@ COPY --from=fetch /out/bin/ /usr/local/bin/
 # The verified pinned secure-enclave source, for the backend tests (ELE_SRC).
 COPY --from=ele-src /ele-src /opt/ele-src
 ENV ELE_SRC=/opt/ele-src
+# Where the pinned source is meant to exist, a missing one fails the test.
+ENV REQUIRE_ELE_SRC=1
 # SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
 # scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
 # SHA-256 in scripts/ahab, into /opt/spsdk. CI stages run without network, so

@@ -141,12 +141,12 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "other HSM error: nonzero exit" 1 "failed"
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete: committed, not rollback-protected" 0 "deleted committed-not-rollback-protected"
-elif [ "${CI:-}" = true ] || [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
-	# The toolchain image carries the verified pinned source (ELE_SRC). Where
-	# it is required (CI, make test), not finding it is a failure, not a skip.
-	fail "ELE_SRC is required (CI or REQUIRE_ELE_SRC=1) and does not name the pinned source: ${ELE_SRC:-unset}"
+elif [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
+	# The toolchain image sets REQUIRE_ELE_SRC=1 beside ELE_SRC, the verified
+	# pinned source. There, not finding it is a failure, not a skip.
+	fail "ELE_SRC is required (REQUIRE_ELE_SRC=1) and does not name the pinned source: ${ELE_SRC:-unset}"
 else
-	echo "skip backend constants check: ELE_SRC is not set (the build script runs it)"
+	echo "skip: ELE_SRC unset (backend constants check skipped; the build script runs it)"
 fi
 
 finish
