@@ -176,8 +176,10 @@ Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
-**Not in CI.** The build fetches about 150 MB, runs for about two minutes and needs the network. `make test`
-runs only the offline lock check and the script's unit tests.
+**In CI as its own job, not in `make test`.** The build fetches about 150 MB, runs twice (about two minutes
+each) and needs the network, so the `secure-world-build` job in `ci.yml` runs it in the toolchain image on the
+bridge network, with sources, build trees and output under `$TMPDIR`. `make test` runs only the offline lock check
+and the script's unit tests.
 
 ## Step (c) on the board
 
@@ -202,6 +204,6 @@ not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
 - `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; builds twice in clean directories and fails unless both
-  artefacts are byte-identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
+  artefacts are byte-identical ([Reproducibility](#reproducibility)). The `secure-world-build` CI job runs `make secure-world` in the toolchain image (network on, output under `$TMPDIR`) and is in the CI Gate. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.

@@ -163,7 +163,7 @@ sm-toolchain-check: ## In the devcontainer image: build the System Manager with 
 
 ## --- The Cortex-A secure world (docs/secure-world/build.md) ---
 
-# Not a CI stage and not in `make test`: it fetches the pinned sources, the
+# Its own CI job (secure-world-build), not in `make test`: it fetches the pinned sources, the
 # toolchain (about 150 MB) and the Python wheels, and builds for about two
 # minutes. SW_WORK is recreated on each run; SW_OUT receives the artefacts.
 # The work and cache directories stay outside the checkout: the tree secret

@@ -1061,7 +1061,7 @@ check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry 
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,
-# system-manager-build, image, lint-gates), and hands the integration test the leased ID.
+# system-manager-build, secure-world-build, image, lint-gates), and hands the integration test the leased ID.
 ci=$(<"$ROOT/.github/workflows/ci.yml")
 # shellcheck disable=SC2016 # the patterns match ci.yml's literal shell text
 n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
@@ -1069,7 +1069,7 @@ n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
 n_tag=$(grep -c 'TOOLCHAIN_IMAGE=$(make -s toolchain-image)' <<<"$ci" || true)
 # shellcheck disable=SC2016
 n_it=$(grep -cE 'make (integration-test|"\$SOAK_TARGET") .*IT_IMAGE_ID="\$IT_LEASE_ID"' <<<"$ci" || true)
-if [ "$n_ref" = 5 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
+if [ "$n_ref" = 6 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
 	pass "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID"
 else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
