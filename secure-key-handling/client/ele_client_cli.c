@@ -66,13 +66,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	/* Locked storage first: when it cannot be locked the credential is never read. */
-	slot = ele_nonce_slot_new();
-	if (!slot) {
-		fprintf(stderr, "ele_client: cannot lock memory for the nonce\n");
+	rc = ele_cli_open_nonce(cmd.nonce_fd, &slot);
+	if (rc == ELE_CLI_NONCE_NOLOCK) {
+		fprintf(stderr, "ele_client: cannot lock memory for the nonce; nothing was read\n");
 		return 2;
 	}
-	if (ele_nonce_slot_read(cmd.nonce_fd, slot) != 0) {
-		ele_nonce_slot_free(slot);
+	if (rc != 0) {
 		fprintf(stderr, "ele_client: cannot read the nonce from fd %d\n", cmd.nonce_fd);
 		return 2;
 	}

@@ -17,9 +17,8 @@
 
 int ele_parse_u32(const char *s, uint32_t *out)
 {
-	unsigned long long v;
-	char *end = NULL;
-	int base = 10;
+	unsigned long long v = 0;
+	unsigned int base = 10, d;
 	const char *p = s;
 
 	if (!s || !out)
@@ -28,14 +27,24 @@ int ele_parse_u32(const char *s, uint32_t *out)
 		base = 16;
 		p += 2;
 	}
-	/* strtoull accepts a sign and leading space: only digits may start it. */
-	if (base == 10 ? !(*p >= '0' && *p <= '9') :
-			 !((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')))
+	/* After one optional prefix every character must be a digit of the base:
+	 * an empty rest, a second prefix, a sign, a space or junk is refused
+	 * before any conversion. */
+	if (*p == '\0')
 		return -1;
-	errno = 0;
-	v = strtoull(p, &end, base);
-	if (errno != 0 || end == p || *end != '\0' || v > UINT32_MAX)
-		return -1;
+	for (; *p; p++) {
+		if (*p >= '0' && *p <= '9')
+			d = (unsigned int)(*p - '0');
+		else if (base == 16 && *p >= 'a' && *p <= 'f')
+			d = (unsigned int)(*p - 'a') + 10;
+		else if (base == 16 && *p >= 'A' && *p <= 'F')
+			d = (unsigned int)(*p - 'A') + 10;
+		else
+			return -1;
+		v = v * base + d;
+		if (v > UINT32_MAX)
+			return -1;
+	}
 	*out = (uint32_t)v;
 	return 0;
 }
@@ -90,29 +99,34 @@ static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 {
 	size_t n = 0;
 	ssize_t r;
-	char ch;
+	int bad = 0;
 
 	if (isatty(fd))
 		return -1;
-	/* One byte at a time, up to the newline: a producer that writes the line
-	 * and keeps its end open (no EOF) must not block the client. The buffer
-	 * still bounds the length; EOF ends the text as a newline does. */
-	while (n < ELE_NONCE_BUF - 1) {
-		r = read(fd, &ch, 1);
+	/* One byte at a time, straight into the locked slot (buf): no byte of the
+	 * credential is ever held in a stack variable. A producer that writes the
+	 * line and keeps its end open (no EOF) must not block the client. The
+	 * buffer bounds the length; EOF ends the text as a newline does. */
+	for (;;) {
+		if (n >= ELE_NONCE_BUF - 1) {
+			bad = 1;
+			break;
+		}
+		r = read(fd, buf + n, 1);
 		if (r < 0) {
 			if (errno == EINTR)
 				continue;
-			ele_secure_zero(&ch, sizeof(ch));
-			return -1;
-		}
-		if (r == 0 || ch == '\n')
+			bad = 1;
 			break;
-		buf[n++] = ch;
+		}
+		if (r == 0 || buf[n] == '\n') {
+			buf[n] = '\0';
+			break;
+		}
+		n++;
 	}
-	ele_secure_zero(&ch, sizeof(ch));
-	buf[n] = '\0';
 	/* Anything longer than the buffer holds is not a 32-bit number. */
-	if (n == 0 || n > 16 || memchr(buf, '\0', n))
+	if (bad || n == 0 || n > 16 || memchr(buf, '\0', n))
 		return -1;
 	return ele_parse_u32(buf, nonce);
 }
@@ -170,4 +184,37 @@ int ele_harden_process(void)
 	if (setrlimit(RLIMIT_CORE, &rl) != 0)
 		rc = -1;
 	return rc;
+}
+
+int (*ele_cli_lockall_override)(void);
+void (*ele_cli_read_hook)(void);
+
+/* Order is the point: dumpable off and all memory locked first; only then is
+ * the first credential byte read. On any failure nothing is read. */
+int ele_cli_open_nonce(int fd, struct ele_nonce_slot **out)
+{
+	struct ele_nonce_slot *s;
+	int rc;
+
+	if (!out)
+		return ELE_CLI_NONCE_NOLOCK;
+	*out = NULL;
+#ifdef __linux__
+	if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0)
+		return ELE_CLI_NONCE_NOLOCK;
+#endif
+	rc = ele_cli_lockall_override ? ele_cli_lockall_override() : mlockall(MCL_CURRENT | MCL_FUTURE);
+	if (rc != 0)
+		return ELE_CLI_NONCE_NOLOCK;
+	s = ele_nonce_slot_new();
+	if (!s)
+		return ELE_CLI_NONCE_NOLOCK;
+	if (ele_cli_read_hook)
+		ele_cli_read_hook();
+	if (ele_nonce_slot_read(fd, s) != 0) {
+		ele_nonce_slot_free(s);
+		return ELE_CLI_NONCE_BAD;
+	}
+	*out = s;
+	return 0;
 }

@@ -139,7 +139,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	ulimit -S -l "$(ulimit -H -l)" 2>/dev/null || true
 	cli 0 --split-confirmed 5 3 del 7
 	case $OUT in *"cannot lock the process memory"*) fail "the host cannot mlockall this process (RLIMIT_MEMLOCK $(ulimit -l)): the CLI tests cannot run" ;; esac
-	for bad in 4294967297 1junk -1 ""; do
+	for bad in 4294967297 1junk -1 "" 0x0x7 0X0x7 0x +7 " 7" "7 "; do
 		cli 0 --split-confirmed 5 3 del "$bad"
 		check "del '$bad' refused" 2 "usage"
 		no_hsm_call "del '$bad'"

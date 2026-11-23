@@ -48,6 +48,18 @@ void ele_nonce_slot_free(struct ele_nonce_slot *s);
  * Returns 0 or -1. */
 int ele_nonce_slot_read(int fd, struct ele_nonce_slot *s);
 
+/* The one entry the CLI uses to obtain the nonce. Order: PR_SET_DUMPABLE 0,
+ * mlockall(MCL_CURRENT|MCL_FUTURE), the locked slot, and only then the first
+ * read of the descriptor. A failed lock returns ELE_CLI_NONCE_NOLOCK and reads
+ * nothing; an unreadable or malformed nonce returns ELE_CLI_NONCE_BAD. On 0,
+ * *out is the slot. Test hooks, NULL in production: ele_cli_lockall_override
+ * replaces mlockall; ele_cli_read_hook runs just before the first read. */
+#define ELE_CLI_NONCE_NOLOCK (-2)
+#define ELE_CLI_NONCE_BAD (-1)
+int ele_cli_open_nonce(int fd, struct ele_nonce_slot **out);
+extern int (*ele_cli_lockall_override)(void);
+extern void (*ele_cli_read_hook)(void);
+
 /* Make the process non-dumpable (prctl PR_SET_DUMPABLE 0) and set
  * RLIMIT_CORE to 0, so no core file or ptrace carries the credential.
  * Returns 0 or -1. */

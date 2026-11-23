@@ -52,6 +52,26 @@ static int nonce_from(const char *text, uint32_t *v)
 	return rc;
 }
 
+static int hook_calls, lock_calls;
+
+static int lock_fail(void)
+{
+	lock_calls++;
+	return -1;
+}
+
+static int lock_ok(void)
+{
+	lock_calls++;
+	return 0;
+}
+
+static void read_hook(void)
+{
+	/* The read hook runs after a successful lock only. */
+	hook_calls++;
+}
+
 int main(void)
 {
 	uint32_t v = 0;
@@ -69,6 +89,18 @@ int main(void)
 	CHECK(ele_parse_u32("", &v) != 0, "empty refused");
 	CHECK(ele_parse_u32("0x", &v) != 0, "bare 0x refused");
 	CHECK(ele_parse_u32("0x-1", &v) != 0, "signed hex refused");
+	CHECK(ele_parse_u32("0x0x7", &v) != 0, "repeated 0x refused");
+	CHECK(ele_parse_u32("0X0x7", &v) != 0, "0X0x refused");
+	CHECK(ele_parse_u32("0x0X7", &v) != 0, "0x0X refused");
+	CHECK(ele_parse_u32("0xg", &v) != 0, "non-hex digit refused");
+	CHECK(ele_parse_u32("0x100000000", &v) != 0, "hex overflow refused");
+	CHECK(ele_parse_u32("0xFFFFFFFF", &v) == 0 && v == 0xffffffffu, "hex max accepted");
+	CHECK(ele_parse_u32("7", &v) == 0 && v == 7, "7 accepted");
+	CHECK(ele_parse_u32("0x7", &v) == 0 && v == 7, "0x7 accepted");
+	CHECK(ele_parse_u32("0X7", &v) == 0 && v == 7, "0X7 accepted");
+	CHECK(parse("1", "3", "del", "0x0x7", NULL) != 0, "del 0x0x7 refused");
+	CHECK(parse("0x0x1", "3", "gen", NULL, NULL) != 0, "store id 0x0x1 refused");
+	CHECK(nonce_from("0x0x7\n", &v) != 0, "nonce 0x0x7 refused");
 	CHECK(ele_parse_u32(NULL, &v) != 0, "null refused");
 
 	CHECK(parse("1", "3", "gen", NULL, NULL) == 0, "gen accepted");
@@ -138,6 +170,35 @@ int main(void)
 			close(p[0]);
 		}
 		ele_nonce_slot_free(s);
+	}
+	/* The lock comes before the first read; a failed lock reads nothing. */
+	{
+		struct ele_nonce_slot *s = NULL;
+		int p[2];
+		char rest[8] = { 0 };
+
+		ele_cli_lockall_override = lock_fail;
+		ele_cli_read_hook = read_hook;
+		if (pipe(p) == 0) {
+			CHECK(write(p[1], "55\n", 3) == 3, "pipe write");
+			CHECK(ele_cli_open_nonce(p[0], &s) == ELE_CLI_NONCE_NOLOCK && !s, "failed lock refused");
+			CHECK(hook_calls == 0, "no read after a failed lock");
+			CHECK(read(p[0], rest, 3) == 3 && !strncmp(rest, "55\n", 3), "the producer's bytes stay unread");
+			close(p[0]);
+			close(p[1]);
+		}
+		ele_cli_lockall_override = lock_ok;
+		lock_calls = 0;
+		if (pipe(p) == 0) {
+			CHECK(write(p[1], "55\n", 3) == 3, "pipe write");
+			CHECK(ele_cli_open_nonce(p[0], &s) == 0 && s && s->value == 55, "nonce read after the lock");
+			CHECK(hook_calls == 1 && lock_calls == 1, "the lock ran once, before the read");
+			ele_nonce_slot_free(s);
+			close(p[0]);
+			close(p[1]);
+		}
+		ele_cli_lockall_override = NULL;
+		ele_cli_read_hook = NULL;
 	}
 	/* Fail closed: when memory cannot be locked there is no slot, so no
 	 * credential is read. Unprivileged only (root ignores the limit). */
