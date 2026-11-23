@@ -27,6 +27,7 @@ APK_INDEX_SUM      ?= none
 IT_PROJECT         ?= $(REPO_NAME)-local
 IT_IMAGE           ?= $(shell scripts/image-tag.sh integration $(REPO_NAME))
 TOOLCHAIN_IMAGE    ?= $(shell scripts/image-tag.sh toolchain $(REPO_NAME))
+SW_IMAGE           ?= $(shell scripts/image-tag.sh secure-world $(REPO_NAME))
 export APK_INDEX_SUM
 
 # The pinned tools outside the devcontainer image: `make tools` installs the
@@ -47,7 +48,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	ahab-m7-test ahab-policy-test ahab-tamper-test \
+	sw-image sw-ref docker-build-sw \
+	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -69,6 +71,10 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 	@want='ARG ALPINE_IMAGE=alpine:$(ALPINE_VERSION)@$(ALPINE_DIGEST)'; found=0; \
 	while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
 	[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }
+	@for want in 'ARG SW_IMAGE=python:$(SW_PYTHON_VERSION)-slim-bookworm@$(SW_PYTHON_DIGEST)' \
+		'ARG SW_DEBIAN_SNAPSHOT=$(SW_DEBIAN_SNAPSHOT)' 'ARG SW_UV_VERSION=$(SW_UV_VERSION)' 'ARG SW_UV_SHA256=$(SW_UV_SHA256)'; do \
+		found=0; while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
+		[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }; done
 	@echo "build: OK ($(words $(SH_SCRIPTS)) shell and $(words $(PY_SCRIPTS)) Python scripts parse)"
 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
@@ -163,7 +169,8 @@ sm-toolchain-check: ## In the devcontainer image: build the System Manager with 
 
 ## --- The Cortex-A secure world (docs/secure-world/build.md) ---
 
-# Not a CI stage and not in `make test`: it fetches the pinned sources, the
+# Its own CI job (secure-world-build, in the Dockerfile's secure-world stage:
+# make docker-build-sw), not in `make test`: it fetches the pinned sources, the
 # toolchain (about 150 MB) and the Python wheels, and builds for about two
 # minutes. SW_WORK is recreated on each run; SW_OUT receives the artefacts.
 # The work and cache directories stay outside the checkout: the tree secret
@@ -208,6 +215,16 @@ ahab-policy-test: ## Check a test-PKI container against a policy file written fr
 
 ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
 	@test/ahab_tamper_test.sh
+
+okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a throwaway test SRK set (pinned SPSDK; message format only, sends nothing, no board, no fuse)
+	@test/key_exchange_test.sh
+
+okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
+	@test/key_import_test.sh
+
+srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
+	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
+	@scripts/ahab/srk-hash-check.sh "$$SRK_EXPECTED" $$SRK_FILES
 
 ## --- The Code Signing Tool (docs/references/README.md) ---
 
@@ -319,6 +336,31 @@ docker-build: docker-build-toolchain ## Build both images, each only when the da
 # checkout is refused here, as scripts/cst-check.sh refuses it on the host:
 # once remapped to /cst, the container's cst-check can no longer tell.
 CST_MOUNT = $(if $(CST_PATH),-v "$$(cd "$$CST_PATH" && pwd -P):/cst:ro" -e CST_PATH=/cst)
+
+sw-image: ## Print the secure-world image tag (by content)
+	@echo $(SW_IMAGE)
+
+SW_REAP_LABEL = ci.reap.repository=$(firstword $(subst :, ,$(SW_IMAGE)))
+SW_ID_FILE   ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/secure-world-image.id)
+
+sw-ref: ## Print the secure-world image a stage starts: a trusted CI run's recorded image ID, otherwise the tag
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		$(call NEED_ID_FILE,$(SW_ID_FILE),SW_ID_FILE); \
+		$(call READ_ID,$(SW_ID_FILE)); \
+	else \
+		echo $(SW_IMAGE); \
+	fi
+
+docker-build-sw: ## Build the secure-world image (a trusted CI run: always from source, no cache, recording the ID; otherwise only when the daemon lacks its tag)
+	@if [ -n "$(TRUSTED_RUN)" ]; then \
+		$(call NEED_ID_FILE,$(SW_ID_FILE),SW_ID_FILE); \
+		rm -f "$(SW_ID_FILE)"; \
+		echo "docker-build-sw: a trusted run ($(GITHUB_EVENT_NAME)) rebuilds $(SW_IMAGE) from source"; \
+		docker build --no-cache --iidfile "$(SW_ID_FILE)" --target secure-world --label "$(SW_REAP_LABEL)" -t $(SW_IMAGE) -f $(DOCKERFILE) .; \
+	else \
+		docker image inspect $(SW_IMAGE) >/dev/null 2>&1 || \
+			docker build --target secure-world --label "$(SW_REAP_LABEL)" -t $(SW_IMAGE) -f $(DOCKERFILE) .; \
+	fi
 
 docker-run: docker-build-toolchain ## Run CMD in the toolchain image, the source and a set CST_PATH (read-only) bind-mounted
 	@[ -n "$(CMD)" ] || { echo "docker-run: set CMD, for example CMD='make test'"; exit 1; }

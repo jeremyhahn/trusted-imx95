@@ -980,6 +980,52 @@ fi
 run mk pull_request -s toolchain-ref
 check "make toolchain-ref: a pull request prints the tag" 0 "$ltag"
 
+# The secure-world image: the same trusted rebuild and ID handoff.
+stag=trusted-imx95-secure-world:abc
+skeysw=$(skey "$stag")
+sw_built=sha256:$(printf '%s' secure-world | sha256sum | cut -c1-64)
+swid=$rt/secure-world-image.id
+sw_seed() { seed yes; echo "$IMG_EVIL" >"$IMG_STATE/$skeysw"; } # a pull request tagged its own image
+sw_seed
+run mk push docker-build-sw SW_IMAGE="$stag"
+check "make docker-build-sw: a push run rebuilds over a seeded tag" 0 "rebuilds $stag from source"
+expect "make docker-build-sw: the trusted rebuild uses no cache and records its ID" \
+	grep -q "^build --no-cache --iidfile $swid --target secure-world --label ci.reap.repository=${stag%%:*} -t $stag " "$IMG_LOG"
+expect "make docker-build-sw: the recorded ID is the rebuild's own, not the seeded image's" \
+	test "$(cat "$swid")" = "$sw_built" -a "$(cat "$swid")" != "$IMG_EVIL"
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a push run prints the ID its rebuild recorded" 0 "$sw_built"
+# Another job moves the tag between the build and the container start.
+echo "$IMG_EVIL" >"$IMG_STATE/$skeysw"
+swref=$(mk push -s sw-ref SW_IMAGE="$stag")
+: >"$IMG_STARTS"
+run env PATH="$TMP_ROOT/imgbin:$PATH" docker run --rm "$swref" true
+expect "make sw-ref: after the tag moves, the container start names the recorded ID" \
+	grep -q " $sw_built " "$IMG_STARTS"
+if grep -q "$stag" "$IMG_STARTS" || [ "$(cat "$IMG_STATE/$skeysw")" = "$swref" ]; then
+	fail "make sw-ref: the start does not follow the moved tag" "$(cat "$IMG_STARTS")"
+else
+	pass "make sw-ref: the start does not follow the moved tag"
+fi
+sw_seed
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a push run with no recorded ID file refuses, never prints the tag" nonzero "holds no image ID"
+: >"$swid"
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: an empty ID file refuses" nonzero "holds no image ID"
+for bad in "$stag" "sha256:abc" "sha256:$(printf 'A%.0s' {1..64})" "sha256:$(printf 'a%.0s' {1..65})"; do
+	printf '%s\n' "$bad" >"$swid"
+	run mk push -s sw-ref SW_IMAGE="$stag"
+	check "make sw-ref: a malformed ID ($bad) refuses" nonzero "holds no image ID"
+done
+sw_seed
+run env -u RUNNER_TEMP PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
+	make --no-print-directory -C "$ROOT" docker-build-sw SW_IMAGE="$stag"
+check "make docker-build-sw: a trusted run with nowhere to record the ID fails" nonzero "records its image ID"
+sw_seed
+run mk pull_request -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a pull request prints the tag" 0 "$stag"
+
 # A trusted job end to end, as ci.yml runs it: the pull, the build, the
 # exported reference; then a pull request's job moves both tags, and every
 # container the job starts (the cache trim, each stage, the integration
@@ -1061,7 +1107,7 @@ check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry 
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,
-# system-manager-build, image, lint-gates), and hands the integration test the leased ID.
+# system-manager-build, image, lint-gates; secure-world-build runs in its own glibc image), and hands the integration test the leased ID.
 ci=$(<"$ROOT/.github/workflows/ci.yml")
 # shellcheck disable=SC2016 # the patterns match ci.yml's literal shell text
 n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
@@ -1215,6 +1261,28 @@ expect "reap-stale-ci-stacks: a toolchain ID a running container uses is kept" g
 expect "reap-stale-ci-stacks: the current toolchain tag's image is kept, however old" grep -q "^$tc_last .* $tc_tag\$" "$RP/images"
 expect "reap-stale-ci-stacks: an old toolchain tag no container uses is removed" grep -qx "$(rid tc-stale-tag)" "$RP/removed"
 expect "reap-stale-ci-stacks: a toolchain tag made within the image age is kept" grep -q "^$(rid tc-fresh-tag) " "$RP/images"
+
+# --- reap-stale-ci-stacks.sh v8: the secure-world image family (Codex P2: the
+# Makefile labels docker-build-sw images for reaping, but the reaper scanned
+# only the integration and toolchain repositories). Stub docker, images this
+# test made up.
+sw_tag=$(make -s --no-print-directory -C "$ROOT" sw-image)
+sw_repo=${sw_tag%%:*}
+: >"$RP/images" && : >"$RP/containers" && : >"$RP/removed" && : >"$RP/log"
+{
+	echo "$(rid sw-current) $old $sw_repo $sw_tag"
+	echo "$(rid sw-stale-tag) $old $sw_repo ${sw_repo}:0000000000000000"
+	echo "$(rid sw-used-tag) $old $sw_repo ${sw_repo}:2222222222222222"
+	echo "$(rid sw-fresh-tag) $new $sw_repo ${sw_repo}:1111111111111111"
+} >>"$RP/images"
+echo "running-job $(rid sw-used-tag)" >"$RP/containers"
+run env PATH="$TMP_ROOT/reapbin:$PATH" "$ROOT/scripts/reap-stale-ci-stacks.sh" "$REAP_PREFIX"
+check "reap-stale-ci-stacks: the secure-world repository is scanned" 0 \
+	"keep  image $sw_tag (the current secure-world tag)" "reap  image ${sw_repo}:0000000000000000"
+expect "reap-stale-ci-stacks: an old secure-world tag no container uses is removed" grep -qx "$(rid sw-stale-tag)" "$RP/removed"
+expect "reap-stale-ci-stacks: the current secure-world tag's image is kept, however old" grep -q "^$(rid sw-current) " "$RP/images"
+expect "reap-stale-ci-stacks: a secure-world tag a container uses is kept" grep -q "^$(rid sw-used-tag) " "$RP/images"
+expect "reap-stale-ci-stacks: a secure-world tag made within the image age is kept" grep -q "^$(rid sw-fresh-tag) " "$RP/images"
 
 # --- the toolchain image carries ssh-keygen ------------------------------------
 # (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's
