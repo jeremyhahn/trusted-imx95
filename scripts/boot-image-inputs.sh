@@ -159,8 +159,29 @@ mkdir -p "$dir"
 sm_default=${SM_OUT:-$root/out/system-manager}/m33_image.bin
 sw_default=${SW_OUT:-$root/.secure-world/out}
 [ -n "${given[system-manager]:-}" ] || { [ ! -f "$sm_default" ] || given[system-manager]=$sm_default; }
-[ -n "${given[bl31]:-}" ] || { [ ! -f "$sw_default/bl31.bin" ] || given[bl31]=$sw_default/bl31.bin; }
-[ -n "${given[tee]:-}" ] || { [ ! -f "$sw_default/tee.bin" ] || given[tee]=$sw_default/tee.bin; }
+sw_used=()
+[ -n "${given[bl31]:-}" ] || { [ ! -f "$sw_default/bl31.bin" ] || { given[bl31]=$sw_default/bl31.bin; sw_used+=(bl31.bin); }; }
+[ -n "${given[tee]:-}" ] || { [ ! -f "$sw_default/tee.bin" ] || { given[tee]=$sw_default/tee.bin; sw_used+=(tee.bin); }; }
+
+# check_sw_build: bl31.bin and tee.bin taken from the make secure-world output
+# count as real only if that build's SHA256SUMS lists them with the hashes of
+# the files, and build-info.txt names the SHA-256 of this tree's bsp.lock.
+check_sw_build() {
+	local sums=$sw_default/SHA256SUMS info=$sw_default/build-info.txt f want got locksum infolock
+	[ -f "$sums" ] || die "$sums: missing; $sw_default is not a verified make secure-world output"
+	[ -f "$info" ] || die "$info: missing; $sw_default is not a verified make secure-world output"
+	for f in "${sw_used[@]}"; do
+		want=$(while read -r h n; do if [ "${n#\*}" = "$f" ]; then echo "$h"; fi; done <"$sums")
+		[ -n "$want" ] || die "$sums: no entry for $f"
+		got=$(sha "$sw_default/$f")
+		[ "$got" = "$want" ] || die "$f: SHA-256 $got differs from $sums ($want)"
+	done
+	infolock=$(while IFS= read -r l; do case "$l" in "lock: "*) echo "${l#lock: }" ;; esac; done <"$info")
+	[ -n "$infolock" ] || die "$info: no lock: line"
+	locksum=$(sha "$root/secure-world/bsp.lock")
+	[ "$infolock" = "$locksum" ] || die "$info: lock: $infolock is not the SHA-256 of secure-world/bsp.lock ($locksum); rebuild with make secure-world"
+}
+[ "${#sw_used[@]}" -eq 0 ] || check_sw_build
 
 : >"$dir/inputs.txt"
 # take <key> <file name in DIR> <label>

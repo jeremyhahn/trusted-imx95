@@ -112,6 +112,9 @@ mkdir -p "$TMP_ROOT/sm" "$TMP_ROOT/sw"
 printf 'sm' >"$TMP_ROOT/sm/m33_image.bin"
 printf 'bl31' >"$TMP_ROOT/sw/bl31.bin"
 printf 'tee' >"$TMP_ROOT/sw/tee.bin"
+# what make secure-world publishes: SHA256SUMS and build-info.txt with the lock: line
+(cd "$TMP_ROOT/sw" && sha256sum bl31.bin tee.bin >SHA256SUMS)
+printf 'lock: %s\nrelease: test\n' "$(sha256sum "$ROOT/secure-world/bsp.lock" | cut -d' ' -f1)" >"$TMP_ROOT/sw/build-info.txt"
 run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/in2"
 check "collect: System Manager, BL31 and tee.bin come from their make outputs" 0
 if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" ' real ')" -eq 3 ] && [ "$(cat "$TMP_ROOT/in2/tee.bin")" = tee ]; then
@@ -125,6 +128,36 @@ if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" 'm7_image.bin STAND-IN')" -eq 1 ]; t
 else
 	fail "collect: with no --m7 the M7 image is a labelled stand-in" "$(cat "$TMP_ROOT/in2/inputs.txt")"
 fi
+
+# BL31 and tee.bin from make secure-world are checked against that build
+sw_case() { # sw_case <name> <mutation command run in the copy>
+	rm -rf "$TMP_ROOT/swx" "$TMP_ROOT/inx"
+	cp -r "$TMP_ROOT/sw" "$TMP_ROOT/swx"
+	(cd "$TMP_ROOT/swx" && eval "$2")
+	run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/swx" "$SCRIPT" --collect "$TMP_ROOT/inx"
+}
+sw_case x ':'
+check "collect: a matching SHA256SUMS and build-info.txt keep bl31.bin and tee.bin real" 0
+if [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'bl31.bin real')" -eq 1 ] && [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'tee.bin real')" -eq 1 ]; then
+	pass "collect: bl31.bin and tee.bin are real after the build check"
+else
+	fail "collect: bl31.bin and tee.bin are real after the build check" "$(cat "$TMP_ROOT/inx/inputs.txt")"
+fi
+sw_refused() { # sw_refused <label> <mutation> <message>
+	sw_case x "$2"
+	check "collect: $1 is refused" nonzero "$3"
+	if [ ! -e "$TMP_ROOT/inx/inputs.txt" ]; then
+		pass "collect: $1 leaves no inputs.txt"
+	else
+		fail "collect: $1 leaves no inputs.txt" "$(cat "$TMP_ROOT/inx/inputs.txt")"
+	fi
+}
+sw_refused "a changed bl31.bin byte" "printf 'X' | dd of=bl31.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "bl31.bin: SHA-256"
+sw_refused "a changed tee.bin byte" "printf 'X' | dd of=tee.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "tee.bin: SHA-256"
+sw_refused "a missing SHA256SUMS" "rm SHA256SUMS" "SHA256SUMS: missing"
+sw_refused "a missing build-info.txt" "rm build-info.txt" "build-info.txt: missing"
+sw_refused "a lock: line for a different bsp.lock" "printf 'lock: %064d\n' 0 >build-info.txt" "is not the SHA-256 of secure-world/bsp.lock"
+sw_refused "a SHA256SUMS with no entry for tee.bin" "sha256sum bl31.bin >SHA256SUMS" "no entry for tee.bin"
 
 # --- fetch fails closed on a digest mismatch (curl stubbed, no network) ---
 stub=$TMP_ROOT/stub
