@@ -35,12 +35,13 @@ input.
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, utils
+from cryptography.hazmat.primitives.asymmetric import ec, rsa, utils
 
 FORMAT = "trusted-imx95/endorse-evidence"
 VERSION = 1
@@ -175,6 +176,151 @@ def check(args):
         raise Invalid("ftpm_ek.public differs from --ek-public")
 
 
+def pem_pub(key):
+    return key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+
+def sign96(key, data):
+    r, s = utils.decode_dss_signature(key.sign(data, ec.ECDSA(hashes.SHA384())))
+    return r.to_bytes(48, "big") + s.to_bytes(48, "big")
+
+
+def vectors(args):
+    """Write a labelled vector set for a verifier: every file in OUTDIR is a
+    bundle or a public key, manifest.json says how to `check` each and what
+    must come out. The enclave key is generated here and only its public half
+    is written. The vectors are SYNTHETIC: the response layout is not public."""
+    nonce = os.urandom(NONCE_LEN)
+    other_nonce = bytes(b ^ 0xFF for b in nonce)
+    key = ec.generate_private_key(ec.SECP384R1())
+    keys_out = {
+        "ele-pub.pem": pem_pub(key),
+        "ele-pub-other.pem": pem_pub(ec.generate_private_key(ec.SECP384R1())),
+        "ele-pub-p256.pem": pem_pub(ec.generate_private_key(ec.SECP256R1())),
+        "ele-pub-rsa.pem": pem_pub(rsa.generate_private_key(65537, 2048)),
+    }
+
+    def region(*parts):
+        return b"".join(parts)
+
+    signed = region(os.urandom(40), nonce, os.urandom(40))
+    absent = os.urandom(90)
+    twice = region(os.urandom(10), nonce, os.urandom(10), nonce, os.urandom(10))
+    body = b"\x00\x23" + os.urandom(60)
+    ek = len(body).to_bytes(2, "big") + body
+    ek_other = len(body).to_bytes(2, "big") + b"\x00\x23" + os.urandom(60)
+
+    def bundle(signed=signed, sig=None, version=3, tpm=ek, nonce_in=nonce):
+        sig = sign96(key, signed) if sig is None else sig
+        return {
+            "format": FORMAT,
+            "version": VERSION,
+            "ele_attestation": {
+                "response_version": version,
+                "signed": b64(signed),
+                "signature": b64(sig),
+                "verifier_nonce": b64(nonce_in),
+            },
+            "ftpm_ek": {"public": b64(tpm), "template": "vector-template"},
+            "binding": "session",
+        }
+
+    def flip(text, index):
+        raw = bytearray(base64.urlsafe_b64decode(text + "=" * (-len(text) % 4)))
+        raw[index] ^= 1
+        return b64(bytes(raw))
+
+    def mut(fn):
+        b = bundle()
+        fn(b, b["ele_attestation"])
+        return b
+
+    def set_(d, k, v):
+        d[k] = v
+
+    def delete(d, k):
+        del d[k]
+
+    nonce_hex = nonce.hex()
+    cases = []  # name, bundle dict (or raw bytes), ele-pub file, nonce hex, ek file, rc, check
+
+    def case(name, content, rc, want, pub="ele-pub.pem", nonce_arg=nonce_hex, ek_file=None):
+        cases.append((name, content, pub, nonce_arg, ek_file, rc, want))
+
+    case("valid", bundle(), 0, "valid")
+    case("valid-response-version-2", bundle(version=2), 0, "valid")
+    case("valid-ek-public-equal", bundle(), 0, "valid", ek_file="ek-public.bin")
+    case("wrong-nonce-argument", bundle(), 1, "verifier_nonce differs", nonce_arg=other_nonce.hex())
+    case("different-p384-key", bundle(), 1, "signature does not verify", pub="ele-pub-other.pem")
+    case("ek-public-mismatch", bundle(), 1, "differs from --ek-public", ek_file="ek-public-other.bin")
+    sig = sign96(key, signed)
+    case("flipped-signature-byte", mut(lambda b, e: set_(e, "signature", flip(e["signature"], 5))),
+         1, "signature does not verify")
+    case("flipped-signed-byte", mut(lambda b, e: set_(e, "signed", flip(e["signed"], 0))),
+         1, "signature does not verify")
+    case("response-version-1", mut(lambda b, e: set_(e, "response_version", 1)), 1, "response_version")
+    case("response-version-4", mut(lambda b, e: set_(e, "response_version", 4)), 1, "response_version")
+    case("extra-top-level-key", mut(lambda b, e: set_(b, "extra", 1)), 1, "key set differs")
+    case("extra-nested-key", mut(lambda b, e: set_(e, "extra", 1)), 1, "key set differs")
+    case("missing-key", mut(lambda b, e: delete(b, "binding")), 1, "key set differs")
+    case("missing-nested-key", mut(lambda b, e: delete(e, "signature")), 1, "key set differs")
+    case("padded-base64", mut(lambda b, e: set_(e, "signature", e["signature"] + "==")),
+         1, "not unpadded base64url")
+    case("tpm2b-size-shortened",
+         mut(lambda b, e: set_(b["ftpm_ek"], "public", b64(ek[:-1]))), 1, "TPM2B size")
+    case("wrong-format", mut(lambda b, e: set_(b, "format", "x")), 1, "format")
+    case("wrong-version", mut(lambda b, e: set_(b, "version", 2)), 1, "version")
+    case("nonce-absent-from-signed", bundle(signed=absent), 1, "nonce does not occur exactly once")
+    case("nonce-twice-in-signed", bundle(signed=twice), 1, "nonce does not occur exactly once")
+    case("signature-95-bytes", bundle(sig=sig[:95]), 1, "signature size")
+    case("tpm2b-size-mismatch", bundle(tpm=(len(body) + 1).to_bytes(2, "big") + body), 1, "TPM2B size")
+    case("unknown-tpm-type", bundle(tpm=len(body).to_bytes(2, "big") + b"\x00\x99" + body[2:]),
+         1, "TPM type")
+    case("not-json", b"not json", 2, "not JSON")
+    case("ele-pub-rsa", bundle(), 2, "not an EC P-384 key", pub="ele-pub-rsa.pem")
+    case("ele-pub-p256", bundle(), 2, "not an EC P-384 key", pub="ele-pub-p256.pem")
+
+    try:
+        os.makedirs(args.outdir, exist_ok=True)
+
+        def put(name, data):
+            with open(os.path.join(args.outdir, name), "wb") as f:
+                f.write(data)
+
+        for name, data in keys_out.items():
+            put(name, data)
+        put("ek-public.bin", ek)
+        put("ek-public-other.bin", ek_other)
+        entries = []
+        for name, content, pub, nonce_arg, ek_file, rc, want in cases:
+            fname = f"{name}.json"
+            if isinstance(content, bytes):
+                put(fname, content)
+            else:
+                text = json.dumps(content, sort_keys=True, separators=(",", ":")) + "\n"
+                put(fname, text.encode("utf-8"))
+            check_args = [fname, "--ele-pub", pub, "--nonce", nonce_arg]
+            if ek_file:
+                check_args += ["--ek-public", ek_file]
+            entries.append(
+                {"name": name, "check_args": check_args, "expect_exit": rc, "expect_check": want}
+            )
+        manifest = {
+            "format": "trusted-imx95/endorse-evidence-vectors",
+            "synthetic": "the enclave response layout is not public: signed regions are "
+            "random bytes holding the nonce, signed with a key generated for this "
+            "run; not a statement about the real enclave output",
+            "proposed": "pending owner approval",
+            "check_args_relative_to": "the manifest directory",
+            "vectors": entries,
+        }
+        put("manifest.json", (json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+    except OSError as e:
+        raise Unusable(str(e))
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         print(f"usage error: {message}", file=sys.stderr)
@@ -197,11 +343,16 @@ def main(argv):
     c.add_argument("--ele-pub", required=True)
     c.add_argument("--nonce", required=True)
     c.add_argument("--ek-public")
+    v = sub.add_parser("vectors")
+    v.add_argument("outdir")
     args = p.parse_args(argv[1:])
     try:
         if args.cmd == "build":
             build(args)
             print("evidence-bundle: built")
+        elif args.cmd == "vectors":
+            vectors(args)
+            print("evidence-bundle: vectors written")
         else:
             check(args)
             print("evidence-bundle: valid")

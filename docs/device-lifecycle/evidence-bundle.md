@@ -48,6 +48,14 @@ The checker is `scripts/device-lifecycle/evidence-bundle.py check`, offline.
 
 The signed region and the signature are treated as opaque bytes. The check does not say which root the enclave key chains to (A2).
 
+## Verifier vectors
+
+Proposed, pending owner approval. `scripts/device-lifecycle/evidence-bundle.py vectors OUTDIR` writes a labelled vector set for a verifier to test against: one bundle per case, public keys (`ele-pub.pem` and three wrong-key variants), two EK public areas, and `manifest.json`. For each file the manifest lists the `check` arguments (relative to the manifest directory), the expected exit code (0 valid, 1 invalid, 2 unusable input) and a substring naming the failed check.
+
+The set is generated at test time and never committed: each run makes a fresh P-384 key in memory, writes only its public half, and signs synthetic regions (random bytes holding the nonce) with it. The manifest says so: the real response layout is not public, so these vectors prove the checks above and nothing about the real enclave output.
+
+How go-xkms would use it: run `vectors` into a temporary directory in its own test setup (the script needs only Python and `cryptography`), read `manifest.json`, feed each bundle to its endorse-01 verifier with the listed public key, nonce and optional EK, and compare accept or reject with `expect_exit` (0 accepts; 1 and 2 reject). The reasons and the exact rejection codes are endorse-01's own; `expect_check` is a hint to which rule a reject case exercises, and endorse-01's acceptance rules remain go-xkms's.
+
 ## Open items
 
 | Item | Belongs to |
