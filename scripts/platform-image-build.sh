@@ -57,7 +57,7 @@ case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outs
 
 # canon PATH: the absolute, symlink-free path of PATH, which need not exist.
 canon() {
-	local a= d r= c in=$1 IFS=/
+	local a='' d='' r='' c in=$1 IFS=/
 	# Lexical clean-up (check_out has refused "..", relative paths): drop
 	# empty and "." components, so a/./b and a/b/ are the plain path.
 	set -f
