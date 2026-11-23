@@ -208,19 +208,25 @@ dangling=
 it_repo="${prefix}it"
 tc_repo=
 tc_current=
+sw_repo=
+sw_current=
 case $prefix in
   ?*-ci-)
     tc_repo="${prefix%-ci-}-toolchain"
     tc_current=$("$(dirname "$0")/image-tag.sh" toolchain "${prefix%-ci-}" 2>/dev/null) || tc_current=
+    # v8: the secure-world image family (Makefile docker-build-sw) is reaped
+    # the same way: dangling ids by label, old tags but the current tree's.
+    sw_repo="${prefix%-ci-}-secure-world"
+    sw_current=$("$(dirname "$0")/image-tag.sh" secure-world "${prefix%-ci-}" 2>/dev/null) || sw_current=
     ;;
 esac
 if [ "${REAP_DRY_RUN:-0}" = 1 ] || image_lock; then
-  for repo in $it_repo $tc_repo; do
+  for repo in $it_repo $tc_repo $sw_repo; do
     refs="$refs $(docker images --filter "reference=$repo" --format '{{.Repository}}:{{.Tag}}')"
     dangling="$dangling $(docker images -q --no-trunc --filter dangling=true --filter "label=ci.reap.repository=$repo")"
   done
 else
-  echo "keep  every $it_repo${tc_repo:+ and $tc_repo} image (the image lock was not free within ${lock_wait}s)"
+  echo "keep  every $it_repo${tc_repo:+, $tc_repo}${sw_repo:+ and $sw_repo} image (the image lock was not free within ${lock_wait}s)"
 fi
 for ref in $refs; do
   case $ref in
@@ -233,6 +239,17 @@ for ref in $refs; do
       fi
       if [ "$ref" = "$tc_current" ]; then
         echo "keep  image $ref (the current toolchain tag)"
+        continue
+      fi
+      ;;
+    "$sw_repo:"*)
+      [ -n "$sw_repo" ] || continue
+      if [ -z "$sw_current" ]; then
+        echo "keep  image $ref (the current secure-world tag could not be computed)"
+        continue
+      fi
+      if [ "$ref" = "$sw_current" ]; then
+        echo "keep  image $ref (the current secure-world tag)"
         continue
       fi
       ;;
@@ -287,7 +304,7 @@ for id in $dangling; do
     echo "keep  dangling image $id (in use: $(echo "$users" | wc -l) container(s))"
     continue
   fi
-  echo "reap  dangling image $id (labelled ci.reap.repository=$it_repo${tc_repo:+ or $tc_repo})"
+  echo "reap  dangling image $id (labelled ci.reap.repository=$it_repo${tc_repo:+ or $tc_repo}${sw_repo:+ or $sw_repo})"
   if run docker image rm "$id"; then images=$((images + 1)); else echo "warn  dangling image $id not removed (in use?)"; fi
 done
 image_unlock
