@@ -45,13 +45,20 @@ split configured (owner decision 241; [architecture.md](architecture.md#key-stor
 | Flags sent and acknowledged | No counter warning, split configured | Result |
 |---|---|---|
 | Both | yes | rollback-protected |
-| Both | no (warning, or no split) | committed, not rollback-protected |
+| Both | no (warning, or no split) | the call fails; state kept: committed, not rollback-protected |
 | Strict only | n/a | committed, not rollback-protected |
 | Monotonic counter only | n/a | not committed (the call fails) |
 | Neither | n/a | not committed (the call fails) |
 
 The table is for an update that can carry both flags (key generate). A delete cannot, so it is at best committed, never
 rollback-protected ([below](#delete-is-never-rollback-protected-a-gap-for-the-owner)).
+
+**The call fails, and the command exits nonzero, whenever the update is not what was asked for:** a counter warning
+(`HSM_KEY_STORE_COUNTER`: accepted, counter not advanced, so the prior blob can still be replayed;
+[architecture.md](architecture.md#key-store-rollback-protection)), a missing strict acknowledgement, or a send of both
+flags that is not rollback-protected (counter not acknowledged, or the split not confirmed). The commit state is still
+returned and printed (`update refused (...)`), so the diagnostic is kept. A strict-only send (a delete) succeeds on the
+strict acknowledgement, as committed and not rollback-protected.
 
 The host tests (`test/ele_client_test.sh`, run by `make test`) cover all four combinations, a counter warning, a
 missing split and an acknowledgement of one flag only, against a stub that holds no key. The default client sends
@@ -87,8 +94,26 @@ The counter split cannot be read through these calls, so the backend reports it 
 `counter_split_confirmed` after confirming it on the device. It is false by default, so nothing is reported
 rollback-protected on an unconfirmed split.
 
-`scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s pin the flag and return-code
-values to the library's headers (a mismatch fails the build), then cross-builds `ele_client` for aarch64 and links it
+**The `ele_client` command** (`ele_client [--split-confirmed] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del
+<key-id>`) is the front end of this backend; it widens the row beyond the host stub, at the coordinator's resume brief
+2 ([plan](../plans/162.md)). The nonce is an access credential for the key store, so it is read from a file
+descriptor (`3<nonce-file`; a terminal is refused) and never from the arguments, where a process listing would show
+it. Every number (store id, descriptor, key id) is parsed strictly (decimal or `0x` hex, no sign, no space, no
+trailing character, at most `UINT32_MAX`) and the whole command line is checked before any HSM service is opened, so
+`del 4294967297` is refused rather than truncated to key 1. `--split-confirmed` is the caller's statement that the
+counter split is configured on the device; without it nothing is rollback-protected and generate fails.
+
+**Contract evidence and tests.** `scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s
+pin the flag and return-code values to the library's headers (a mismatch fails the build); that is the evidence the
+constants match the pinned library's contract. `test/ele_client_test.sh` also builds the shipped backend against
+`ele_hsm_fake.c`, a test double of the library's calls compiled on the same headers, and checks the request flags it
+sends (key store `LOAD`, `STRICT_OPERATION` and `MONOTONIC`, never `CREATE`; generate strict and counter, never
+`PLAINTEXT_KEY`; delete strict only) and its translation of `HSM_NO_ERROR`, `HSM_KEY_STORE_COUNTER` and another code,
+and runs the command over the double. These need the fetched source (`ELE_SRC=<work>/src`, from
+`scripts/ele-lib-build.sh`); without it the test prints that they were skipped, and the build script runs the
+constants check on every build. Whether the firmware acknowledges the flags as assumed is board validation, below.
+
+`scripts/ele-lib-build.sh` then cross-builds `ele_client` for aarch64 and links it
 against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same
 check when `ELE_SRC` names the fetched source, and shows that a wrong value fails it. No vendor header or text is
 copied into this repository.
