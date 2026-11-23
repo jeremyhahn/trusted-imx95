@@ -186,6 +186,25 @@ check "OUT = /: refused" nonzero "root directory"
 orun "$ROOT/docs"
 check "OUT inside the checkout, outside .platform-image: refused" nonzero "outside .platform-image"
 expect "OUT inside the checkout: docs survive" test -d "$ROOT/docs"
+orun "$tmp/new/../un"
+check "OUT with '..' to an unmarked dir: refused" nonzero "'..' component"
+expect "'..' case: sentinel survives" test -f "$tmp/un/sentinel"
+expect "'..' case: no marker written" test ! -e "$tmp/un/.platform-image-out"
+expect "'..' case: nothing fetched" test ! -e "$tmp/log"
+orun "relative/out"
+check "a relative OUT: refused" nonzero "not an absolute path"
+# a/./b and a trailing slash behave like the plain path.
+rm -rf "$tmp/d" "$tmp/out"
+for v in "$tmp/./out" "$tmp/out/" "$tmp//out"; do
+	brun "$stub:$tools" --check
+	orun "$v"
+	check "OUT $v: accepted like the plain path" 0 "OK, 2 artefacts"
+	expect "OUT $v: marker in the plain path" test -f "$tmp/out/.platform-image-out"
+	rm -rf "$tmp/d" "$tmp/out"
+done
+orun "$tmp/un/./"
+check "OUT unmarked with ./ and slash: refused" nonzero "not written by this script"
+expect "unmarked with ./: sentinel survives" test -f "$tmp/un/sentinel"
 # A fresh dir and a marked dir are accepted (check mode, then a full run).
 rm -rf "$tmp/d" "$tmp/out"
 brun "$stub:$tools" --check

@@ -182,7 +182,9 @@ with `SHA256SUMS` and `build-info.txt` (machine, distro, targets,
 of the status and diff; dirty inputs are recorded, not refused), the manifest
 commit and every layer commit). The script deletes `PLATFORM_IMAGE_OUT` only
 when it carries the `.platform-image-out` marker it wrote, and refuses an empty
-value, `/`, the checkout or an ancestor, a path outside `.platform-image/`
+value, a relative path, any path with a `..` component (`.`, `//` and a
+trailing slash are collapsed first, so the path checked is the one used), `/`,
+the checkout or an ancestor, a path outside `.platform-image/`
 inside the checkout, and any path overlapping the fetch directory. Its stub test is `test/platform_image_build_test.sh`, in `make test`.
 It is not in CI.
 

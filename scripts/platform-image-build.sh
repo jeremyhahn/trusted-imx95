@@ -57,8 +57,16 @@ case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outs
 
 # canon PATH: the absolute, symlink-free path of PATH, which need not exist.
 canon() {
-	local a=$1 d r=
-	case $a in /*) ;; *) a=$PWD/$a ;; esac
+	local a= d r= c in=$1 IFS=/
+	# Lexical clean-up (check_out has refused "..", relative paths): drop
+	# empty and "." components, so a/./b and a/b/ are the plain path.
+	set -f
+	for c in $in; do
+		case $c in '' | .) ;; *) a=$a/$c ;; esac
+	done
+	set +f
+	[ -n "$a" ] || a=/
+	IFS=$' \t\n'
 	while [ ! -d "$a" ]; do
 		[ ! -L "$a" ] || { echo "$a"; return 0; }
 		r=/$(basename "$a")$r
@@ -73,6 +81,8 @@ canon() {
 check_out() {
 	local o
 	[ -n "$out" ] || die "PLATFORM_IMAGE_OUT is empty; refusing to use it as the artefacts directory"
+	case $out in /*) ;; *) die "$out is not an absolute path; refusing" ;; esac
+	case "/$out/" in */../*) die "$out contains a '..' component; refusing" ;; esac
 	[ ! -L "$out" ] || die "$out is a symbolic link; refusing to use it as the artefacts directory"
 	o=$(canon "$out")
 	[ -n "$o" ] && [ "$o" != / ] || die "$out is the root directory; refusing"
