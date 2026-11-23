@@ -332,6 +332,56 @@ patch_image "$img_out/boot-image.bin" "$TMP_ROOT/mv.bin" "$WANT_M7_CONTAINER_OFF
 patch_image "$TMP_ROOT/mv.bin" "$TMP_ROOT/mv2.bin" "$((WANT_M7_CONTAINER_OFFSET + 0x400))" "02ac0387"
 read -r -a moffs <<<"$(walk_containers "$TMP_ROOT/mv2.bin" "$first_payload")"
 expect "m7: an M7 container header moved off its offset is refused (found: ${moffs[*]})" m7_refused "${moffs[@]}"
+# --- the Cortex-A55 container (the third, index 2) read back from the parse ---
+# field <container> <image> <key>: the value of <key> of that entry in the parse,
+# lower-cased, quotes stripped; comment lines skipped. Same walk as m7_field.
+field() {
+	local l ci=-1 ii=-1
+	while IFS= read -r l; do
+		l=${l%$'\r'}
+		case "$l" in
+		"    container:"*) ci=$((ci + 1)); ii=-1 ;;
+		*"image_path:"*) ii=$((ii + 1)) ;;
+		*"$3:"*)
+			if [ "$ci" -eq "$1" ] && [ "$ii" -eq "$2" ] && [[ "$l" != "#"* && "$l" != *"# "* ]]; then
+				l=${l#*"$3:"}; l=${l//[\'\" ]/}; echo "${l,,}"; return
+			fi ;;
+		esac
+	done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+}
+# Entries of container 3, counted from the parse: three, in the order atf, uboot, tee
+# (the parse names each payload file after its image type and core, so the order is
+# read from the load addresses below, not from file names).
+# a55_carries <extracted payload> <input>: the payload starts with the input's bytes
+a55_carries() { [ -n "$1" ] && cmp -s -n "$(stat -c %s "$2")" "$2" "$1"; }
+a55_entries=0
+for ii in 0 1 2 3; do [ -n "$(field 2 "$ii" image_offset)" ] && a55_entries=$((a55_entries + 1)); done
+expect "a55: container 3 holds exactly three entries (found $a55_entries)" [ "$a55_entries" -eq 3 ]
+for ii in 0 1 2; do
+	expect "a55: container 3 entry $ii runs on cortex-a55 (parsed '$(field 2 "$ii" core_id)')" [ "$(field 2 "$ii" core_id)" = cortex-a55 ]
+done
+# Cited constants (read at the pins of secure-world/bsp.lock, 2026-11-23):
+#  tee: TF-A da738d5eae93 plat/imx/imx9/imx95/platform.mk:56, BL32_BASE ?= 0x8C000000, and
+#       imx-optee-os 99f40897 core/arch/arm/plat-imx/conf.mk:729, CFG_TZDRAM_START =
+#       CFG_DRAM_BASE + 0x0C000000 (the DRAM base itself not read: OPEN).
+#  atf: no citation. TF-A's BL31 base is in plat/imx/imx9/imx95/include/platform_def.h,
+#       which the lane could not read: OPEN. The value pinned here is SPSDK 3.13.0's
+#       default for the atf entry, so a change of it is noticed, not endorsed.
+#  uboot: a stand-in, SPSDK's default, not asserted.
+WANT_ATF_LOAD=0x8a200000 WANT_ATF_ENTRY=0x8a200000
+WANT_TEE_LOAD=0x8c000000 WANT_TEE_ENTRY=0x8c000000
+for spec in "0 atf $WANT_ATF_LOAD $WANT_ATF_ENTRY" "2 tee $WANT_TEE_LOAD $WANT_TEE_ENTRY"; do
+	read -r ii nm wl we <<<"$spec"
+	expect "a55: the $nm load_address is $wl (parsed '$(field 2 "$ii" load_address)')" m7_num_eq "$(field 2 "$ii" load_address)" "$wl"
+	expect "a55: the $nm entry_point is $we (parsed '$(field 2 "$ii" entry_point)')" m7_num_eq "$(field 2 "$ii" entry_point)" "$we"
+done
+# the order atf, uboot, tee: the payload the parse extracts for each entry starts with
+# that input's bytes
+for spec in "0 bl31.bin" "1 u-boot.bin" "2 tee.bin"; do
+	read -r ii nm <<<"$spec"
+	pf=$(ls "$TMP_ROOT/m7parse/container2_image${ii}_"*.bin 2>/dev/null | head -n 1)
+	expect "a55: container 3 entry $ii carries $nm" a55_carries "$pf" "$TMP_ROOT/in3/$nm"
+done
 # One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
 python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
 import sys

@@ -69,8 +69,25 @@ containers:
       sw_version: 0
       signer: type=file;file_path=srk0.pem
       images:
+        # BL31: SPSDK's default address (0x8A200000). TF-A's BL31 link base for
+        # PLAT=imx95 is in plat/imx/imx9/imx95/include/platform_def.h, which this
+        # lane could not read (read guard): OPEN, not asserted from a citation.
         - atf: bl31.bin
+        # U-Boot is a stand-in here: SPSDK's default address, not a pinned value.
         - uboot: u-boot.bin
-        - tee: tee.bin
+        # tee.bin (OP-TEE core/tee-raw.bin) at the address OP-TEE and TF-A name:
+        # TF-A da738d5 plat/imx/imx9/imx95/platform.mk:56 (BL32_BASE ?= 0x8C000000)
+        # and imx-optee-os 99f4089 core/arch/arm/plat-imx/conf.mk:729
+        # (CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000, the DRAM base being
+        # 0x80000000 on i.MX 95: not read at that commit, OPEN). Written out
+        # because the tee shorthand cannot carry an address; every other field
+        # is what the shorthand produced under SPSDK 3.13.0.
+        - image_path: tee.bin
+          load_address: '0x8C000000'
+          entry_point: '0x8C000000'
+          image_type: executable
+          core_id: cortex-a55
+          meta_data_start_cpu_id: 2
+          hash_type: sha384
       srk_table:
         srk_array: *srk
