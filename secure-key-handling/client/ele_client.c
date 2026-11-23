@@ -14,6 +14,20 @@ enum ele_commit ele_classify(uint32_t flags_sent, const struct ele_ack *ack)
 	return ELE_COMMITTED_UNPROTECTED;
 }
 
+/* An update succeeds only when every flag sent was acknowledged: a counter
+ * warning (accepted, counter not advanced, so the prior blob can be replayed)
+ * fails it, as does a missing strict acknowledgement, and a call that sent the
+ * counter flag needs rollback-protected (counter acknowledged, split
+ * configured). A strict-only send (a delete) needs the strict acknowledgement. */
+static bool ele_update_ok(uint32_t flags_sent, const struct ele_ack *ack, enum ele_commit st)
+{
+	if (st == ELE_NOT_COMMITTED || !ack || ack->counter_warning)
+		return false;
+	if ((flags_sent & ELE_REQ_MONOTONIC_COUNTER) && st != ELE_ROLLBACK_PROTECTED)
+		return false;
+	return true;
+}
+
 const char *ele_commit_name(enum ele_commit c)
 {
 	switch (c) {
@@ -44,7 +58,8 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 	if (c->ops->generate(c->ctx, c->flags, &id, &ack) != 0)
 		return -1;
 	*state = ele_classify(c->flags, &ack);
-	if (*state == ELE_NOT_COMMITTED)
+	/* The state is kept for the caller's diagnostics even when the call fails. */
+	if (!ele_update_ok(c->flags, &ack, *state))
 		return -1;
 	*key_id = id;
 	return 0;
@@ -72,5 +87,5 @@ int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state
 	if (c->ops->del(c->ctx, flags, key_id, &ack) != 0)
 		return -1;
 	*state = ele_classify(flags, &ack);
-	return *state == ELE_NOT_COMMITTED ? -1 : 0;
+	return ele_update_ok(flags, &ack, *state) ? 0 : -1;
 }

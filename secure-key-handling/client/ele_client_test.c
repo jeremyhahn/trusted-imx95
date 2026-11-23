@@ -64,12 +64,30 @@ int main(void)
 	case_flags("neither", 0, true, true, false, true, ELE_NOT_COMMITTED, false);
 
 	/* Both sent, but the enclave acknowledges one, or warns. */
+	/* The diagnostic state is kept, but the call fails (case_state). */
 	case_flags("strict acked, counter not", both, true, false, false, true,
-		   ELE_COMMITTED_UNPROTECTED, true);
+		   ELE_COMMITTED_UNPROTECTED, false);
 	case_flags("counter acked, strict not", both, false, true, false, true,
 		   ELE_NOT_COMMITTED, false);
-	case_flags("counter warning", both, true, true, true, true, ELE_COMMITTED_UNPROTECTED, true);
-	case_flags("no counter split", both, true, true, false, false, ELE_COMMITTED_UNPROTECTED, true);
+	case_flags("counter warning", both, true, true, true, true, ELE_COMMITTED_UNPROTECTED, false);
+	case_flags("no counter split", both, true, true, false, false, ELE_COMMITTED_UNPROTECTED, false);
+	case_flags("counter warning, strict only", ELE_REQ_STRICT_OPERATION, true, false, true, true,
+		   ELE_COMMITTED_UNPROTECTED, false);
+
+	/* A failed update still reports why (the state is not cleared). */
+	{
+		struct ele_stub s = make(true, true, true, true);
+		struct ele_client c;
+		enum ele_commit st = ELE_NOT_COMMITTED;
+		uint32_t id = 0;
+
+		ele_client_init(&c, &ele_stub_ops, &s);
+		CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 0,
+		      "counter warning fails, state kept, no key id returned");
+		st = ELE_NOT_COMMITTED;
+		CHECK(ele_delete_key(&c, 1, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
+		      "counter warning on delete fails, state kept");
+	}
 
 	/* The default client sends both flags. */
 	{
