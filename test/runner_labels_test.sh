@@ -264,6 +264,33 @@ chain "[push]"; stepcmd
 check "the same chain from a push-only a passes" 0 "OK:"
 chain "[pull_request]" "$G"; stepcmd
 check "a guarded a -> b edge carries no pull_request" 0 "OK:"
+# Verify 11: an uncalled workflow_call file is fork-reachable and seeds its callees.
+chain "workflow_call"; stepcmd
+check "an uncalled a -> b -> c chain refuses the waived job in c" 1 "$FORKMSG"
+pair() { # <condition on the a->b calling job, or empty>
+	resetwf
+	wfwrite a.yml <<EOF
+name: a
+on: workflow_call
+jobs:
+  call:
+${1:+    if: "$1"}
+    uses: ./.github/workflows/b.yml
+EOF
+	wfwrite b.yml <<EOF
+name: b
+on: workflow_call
+jobs:
+  b:
+    runs-on: $W
+    steps:
+      - run: true
+EOF
+}
+pair; stepcmd
+check "an uncalled a -> unguarded b refuses the waived job in b" 1 "$FORKMSG"
+pair "$G"; stepcmd
+check "an uncalled a -> guarded b passes" 0 "OK:"
 resetwf
 wfwrite a.yml <<EOF
 name: a

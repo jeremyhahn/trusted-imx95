@@ -2257,15 +2257,6 @@ jobs:
                       if m:
                           edges.append((base, m.group(1), fork_safe(jr, n)))
               eff = {b: set(c) & PR_EV for b, c in own.items()}
-              changed = True
-              while changed:
-                  changed = False
-                  for caller, callee, safe in edges:
-                      if safe or callee not in own or "workflow_call" not in own[callee]:
-                          continue
-                      if not eff[caller] <= eff[callee]:
-                          eff[callee] |= eff[caller]
-                          changed = True
               called = {callee for _, callee, _ in edges}
               for b in own:
                   # on a cycle: b reaches itself through the call edges (safe ones too)
@@ -2276,8 +2267,19 @@ jobs:
                           if caller == x and callee not in seen:
                               seen.add(callee)
                               todo.append(callee)
+                  # seed the conservative cases before the fixed point (verify 11), so
+                  # their events propagate through unguarded edges like a real caller's
                   if "workflow_call" in own[b] and (CALLERS_UNKNOWN or b not in called or b in seen):
                       eff[b] |= PR_EV
+              changed = True
+              while changed:
+                  changed = False
+                  for caller, callee, safe in edges:
+                      if safe or callee not in own or "workflow_call" not in own[callee]:
+                          continue
+                      if not eff[caller] <= eff[callee]:
+                          eff[callee] |= eff[caller]
+                          changed = True
               EFFECTIVE.update(eff)
 
 
