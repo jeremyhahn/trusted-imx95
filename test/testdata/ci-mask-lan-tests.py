@@ -82,6 +82,15 @@ def script_cases():
     for l in got:
         check(not any(k in l for k in ("proxy.golang.org", "direct", "::add-mask::off", "ghcr.io", "github.com")),
               f"the script masks {l}: a public host or a keyword")
+    # #159 (Codex security P1 at verify 5): .intranet is internal, as in
+    # scripts/docs-check.py; case and a trailing dot do not hide it.
+    for val, host in [("https://mirror.intranet/alpine", "mirror.intranet"),
+                      ("https://MIRROR.INTRANET/alpine", "mirror.intranet"),
+                      ("https://mirror.intranet./alpine", "mirror.intranet")]:
+        got = subprocess.run(["bash", SCRIPT], env=dict(PATH=env["PATH"], DEVCACHE_APK_MIRROR=val),
+                             capture_output=True, text=True).stdout.split()
+        check(any(host in l.lower() for l in got if l.startswith("::add-mask::")),
+              f"the script does not mask the .intranet host in {val}: {got}")
     # v1.53 (Tenant Agent on go-quicbaas #2667): every *_REGISTRY variable,
     # a secret's copy in the mask step's env included.
     regs = dict(PATH=env["PATH"], LAN_REGISTRY="registry.lan:5005", IT_REGISTRY="10.4.4.4:5000",
