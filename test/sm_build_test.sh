@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 sm="$ROOT/scripts/sm-build.sh"
-unset FAKE_NONDET FAKE_FAIL SM_OUT
+unset FAKE_NONDET FAKE_FAIL FAKE_PERF SM_OUT
 
 run bash "$sm" --check "$ROOT/system-manager/sm.lock"
 check "the committed lock validates" 0 "lf-6.18.37-2.1.0" "mx95frdm-pro" "15.2.rel1"
@@ -21,13 +21,30 @@ tc_sha=$(sha256sum "$TMP_ROOT/tc.tar.xz" | cut -d' ' -f1)
 
 # A fake imx-sm: `make cfg` copies the .cfg, `make all` writes an image from
 # the compiler, M and SOURCE_DATE_EPOCH; FAKE_NONDET adds the tree's path,
-# FAKE_FAIL fails the build.
+# FAKE_FAIL fails the build. `make cfg` also writes a synthetic
+# config_scmi.h (written here, not NXP's): FAKE_PERF picks the fixture
+# configs/other/perf-<FAKE_PERF>.h (default "good"); FAKE_PERF=missing writes none.
 repo="$TMP_ROOT/imx-sm"
 mkdir -p "$repo/configs/other"
 printf 'LM1 name="M7"\nboard=fake\n' >"$repo/configs/other/fakepro.cfg"
+perf_fixture() { # <name> <M7 record's perf line> [other record's perf line]
+	{
+		printf '/* SCMI AGENT0 Config (M7) */\n#define A0 \\\n    { \\\n        .name = "M7", \\\n%s\n    }\n' "$2"
+		printf '/* SCMI Instance 0 Config (M7) */\n#define I0 \\\n    { \\\n    }\n'
+		printf '/* SCMI AGENT1 Config (AP-NS) */\n#define A1 \\\n    { \\\n        .name = "AP-NS", \\\n%s\n    }\n' "${3:-        .sysPerms = SM_SCMI_PERM_ALL, \\}"
+	} >"$repo/configs/other/perf-$1.h"
+}
+bs=$'\\'
+perf_all="        .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_ALL, $bs"
+perf_fixture good "$perf_all"
+perf_fixture priv "        .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_PRIV, $bs"
+perf_fixture second "$perf_all" "$perf_all"
+perf_fixture none "        .sysPerms = SM_SCMI_PERM_ALL, $bs"
+printf '/* SCMI AGENT1 Config (AP-NS) */\n#define A1 \\\n    { \\\n        .name = "AP-NS", \\\n        .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_ALL, \\\n    }\n' >"$repo/configs/other/perf-norec.h"
 # shellcheck disable=SC2016 # make's $(...), not the shell's
 printf '%s\n' 'cfg:' \
 	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h' \
+	'	[ "$(FAKE_PERF)" = missing ] || cp configs/other/perf-$(or $(FAKE_PERF),good).h configs/$(config)/config_scmi.h' \
 	'all:' \
 	'	[ -z "$(FAKE_FAIL)" ]' \
 	'	mkdir -p build/$(config)' \
@@ -117,6 +134,28 @@ lock
 run env SM_OUT="$TMP_ROOT/out4" bash "$sm" "$TMP_ROOT/lock"
 check "sm-build.sh stops a build whose patched file widens the M7 block" nonzero "grants: UNLISTED board=fake-closed" "differ from system-manager/m7-grants.txt"
 printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
+
+# The generated SCMI table: the M7 agent holds PERF_M7 at ALL, no other agent.
+lock
+run env SM_OUT="$TMP_ROOT/out5" bash "$sm" "$TMP_ROOT/lock"
+check "perf: the good table passes in the build" 0 "sm-perf-check: M7 PERF_M7=ALL, no other agent" "reproducible, m33_image.bin"
+expect "perf: the manifest names the checked grant" has_line "m7_perf_m7=ALL" "$TMP_ROOT/out5/sm-manifest.txt"
+run env SM_OUT="$TMP_ROOT/out5" FAKE_PERF=priv bash "$sm" "$TMP_ROOT/lock"
+check "perf: the M7 grant at PRIV fails the build" nonzero "the M7 agent's PERF_M7 grant is not ALL: .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_PRIV," "fails scripts/sm-perf-check.sh"
+run env SM_OUT="$TMP_ROOT/out5" FAKE_PERF=second bash "$sm" "$TMP_ROOT/lock"
+check "perf: a second agent holding PERF_M7 fails the build" nonzero "2 perfPerms[DEV_SM_PERF_M7] lines" "want exactly 1"
+run env SM_OUT="$TMP_ROOT/out5" FAKE_PERF=none bash "$sm" "$TMP_ROOT/lock"
+check "perf: a table with no PERF_M7 line fails the build" nonzero "no perfPerms[DEV_SM_PERF_M7] line"
+run env SM_OUT="$TMP_ROOT/out5" FAKE_PERF=norec bash "$sm" "$TMP_ROOT/lock"
+check "perf: a table with no M7 record fails the build" nonzero "no M7 agent record"
+run env SM_OUT="$TMP_ROOT/out5" FAKE_PERF=missing bash "$sm" "$TMP_ROOT/lock"
+check "perf: a missing config_scmi.h fails the build" nonzero "cannot read config_scmi.h"
+# The line outside the M7 record (header present, line only in the other agent).
+printf '/* SCMI AGENT0 Config (M7) */\n#define A0 \\\n    { \\\n    }\n/* SCMI AGENT1 Config (AP-NS) */\n    .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_ALL, \\\n' >"$TMP_ROOT/outside.h"
+run "$ROOT/scripts/sm-perf-check.sh" "$TMP_ROOT/outside.h"
+check "perf: the only PERF_M7 line in another agent's record fails" 1 "is not in the M7 agent's record"
+run "$ROOT/scripts/sm-perf-check.sh"
+check "perf: no argument fails with usage" 1 "usage: sm-perf-check.sh"
 
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
