@@ -26,13 +26,35 @@
 #   usage: scripts/ci-mask-lan.sh
 set -euo pipefail
 
+# LOCAL CHANGE to the template file (#159, Codex security P1 at verify 15): the host
+# is classified in its canonical form (lower case, one trailing root dot removed),
+# since DNS ignores both and `https://FORGE.CORP:3000` or `https://forge.corp.:3000`
+# is the same internal host; and a host this script cannot classify (empty, a
+# bracketed IPv6 literal, a character outside a-z 0-9 . _ -) fails closed: it is
+# treated as internal and masked, and an entry with userinfo before an @ is masked
+# whatever its host. Every spelling that can appear later is masked:
+# the entry, its authority (userinfo and port included), the host as written and the
+# canonical host, with and without the port. For the handbook to take back.
 private() {
-	case $1 in
+	local h=${1,,}
+	h=${h%.}
+	case $h in
+	'' | \[*) return 0 ;;
+	*[!a-z0-9._-]*) return 0 ;;
 	10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].*) return 0 ;;
-	'' | direct | off) return 1 ;;
+	direct | off) return 1 ;;
 	*.internal | *.lan | *.local | *.localdomain | *.home.arpa | *.corp) return 0 ;;
 	*.*) return 1 ;;
 	esac
+	return 0
+}
+
+declare -A seen=()
+mask() {
+	if [ -n "$1" ] && [ -z "${seen[$1]:-}" ]; then
+		seen[$1]=1
+		echo "::add-mask::$1"
+	fi
 	return 0
 }
 
@@ -43,12 +65,40 @@ for v in $(compgen -e); do
 	esac
 	IFS='|, ' read -ra entries <<<"${!v}"
 	for entry in "${entries[@]}"; do
-		hostport=${entry#*://}
-		hostport=${hostport%%/*}
-		host=${hostport%%:*}
-		private "$host" || continue
-		echo "::add-mask::$entry"
-		[ "$hostport" = "$entry" ] || echo "::add-mask::$hostport"
-		[ "$host" = "$hostport" ] || echo "::add-mask::$host"
+		[ -n "$entry" ] || continue
+		authority=${entry#*://}
+		authority=${authority%%[/?#]*}
+		userinfo=
+		hostport=$authority
+		case $authority in
+		*@*)
+			userinfo=${authority%@*}
+			hostport=${authority##*@}
+			;;
+		esac
+		case $hostport in
+		\[*)
+			host=${hostport%%]*}]
+			port=${hostport#"$host"}
+			;;
+		*)
+			host=${hostport%%:*}
+			port=${hostport#"$host"}
+			;;
+		esac
+		# userinfo before an @ is a credential: masked whatever the host
+		case $authority in
+		*@*) ;;
+		*) private "$host" || continue ;;
+		esac
+		chost=${host,,}
+		chost=${chost%.}
+		mask "$entry"
+		mask "$authority"
+		mask "$userinfo"
+		mask "$hostport"
+		mask "$host"
+		mask "$chost"
+		mask "$chost$port"
 	done
 done
