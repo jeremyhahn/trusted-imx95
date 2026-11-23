@@ -22,12 +22,17 @@ inherit deploy
 
 FTPM_TA_UUID = "bc50d971-d4c9-42c4-82cb-343fb7f37896"
 
-# The NV is in REE FS storage, explicitly (provisional default, question 1).
+# The NV storage follows the selector of optee-ftpm-flags.inc, owner ruling 1234
+# (question 1): reefs (development boards, default) is REE FS storage, rpmb
+# (production) is RPMB storage. Any other value stops the parse.
 # CFG_TA_MEASURED_BOOT stays off, the TA's default (docs/ftpm/README.md,
 # "Measured boot").
+TRUSTED_IMX95_FTPM_NV ?= "reefs"
+FTPM_TA_STORAGE_ID[reefs] = "TEE_STORAGE_PRIVATE_REE"
+FTPM_TA_STORAGE_ID[rpmb] = "TEE_STORAGE_PRIVATE_RPMB"
 EXTRA_OEMAKE = "TA_DEV_KIT_DIR=${STAGING_INCDIR}/optee/export-user_ta \
                 CFG_MS_TPM_20_REF=${UNPACKDIR}/ms-tpm-20-ref \
-                CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE \
+                CFG_FTPM_TA_TEE_STORAGE_ID=${@d.getVarFlag('FTPM_TA_STORAGE_ID', d.getVar('TRUSTED_IMX95_FTPM_NV')) or bb.fatal('TRUSTED_IMX95_FTPM_NV must be reefs or rpmb, not %s' % d.getVar('TRUSTED_IMX95_FTPM_NV'))} \
                 CFG_TEE_TA_LOG_LEVEL=0 \
                 CROSS_COMPILE=${HOST_PREFIX} \
                 LIBGCC_LOCATE_CFLAGS=--sysroot=${STAGING_DIR_HOST} \

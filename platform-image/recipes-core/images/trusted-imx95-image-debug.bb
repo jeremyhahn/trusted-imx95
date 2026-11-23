@@ -25,3 +25,11 @@ IMAGE_INSTALL:append = " bash gdb strace imx-test"
 # design, docs/ftpm/build.md): tpm2-tools to talk to /dev/tpmrm0 during
 # bring-up. Debug image only; the production image does not carry it.
 IMAGE_INSTALL:append = " tpm2-tools"
+
+# Owner ruling 1234: the fTPM NV is in RPMB on production devices only. This
+# image is for development boards and never holds production keys, so it
+# refuses the rpmb selection of optee-ftpm-flags.inc.
+python () {
+    if d.getVar('TRUSTED_IMX95_FTPM_NV') == 'rpmb':
+        bb.fatal('the debug image is for development boards only: TRUSTED_IMX95_FTPM_NV = "rpmb" (production) is refused')
+}

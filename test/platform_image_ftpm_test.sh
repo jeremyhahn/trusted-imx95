@@ -58,6 +58,8 @@ none() {
 		! has "$f" "$s" || return 1
 	done
 }
+# has_in TEXT STRING: TEXT contains STRING.
+has_in() { [[ $1 == *"$2"* ]]; }
 # tree_none STRING DIR: no tracked file under DIR contains STRING.
 tree_none() {
 	local f
@@ -606,19 +608,42 @@ expect "the boot partition lists no imx-m7-demos binary" ncstr "$img" 'IMAGE_BOO
 expect "the image depends on optee-os:do_deploy (the firmware with the fTPM TA)" ncstr "$img" 'do_image_complete[depends] += "optee-os:do_deploy"'
 expect "optee-os depends on the fTPM TA deploy" ncstr "$os_app" 'do_compile[depends] += "optee-ftpm:do_deploy"'
 expect "ACCEPT_FSL_EULA is not set in the layer" tree_none 'ACCEPT_FSL_EULA = ' 'platform-image/conf'
-expect "REE FS on" ncstr "$flags" 'CFG_REE_FS=y'
-expect "RPMB FS off" ncstr "$flags" 'CFG_RPMB_FS=n'
+# NV storage selector (owner ruling 1234): reefs by default, rpmb for production.
+sel=TRUSTED_IMX95_FTPM_NV
+expect "the selector defaults to reefs" ncstr "$flags" "$sel ?= \"reefs\""
+expect "the reefs set holds REE FS on" ncstr "$flags" "${sel}_FLAGS[reefs] = \"CFG_REE_FS=y CFG_RPMB_FS=n\""
+rpset=$(git -C "$ROOT" grep -h "^${sel}_FLAGS\[rpmb\]" -- platform-image || true)
+expect "the rpmb set holds RPMB FS on" has_in "$rpset" 'CFG_RPMB_FS=y'
+expect "the rpmb set keeps REE FS on" has_in "$rpset" 'CFG_REE_FS=y'
+# The key option names are assembled so this file does not itself carry them.
+wk="CFG_RPMB_WRITE""_KEY"
+tk="CFG_RPMB_TEST""KEY"
+expect "the rpmb set turns the write-key option off explicitly" has_in "$rpset" "$wk=n"
+expect "the rpmb set turns the test-key option off explicitly" has_in "$rpset" "$tk=n"
+expect "an unknown selector value reaches bb.fatal" ncstr "$flags" "or bb.fatal('$sel must be reefs or rpmb"
+expect "the TA maps reefs to the REE storage ID" ncstr "$ftpm_bb" 'FTPM_TA_STORAGE_ID[reefs] = "TEE_STORAGE_PRIVATE_REE"'
+expect "the TA maps rpmb to the RPMB storage ID" ncstr "$ftpm_bb" 'FTPM_TA_STORAGE_ID[rpmb] = "TEE_STORAGE_PRIVATE_RPMB"'
+expect "the TA storage ID comes from the selector" ncstr "$ftpm_bb" "CFG_FTPM_TA_TEE_STORAGE_ID=\${@d.getVarFlag('FTPM_TA_STORAGE_ID', d.getVar('$sel'))"
+expect "the TA recipe's unknown value reaches bb.fatal" ncstr "$ftpm_bb" "or bb.fatal('$sel must be reefs or rpmb"
+expect "the TA recipe defaults the selector to reefs" ncstr "$ftpm_bb" "$sel ?= \"reefs\""
+expect "the debug image refuses rpmb with bb.fatal" nc "$dbg" "bb\\.fatal\\(.*$sel = \"rpmb\""
+expect "the debug image tests the selector for rpmb" ncstr "$dbg" "d.getVar('$sel') == 'rpmb'"
 expect "optee-os takes the shared flags" ncstr "$os_app" 'optee-ftpm-flags.inc'
 expect "the TA dev kit takes the shared flags" ncstr "$kit_app" 'optee-ftpm-flags.inc'
-expect "the TA stores its NV in REE FS explicitly" ncstr "$ftpm_bb" 'CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE'
 expect "measured boot stays off" none CFG_TA_MEASURED_BOOT=y "$ftpm_bb" "$os_app" "$flags"
 
-# The RPMB key is never programmed or enabled by this layer or its docs. The
-# option name is assembled so this file does not itself carry it.
-opt="RPMB_WRITE""_KEY"
-expect "no RPMB key option in platform-image" tree_none "$opt" platform-image
-expect "no RPMB key option in docs/ftpm" tree_none "$opt" docs/ftpm
-expect "CFG_RPMB_FS=y appears nowhere in platform-image" tree_none 'CFG_RPMB_FS=y' platform-image
+# No RPMB key option is assigned anything but n, in the layer or its docs: OP-TEE
+# never programs the key, so RPMB writes fail until the provisioning station has.
+for o in "$wk" "$tk"; do
+	for v in y 1 Y; do
+		expect "no $v assignment of a RPMB key option in platform-image" tree_none "$o=$v" platform-image
+		expect "no $v assignment of a RPMB key option in docs/ftpm" tree_none "$o=$v" docs/ftpm
+	done
+	expect "no ?= or += of a RPMB key option in platform-image" tree_none "$o ?=" platform-image
+done
+# CFG_RPMB_FS=y only inside the rpmb set (exactly one line carries it).
+rpfs=$(git -C "$ROOT" grep -h 'CFG_RPMB_FS=y' -- platform-image || true)
+expect "CFG_RPMB_FS=y occurs only in the rpmb set" test "$rpfs" = "$rpset"
 
 # tpm2-tools: the debug image only.
 expect "the debug image installs tpm2-tools" nc "$dbg" 'IMAGE_INSTALL.*tpm2-tools'

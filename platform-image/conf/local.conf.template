@@ -11,3 +11,8 @@ DISTRO = "trusted-imx95"
 
 PACKAGE_CLASSES = "package_ipk"
 # Images are built unsigned. AHAB signing is a separate step after the build.
+
+# fTPM NV storage (owner ruling 1234, docs/ftpm/build.md): TRUSTED_IMX95_FTPM_NV
+# is "reefs" (the NV in the REE file system, development boards, the default) or
+# "rpmb" (the eMMC RPMB, production builds). It is not set here, so the default
+# applies; a production build sets it to "rpmb". The debug image refuses "rpmb".
