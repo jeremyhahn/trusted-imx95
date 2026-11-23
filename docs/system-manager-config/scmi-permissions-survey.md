@@ -481,7 +481,7 @@ Every upstream claim below cites a path under the imx-sm tree and a
 line at commit `eec232878ab7` (tag `lf-6.18.37-2.1.0`, pinned in
 `system-manager/sm.lock`). The imx-sm source is not in this repository,
 and no vendor text is copied here. To check a claim, fetch that tag
-the way `scripts/sm-build.sh` does (lines 134-143, which fail closed if
+the way `scripts/sm-build.sh` does (lines 135-144, which fail closed if
 the commit differs) and open the cited line.
 
 - Confirmable from this repository alone: the lock pins, the patch
@@ -504,7 +504,9 @@ the build check proposed in 8.5) confirms the citations.
 level.** Ownership of `M7P` already gives the M7 agent all rights on
 the `PERF_M7` domain, and `PERFORMANCE_LEVEL_SET` needs only PRIV. The
 M7 in fact holds ALL there, more than the message needs. One link is
-inferred, not read: the generated table of the PRO file (item 2).
+inferred, not read: the generated table of the PRO file (item 2), so
+the `PERF_M7  PRIV` line stays open until that table is checked
+(proposed, pending owner approval).
 
 ### 8.2 Evidence
 
