@@ -558,6 +558,11 @@ static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_r
 	if (res.status == 0) {
 		*out = res;
 		rc = 0;
+	} else {
+		/* Status -1 or any vendor error after the update call started:
+		 * the vendor may report a lost device reply as an error after the
+		 * update was applied, so it is unknown, whatever the code. */
+		rc = lost;
 	}
 	ele_secure_zero(&res, sizeof(res));
 	return rc;

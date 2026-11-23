@@ -160,8 +160,8 @@ static void isolation(void)
 	fake.err = OTHER_ERR;
 	st = ELE_NOT_COMMITTED;
 	id = 0;
-	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_NOT_COMMITTED && id == 0,
-	      "other code on generate: fails, not committed");
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_OUTCOME_UNKNOWN && id == 0,
+	      "other code on generate after the started marker: unknown outcome");
 	ele_hsm_close(&x);
 
 	/* Split unconfirmed: refused before any fork, so before any library call. */
@@ -189,7 +189,8 @@ static void isolation(void)
 	begin(&x, &c, &nonce, true);
 	fake.err = OTHER_ERR;
 	st = ELE_NOT_COMMITTED;
-	CHECK(ele_delete_key(&c, 7, &st) != 0 && st == ELE_NOT_COMMITTED, "other code on delete: fails, not committed");
+	CHECK(ele_delete_key(&c, 7, &st) != 0 && st == ELE_OUTCOME_UNKNOWN,
+	      "other code on delete after the started marker: unknown outcome");
 	ele_hsm_close(&x);
 
 	/* One operation per open: the nonce is spent, a second operation fails. */

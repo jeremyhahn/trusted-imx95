@@ -76,15 +76,30 @@ The key-store child writes a one-byte marker to the parent just before the vendo
 
 - **Before the marker** (the child died, exited nonzero or sent a short result before the update call, or any setup
   step failed): a plain failure, state `not-committed`, exit 1 (or 2 for setup).
-- **After the marker** (the child died, exited nonzero, or the result was short or unreadable, or `waitpid` failed): a
+- **After the marker** (the child died, exited nonzero, or the result was short or unreadable, or `waitpid` failed, **or
+  a complete result carries status -1 or any vendor error code**): a
   generate or a delete returns `ELE_OP_UNKNOWN`, the client sets `ELE_OUTCOME_UNKNOWN` (`outcome-unknown`), and the CLI
   prints that the result was lost, that the key store may have changed and that the operator must check it before any
   retry, then exits **3**. Success is never reported and nothing is retried. A sign is not an update and stays a plain
   failure. If the marker itself cannot be written, the update is not run.
 
 Exit codes: 0 success, 1 failure (or an update refused), 2 usage or setup (including a lock or nonce read failure), 3
-outcome unknown. Tests: the backend test splits the child-killed, exits-nonzero and short-result cases into before-marker
-(plain failure) and after-marker (unknown) cases for generate and delete.
+outcome unknown (the key store may have changed; check it before retrying). Tests: the backend test splits the
+child-killed, exits-nonzero, short-result, status -1 and vendor-error-code cases into before-marker (plain failure) and
+after-marker (unknown) cases for generate and delete, and `test/ele_client_test.sh` drives exit 3 end to end.
+
+**Why every error after the marker is unknown.** The vendor may report a lost device reply as an error after the
+update was applied, so the error code does not tell applied from not applied. The classification therefore does not
+depend on the vendor's error mapping: after the marker, only a verified success (status 0 in a complete result of a
+normal child exit) is anything but unknown. `ELE_NOT_COMMITTED` stays for failures before the marker.
+
+*Vendor call path (citations only, pinned commit 463845060a79).* The update runs through
+`src/common/hsm_api/hsm_key_generate.c:hsm_generate_key` and `src/common/hsm_api/hsm_delete_key.c:hsm_delete_key`, which build
+the message in `src/common/sab_msg/sab_key_generate.c` and `src/common/sab_msg/sab_delete_key.c` and send it through
+`src/common/sab_msg/sab_process_msg.c:process_sab_msg`. **Open:** the line-by-line trace of what a lost or short device
+reply returns (which of the library's error codes can follow a dispatched update) was not done in this lane, whose
+tooling cannot read the fetched vendor source; it is not needed for the classification above, and it stays open for a reader
+with the source.
 
 **The nonce is parsed in the locked slot.** The nonce does not go through the generic `ele_parse_u32`, whose running
 value lives in an ordinary automatic variable that is never erased. A dedicated parser, `ele_nonce_parse`, applies the

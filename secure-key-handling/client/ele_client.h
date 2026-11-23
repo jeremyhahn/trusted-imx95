@@ -38,8 +38,13 @@ enum ele_commit {
 };
 
 /* An ops-table call returns this (not -1) for generate or del when the update
- * may have run and its result is lost. ele_generate_key and ele_delete_key then
- * set *state to ELE_OUTCOME_UNKNOWN and fail. */
+ * may have run and its result is lost or is an error. That is every outcome
+ * other than verified success once the update call has started (status -1, any
+ * vendor error code, a transport error, a short result): the vendor may report
+ * a lost device reply as an error after the update was applied.
+ * ele_generate_key and ele_delete_key then set *state to ELE_OUTCOME_UNKNOWN
+ * and fail (exit 3: the key store may have changed; check it before retrying).
+ * ELE_NOT_COMMITTED is only for failures before the started marker. */
 #define ELE_OP_UNKNOWN (-2)
 
 /* The decision, a pure function: rollback-protected only with both flags sent
