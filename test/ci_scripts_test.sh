@@ -980,6 +980,52 @@ fi
 run mk pull_request -s toolchain-ref
 check "make toolchain-ref: a pull request prints the tag" 0 "$ltag"
 
+# The secure-world image: the same trusted rebuild and ID handoff.
+stag=trusted-imx95-secure-world:abc
+skeysw=$(skey "$stag")
+sw_built=sha256:$(printf '%s' secure-world | sha256sum | cut -c1-64)
+swid=$rt/secure-world-image.id
+sw_seed() { seed yes; echo "$IMG_EVIL" >"$IMG_STATE/$skeysw"; } # a pull request tagged its own image
+sw_seed
+run mk push docker-build-sw SW_IMAGE="$stag"
+check "make docker-build-sw: a push run rebuilds over a seeded tag" 0 "rebuilds $stag from source"
+expect "make docker-build-sw: the trusted rebuild uses no cache and records its ID" \
+	grep -q "^build --no-cache --iidfile $swid --target secure-world --label ci.reap.repository=${stag%%:*} -t $stag " "$IMG_LOG"
+expect "make docker-build-sw: the recorded ID is the rebuild's own, not the seeded image's" \
+	test "$(cat "$swid")" = "$sw_built" -a "$(cat "$swid")" != "$IMG_EVIL"
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a push run prints the ID its rebuild recorded" 0 "$sw_built"
+# Another job moves the tag between the build and the container start.
+echo "$IMG_EVIL" >"$IMG_STATE/$skeysw"
+swref=$(mk push -s sw-ref SW_IMAGE="$stag")
+: >"$IMG_STARTS"
+run env PATH="$TMP_ROOT/imgbin:$PATH" docker run --rm "$swref" true
+expect "make sw-ref: after the tag moves, the container start names the recorded ID" \
+	grep -q " $sw_built " "$IMG_STARTS"
+if grep -q "$stag" "$IMG_STARTS" || [ "$(cat "$IMG_STATE/$skeysw")" = "$swref" ]; then
+	fail "make sw-ref: the start does not follow the moved tag" "$(cat "$IMG_STARTS")"
+else
+	pass "make sw-ref: the start does not follow the moved tag"
+fi
+sw_seed
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a push run with no recorded ID file refuses, never prints the tag" nonzero "holds no image ID"
+: >"$swid"
+run mk push -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: an empty ID file refuses" nonzero "holds no image ID"
+for bad in "$stag" "sha256:abc" "sha256:$(printf 'A%.0s' {1..64})" "sha256:$(printf 'a%.0s' {1..65})"; do
+	printf '%s\n' "$bad" >"$swid"
+	run mk push -s sw-ref SW_IMAGE="$stag"
+	check "make sw-ref: a malformed ID ($bad) refuses" nonzero "holds no image ID"
+done
+sw_seed
+run env -u RUNNER_TEMP PATH="$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push \
+	make --no-print-directory -C "$ROOT" docker-build-sw SW_IMAGE="$stag"
+check "make docker-build-sw: a trusted run with nowhere to record the ID fails" nonzero "records its image ID"
+sw_seed
+run mk pull_request -s sw-ref SW_IMAGE="$stag"
+check "make sw-ref: a pull request prints the tag" 0 "$stag"
+
 # A trusted job end to end, as ci.yml runs it: the pull, the build, the
 # exported reference; then a pull request's job moves both tags, and every
 # container the job starts (the cache trim, each stage, the integration
