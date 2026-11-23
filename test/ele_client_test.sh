@@ -76,28 +76,51 @@ if [ ! -e "$tmp/reused-work" ]; then pass "the refusal came before anything was 
 run bash "$script" --work "$tmp/reused-work" --out "$tmp/afile"
 check "an --out that is a file is refused" 1 "not an empty directory"
 
-# The work directory is emptied only when this script made it. The lock names a
-# host that never resolves (.invalid), so no fetch can succeed: only the
-# ownership check and what the script did before the fetch are observed.
+# The work directory is emptied only when this script made it. Only the
+# ownership check and what the script did before the fetch are observed, and no
+# network call may run: a git stub first on PATH refuses (and logs) any http or
+# https argument and passes every other call to the real git, so no DNS lookup
+# or remote fetch happens and no case relies on a host failing to resolve.
 mutate ELE_REPO "ELE_REPO=https://example.invalid/x.git"
 cp "$tmp/lock" "$tmp/lock.invalid"
+real_git=$(command -v git)
+mkdir -p "$tmp/stubbin"
+{
+	printf '%s\n' '#!/bin/bash'
+	printf '%s\n' 'for a in "$@"; do'
+	# shellcheck disable=SC2016 # the stub's own text, expanded when the stub runs
+	printf '%s\n' '	case $a in http://* | https://*) echo "network URL refused: $a" >>"$STUB_GIT_LOG"; exit 1 ;; esac'
+	printf '%s\n' 'done'
+	printf 'exec %q "$@"\n' "$real_git"
+} >"$tmp/stubbin/git"
+chmod +x "$tmp/stubbin/git"
+export STUB_GIT_LOG="$tmp/stub-git.log"
+rm -f "$STUB_GIT_LOG"
+stub_rc=0
+PATH="$tmp/stubbin:$PATH" git fetch https://example.invalid/x.git || stub_rc=$?
+[ "$stub_rc" = 1 ] || fail "the git stub did not refuse a network URL (exit $stub_rc)"
+[ -s "$STUB_GIT_LOG" ] || fail "the git stub did not log the refused network URL"
+rm -f "$STUB_GIT_LOG"
 mkdir -p "$tmp/foreign"
 : >"$tmp/foreign/sentinel"
-run timeout 60 bash "$script" --work "$tmp/foreign" --src-only --lock "$tmp/lock.invalid"
+PATH="$tmp/stubbin:$PATH" run timeout 60 bash "$script" --work "$tmp/foreign" --src-only --lock "$tmp/lock.invalid"
 check "a non-empty unmarked --work is refused" 1 "not empty and was not made by this script"
 [ -e "$tmp/foreign/sentinel" ] || fail "the refused --work lost its sentinel file"
 [ ! -e "$tmp/foreign/.ele-lib-build-work" ] || fail "the refused --work was given a marker"
-run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
+PATH="$tmp/stubbin:$PATH" run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
 case $OUT in *"not empty and was not made"*) fail "a fresh --work was refused" ;; esac
 [ -e "$tmp/fresh-owned/.ele-lib-build-work" ] || fail "a fresh --work did not get the marker"
 mkdir -p "$tmp/fresh-owned/src"
 : >"$tmp/fresh-owned/src/stale"
-run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
+PATH="$tmp/stubbin:$PATH" run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
 case $OUT in *"not empty and was not made"*) fail "a marked --work was refused" ;; esac
 [ ! -e "$tmp/fresh-owned/src/stale" ] || fail "a marked --work was not emptied"
 mkdir -p "$tmp/empty-dir"
-run timeout 60 bash "$script" --work "$tmp/empty-dir" --src-only --lock "$tmp/lock.invalid"
+PATH="$tmp/stubbin:$PATH" run timeout 60 bash "$script" --work "$tmp/empty-dir" --src-only --lock "$tmp/lock.invalid"
 case $OUT in *"not empty and was not made"*) fail "an empty --work was refused" ;; esac
+# The stub was in effect (the script did ask git for the remote) and refused it.
+[ -s "$STUB_GIT_LOG" ] || fail "the work-dir runs never reached the git stub"
+[ "$(wc -l <"$STUB_GIT_LOG")" -ge 3 ] || fail "the three accepting work-dir runs did not each reach the git stub"
 
 # The client policy tests, built with the host compiler.
 d=$ROOT/secure-key-handling/client
