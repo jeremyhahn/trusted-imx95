@@ -66,6 +66,8 @@ The candidates are the Cortex-A55 Linux side and the Cortex-M7 ([SPEC.md](../SPE
 | Cortex-A55, Linux | The enclave's HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from Linux to the enclave; the TrustZone configuration that decides whether the caller runs in the secure or the normal world | The HSM API is in RM00284. The A55 path to the enclave and the TrustZone configuration are under [Missing](#missing); the latter is the `secure-world` row's open question ([SPEC.md](../SPEC.md)) |
 | Cortex-M7 | The same HSM API (RM00284 §3.2, §3.4, §3.8, §3.12); a path from the M7 to the enclave; the resources the System Manager grants the M7 ([SPEC.md](../SPEC.md), row `system-manager-config`) | The HSM API is in RM00284. The M7 path to the enclave and the System Manager's resource grants are under [Missing](#missing) |
 
+A provisional Linux-side client, with the choice left open, is in [client.md](client.md).
+
 Under either choice the keys stay in the enclave's key store (RM00284 §2.4, §3.2), and the rollback rule applies
 (RM00284 §2.4.2) under the caller's fail-closed checks above.
 
