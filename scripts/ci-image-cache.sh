@@ -187,7 +187,8 @@ case ${1:-} in
       rm -rf "$cfg" "$work"
     }
     DOCKER_CONFIG=$cfg docker buildx build --load --no-cache --provenance=false --sbom=false \
-      --target toolchain -f "$dockerfile" --iidfile "$work/iid" . \
+      --target toolchain --label "ci.reap.repository=${local_tag%%:*}" \
+      -f "$dockerfile" --iidfile "$work/iid" . \
       || die "the build of $remote failed; nothing was pushed"
     id=$(cat "$work/iid" 2>/dev/null || true)
     [[ "$id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "the build recorded no image ID for $remote; nothing was pushed"
@@ -250,7 +251,9 @@ case ${1:-} in
       || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote"
     # LOCAL CHANGE (#159, verify 5): once $remote is visible another job on the
     # shared daemon may pull it and record this same ID. The image is then no
-    # longer this job's alone, so cleanup leaves it to the age-aware reaper.
+    # longer this job's alone, so cleanup leaves it to the age-aware reaper. The
+    # build above carries the Makefile's ci.reap.repository label (the local
+    # toolchain repository), which is how the reaper finds this untagged image.
     built_id=""
     echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;

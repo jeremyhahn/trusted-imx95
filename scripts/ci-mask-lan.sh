@@ -12,8 +12,8 @@
 # internal when it is a private IPv4 address, or (ci-template v1.53, Tenant
 # Agent on trusted-firmware #821) a host name: a single label with no dot
 # (a LAN host name) or a name under .internal, .lan, .local, .localdomain,
-# .home.arpa, .corp or .intranet (the list of scripts/docs-check.py). Public hosts and keywords (proxy.golang.org, direct,
-# off) are left.
+# .home.arpa, .corp or .intranet (the list of scripts/docs-check.py). Public
+# hosts and keywords (proxy.golang.org, direct, off) are left.
 # v1.53 (Tenant Agent on go-quicbaas #2667): every variable whose name ends
 # in _REGISTRY is scanned (CI_REGISTRY, CI_IMAGE_REGISTRY, RELEASE_REGISTRY,
 # a copy's IT_REGISTRY). The template's mask step sets CI_IMAGE_REGISTRY from

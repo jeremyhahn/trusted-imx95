@@ -36,7 +36,17 @@ case "$1 $2 $3" in
   *) printf '{"digest":"sha256:%064d"}\n' 1 ;;
   esac
   exit 0 ;;
-"buildx imagetools create") exit "${CREATE_RC:-0}" ;;
+"buildx imagetools create")
+  # Promotion makes $remote visible: a consumer on the shared daemon pulls it
+  # and records the published ID (TOOLCHAIN_VERIFIED_ID) before this job exits.
+  if [ "${CREATE_RC:-0}" = 0 ]; then echo "$BUILT_ID" > "$STUB_DIR/consumer"; fi
+  exit "${CREATE_RC:-0}" ;;
+"image rm -f")
+  # Removing an ID a consumer recorded is what the publisher must not do.
+  if [ -f "$STUB_DIR/consumer" ] && [ "$4" = "$(cat "$STUB_DIR/consumer")" ]; then
+    echo "consumer-image-removed $4" >> "$STUB_DIR/log"
+  fi
+  exit 0 ;;
 esac
 case $1 in
 login) cat > /dev/null; exit "${LOGIN_RC:-0}" ;;
@@ -89,7 +99,7 @@ EOF
 chmod +x "$d/bin/"* "$d/repo/scripts/"*
 
 pub() { # pub [VAR=value...]: one publish run in a clean stub state
-	rm -f "$d/log" "$d/pushed"
+	rm -f "$d/log" "$d/pushed" "$d/consumer"
 	: > "$d/log"
 	(cd "$d/repo" && env "PATH=$d/bin:$PATH" STUB_DIR="$d" BUILT_ID="$ID" PUSHED_CONFIG="$ID" CFG="$CFG" \
 		GITHUB_SERVER_URL=https://forge.example CI_IMAGE_NAMESPACE=ns GITHUB_EVENT_NAME=push \
@@ -178,6 +188,63 @@ run pub PUSHED_CONFIG="$OTHER"
 expect "publish: removes the built image after a config-digest mismatch" logged "$rmid"
 run pub
 expect "publish: leaves the promoted image to the reaper (a consumer may hold its ID)" nolog '^docker image rm'
+# Interleaving: the consumer recorded the published ID after the promotion and
+# before the publisher's EXIT cleanup; after cleanup that ID must still be there.
+expect "publish: a consumer recorded the published ID before cleanup" test "$(cat "$d/consumer" 2>/dev/null)" = "$ID"
+expect "publish: cleanup never removes the ID a consumer recorded" nolog 'consumer-image-removed'
+# The reap label: the build carries the Makefile's ci.reap.repository value
+# (the local toolchain repository, here repo-toolchain).
+expect "publish: the build carries the toolchain reap label" \
+	logged '^docker buildx build .*--label ci\.reap\.repository=repo-toolchain( |$)'
+# shellcheck disable=SC2016 # the Makefile text is matched literally
+expect "Makefile: TOOLCHAIN_REAP_LABEL is ci.reap.repository=<the toolchain image's repository>" \
+	grep -qF 'TOOLCHAIN_REAP_LABEL = ci.reap.repository=$(firstword $(subst :, ,$(TOOLCHAIN_IMAGE)))' "$ROOT/Makefile"
+# Publish, then reap: the image the successful publish left (untagged, labelled
+# as the build labelled it) is removed by the real reaper once it is old
+# enough; an unlabelled image of the same age and a young labelled one stay.
+label=$(grep -oE -- '--label [^ ]+' "$d/log" | head -1 | cut -d' ' -f2)
+rp="$TMP_ROOT/pubreap"
+mkdir -p "$rp/bin"
+cat > "$rp/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$RP/log"
+case "$1 ${2:-}" in
+"ps -a") ;;
+"images "*)
+  case " $* " in
+  *" --filter dangling=true "*)
+    want=${!#}; want=${want#label=}
+    while read -r id _ lab tag; do
+      [ "$tag" = - ] && [ "$lab" != - ] && [ "ci.reap.repository=$lab" = "$want" ] && echo "$id"
+    done < "$RP/images" ;;
+  esac ;;
+"image inspect")
+  ref=${*: -1}
+  case $ref in *image-lock:base) exit 0 ;; esac
+  while read -r id created _ _; do
+    if [ "$ref" = "$id" ]; then echo "$created"; exit 0; fi
+  done < "$RP/images"
+  exit 1 ;;
+"image rm") echo "$3" >> "$RP/removed" ;;
+"create --pull") echo lock-id ;;
+"rm "*) ;;
+*) echo "stub docker: unexpected $*" >&2; exit 3 ;;
+esac
+EOF
+chmod +x "$rp/bin/docker"
+old=$(date -u -d '-5 hours' +%Y-%m-%dT%H:%M:%SZ)
+new=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+pubid=$ID
+unl=sha256:$(printf 'e%.0s' $(seq 64))
+young=sha256:$(printf 'f%.0s' $(seq 64))
+printf '%s %s %s -\n%s %s - -\n%s %s %s -\n' \
+	"$pubid" "$old" "${label#ci.reap.repository=}" "$unl" "$old" "$young" "$new" "${label#ci.reap.repository=}" > "$rp/images"
+: > "$rp/removed"; : > "$rp/log"
+run env RP="$rp" "PATH=$rp/bin:$PATH" bash "$ROOT/scripts/reap-stale-ci-stacks.sh" repo-ci-
+check "publish then reap: the published image is reaped once untagged and old" 0 "reap  dangling image $pubid"
+expect "publish then reap: the published image was removed" grep -qx "$pubid" "$rp/removed"
+expect "publish then reap: an unlabelled image of the same age stays" test "$(grep -c "^$unl\$" "$rp/removed")" = 0
+expect "publish then reap: a young labelled image stays" test "$(grep -c "^$young\$" "$rp/removed")" = 0
 expect "publish: the daemon never holds a staging tag, so none is removed" nolog '^docker image rm .*:stage-'
 expect "publish: never removes the trusted tag from the daemon" nolog '^docker image rm .*:abc-main'
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage
