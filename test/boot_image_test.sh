@@ -240,13 +240,16 @@ expect "m7: the M7 entry's entry point is $WANT_M7_ENTRY (parsed '$got')" m7_num
 # [0, first image_offset) from the parse output, 0x400-aligned, version 2 at +0 and AHAB tag 0x87 at +3;
 # no payload byte is ever read
 first_payload=0
+all_image_offsets=()
 while IFS= read -r l; do
 	if [[ "$l" =~ image_offset:\ \'(0x[0-9a-f]+)\' ]]; then
 		m=${BASH_REMATCH[1]}
 		v=$((m))
+		all_image_offsets+=("$m")
 		if [ "$first_payload" -eq 0 ] || [ "$v" -lt "$first_payload" ]; then first_payload=$v; fi
 	fi
 done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+echo "# m7: parsed image_offset values: ${all_image_offsets[*]}"
 expect "m7: the parse output records the first payload offset (got '$first_payload')" [ "${first_payload:-0}" -gt 0 ]
 offsets=$(python3 -I - "$img_out/boot-image.bin" "${first_payload:-0}" <<'PY'
 import sys
@@ -261,6 +264,10 @@ print(" ".join(out))
 PY
 )
 read -r -a offs <<<"$offsets"
+WANT_LAST_CONTAINER_OFFSET=$((0x8000))
+# the bound must lie past the last container header, or the walk could not see it
+expect "m7: the walk bound $first_payload lies past the last container header $WANT_LAST_CONTAINER_OFFSET (offsets: ${all_image_offsets[*]}; headers: $offsets)" \
+	[ "$first_payload" -gt "$WANT_LAST_CONTAINER_OFFSET" ]
 m7_offsets_ok() { [ "$#" -eq 3 ] && [ "$2" -eq "$WANT_M7_CONTAINER_OFFSET" ]; }
 expect "m7: the image holds three containers, the M7 one second, at $WANT_M7_CONTAINER_OFFSET (found: $offsets)" \
 	m7_offsets_ok "${offs[@]}"
