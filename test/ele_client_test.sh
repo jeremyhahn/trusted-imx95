@@ -160,6 +160,19 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "other HSM error: nonzero exit" 1 "failed"
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete: committed, not rollback-protected" 0 "deleted committed-not-rollback-protected"
+	# A result that cannot be written: exit 1, the key id and its state on stderr.
+	if [ -w /dev/full ]; then
+		rc=0
+		"$tmp/ele_cli" --split-confirmed 5 3 gen 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		[ "$rc" = 1 ] || fail "gen with a full stdout: exit $rc, want 1"
+		grep -q 'key 7 was generated, commit state' "$tmp/full.err" || fail "gen with a full stdout: the key id is not on stderr"
+		rc=0
+		"$tmp/ele_cli" --split-confirmed 5 3 del 7 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
+		[ "$rc" = 1 ] || fail "del with a full stdout: exit $rc, want 1"
+		grep -q 'key 7 was deleted, commit state' "$tmp/full.err" || fail "del with a full stdout: the key id is not on stderr"
+	else
+		fail "/dev/full is not writable here"
+	fi
 elif [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
 	# The toolchain image sets REQUIRE_ELE_SRC=1 beside ELE_SRC, the verified
 	# pinned source. There, not finding it is a failure, not a skip.

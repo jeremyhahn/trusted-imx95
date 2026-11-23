@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 /* See ele_hsm_backend.h. PROVISIONAL.
  *
  * The flag and return-code names are the library's own, from hsm_api.h and
@@ -5,6 +6,8 @@
  * at the pinned commit; ele_hsm_consts_check.c asserts their values.
  */
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "hsm_api.h"
 
@@ -12,6 +15,9 @@
 #include "ele_secure.h"
 
 void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
+
+/* P-256 r||s; provisional, the library does not report the length. */
+#define ELE_SIG_LEN 64u
 
 /* The request flags of the client, mapped to the library's. */
 static uint8_t gen_flags(uint32_t f)
@@ -76,7 +82,9 @@ static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len
 	struct ele_hsm_ctx *c = p;
 	op_generate_sign_args_t a;
 
-	if (!c->open || msg_len > UINT32_MAX || *sig_len > UINT16_MAX)
+	/* A buffer under 64 bytes (P-256 r||s, provisional) is refused before
+	 * the call: the library does not report the size back (see client.md). */
+	if (!c->open || msg_len > UINT32_MAX || *sig_len > UINT16_MAX || *sig_len < ELE_SIG_LEN)
 		return -1;
 	memset(&a, 0, sizeof(a));
 	a.key_identifier = key_id;
@@ -88,7 +96,9 @@ static int hsm_sign(void *p, uint32_t key_id, const uint8_t *msg, size_t msg_len
 	a.flags = HSM_OP_GENERATE_SIGN_FLAGS_INPUT_MESSAGE;
 	if (hsm_generate_signature(c->sign_gen, &a) != HSM_NO_ERROR)
 		return -1;
-	*sig_len = a.signature_size;
+	/* A successful sign does not update signature_size: report the known
+	 * P-256 length, not the echoed buffer size. */
+	*sig_len = ELE_SIG_LEN;
 	return 0;
 }
 
@@ -116,7 +126,9 @@ const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 {
 	open_session_args_t sa;
-	open_svc_key_store_args_t ks;
+	open_svc_key_store_args_t *ks;
+	size_t pg = (size_t)sysconf(_SC_PAGESIZE);
+	void *page;
 	open_svc_key_management_args_t km;
 	open_svc_sign_gen_args_t sg;
 	hsm_hdl_t h;
@@ -131,19 +143,39 @@ int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 		return -1;
 	}
 	c->session = h;
-	memset(&ks, 0, sizeof(ks));
-	ks.key_store_identifier = key_store_id;
-	ks.authentication_nonce = *nonce;
+	/* The open-key-store args hold the nonce: they live in a mapping of
+	 * their own that is locked, so no stack copy of the nonce is made here.
+	 * When the lock fails the credential is never copied (fail closed). */
+	page = mmap(NULL, pg, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (page == MAP_FAILED) {
+		ele_secure_zero(nonce, sizeof(*nonce));
+		goto fail;
+	}
+	if (mlock(page, sizeof(*ks)) != 0) {
+		munmap(page, pg);
+		ele_secure_zero(nonce, sizeof(*nonce));
+		goto fail;
+	}
+#ifdef MADV_DONTDUMP
+	(void)madvise(page, pg, MADV_DONTDUMP);
+#endif
+	ks = page;
+	memset(ks, 0, sizeof(*ks));
+	ks->key_store_identifier = key_store_id;
+	ks->authentication_nonce = *nonce;
 	/* The store is loaded, never created here; both update flags are set so
 	 * the store's updates are strict and counted. */
-	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
-		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
-	err = hsm_open_key_store_service(c->session, &ks, &h);
-	/* Every copy of the credential made here is erased on every path. */
+	ks->flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
+		    HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
+	err = hsm_open_key_store_service(c->session, ks, &h);
+	/* Every copy of the credential made here is erased on every path, and
+	 * only then is the page unlocked and unmapped. */
 	ele_secure_zero(nonce, sizeof(*nonce));
-	ele_secure_zero(&ks, sizeof(ks));
+	ele_secure_zero(ks, pg);
 	if (ele_hsm_wipe_hook)
-		ele_hsm_wipe_hook(&ks, sizeof(ks));
+		ele_hsm_wipe_hook(ks, sizeof(*ks));
+	munlock(page, sizeof(*ks));
+	munmap(page, pg);
 	if (err != HSM_NO_ERROR)
 		goto fail;
 	c->key_store = h;

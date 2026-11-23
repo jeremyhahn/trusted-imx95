@@ -151,7 +151,8 @@ hsm_err_t hsm_generate_signature(hsm_hdl_t signature_gen_hdl, op_generate_sign_a
 	/* Known bytes: byte i is (3*i + 1) & 0xff. */
 	for (i = 0; i < 64 && i < args->signature_size; i++)
 		args->signature[i] = (uint8_t)(3 * i + 1);
-	args->signature_size = 64;
+	/* Like the pinned source (sab_sign_gen.c:178): signature_size is not
+	 * updated by a successful sign. */
 	note("sign key=%u", (unsigned)args->key_identifier);
 	return HSM_NO_ERROR;
 }

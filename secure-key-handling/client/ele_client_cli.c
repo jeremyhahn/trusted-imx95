@@ -73,8 +73,13 @@ int main(int argc, char **argv)
 	switch (cmd.op) {
 	case ELE_CLI_GEN:
 		rc = ele_generate_key(&cl, &id, &st) == 0 ? 0 : 1;
-		if (rc == 0)
-			printf("key %u %s\n", id, ele_commit_name(st));
+		if (rc == 0 && (printf("key %u %s\n", id, ele_commit_name(st)) < 0 || fflush(stdout) != 0)) {
+			/* The key exists whatever stdout did: name it on stderr. */
+			fprintf(stderr, "ele_client: cannot write the result; key %u was generated, commit state %s\n",
+				id, ele_commit_name(st));
+			rc = 1;
+			goto done;
+		}
 		break;
 	case ELE_CLI_SIGN:
 		rc = ele_sign(&cl, cmd.key_id, (const uint8_t *)cmd.msg, strlen(cmd.msg), sig, &n) == 0 ? 0 : 1;
@@ -93,8 +98,12 @@ int main(int argc, char **argv)
 		break;
 	case ELE_CLI_DEL:
 		rc = ele_delete_key(&cl, cmd.key_id, &st) == 0 ? 0 : 1;
-		if (rc == 0)
-			printf("deleted %s\n", ele_commit_name(st));
+		if (rc == 0 && (printf("deleted %s\n", ele_commit_name(st)) < 0 || fflush(stdout) != 0)) {
+			fprintf(stderr, "ele_client: cannot write the result; key %u was deleted, commit state %s\n",
+				cmd.key_id, ele_commit_name(st));
+			rc = 1;
+			goto done;
+		}
 		break;
 	}
 	/* A failed update keeps its diagnostic state: print it, exit nonzero. */
@@ -107,6 +116,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "ele_client: update refused (%s)\n", ele_commit_name(st));
 	else if (rc != 0)
 		fprintf(stderr, "ele_client: failed\n");
+done:
 	ele_hsm_close(&ctx);
 	return rc;
 }

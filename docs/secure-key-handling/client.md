@@ -121,6 +121,22 @@ buffer, the library argument structure's `authentication_nonce` copy and the tex
 with a non-elidable volatile erase (`ele_secure.h`) on every exit path, success or error. A test hook shows the buffer
 is zero after `ele_hsm_open` returns, on success, a key-store open failure and a session open failure.
 
+`ele_hsm_open` builds the library's open-key-store arguments (the structure that holds `authentication_nonce`) in a
+mapping of its own too: an anonymous page, locked with `mlock` (and excluded from dumps), so the backend leaves no stack
+copy of the nonce. When the lock fails the open fails closed before the nonce is copied, and a test (a child with
+`RLIMIT_MEMLOCK` 0) asserts it. The page is zeroed, unlocked and unmapped on every exit path.
+
+**Residual copy, open.** The library keeps a stack copy of its own that this client cannot erase: `process_sab_msg`
+(`src/common/sab_msg/sab_process_msg.c:170`) declares the `cmd[]` word buffer on its stack, `prepare_sab_msg` fills it
+(`sab_process_msg.c:216`, from `sab_msg/sab_key_store.c:32`, `cmd->password = op_args->authentication_nonce`), the
+message is sent from it (`:268`) and the function returns (`:368`) without wiping it. Only a vendor patch removes that
+copy; it is recorded here, not solved.
+
+**A result that cannot be written.** `gen` and `del` check `printf` and `fflush`. When stdout cannot be written (a full
+disk, a closed pipe) the command exits 1 and prints the key id and its commit state on stderr
+(`key N was generated, commit state S`, `key N was deleted, commit state S`), because the HSM operation has already
+happened. A test sends stdout to `/dev/full` and asserts exit 1 and the key id on stderr.
+
 **Contract evidence and tests.** `scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s
 pin the flag and return-code values to the library's headers (a mismatch fails the build); that is the evidence the
 constants match the pinned library's contract. `test/ele_client_test.sh` also builds the shipped backend against
@@ -140,6 +156,27 @@ it, so they skip on a host without the image. `CI=true` alone does not require i
 against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same
 check when `ELE_SRC` names the fetched source, and shows that a wrong value fails it. No vendor header or text is
 copied into this repository.
+
+## The library contract the backend relies on
+
+Paths are in the pinned tree (`ele-lib.lock`), under `src/common/` unless stated; line numbers are 1-based and were
+re-checked against the fetched source. Nothing here is copied from it. "Provisional" means the source does not settle it
+and only the board can.
+
+| Behaviour the backend assumes | Where in the pinned source | Status |
+|---|---|---|
+| `PLAT=ele` builds with `-DPSA_COMPLIANT`, so the PSA branches of the message code are the ones compiled | `src/plat/ele/ele.mk:41` | read |
+| A success-tagged response with a warning rating maps to `HSM_NO_ERROR` (the warning is only logged), so a counter warning on a success-tagged reply is invisible to the caller | `hsm_api/hsm_utils.c:223-224`, `:24-48` (returns `HSM_NO_ERROR` at `:48`) | read |
+| `HSM_KEY_STORE_COUNTER` reaches the caller only from an error-tagged response | `hsm_api/hsm_utils.c:226` (error path), `:118` (the error case) | read |
+| No per-flag acknowledgement is exposed; "both flags acknowledged" is inferred from `HSM_NO_ERROR` | no field in the argument structures; see the two rows above | **provisional** |
+| Generate writes the key id into the caller's variable whatever the rating | `sab_msg/sab_key_generate.c:94-95`; the response handler runs at `sab_msg/sab_process_msg.c:333` | read |
+| A successful sign does not update `signature_size`; the PSA build stores the response size in `exp_signature_size` instead | `sab_msg/sab_sign_gen.c:178` | read |
+| The signature is 64 bytes (P-256 `r\|\|s`) | not stated at the call | **provisional** |
+| The library keeps an unwiped stack copy of the key-store nonce | `sab_msg/sab_process_msg.c:170, 216, 268, 368`; `sab_msg/sab_key_store.c:32` | read; open |
+
+Consequences in the backend: `hsm_sign` refuses a buffer under 64 bytes before the call and, after a success, reports
+64 rather than echoing the size it passed in. A generate that fails still returns the key id it was given. The test
+double (`ele_hsm_fake.c`) follows the same source: a sign leaves `signature_size` alone.
 
 ## What is left open
 

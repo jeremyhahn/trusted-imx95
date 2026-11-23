@@ -3,8 +3,12 @@
  * library's return codes into the client's policy. Built against the pinned
  * library's headers (ELE_SRC); never touches an enclave. Exit 0 when all pass.
  */
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "hsm_api.h"
 
@@ -83,6 +87,33 @@ static void nonce_erasure(void)
 	CHECK(nonce == 0, "nonce zero after a failed session open");
 
 	ele_hsm_wipe_hook = NULL;
+
+	/* The args page cannot be locked: open fails closed, the library never
+	 * sees the nonce, and the nonce is erased. Run in a child so the limit
+	 * does not reach the other tests. */
+	{
+		pid_t pid;
+		int status = 0;
+
+		fflush(stdout);
+		pid = fork();
+		if (pid == 0) {
+			struct rlimit rl = { 0, 0 };
+			uint32_t nn = 0xdeadbeef;
+
+			if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0)
+				_exit(77);
+			memset(&fake, 0, sizeof(fake));
+			if (ele_hsm_open(&x, 5, &nn) == 0)
+				_exit(77); /* lock is not limited here */
+			_exit(nn == 0 && fake.ks_nonce == 0 ? 0 : 1);
+		}
+		CHECK(pid > 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status), "mlock child ran");
+		if (WIFEXITED(status) && WEXITSTATUS(status) == 77)
+			printf("skip: memory locking is not limited for this user\n");
+		else
+			CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "open fails closed when the nonce page cannot be locked");
+	}
 }
 
 int main(void)
@@ -153,7 +184,11 @@ int main(void)
 
 	/* Sign goes through. */
 	n = sizeof(sig);
-	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 64 && fake.sign_calls == 1, "sign");
+	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) == 0 && n == 64 && fake.sign_calls == 1, "sign reports 64, not the buffer size");
+	/* A buffer under 64 bytes is refused before the library is called. */
+	n = 63;
+	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) != 0 && fake.sign_calls == 1, "short buffer refused before the call");
+	n = sizeof(sig);
 	{
 		size_t i;
 		int same = 1;

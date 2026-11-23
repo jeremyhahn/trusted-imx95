@@ -3,6 +3,9 @@
 # docs/secure-key-handling/client.md. PROVISIONAL: the Linux A55 side as the
 # caller of the HSM API is a default pending the owner (architecture.md).
 #
+# The library behaviour the client relies on, with file:line in this pinned
+# tree, is the contract table in docs/secure-key-handling/client.md.
+#
 # Format: one NAME=value per line; blank lines and # lines are ignored. The
 # script parses this file, it never sources it; each name appears once and each
 # value is checked. A value that could not be read would be the word UNREAD,
