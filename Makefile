@@ -48,7 +48,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	ahab-m7-test ahab-policy-test ahab-tamper-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools \
+	ele-lib ele-lib-check
 
 help: ## List the targets
 	@echo "Targets:"
@@ -175,6 +176,17 @@ SW_CACHE ?= $(SW_BASE)/cache
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
 	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+## --- The enclave HSM API client (docs/secure-key-handling/client.md; provisional) ---
+
+ELE_BASE ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/ele-lib
+ELE_OUT  ?= $(CURDIR)/.ele-lib/out
+
+ele-lib-check: ## Check secure-key-handling/ele-lib.lock and the toolchain pin it reads (offline)
+	@scripts/ele-lib-build.sh --check-lock
+
+ele-lib: ## Fetch NXP's secure-enclave library at the pinned commit and SHA-256, cross-build it for aarch64 into ELE_OUT (needs network; not in CI)
+	@scripts/ele-lib-build.sh --work "$(ELE_BASE)/work" --out "$(ELE_OUT)" --cache "$(ELE_BASE)/cache"
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
