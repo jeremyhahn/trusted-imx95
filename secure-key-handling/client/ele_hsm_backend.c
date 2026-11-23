@@ -40,7 +40,15 @@ static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *a
 		return false;
 	ack->strict_acked = (sent & ELE_REQ_STRICT_OPERATION) != 0;
 	ack->counter_warning = err == HSM_KEY_STORE_COUNTER;
-	ack->counter_acked = (sent & ELE_REQ_MONOTONIC_COUNTER) != 0 && !ack->counter_warning;
+	/* Fail closed. The pinned library maps a success-tagged response that
+	 * carries a warning rating to HSM_NO_ERROR (client.md, contract table),
+	 * so HSM_NO_ERROR does not show that the counter advanced. No per-flag
+	 * acknowledgement is exposed, so the counter flag is never reported
+	 * acknowledged and nothing is reported rollback-protected from here;
+	 * a generate is refused with the key id kept for reconciliation.
+	 * PROVISIONAL: lifted only by evidence from the board or a library
+	 * that exposes the acknowledgement (the owner's call). */
+	ack->counter_acked = false;
 	ack->split_configured = split;
 	return true;
 }

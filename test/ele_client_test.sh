@@ -132,12 +132,14 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "an unreadable nonce descriptor is refused before the store opens" 2 "cannot read the nonce"
 	no_hsm_call "bad nonce fd"
 	cli 0 --split-confirmed 5 3 gen
-	check "gen with a confirmed split" 0 "rollback-protected"
+	# HSM_NO_ERROR cannot show the counter advanced (a success-tagged warning maps to it): fail closed.
+	check "gen with a confirmed split is refused, never reported rollback-protected" 1 "key 7 was generated and is NOT rollback-protected"
+	case $OUT in *"key 7 rollback-protected"*) fail "gen claimed rollback protection" ;; esac
 	cli 0 5 3 gen
 	check "gen with the split unconfirmed fails" 1 "refused"
 	no_hsm_call "gen with the split unconfirmed (no session, no service, no generate)"
 	cli 0 --split-confirmed 5 3 gen
-	check "gen with a confirmed split prints the key" 0 "key 7"
+	check "gen with a confirmed split names the key it generated" 1 "key 7"
 	grep -q '^open_session dumpable=0$' "$tmp/hsm.log" || fail "the CLI did not set PR_SET_DUMPABLE 0 before opening the HSM"
 	# sign prints the double's known signature bytes, byte i = (3i+1)&0xff.
 	want=
@@ -165,7 +167,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		rc=0
 		"$tmp/ele_cli" --split-confirmed 5 3 gen 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
 		[ "$rc" = 1 ] || fail "gen with a full stdout: exit $rc, want 1"
-		grep -q 'key 7 was generated, commit state' "$tmp/full.err" || fail "gen with a full stdout: the key id is not on stderr"
+		grep -q 'key 7 was generated' "$tmp/full.err" || fail "gen with a full stdout: the key id is not on stderr"
 		rc=0
 		"$tmp/ele_cli" --split-confirmed 5 3 del 7 3<"$tmp/nonce" >/dev/full 2>"$tmp/full.err" || rc=$?
 		[ "$rc" = 1 ] || fail "del with a full stdout: exit $rc, want 1"

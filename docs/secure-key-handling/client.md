@@ -91,8 +91,15 @@ library's HSM API (`include/hsm/hsm_api.h` and `include/hsm/internal/*.h` at the
 - signing: `hsm_open_signature_generation_service`, `hsm_generate_signature` (ECDSA P-256 with SHA-256),
   `hsm_close_signature_generation_service`.
 
-The return code maps to the acknowledgement: `HSM_NO_ERROR` acknowledges the flags sent; `HSM_KEY_STORE_COUNTER` is a
+The return code maps to the acknowledgement: `HSM_NO_ERROR` acknowledges the strict flag sent; `HSM_KEY_STORE_COUNTER` is a
 counter warning (accepted, counter not advanced: strict acknowledged, counter not); any other code fails the call.
+**The counter flag is never reported acknowledged (fail closed, provisional).** The library maps a success-tagged
+response that carries a warning rating to `HSM_NO_ERROR` (contract table below), so `HSM_NO_ERROR` cannot show the
+counter advanced, and no per-flag acknowledgement is exposed. The backend therefore reports no operation
+rollback-protected: `generate` is refused (exit 1) with the key id and `NOT rollback-protected` on stderr, so the key
+can be reconciled or deleted, and it never prints `rollback-protected`. This keeps the SPEC statement (rollback-protected
+only when both flags are acknowledged) true and needs no SPEC change. What lifts it is evidence from the board, or a
+library that exposes the acknowledgement: the owner's decision. A test asserts it on the double.
 The counter split cannot be read through these calls, so the backend reports it configured only when the caller sets
 `counter_split_confirmed` after confirming it on the device. It is false by default, so nothing is reported
 rollback-protected on an unconfirmed split.

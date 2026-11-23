@@ -135,8 +135,10 @@ int main(void)
 
 	/* Generate: strict and counter flags, no plaintext key. */
 	st = ELE_NOT_COMMITTED;
-	CHECK(ele_generate_key(&c, &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED && id == 7,
-	      "HSM_NO_ERROR with the split confirmed: rollback-protected");
+	/* HSM_NO_ERROR is also what a success-tagged warning response maps to:
+	 * the counter acknowledgement cannot be established, so it fails closed. */
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 7,
+	      "HSM_NO_ERROR (also a success-tagged warning): not rollback-protected, generate refused, key id kept");
 	CHECK(fake.gen_flags == (HSM_OP_KEY_GENERATION_FLAGS_STRICT_OPERATION |
 				 HSM_OP_KEY_GENERATION_FLAGS_MONOTONIC_COUNTER),
 	      "generate sends STRICT_OPERATION and MONOTONIC_COUNTER only");
