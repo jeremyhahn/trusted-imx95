@@ -23,6 +23,17 @@ void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 int (*ele_hsm_lockall_override)(void);
 void (*ele_hsm_scrub_hook)(size_t len);
 size_t ele_hsm_result_len_override;
+void (*ele_hsm_event_hook)(const char *event);
+
+#ifndef MADV_WIPEONFORK
+#define MADV_WIPEONFORK 18
+#endif
+
+static void ele_hsm_event(const char *event)
+{
+	if (ele_hsm_event_hook)
+		ele_hsm_event_hook(event);
+}
 
 /* The library copies the nonce into its own stack buffer (process_sab_msg's
  * cmd[MAX_CMD_WORD_SZ = 256] words, plus the response buffer and frames) and
@@ -292,7 +303,7 @@ static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *
  * non-dumpable and locked, builds the library's arguments in its own memory,
  * erases what it can reach, and leaves with _exit() (no atexit handler, no
  * stdio flush); its pages, the vendor stack included, go when it exits. */
-__attribute__((noreturn)) static void op_child(int wfd, const struct op_req *rq, uint32_t *nonce)
+__attribute__((noreturn)) static void op_child(int wfd, int rfd, const struct op_req *rq)
 {
 	open_session_args_t sa;
 	open_svc_key_store_args_t ks;
@@ -301,26 +312,56 @@ __attribute__((noreturn)) static void op_child(int wfd, const struct op_req *rq,
 	const unsigned char *p = (const unsigned char *)&res;
 	hsm_hdl_t sess = 0, store = 0;
 	hsm_err_t err;
+	uint32_t nonce = 0;
+	unsigned char *np = (unsigned char *)&nonce;
+	size_t nleft = sizeof(nonce);
 
+	/* The child holds no credential yet (the parent's copy sits in a page that
+	 * is zero after the fork). It goes non-dumpable and locks first, says so,
+	 * and only then does the parent send the nonce. */
 	if (prctl(PR_SET_DUMPABLE, 0) != 0 || lock_process() != 0)
 		_exit(3);
+	ele_hsm_event("child_locked");
+	for (;;) {
+		ssize_t w = write(wfd, "L", 1);
+
+		if (w < 0 && errno == EINTR)
+			continue;
+		if (w != 1)
+			_exit(4);
+		break;
+	}
+	while (nleft > 0) {
+		ssize_t r = read(rfd, np, nleft);
+
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r <= 0) {
+			ele_secure_zero(&nonce, sizeof(nonce));
+			_exit(5);
+		}
+		np += r;
+		nleft -= (size_t)r;
+	}
+	close(rfd);
+	ele_hsm_event("nonce_received");
 	memset(&res, 0, sizeof(res));
 	res.status = -1;
 	memset(&sa, 0, sizeof(sa));
 	if (hsm_open_session(&sa, &sess) != HSM_NO_ERROR) {
-		ele_secure_zero(nonce, sizeof(*nonce));
+		ele_secure_zero(&nonce, sizeof(nonce));
 		scrub_stack();
 		goto out;
 	}
 	memset(&ks, 0, sizeof(ks));
 	ks.key_store_identifier = rq->store_id;
-	ks.authentication_nonce = *nonce;
+	ks.authentication_nonce = nonce;
 	/* The store is loaded, never created here; both update flags are set so
 	 * the store's updates are strict and counted. */
 	ks.flags = HSM_SVC_KEY_STORE_FLAGS_LOAD | HSM_SVC_KEY_STORE_FLAGS_STRICT_OPERATION |
 		   HSM_SVC_KEY_STORE_FLAGS_MONOTONIC;
 	err = hsm_open_key_store_service(sess, &ks, &store);
-	ele_secure_zero(nonce, sizeof(*nonce));
+	ele_secure_zero(&nonce, sizeof(nonce));
 	ele_secure_zero(&ks, sizeof(ks));
 	if (ele_hsm_wipe_hook)
 		ele_hsm_wipe_hook(&ks, sizeof(ks));
@@ -354,39 +395,93 @@ static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_r
 {
 	struct op_req rq = *rq_in;
 	struct op_res res;
-	unsigned char buf[sizeof(res) + 1];
-	size_t got = 0;
-	int fd[2], status = 0, rd_ok = 1;
-	uint32_t *nonce = c->nonce;
+	unsigned char buf[sizeof(res) + 1], ready = 0;
+	size_t got = 0, ps = (size_t)sysconf(_SC_PAGESIZE), left = sizeof(uint32_t);
+	int up[2], down[2], status = 0, rd_ok = 1, sent_ok = 1, rc = -1;
+	uint32_t *slot = c->nonce;
+	volatile unsigned char *held;
+	const unsigned char *hp;
+	ssize_t r;
 	pid_t pid;
 
 	/* One operation per open: the nonce is spent by the one fork. */
 	c->open = false;
 	c->nonce = NULL;
-	if (!nonce)
+	if (!slot)
 		return -1;
 	rq.store_id = c->store_id;
-	if (pipe(fd) != 0) {
-		ele_secure_zero(nonce, sizeof(*nonce));
+	/* The parent's copy lives in its own locked page (the process is under
+	 * mlockall), marked to be zero in a forked child; the caller's slot is
+	 * wiped now. The child therefore inherits no credential at all. */
+	held = mmap(NULL, ps, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (held == MAP_FAILED) {
+		ele_secure_zero(slot, sizeof(*slot));
+		return -1;
+	}
+	if (madvise((void *)held, ps, MADV_WIPEONFORK) != 0) {
+		ele_secure_zero(slot, sizeof(*slot));
+		munmap((void *)held, ps);
+		return -1;
+	}
+	memcpy((void *)held, slot, sizeof(*slot));
+	ele_secure_zero(slot, sizeof(*slot));
+	if (pipe(up) != 0) {
+		ele_secure_zero((void *)held, ps);
+		munmap((void *)held, ps);
+		return -1;
+	}
+	if (pipe(down) != 0) {
+		close(up[0]);
+		close(up[1]);
+		ele_secure_zero((void *)held, ps);
+		munmap((void *)held, ps);
 		return -1;
 	}
 	pid = fork();
 	if (pid < 0) {
-		close(fd[0]);
-		close(fd[1]);
-		ele_secure_zero(nonce, sizeof(*nonce));
+		close(up[0]);
+		close(up[1]);
+		close(down[0]);
+		close(down[1]);
+		ele_secure_zero((void *)held, ps);
+		munmap((void *)held, ps);
 		return -1;
 	}
 	if (pid == 0) {
-		close(fd[0]);
-		op_child(fd[1], &rq, nonce);
+		close(up[0]);
+		close(down[1]);
+		op_child(up[1], down[0], &rq);
 	}
-	/* Right after the fork: the parent's copy goes before anything else. */
-	ele_secure_zero(nonce, sizeof(*nonce));
-	close(fd[1]);
-	for (;;) {
-		ssize_t r = read(fd[0], buf + got, sizeof(buf) - got);
+	close(up[1]);
+	close(down[0]);
+	/* Send the nonce only after the child says it is locked and non-dumpable;
+	 * a child that cannot lock exits without a word and gets nothing. */
+	do {
+		r = read(up[0], &ready, 1);
+	} while (r < 0 && errno == EINTR);
+	if (r == 1 && ready == 'L') {
+		hp = (const unsigned char *)held;
+		ele_hsm_event("nonce_sending");
+		while (left > 0) {
+			ssize_t w = write(down[1], hp, left);
 
+			if (w < 0 && errno == EINTR)
+				continue;
+			if (w <= 0) {
+				sent_ok = 0;
+				break;
+			}
+			hp += w;
+			left -= (size_t)w;
+		}
+	} else {
+		sent_ok = 0;
+	}
+	ele_secure_zero((void *)held, ps);
+	munmap((void *)held, ps);
+	close(down[1]);
+	for (; sent_ok;) {
+		r = read(up[0], buf + got, sizeof(buf) - got);
 		if (r < 0 && errno == EINTR)
 			continue;
 		if (r < 0)
@@ -397,26 +492,25 @@ static int run_op(struct ele_hsm_ctx *c, const struct op_req *rq_in, struct op_r
 		if (got == sizeof(buf))
 			break;
 	}
-	close(fd[0]);
+	close(up[0]);
 	while (waitpid(pid, &status, 0) < 0) {
 		if (errno != EINTR) {
 			ele_secure_zero(buf, sizeof(buf));
 			return -1;
 		}
 	}
-	if (!rd_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || got != sizeof(res)) {
+	if (!sent_ok || !rd_ok || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || got != sizeof(res)) {
 		ele_secure_zero(buf, sizeof(buf));
 		return -1;
 	}
 	memcpy(&res, buf, sizeof(res));
 	ele_secure_zero(buf, sizeof(buf));
-	if (res.status != 0) {
-		ele_secure_zero(&res, sizeof(res));
-		return -1;
+	if (res.status == 0) {
+		*out = res;
+		rc = 0;
 	}
-	*out = res;
 	ele_secure_zero(&res, sizeof(res));
-	return 0;
+	return rc;
 }
 
 int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)

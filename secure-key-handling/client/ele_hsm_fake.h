@@ -36,6 +36,8 @@ struct ele_ks_seen {
 	uint32_t calls;
 	uint32_t hook_calls, hook_nonzero;	/* the test's wipe hook, run in the child */
 	uint32_t scrubs, scrub_bytes;		/* the test's scrub hook, run in the child */
+	uint32_t ev_n;				/* the test's event hook: the ordered event log */
+	char ev[8][16];
 };
 
 extern struct ele_ks_seen *ks_seen;

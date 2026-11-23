@@ -377,6 +377,46 @@ static void lock_failures(void)
 	}
 }
 
+static void event_hook(const char *e)
+{
+	uint32_t i = __atomic_fetch_add(&ks_seen->ev_n, 1, __ATOMIC_SEQ_CST);
+
+	if (i < 8)
+		snprintf(ks_seen->ev[i], sizeof(ks_seen->ev[i]), "%s", e);
+}
+
+/* The credential reaches the child only after the child reports it is locked. */
+static void nonce_order(void)
+{
+	struct ele_hsm_ctx x;
+	struct ele_client c;
+	uint8_t sig[64];
+	uint32_t nonce;
+	size_t n = sizeof(sig);
+
+	ele_hsm_event_hook = event_hook;
+	begin(&x, &c, &nonce, true);
+	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) == 0, "sign for the ordering test");
+	CHECK(ks_seen->ev_n == 3 && strcmp(ks_seen->ev[0], "child_locked") == 0 &&
+		      strcmp(ks_seen->ev[1], "nonce_sending") == 0 && strcmp(ks_seen->ev[2], "nonce_received") == 0,
+	      "event order: child locked, parent sends the nonce, child receives it");
+	CHECK(nonce == 0 && ks_seen->nonce == NONCE, "the nonce reached the library and the parent's slot is zero");
+	ele_hsm_close(&x);
+
+	/* A child that cannot lock reports nothing: no send, no receive, no library call. */
+	ele_hsm_lockall_override = lock_ok;
+	begin(&x, &c, &nonce, true);
+	ele_hsm_lockall_override = lock_fails;
+	n = sizeof(sig);
+	CHECK(ele_sign(&c, 7, (const uint8_t *)"m", 1, sig, &n) != 0, "a child that cannot lock fails the operation");
+	CHECK(ks_seen->ev_n == 0 && fake.calls == 0 && ks_seen->nonce == 0,
+	      "the nonce is never sent to a child that did not lock, and never reached the library");
+	CHECK(nonce == 0, "the parent's slot is zero after the refused send");
+	ele_hsm_lockall_override = lock_ok;
+	ele_hsm_close(&x);
+	ele_hsm_event_hook = NULL;
+}
+
 int main(void)
 {
 	/* A unit test cannot count on its host's memory-lock limit: the real
@@ -389,6 +429,7 @@ int main(void)
 	child_failures();
 	nonce_erasure();
 	lock_failures();
+	nonce_order();
 	if (fails)
 		return 1;
 	printf("ele_hsm_backend_test: all passed\n");

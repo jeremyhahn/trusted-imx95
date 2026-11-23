@@ -43,6 +43,10 @@ extern void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
 /* Test hook, 0 in production: when nonzero and below the result size, the
  * key-store child writes only this many bytes of its result (a short read). */
 extern size_t ele_hsm_result_len_override;
+/* Test hook, NULL in production: called with "child_locked" and
+ * "nonce_received" in the child and "nonce_sending" in the parent, so a test
+ * can check the order: the nonce is sent only after the child has locked. */
+extern void (*ele_hsm_event_hook)(const char *event);
 /* All vendor calls of an operation run in one forked child; the wipe hook is
  * called in that child. */
 
