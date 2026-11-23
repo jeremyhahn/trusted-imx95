@@ -262,7 +262,7 @@ expect "marker: an id with a space is refused" test "$(sh "$rm_sh" sector 'a b' 
 expect "marker: an offset that is not a multiple of 512 is refused" test "$(sh "$rm_sh" write "$wt/marker" 100 x >/dev/null 2>&1; echo $?)" -ne 0
 printf '%s\n' 'label: gpt' 'sector-size: 512' '/dev/x1 : start=        2048, size=      524288, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="boot"' '/dev/x2 : start=      526336, size=     2097152, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"' >"$wt/dump"
 expect "marker: the root partition's byte offset is read from an sfdisk dump" test "$(sh "$rm_sh" start <"$wt/dump")" -eq $((526336 * 512))
-expect "the image build registers the marker step as a postfunc of the wic task" ncstr "$img" 'do_image_wic[postfuncs] += "trusted_imx95_mark_root"'
+expect "the image build appends the marker step to IMAGE_CMD:wic, which runs before the conversions" ncstr "$img" 'IMAGE_CMD:wic:append () {'
 expect "marker: write refuses a file that does not exist (dd would create one)" test "$(sh "$rm_sh" write "$wt/no-such-file" 0 x >/dev/null 2>&1; echo $?)" -ne 0
 expect "marker: write left no file behind" test ! -e "$wt/no-such-file"
 
@@ -271,10 +271,11 @@ expect "marker: write left no file behind" test ! -e "$wt/no-such-file"
 # hook's shell body is cut out of the .bb by its function name and run with stubbed bitbake variables.
 # IMAGE_FSTYPES: the image adds only "wic" (machine defaults are not readable without a build), so the
 # variants are .wic, .wic.gz (a compressed variant, in case a build adds one) and a .wic.bmap.
-# The order is the one the image class gives the post-step: it is a postfunc of do_image_wic, so it
-# runs inside that task, before any compression or bmap conversion, which then run on its output;
-# do_image_complete copies the result to the deploy directory. UNBUILT: that order is read from the
-# postfunc registration, not observed in a build.
+# The order is derived from the recipe (taskorder), not supplied: the pinned image.bbclass inlines
+# IMAGE_CMD:wic and then every conversion into the one do_image_wic body and runs postfuncs after it,
+# so the hook must be in IMAGE_CMD:wic (append) to precede the compression and the bmap; do_image_complete
+# then copies the result to the deploy directory. UNBUILT: the order is read from the pinned classes
+# (docs/ftpm/build.md), not observed in a build.
 chk=$ROOT/scripts/platform-image-check-root-marker.sh
 hookfn=trusted_imx95_mark_root
 expect "the hook function is in the image recipe" has "$img" "$hookfn () {"
@@ -357,6 +358,21 @@ mktree() {
 # scen NAME ORDER TREE SUPERBLOCK: one synthetic build. ORDER is the sequence of steps run:
 # h = the hook (extracted from TREE's recipe), g = gzip of the wic, b = bmap of the wic.
 # Sets hook_rc and chk_rc; the artifacts are in $wt/NAME/deploy.
+# taskorder TREE: the step order of the generated do_image_wic, derived from where TREE's recipe puts the
+# hook. image.bbclass:467-531 (pinned openembedded-core, docs/ftpm/build.md) builds the task body as
+# IMAGE_CMD:wic (with any :append), then every conversion (g, b), and runs postfuncs after the body.
+# So the hook is first (h,g,b) when IMAGE_CMD:wic:append calls it, and last (g,b,h) when it is a postfunc.
+taskorder() {
+	local f=$1/platform-image/recipes-core/images/trusted-imx95-image.bb
+	if sed -n '/^IMAGE_CMD:wic:append () {/,/^}/p' "$f" | grep -q "^[[:space:]]*$hookfn\$"; then
+		echo h,g,b
+	elif grep -q "^do_image_wic\[postfuncs\] += \"$hookfn\"" "$f"; then
+		echo g,b,h
+	else
+		echo none
+	fi
+}
+
 scen() {
 	local d=$wt/$1 order=$2 tree=$3 st n=trusted-imx95-image-frdm-imx95-pro.rootfs-20250101 l body=0 w
 	rm -rf "$d"
@@ -371,6 +387,7 @@ scen() {
 	while IFS= read -r l; do
 		case $l in "$hookfn () {"*) body=1 ;; '}'*) body=0 ;; *) [ "$body" -eq 1 ] && printf '%s\n' "$l" >>"$d/hook.sh" ;; esac
 	done <"$tree/platform-image/recipes-core/images/trusted-imx95-image.bb"
+	[ "$order" = derived ] && order=$(taskorder "$tree")
 	w=$d/imgdeploy/$n.wic
 	mkwic "$w" "$4"
 	hook_rc=0
@@ -397,7 +414,8 @@ expect "scenario tree: the extracted recipe equals the real one" cmp -s "$img" "
 expect "scenario tree: the hook function body was cut out" test "$(grep -c . <(sed -n "/^$hookfn () {/,/^}/p" "$img"))" -gt 2
 
 # The real order: hook, then gzip, then bmap.
-scen good h,g,b "$wt/tree-good" 1
+scen good derived "$wt/tree-good" 1
+expect "scenario order: derived from the recipe, the hook runs before every conversion" test "$(taskorder "$wt/tree-good")" = h,g,b
 expect "hook: runs ok on the synthetic wic" test "$hook_rc" -eq 0
 expect "good deploy: the wic, the gz and the bmap are there" test -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic" -a -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.gz" -a -f "$wt/good/deploy/trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.bmap"
 expect "good deploy: the checker passes" test "$chk_rc" -eq 0
@@ -415,6 +433,25 @@ sed -i 's|\(<BmapFileChecksum> \)[0-9a-f]|\1z|' "$wt/bm-tamper/trusted-imx95-ima
 expect "bmap: a bad file checksum fails the checker" test "$(PATH="$wt/good/bin:$PATH" sh "$chk" "$wt/bm-tamper" >"$wt/bm-tamper.log" 2>&1; echo $?)" -ne 0
 expect "bmap: ... and the log names the file checksum" has "$wt/bm-tamper.log" 'file checksum'
 rm -rf "$wt/bm-tamper"
+# A .wic.gz whose payload is the good image (valid GPT and marker) but whose gzip trailer CRC is wrong:
+# gzip -dc writes all the data, then exits nonzero. A pipeline into dd would hide that status.
+gzn=trusted-imx95-image-frdm-imx95-pro.rootfs-20250101.wic.gz
+cp -a "$wt/good/deploy" "$wt/gz-bad"
+gzsz=$(stat -c %s "$wt/gz-bad/$gzn")
+printf '\377\377\377\377' | dd of="$wt/gz-bad/$gzn" bs=1 seek=$((gzsz - 8)) conv=notrunc 2>/dev/null
+expect "gz trailer: the corrupt gzip has a valid payload (gzip -dc yields the marker) and a bad status" test "$(gzip -dc "$wt/gz-bad/$gzn" >"$wt/gz-bad.raw" 2>/dev/null; dd if="$wt/gz-bad.raw" bs=512 skip=$((rootoff / 512)) count=1 2>/dev/null | cmp -s - "$wt/marker"; echo $?)" -eq 0
+expect "gz trailer: gzip -dc exits nonzero on it" test "$(gzip -dc "$wt/gz-bad/$gzn" >/dev/null 2>&1; echo $?)" -ne 0
+expect "gz trailer: the checker refuses it" test "$(PATH="$wt/good/bin:$PATH" sh "$chk" "$wt/gz-bad" >"$wt/gz-bad.log" 2>&1; echo $?)" -ne 0
+expect "gz trailer: ... and the log names the file" has "$wt/gz-bad.log" "$gzn: cannot be decompressed"
+# Mutation 7: the status check removed (the old pipeline into dd): the corrupt gzip must then pass, proving
+# the case above tests that check. A scratch copy of the checker; the real one is untouched.
+mkdir -p "$wt/tree-m7/scripts" "$wt/tree-m7/platform-image/files"
+cp "$rm_sh" "$wt/tree-m7/platform-image/files/root-marker.sh"
+# shellcheck disable=SC2016 # the sed program holds the script's own $ words
+sed 's#^\t\t\$dec <"\$1" >"\$tmp/img" 2>"\$tmp/dec.err" .*#\t\t$dec <"$1" | dd of="$tmp/img" bs=1M conv=sparse 2>/dev/null || return 1#' "$chk" >"$wt/tree-m7/scripts/chk.sh"
+expect "mutation 7: the scratch checker differs from the real one" test "$(cmp -s "$chk" "$wt/tree-m7/scripts/chk.sh"; echo $?)" -ne 0
+expect "mutation 7 (no decompressor status check): the corrupt gzip passes" test "$(PATH="$wt/good/bin:$PATH" sh "$wt/tree-m7/scripts/chk.sh" "$wt/gz-bad" >/dev/null 2>&1; echo $?)" -eq 0
+rm -rf "$wt/gz-bad" "$wt/gz-bad.log" "$wt/gz-bad.raw" "$wt/tree-m7"
 expect "checker: a directory with no image fails" test "$(sh "$chk" "$wt/geom-none" >/dev/null 2>&1; echo $?)" -ne 0
 mkdir "$wt/empty-deploy"
 expect "checker: an empty deploy directory fails" test "$(sh "$chk" "$wt/empty-deploy" >/dev/null 2>&1; echo $?)" -ne 0
@@ -423,7 +460,7 @@ expect "checker: an empty deploy directory fails" test "$(sh "$chk" "$wt/empty-d
 # shellcheck disable=SC2016 # sed scripts, the $ are literal
 mktree "$wt/tree-m1" 's|\${IMAGE_NAME}\.wic |${IMAGE_NAME}.rootfs.wic |'
 expect "mutation 1: the scratch recipe differs from the real one" test "$(cmp -s "$img" "$wt/tree-m1/platform-image/recipes-core/images/trusted-imx95-image.bb"; echo $?)" -ne 0
-scen m1 h,g,b "$wt/tree-m1" 1
+scen m1 derived "$wt/tree-m1" 1
 expect "mutation 1 (hook targets a nonexistent file): the hook fails" test "$hook_rc" -ne 0
 expect "mutation 1: the checker fails" test "$chk_rc" -ne 0
 expect "mutation 1: the checker says the root sector holds no marker" has "$wt/m1/chk.log" 'not 512 nonzero bytes'
@@ -431,7 +468,7 @@ expect "mutation 1: the checker says the root sector holds no marker" has "$wt/m
 # shellcheck disable=SC2016 # a sed script, the $ are literal
 mktree "$wt/tree-m2" '' 's|^\tput "\$2" "\$off" "\$3"$|\t:|'
 expect "mutation 2: the scratch script differs from the real one" test "$(cmp -s "$rm_sh" "$wt/tree-m2/platform-image/files/root-marker.sh"; echo $?)" -ne 0
-scen m2 h,g,b "$wt/tree-m2" 1
+scen m2 derived "$wt/tree-m2" 1
 expect "mutation 2 (wic mode writes nothing): the hook itself exits ok" test "$hook_rc" -eq 0
 expect "mutation 2: the checker fails" test "$chk_rc" -ne 0
 expect "mutation 2: the checker says the root sector holds no marker" has "$wt/m2/chk.log" 'not 512 nonzero bytes'
@@ -439,6 +476,13 @@ expect "mutation 2: the checker says the root sector holds no marker" has "$wt/m
 scen m3 g,h,b "$wt/tree-good" 1
 expect "mutation 3 (hook after compression): the checker fails" test "$chk_rc" -ne 0
 expect "mutation 3: it names the compressed variant" has "$wt/m3/chk.log" '.wic.gz: the root sector'
+# Mutation 6: the recipe registers the hook as a postfunc of do_image_wic (the earlier, wrong placement).
+# The order is derived from that recipe: the hook runs after the conversions, so the checker must fail.
+mktree "$wt/tree-m6" 's/^IMAGE_CMD:wic:append () {/do_image_wic[postfuncs] += "trusted_imx95_mark_root"\ntrusted_imx95_unused () {/'
+expect "mutation 6: the derived order puts the hook after the conversions" test "$(taskorder "$wt/tree-m6")" = g,b,h
+scen m6 derived "$wt/tree-m6" 1
+expect "mutation 6 (hook as a postfunc): the checker fails" test "$chk_rc" -ne 0
+expect "mutation 6: it names the compressed variant" has "$wt/m6/chk.log" '.wic.gz: the root sector'
 # Mutation 4: the hook runs after the bmap, and the root block was a hole when the bmap was made.
 scen m4 b,h "$wt/tree-good" 0
 expect "mutation 4 (hook after bmap, block unmapped): the checker fails" test "$chk_rc" -ne 0
@@ -447,7 +491,7 @@ expect "mutation 4: the bmap does not cover the marker" has "$wt/m4/chk.log" 'no
 scen m5 b,h "$wt/tree-good" 1
 expect "mutation 5 (hook after bmap, block mapped): the checker fails" test "$chk_rc" -ne 0
 expect "mutation 5: the range checksum does not match" has "$wt/m5/chk.log" 'does not match the image'
-rm -rf "$wt"/good "$wt"/m[1-5] "$wt"/tree-* "$wt/empty-deploy" "$wt/genbmap.py"
+rm -rf "$wt"/good "$wt"/m[1-6] "$wt"/tree-* "$wt/empty-deploy" "$wt/genbmap.py"
 mkroot "$rootdev" 2 # the whole partition rewritten from the very same image: same content id
 expect "token: a full-partition identical rewrite runs ok" test "$(wipe_run)" -eq 0
 expect "token: a full-partition identical rewrite wipes the NV" test ! -e "$wt/data/tee/obj"

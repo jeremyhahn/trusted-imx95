@@ -53,7 +53,10 @@ materialise() {
 		*) return 1 ;;
 		esac
 		# shellcheck disable=SC2086 # the decompressor is a word list chosen above
-		$dec <"$1" | dd of="$tmp/img" bs=1M conv=sparse 2>/dev/null || return 1
+		# Not a pipeline: a POSIX pipeline returns the last command's status, so a decompressor
+		# that fails (a bad gzip CRC or length trailer, a truncated stream) would be missed.
+		# The decompressor's own status is tested here; a failure leaves no usable image.
+		$dec <"$1" >"$tmp/img" 2>"$tmp/dec.err" || { rm -f "$tmp/img"; return 1; }
 		printf '%s\n' "$tmp/img"
 		;;
 	esac
@@ -119,7 +122,7 @@ for f in "$dir"/*.wic "$dir"/*.wic.gz "$dir"/*.wic.bz2 "$dir"/*.wic.xz "$dir"/*.
 	seen=$((seen + 1))
 	[ -f "$f" ] || { fail "$f is not a readable file (a dangling link?)"; continue; }
 	rm -f "$tmp/img"
-	img=$(materialise "$f") || { fail "$f: cannot be decompressed"; continue; }
+	img=$(materialise "$f") || { fail "$f: cannot be decompressed (the decompressor failed: a corrupt or truncated file)"; continue; }
 	if ! start=$(sfdisk -d "$img" 2>/dev/null | sh "$rm_sh" start 2>/dev/null); then
 		fail "$f: no partition named root in its partition table"
 		continue

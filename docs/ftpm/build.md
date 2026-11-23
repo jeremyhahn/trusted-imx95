@@ -102,6 +102,19 @@ The wic's GPT, read from the image: `boot` (256 MiB, FAT, holds `Image` and the 
 `imx-boot` entry; the image drops the `mcore-demos/` entries of `IMAGE_BOOT_FILES` (imx-m7-demos, EULA). The rootfs has
 the `/data` mountpoint. The NV is wiped with a rootfs reflash (SPEC row `ftpm`): a full-image flash recreates `tee-data` empty.
 
+The root-sector marker and the task order (read from the pinned openembedded-core, commit
+`5d1aa5c806c061a2994f4decb59016610f093213` of `platform-image/manifest.lock`; no bitbake was run):
+`meta/classes-recipe/image.bbclass:467-470` puts `IMAGE_CMD` of the type into the generated `do_image_<type>` body;
+`:480-501` then appends every conversion command (`CONVERSION_CMD:gz`, `:xz`, `:zst`, `:bmap` at
+`image_types.bbclass:342-357`) to that same body; `:521` sets the body as the task, and `:527` and `:531` add
+`create_symlinks` and `write_image_output_manifest` as postfuncs. Postfuncs therefore run after the conversions, so a marker
+written by a `do_image_wic[postfuncs]` step would reach the `.wic` only, and the `.wic.gz` and `.wic.bmap` would be stale.
+The image therefore appends the marker step to `IMAGE_CMD:wic` (`image_types_wic.bbclass:74-105`, which ends with the `mv`
+that creates `${IMAGE_NAME}.wic`), so it runs before every conversion. That is the smallest change the class supports: no
+change to the wks, and the root partition image is not touched. Unbuilt: this order is read from the classes, not observed.
+
 Still open:
 
 - The board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
+
+

@@ -80,11 +80,19 @@ do_rootfs[file-checksums] += "${THISDIR}/../../files/rootfs-id.sh:True"
 # The root binding token sector (first sector of the root partition) must hold a nonzero
 # "unbound" marker in the image: an all-zero sector is skipped by a sparse writer, which would
 # keep the old token and the old NV (docs/ftpm/README.md). The step writes it into the wic
-# after wic made it. MISSING: no survey covers it; unbuilt: the wic file name, the order against
-# a .bmap and any compression of the wic are unverified, no bitbake run has used this.
+# after wic made it, and it must do so BEFORE the conversions. image.bbclass inlines IMAGE_CMD
+# and then every CONVERSION_CMD (gz, xz, zst, bmap...) into the one generated do_image_wic body
+# (image.bbclass:467-513 at the pinned openembedded-core), and runs postfuncs only after that body.
+# A postfunc would therefore mark the .wic after its .wic.gz and .wic.bmap were made, leaving those
+# stale. So the step is appended to IMAGE_CMD:wic (image_types_wic.bbclass:74-105, which ends with
+# the mv that makes ${IMAGE_NAME}.wic), which the body runs before any conversion
+# (docs/ftpm/build.md). MISSING: no survey covers it; unbuilt: no bitbake run has used this, the
+# order is read from the pinned classes.
 trusted_imx95_mark_root () {
     sh ${THISDIR}/../../files/root-marker.sh wic ${IMGDEPLOYDIR}/${IMAGE_NAME}.wic "$(cat ${IMAGE_ROOTFS}${sysconfdir}/trusted-imx95-rootfs-id)"
 }
-do_image_wic[postfuncs] += "trusted_imx95_mark_root"
+IMAGE_CMD:wic:append () {
+    trusted_imx95_mark_root
+}
 do_image_wic[vardeps] += "trusted_imx95_mark_root"
 do_image_wic[file-checksums] += "${THISDIR}/../../files/root-marker.sh:True"
