@@ -101,7 +101,18 @@ descriptor (`3<nonce-file`; a terminal is refused) and never from the arguments,
 it. Every number (store id, descriptor, key id) is parsed strictly (decimal or `0x` hex, no sign, no space, no
 trailing character, at most `UINT32_MAX`) and the whole command line is checked before any HSM service is opened, so
 `del 4294967297` is refused rather than truncated to key 1. `--split-confirmed` is the caller's statement that the
-counter split is configured on the device; without it nothing is rollback-protected and generate fails.
+counter split is configured on the device; without it nothing is rollback-protected, and generate is refused before any
+HSM call is made (a test asserts zero generate calls on the double).
+
+**`sign` output.** `sign` writes the signature bytes to stdout as one line of lowercase hex, or as raw bytes with
+`--raw` (`ele_client --raw <store-id> <nonce-fd> sign <key-id> <msg>`; `--raw` is refused on any other command). A test
+compares the output with the double's known signature bytes exactly.
+
+**Nonce handling.** The command first sets the process non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`) and `RLIMIT_CORE` to
+0. The nonce is held in one buffer locked with `mlock` where available. `ele_hsm_open` takes a pointer to it, and the
+buffer, the library argument structure's `authentication_nonce` copy and the text buffer it was read through are erased
+with a non-elidable volatile erase (`ele_secure.h`) on every exit path, success or error. A test hook shows the buffer
+is zero after `ele_hsm_open` returns, on success, a key-store open failure and a session open failure.
 
 **Contract evidence and tests.** `scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s
 pin the flag and return-code values to the library's headers (a mismatch fails the build); that is the evidence the
@@ -109,9 +120,12 @@ constants match the pinned library's contract. `test/ele_client_test.sh` also bu
 `ele_hsm_fake.c`, a test double of the library's calls compiled on the same headers, and checks the request flags it
 sends (key store `LOAD`, `STRICT_OPERATION` and `MONOTONIC`, never `CREATE`; generate strict and counter, never
 `PLAINTEXT_KEY`; delete strict only) and its translation of `HSM_NO_ERROR`, `HSM_KEY_STORE_COUNTER` and another code,
-and runs the command over the double. These need the fetched source (`ELE_SRC=<work>/src`, from
-`scripts/ele-lib-build.sh`); without it the test prints that they were skipped, and the build script runs the
-constants check on every build. Whether the firmware acknowledges the flags as assumed is board validation, below.
+and runs the command over the double. These need the fetched source, `ELE_SRC`. In the toolchain
+image it comes from the Dockerfile's `ele-src` stage, which runs `scripts/ele-lib-build.sh --src-only`: the commit and
+archive digest pinned by `ele-lib.lock` are checked, and the source is unpacked to `/opt/ele-src` (`ENV ELE_SRC`).
+Outside the image, set `ELE_SRC=<work>/src` from a `--src-only` run. With `ELE_SRC` unset the test prints that these
+parts were skipped, unless `CI=true` or `REQUIRE_ELE_SRC=1` is set (`make test` and `make coverage` set the latter),
+in which case it fails instead of skipping. The build script runs the constants check on every build. Whether the firmware acknowledges the flags as assumed is board validation, below.
 
 `scripts/ele-lib-build.sh` then cross-builds `ele_client` for aarch64 and links it
 against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same

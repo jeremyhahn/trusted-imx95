@@ -127,7 +127,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 5 3 sign 7 msg
 	check "sign prints the signature as one line of lowercase hex" 0 "$want"
 	[ "$OUT" = "$want" ] || fail "sign output is not exactly the signature hex"
-	for i in $(seq 0 63); do printf "\\x$(printf '%02x' $(((3 * i + 1) & 255)))"; done >"$tmp/sig.bin"
+	for i in $(seq 0 63); do printf '%b' "\\x$(printf '%02x' $(((3 * i + 1) & 255)))"; done >"$tmp/sig.bin"
 	rm -f "$tmp/hsm.log"
 	ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --raw 5 3 sign 7 msg 3<"$tmp/nonce" >"$tmp/sig.out"
 	cmp -s "$tmp/sig.out" "$tmp/sig.bin" || fail "sign --raw is not exactly the signature bytes"
