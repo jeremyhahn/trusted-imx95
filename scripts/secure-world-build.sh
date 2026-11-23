@@ -8,6 +8,11 @@
 # TA linked in as early TAs, secure storage on the REE file system. It writes
 # bl31.bin, tee.bin, SHA256SUMS and build-info.txt to the output directory.
 #
+# The build runs twice, each in its own clean directory under the work
+# directory, and the artefacts are published only if bl31.bin and tee.bin are
+# byte-identical (SHA-256) between the two; otherwise it fails naming the
+# artefact and both hashes. SHA256SUMS holds the agreed hashes.
+#
 # Every source is fetched at its pinned commit and checked; the toolchain
 # tarball and the Python wheels are checked against their pinned SHA-256.
 # The work directory is created fresh on each run, so each build starts from
@@ -32,6 +37,7 @@ out=$root/.secure-world/out
 cache=$base/cache
 jobs=$(nproc 2>/dev/null || echo 4)
 check_only=0
+single=0 # internal: one build, run by the two-build driver below
 
 die() {
 	echo "secure-world-build: $*" >&2
@@ -46,6 +52,7 @@ while [ $# -gt 0 ]; do
 	--cache) cache=${2:?--cache needs a directory} && shift 2 ;;
 	--jobs) jobs=${2:?--jobs needs a number} && shift 2 ;;
 	--check-lock) check_only=1 && shift ;;
+	--single) single=1 && shift ;;
 	-h | --help)
 		echo "usage: secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
 		exit 0
@@ -119,6 +126,41 @@ work=$(cd "$work" && pwd -P)
 out=$(cd "$out" && pwd -P)
 cache=$(cd "$cache" && pwd -P)
 : >"$work/$marker"
+
+# --- Twice, and compared ------------------------------------------------------
+# Without --single this run is the driver: it runs this script twice in
+# separate, clean build directories (work/build-1, work/build-2), compares
+# bl31.bin and tee.bin byte for byte by SHA-256 and publishes only when both
+# builds agree. A difference fails naming the artefact and both SHA-256s.
+if [ "$single" = 0 ]; then
+	for i in 1 2; do
+		echo "secure-world-build: clean build $i of 2"
+		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --work "$work/build-$i" \
+			--out "$work/out-$i" --cache "$cache" --jobs "$jobs" || die "build $i of 2 failed; nothing published"
+	done
+	differ=0
+	for f in bl31.bin tee.bin; do
+		h1=$(sha256sum <"$work/out-1/$f" | cut -d' ' -f1)
+		h2=$(sha256sum <"$work/out-2/$f" | cut -d' ' -f1)
+		echo "secure-world-build: $f build 1 $h1, build 2 $h2"
+		if [ "$h1" != "$h2" ]; then
+			echo "secure-world-build: $f differs: build 1 $h1, build 2 $h2" >&2
+			differ=1
+		fi
+	done
+	[ "$differ" = 0 ] || die "not reproducible: the two clean builds differ; nothing published"
+	cp "$work/out-1/bl31.bin" "$work/out-1/tee.bin" "$work/out-1/SHA256SUMS" "$work/out-1/build-info.txt" "$out/"
+	(cd "$out" && sha256sum -c --quiet SHA256SUMS) || die "SHA256SUMS does not verify in $out"
+	{
+		echo "reproducible: yes, two clean builds byte-identical (docs/secure-world/build.md#reproducibility)"
+		echo "bl31.bin sha256 (both builds): $(sha256sum <"$out/bl31.bin" | cut -d' ' -f1)"
+		echo "tee.bin sha256 (both builds): $(sha256sum <"$out/tee.bin" | cut -d' ' -f1)"
+	} >>"$out/build-info.txt"
+	echo "secure-world-build: reproducible, two clean builds identical, $out:"
+	cat "$out/SHA256SUMS"
+	exit 0
+fi
+
 logs=$work/logs
 mkdir -p "$logs"
 
