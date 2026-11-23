@@ -216,10 +216,38 @@ Gaps, all provisional:
   `local.conf.template`); until then no image builds. It is deliberately not
   set. After it is set, a second run is expected to reach `do_rootfs` and
   `do_image_wic`; what happens there is unknown.
-- No artefact was built, so there are no digests, and reproducibility
-  (two builds, same digests) is untested.
+- No artefact was built, so there are no digests, and reproducibility is
+  untested on real artefacts: the check exists (see "Reproducibility check"
+  below) but no real two-build run has happened.
 - The debug image was not run on its own; its target shares every failing
   recipe.
 - The host-tool list in the script (gcc, g++, make, git, python3, tar, xz,
   bzip2, patch, perl, unzip, wget, diffstat, chrpath, gawk, cpio, file, socat,
   zstd, lz4c) is a working list from this run, not Yocto's full required list.
+
+## Reproducibility check (provisional, not run)
+
+`make platform-image ARGS=--repro` (or `scripts/platform-image-build.sh --repro`)
+runs the build twice, each in its own freshly emptied build directory
+(`<dir>.repro-a`, `<dir>.repro-b`) and output directory (`<out>.repro-a`,
+`<out>.repro-b`), under the same pinned layers and the same
+`SOURCE_DATE_EPOCH`. A directory is emptied only when it is absent, empty or
+carries the marker this mode wrote. Then
+`scripts/platform-image-repro-compare.sh OUT_A OUT_B` compares the outputs, and
+`.platform-image/out/` is written only when they match; on a difference the two
+outputs stay for inspection and nothing is published. `--check` with `--repro`
+builds nothing.
+
+What is compared: each output against its own `SHA256SUMS` (a missing file, an
+unlisted file or a changed byte fails); then every artefact in both
+`SHA256SUMS` with the same hash; then `build-info.txt` line by line, layer
+commits and `SOURCE_DATE_EPOCH` included. The one ignored key is
+`build_seconds`, which differs every run. A difference names the artefact and
+both hashes, or the build-info key and both values. `--allow NAME` on the
+compare script excuses one named artefact for a known, documented exception;
+none is set here and the build script passes none.
+
+No real run has happened: the build stops at the NXP EULA (#14, the owner's to
+accept), so only the stub bitbake tests
+(`test/platform_image_repro_test.sh`, `test/platform_image_build_test.sh`)
+have exercised this.
