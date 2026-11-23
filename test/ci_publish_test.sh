@@ -177,7 +177,7 @@ expect "publish: removes the built image after an upload failure" logged "$rmid"
 run pub PUSHED_CONFIG="$OTHER"
 expect "publish: removes the built image after a config-digest mismatch" logged "$rmid"
 run pub
-expect "publish: removes the built image after success" logged "$rmid"
+expect "publish: leaves the promoted image to the reaper (a consumer may hold its ID)" nolog '^docker image rm'
 expect "publish: the daemon never holds a staging tag, so none is removed" nolog '^docker image rm .*:stage-'
 expect "publish: never removes the trusted tag from the daemon" nolog '^docker image rm .*:abc-main'
 run pub IMG_NO_BUILDX=1 BUILT_ID=garbage

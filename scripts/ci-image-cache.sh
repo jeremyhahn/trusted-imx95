@@ -248,6 +248,10 @@ case ${1:-} in
       || die "the staged manifest $mdigest has config $pushed, not the checked image $id; nothing was published under $remote"
     DOCKER_CONFIG=$cfg docker buildx imagetools create --tag "$remote" "$repo@$mdigest" >/dev/null \
       || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote"
+    # LOCAL CHANGE (#159, verify 5): once $remote is visible another job on the
+    # shared daemon may pull it and record this same ID. The image is then no
+    # longer this job's alone, so cleanup leaves it to the age-aware reaper.
+    built_id=""
     echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;
   *)
