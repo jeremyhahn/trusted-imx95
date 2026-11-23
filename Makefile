@@ -185,7 +185,7 @@ secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from se
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
-platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing)
+platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing; ARGS=--repro builds twice in separate directories and publishes only if the two outputs are identical)
 	@scripts/platform-image-build.sh $(ARGS)
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)

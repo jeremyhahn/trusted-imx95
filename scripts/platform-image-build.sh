@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# platform-image-build.sh [--check|--dry-run] [DIR]: build trusted-imx95-image
+# platform-image-build.sh [--check|--dry-run] [--repro] [DIR]: build trusted-imx95-image
 # (and trusted-imx95-image-debug with PI_DEBUG=1) from the layers
 # platform-image/manifest.lock pins. Fetches the pins into DIR (outside the
 # clone), writes the build directory's conf from the templates (refusing to
@@ -7,7 +7,9 @@
 # bitbake, then copies the wic and rootfs artefacts, SHA256SUMS and
 # build-info.txt into OUT (default <clone>/.platform-image/out, git-ignored).
 # --check names every missing host tool and prints the plan; it fetches and
-# builds nothing. Needs the network and a Yocto build host; not in CI.
+# builds nothing. --repro builds twice in separate directories and publishes
+# to OUT only when platform-image-repro-compare.sh finds the outputs equal.
+# Needs the network and a Yocto build host; not in CI.
 # Provisional default, pending the owner's answer on #14.
 set -euo pipefail
 
@@ -19,10 +21,12 @@ die() {
 }
 
 check=0
+repro=0
 dir=
 while [ $# -gt 0 ]; do
 	case $1 in
 	--check | --dry-run) check=1 ;;
+	--repro) repro=1 ;;
 	-*) die "unknown option $1" ;;
 	*) [ -z "$dir" ] || die "more than one directory given"; dir=$1 ;;
 	esac
@@ -122,7 +126,56 @@ if [ "$check" -eq 1 ]; then
 	echo "platform-image-build: check: targets: $targets"
 	echo "platform-image-build: check: layers and build directory: $phys"
 	echo "platform-image-build: check: artefacts: $out"
+	[ "$repro" -eq 0 ] || echo "platform-image-build: check: --repro: two builds in $phys.repro-a and $phys.repro-b, compared before publishing"
 	echo "platform-image-build: check: OK, nothing fetched or built"
+	exit 0
+fi
+
+# --repro: this script twice, each in its own freshly emptied layer, build and
+# output directories ($phys.repro-a, $phys.repro-b; $out.repro-a, -b), under
+# the same pinned layers; the two outputs are compared by
+# platform-image-repro-compare.sh, and $out is written only when they match.
+# A directory is emptied only when absent, empty or marked by this mode.
+if [ "$repro" -eq 1 ]; then
+	repro_marker=.platform-image-repro-dir
+	rdirs=()
+	routs=()
+	for k in a b; do
+		d=$phys.repro-$k
+		if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
+			die "$d is not a plain directory; refusing"
+		fi
+		if [ -d "$d" ]; then
+			any=0
+			for f in "$d"/* "$d"/.[!.]* "$d"/..?*; do
+				if [ -e "$f" ] || [ -L "$f" ]; then any=1; fi
+			done
+			if [ "$any" -eq 1 ] && { [ ! -f "$d/$repro_marker" ] || [ -L "$d/$repro_marker" ]; }; then
+				die "$d exists and was not written by --repro (no $repro_marker); remove it yourself"
+			fi
+			rm -rf "$d"
+		fi
+		mkdir -p "$d"
+		printf '%s\n' "written by scripts/platform-image-build.sh --repro; the script may delete this directory" >"$d/$repro_marker"
+		rdirs+=("$d")
+		routs+=("$out.repro-$k")
+	done
+	for i in 0 1; do
+		echo "platform-image-build: repro: build $((i + 1)) of 2 in ${rdirs[$i]}"
+		PLATFORM_IMAGE_OUT=${routs[$i]} "$BASH" "$root/scripts/platform-image-build.sh" "${rdirs[$i]}" ||
+			die "build $((i + 1)) of 2 failed; nothing published"
+	done
+	"$BASH" "$root/scripts/platform-image-repro-compare.sh" "${routs[0]}" "${routs[1]}" ||
+		die "not reproducible: the two builds differ (outputs kept in ${routs[0]} and ${routs[1]}); nothing published"
+	check_out
+	rm -rf "$out"
+	mkdir -p "$out"
+	cp -R "${routs[0]}/." "$out/"
+	(cd "$out" && sha256sum -c --quiet SHA256SUMS) || die "SHA256SUMS does not verify in $out"
+	rm -rf "${routs[0]}" "${routs[1]}"
+	n=0
+	while IFS= read -r _; do n=$((n + 1)); done <"$out/SHA256SUMS"
+	echo "platform-image-build: OK, $n artefacts in $out (two builds identical)"
 	exit 0
 fi
 

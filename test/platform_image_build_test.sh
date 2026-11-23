@@ -55,6 +55,8 @@ for t in "$@"; do
 	[ -n "${BB_NOART:-}" ] && continue
 	echo wic-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.wic.zst"
 	echo tar-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.tar.zst"
+	# BB_NONDET: a run-dependent byte (the process id) in the rootfs tarball.
+	[ -z "${BB_NONDET:-}" ] || echo "$$" >>"$d/$t-$BB_MACHINE-20261123000000.rootfs.tar.zst"
 	echo mf-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.manifest"
 	ln -sf "$t-$BB_MACHINE-20261123000000.rootfs.wic.zst" "$d/$t-$BB_MACHINE.rootfs.wic.zst"
 done
@@ -268,6 +270,44 @@ head=$(git -C "$ROOT" rev-parse HEAD)
 expect "build-info holds checkout_commit" test "${info##*"checkout_commit=$head"*}" != "$info"
 expect "build-info holds the dirty marker" test "${info##*"platform_image_dirty="*}" != "$info"
 expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_sha256="*}" != "$info"
+
+# --repro: two builds in separate directories, compared, published on a match.
+rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
+brun "$stub:$tools" --repro
+check "--repro: deterministic stub passes" 0 "OK, 2 artefacts" "two builds identical"
+expect "--repro: bitbake ran twice" test "$(wc -l <"$tmp/log")" -eq 4
+expect "--repro: SHA256SUMS published and verifies" bash -c "cd '$tmp/out' && sha256sum -c --quiet SHA256SUMS"
+expect "--repro: build-info published" test -f "$tmp/out/build-info.txt"
+expect "--repro: the marker is published" test -f "$tmp/out/.platform-image-out"
+expect "--repro: build 1 had its own directory" test -d "$tmp/d.repro-a/build/conf"
+expect "--repro: build 2 had its own directory" test -d "$tmp/d.repro-b/build/conf"
+expect "--repro: staged outputs removed" test ! -e "$tmp/out.repro-a" -a ! -e "$tmp/out.repro-b"
+# A second run empties the two directories first.
+: >"$tmp/d.repro-a/stale"
+brun "$stub:$tools" --repro
+check "--repro: a second run passes" 0 "two builds identical"
+expect "--repro: the stale file in a build directory is gone" test ! -e "$tmp/d.repro-a/stale"
+
+rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
+BB_NONDET=1 brun "$stub:$tools" --repro
+check "--repro: a nondeterministic artefact fails" nonzero "rootfs.tar.zst differs" "not reproducible" "nothing published"
+expect "--repro: nothing published" test ! -e "$tmp/out"
+
+# An existing, unmarked directory is never emptied.
+rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
+mkdir -p "$tmp/d.repro-a"
+: >"$tmp/d.repro-a/sentinel"
+brun "$stub:$tools" --repro
+check "--repro: an unmarked directory is refused" nonzero "was not written by --repro"
+expect "--repro: the unmarked directory survives" test -f "$tmp/d.repro-a/sentinel"
+rm -rf "$tmp/d.repro-a"
+
+# --check with --repro builds and fetches nothing.
+rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
+brun "$stub:$tools" --repro --check
+check "--repro --check: passes" 0 "check: --repro:" "check: OK, nothing fetched or built"
+expect "--repro --check: no bitbake, no fetch" test ! -e "$tmp/log"
+expect "--repro --check: no directories" test ! -e "$tmp/d.repro-a" -a ! -e "$tmp/out"
 
 # Options.
 brun "$stub:$tools" --bogus
