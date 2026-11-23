@@ -47,7 +47,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools platform-image-repro-check
 
 help: ## List the targets
 	@echo "Targets:"
@@ -188,6 +188,10 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image-repro-check: ## Reproducible-build check on a build host: REPRO_A=<dir> REPRO_B=<dir> are the deploy directories of two clean builds; compares firmware, kernel, boot and tee-data partitions and the rootfs archive (needs no network; not in CI)
+	@test -n "$(REPRO_A)" -a -n "$(REPRO_B)" || { echo "usage: make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>" >&2; exit 2; }
+	@scripts/platform-image-repro-check.sh "$(REPRO_A)" "$(REPRO_B)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
