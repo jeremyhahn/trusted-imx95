@@ -2137,6 +2137,19 @@ jobs:
               for job, ro, cond in jobs:
                   ro_line = ro_lines.get(job, "")
                   where = f"{path}:{job}"
+                  # CUSTOMIZE (#159, Codex security P1 at verify 20): a job-level `uses:`
+                  # has no runs-on, so it was accepted unread. It is accepted only as a
+                  # local `./.github/workflows/<file>.yml` of this checkout (no ref), whose
+                  # file is one of the workflow files every run scans with these rules, so
+                  # a nested local call is scanned too and a cycle is read once. Any other
+                  # callee (`owner/repo/...@ref`, a path outside the directory) is refused.
+                  uses = (doc.get("jobs") or {}).get(job, {}).get("uses") if isinstance(doc.get("jobs"), dict) else None
+                  if uses is not None:
+                      m = re.fullmatch(r"\./\.github/workflows/([A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml)", str(uses))
+                      if not m or not os.path.isfile(os.path.join(ROOT, ".github", "workflows", m.group(1))):
+                          bad.append(f"{where}: (a) calls reusable workflow {uses!s}, which is not a workflow file of this checkout "
+                                     f"(`./.github/workflows/<file>.yml`, no ref); its jobs are never checked for a release runner")
+                      continue
                   # CUSTOMIZE (#159, Codex security P1s at verify 7 and 8): the release
                   # decision is an allowlist applied to every job, whatever the triggers.
                   # The `# self-hosted:` waiver is never consulted here.

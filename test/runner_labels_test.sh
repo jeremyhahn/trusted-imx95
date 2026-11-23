@@ -205,6 +205,80 @@ check "unparseable YAML is refused" 1 "not parseable YAML"
 rawfile "name: t
 on: [push]"
 check "a workflow with no jobs is refused" 1 "no \`jobs\` mapping"
+# Reusable-workflow callers (#159, Codex security P1 at verify 20): a job-level
+# `uses:` has no runs-on. Only a local ./.github/workflows/<file>.yml of this
+# checkout is accepted; every file of the directory is scanned, so a local
+# callee and a nested one are held to the same rules.
+callfile() { # callfile <name> <content>: add one workflow file beside t.yml
+	printf '%s\n' "$2" >"$work/.github/workflows/$1"
+}
+rl_callee_ok='name: c
+on: workflow_call
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true'
+rl_callee_rel='name: c
+on: workflow_call
+jobs:
+  c:
+    runs-on: [self-hosted, linux, x64, release]
+    steps:
+      - run: true'
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: owner/trusted-imx95/.github/workflows/other.yml@refs/heads/other"
+check "a remote reusable-workflow callee at another ref is refused" 1 "calls reusable workflow owner/trusted-imx95"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/c.yml@refs/heads/other"
+check "a local callee with a ref is refused" 1 "calls reusable workflow"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/c.yml"
+callfile c.yml "$rl_callee_rel"
+stepcmd
+check "a local callee selecting a release runner is refused" 1 "names \`release\`"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/c.yml"
+callfile c.yml "$rl_callee_ok"
+stepcmd
+check "a local callee on allowed runners is accepted" 0 "OK:"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/c.yml"
+callfile c.yml "name: c
+on: workflow_call
+jobs:
+  c:
+    uses: ./.github/workflows/d.yml"
+callfile d.yml "$rl_callee_rel"
+stepcmd
+check "a nested local call is scanned" 1 "d.yml:c: (a) names \`release\`"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/missing.yml"
+check "a local callee that is not a file of the checkout is refused" 1 "calls reusable workflow"
+rawfile "name: t
+on: [pull_request]
+jobs:
+  a:
+    uses: ./.github/workflows/t.yml"
+check "a local workflow calling itself is read once, not looped" 0 "OK:"
 rawfile "name: t
 on: [push]
 jobs:
