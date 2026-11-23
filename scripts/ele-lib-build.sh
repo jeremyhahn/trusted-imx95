@@ -102,6 +102,11 @@ if [ "$src_only" = 1 ]; then
 	[ -n "$work" ] || die "--src-only needs --work"
 else
 	[ -n "$work" ] && [ -n "$out" ] || die "give --check-lock, or --work and --out, or --work and --src-only"
+	# A reused --out could hold a stale libele_hsm.so.*: refuse it before
+	# anything is fetched. The build is published into an empty or new one.
+	if [ -e "$out" ] && { [ ! -d "$out" ] || [ -n "$(ls -A -- "$out")" ]; }; then
+		die "--out $out exists and is not an empty directory; give a new or empty one"
+	fi
 fi
 # resolve_phys PATH: the physical location of PATH, which need not exist: the
 # deepest existing ancestor is resolved with pwd -P, every symlink on the way
@@ -151,7 +156,14 @@ mkdir -p "$work"
 # The directory just made is where it was resolved to, and still outside.
 made=$(cd "$work" && pwd -P) || die "cannot enter $work"
 [ "$made" = "$work" ] || die "--work $work resolved elsewhere ($made)"
-[ "$src_only" = 1 ] || mkdir -p "$out" "$cache"
+# The build is staged in a fresh directory of its own: the library is chosen
+# from this build's outputs only, never from whatever a reused --out holds.
+final_out=$out
+if [ "$src_only" != 1 ]; then
+	out=$work/stage
+	rm -rf "$out"
+	mkdir -p "$out" "$cache"
+fi
 rm -rf "$work/src" "$work/git" "$work/toolchain"
 
 # Fetch the commit and check it, then check the archive digest.
@@ -230,4 +242,8 @@ case $m in *AArch64*) ;; *) die "ele_client is not aarch64: $m" ;; esac
 needed=$("${cross}readelf" -d "$out/ele_client" | while IFS= read -r l; do case $l in *NEEDED*"[libele_hsm.so."*) echo "$l" ;; esac; done)
 [ -n "$needed" ] || die "ele_client does not need libele_hsm (its soname)"
 (cd "$out" && sha256sum -- *.so.* ele_client >SHA256SUMS)
-echo "ele-lib-build: OK ($n libraries and ele_client in $out)"
+[ ! -e "$final_out" ] || { [ -d "$final_out" ] && [ -z "$(ls -A -- "$final_out")" ]; } ||
+	die "--out $final_out was filled while the build ran; nothing was published"
+mkdir -p "$final_out"
+cp -a "$out"/. "$final_out"/
+echo "ele-lib-build: OK ($n libraries and ele_client in $final_out)"
