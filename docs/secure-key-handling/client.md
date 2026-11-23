@@ -132,8 +132,12 @@ library's HSM API (`include/hsm/hsm_api.h` and `include/hsm/internal/*.h` at the
 - signing: `hsm_open_signature_generation_service`, `hsm_generate_signature` (ECDSA P-256 with SHA-256),
   `hsm_close_signature_generation_service`.
 
-The return code maps to the acknowledgement: `HSM_NO_ERROR` acknowledges the strict flag sent; `HSM_KEY_STORE_COUNTER` is a
-counter warning (accepted, counter not advanced: strict acknowledged, counter not); any other code fails the call.
+The return code maps to the acknowledgement: `HSM_NO_ERROR` acknowledges the strict flag sent; any other code, `HSM_KEY_STORE_COUNTER` (0x10) included, is
+not a result the client can vouch for: it comes from an error-tagged response, which does not show whether the update
+was applied. After the started marker it is an unknown outcome for generate and delete (exit 3, "the key store may have
+changed; check it before retrying"), and generate never reports a key. Before the marker an error stays a plain failure.
+The result table above for a counter warning therefore applies only to a library that exposes it separately; the
+binding does not.
 **The counter flag is never reported acknowledged (fail closed, provisional).** The library maps a success-tagged
 response that carries a warning rating to `HSM_NO_ERROR` (contract table below), so `HSM_NO_ERROR` cannot show the
 counter advanced, and no per-flag acknowledgement is exposed. The backend therefore reports no operation

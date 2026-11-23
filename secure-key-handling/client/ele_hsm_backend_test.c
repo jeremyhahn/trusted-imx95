@@ -153,8 +153,8 @@ static void isolation(void)
 	fake.err = HSM_KEY_STORE_COUNTER;
 	st = ELE_NOT_COMMITTED;
 	id = 0;
-	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 7,
-	      "HSM_KEY_STORE_COUNTER on generate: fails, state kept, key id returned");
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_OUTCOME_UNKNOWN && id == 0,
+	      "HSM_KEY_STORE_COUNTER on generate after the marker: unknown outcome, no key id claimed");
 	ele_hsm_close(&x);
 	begin(&x, &c, &nonce, true);
 	fake.err = OTHER_ERR;
@@ -184,7 +184,8 @@ static void isolation(void)
 	begin(&x, &c, &nonce, true);
 	fake.err = HSM_KEY_STORE_COUNTER;
 	st = ELE_NOT_COMMITTED;
-	CHECK(ele_delete_key(&c, 7, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED, "HSM_KEY_STORE_COUNTER on delete: fails, state kept");
+	CHECK(ele_delete_key(&c, 7, &st) != 0 && st == ELE_OUTCOME_UNKNOWN,
+	      "HSM_KEY_STORE_COUNTER on delete after the marker: unknown outcome");
 	ele_hsm_close(&x);
 	begin(&x, &c, &nonce, true);
 	fake.err = OTHER_ERR;

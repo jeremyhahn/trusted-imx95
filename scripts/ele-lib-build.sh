@@ -152,7 +152,17 @@ esac
 work=$work_phys
 [ -n "$cache" ] || cache=$work/cache
 
+# Only a directory this script made is ever emptied: a non-empty one must carry
+# the script's marker, and nothing is removed before this check.
+work_marker=.ele-lib-build-work
+if [ -e "$work" ]; then
+	[ -d "$work" ] || die "--work $work is not a directory"
+	if [ ! -e "$work/$work_marker" ] && [ -n "$(ls -A "$work")" ]; then
+		die "--work $work is not empty and was not made by this script; name an empty or new directory"
+	fi
+fi
 mkdir -p "$work"
+: >"$work/$work_marker"
 # The directory just made is where it was resolved to, and still outside.
 made=$(cd "$work" && pwd -P) || die "cannot enter $work"
 [ "$made" = "$work" ] || die "--work $work resolved elsewhere ($made)"

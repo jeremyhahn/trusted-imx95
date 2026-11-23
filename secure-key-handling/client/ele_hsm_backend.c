@@ -79,10 +79,14 @@ static uint8_t gen_flags(uint32_t f)
  * advancing: the strict operation is acknowledged, the counter flag is not. */
 static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *ack)
 {
-	if (err != HSM_NO_ERROR && err != HSM_KEY_STORE_COUNTER)
+	/* Called only after the started marker. Anything but HSM_NO_ERROR, the
+	 * counter warning HSM_KEY_STORE_COUNTER included, is not a result the
+	 * client can vouch for: the caller leaves status -1 and the parent
+	 * reports an unknown outcome (the update may have been applied). */
+	if (err != HSM_NO_ERROR)
 		return false;
 	ack->strict_acked = (sent & ELE_REQ_STRICT_OPERATION) != 0;
-	ack->counter_warning = err == HSM_KEY_STORE_COUNTER;
+	ack->counter_warning = false;
 	/* Fail closed. The pinned library maps a success-tagged response that
 	 * carries a warning rating to HSM_NO_ERROR (client.md, contract table),
 	 * so HSM_NO_ERROR does not show that the counter advanced. No per-flag

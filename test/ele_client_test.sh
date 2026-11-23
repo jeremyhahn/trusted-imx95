@@ -76,6 +76,29 @@ if [ ! -e "$tmp/reused-work" ]; then pass "the refusal came before anything was 
 run bash "$script" --work "$tmp/reused-work" --out "$tmp/afile"
 check "an --out that is a file is refused" 1 "not an empty directory"
 
+# The work directory is emptied only when this script made it. The lock names a
+# host that never resolves (.invalid), so no fetch can succeed: only the
+# ownership check and what the script did before the fetch are observed.
+mutate ELE_REPO "ELE_REPO=https://example.invalid/x.git"
+cp "$tmp/lock" "$tmp/lock.invalid"
+mkdir -p "$tmp/foreign"
+: >"$tmp/foreign/sentinel"
+run timeout 60 bash "$script" --work "$tmp/foreign" --src-only --lock "$tmp/lock.invalid"
+check "a non-empty unmarked --work is refused" 1 "not empty and was not made by this script"
+[ -e "$tmp/foreign/sentinel" ] || fail "the refused --work lost its sentinel file"
+[ ! -e "$tmp/foreign/.ele-lib-build-work" ] || fail "the refused --work was given a marker"
+run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
+case $OUT in *"not empty and was not made"*) fail "a fresh --work was refused" ;; esac
+[ -e "$tmp/fresh-owned/.ele-lib-build-work" ] || fail "a fresh --work did not get the marker"
+mkdir -p "$tmp/fresh-owned/src"
+: >"$tmp/fresh-owned/src/stale"
+run timeout 60 bash "$script" --work "$tmp/fresh-owned" --src-only --lock "$tmp/lock.invalid"
+case $OUT in *"not empty and was not made"*) fail "a marked --work was refused" ;; esac
+[ ! -e "$tmp/fresh-owned/src/stale" ] || fail "a marked --work was not emptied"
+mkdir -p "$tmp/empty-dir"
+run timeout 60 bash "$script" --work "$tmp/empty-dir" --src-only --lock "$tmp/lock.invalid"
+case $OUT in *"not empty and was not made"*) fail "an empty --work was refused" ;; esac
+
 # The client policy tests, built with the host compiler.
 d=$ROOT/secure-key-handling/client
 if command -v cc >/dev/null 2>&1; then
@@ -188,10 +211,10 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 --raw 5 3 del 7
 	check "--raw on del refused" 2 "usage"
 	cli 0x10 --split-confirmed 5 3 gen
-	check "counter warning: nonzero exit" 1 "update refused"
-	check "counter warning: the accepted key id is reported" 1 "key 7 was generated and is NOT rollback-protected"
+	check "counter warning (0x10) after the marker on generate: exit 3, unknown outcome" 3 "outcome unknown"
+	case $OUT in *"was generated"* | *"key 7"*) fail "0x10 on generate claimed a key" ;; esac
 	cli 0x10 --split-confirmed 5 3 del 7
-	check "counter warning on delete: nonzero exit" 1 "update refused"
+	check "counter warning (0x10) after the marker on delete: exit 3, unknown outcome" 3 "the key store may have changed"
 	cli 0xfe --split-confirmed 5 3 gen
 	check "other HSM error after the started marker: exit 3, unknown outcome" 3 "outcome unknown"
 	cli 0 --split-confirmed 5 3 del 7
