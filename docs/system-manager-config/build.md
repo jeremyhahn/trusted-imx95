@@ -228,12 +228,17 @@ check offline, and a fake build whose patched file widens the M7 block.
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
-  installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. **The real
-  compiler has not yet built the System Manager in the image on the lane's node** (no Docker there). The CI job
-  `system-manager-build` runs `make sm-toolchain-check` (`scripts/sm-toolchain-check.sh` in the image): it runs
-  `make system-manager` with the real pinned toolchain, then checks the compiler starts, `m33_image.bin` and the
-  manifest exist and the linked `.elf` is an ARM ELF. The result of its first run is not recorded here yet. If
-  `gcompat` is not enough to start the compiler, the base image would have to change, which is the owner's choice (#14).
+  installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. The lane's node
+  has no Docker, so the check ran in CI. The CI job "System Manager build with the pinned Arm toolchain" runs
+  `make sm-toolchain-check` (`scripts/sm-toolchain-check.sh` in the image): it runs `make system-manager` with
+  the real pinned toolchain, then checks the compiler starts, `m33_image.bin` and the manifest exist and the
+  linked `.elf` is an ARM ELF.
+  **First result (GitHub Actions): passed.** On `main` at `bd72342`, CI run 45022475307, job 137208249253,
+  concluded success and its `sm-toolchain-check` step succeeded. It also succeeded on `fbb58056` (runs
+  45021223766 and 45013632384). So in the image, `gcompat` is enough to start the pinned compiler, the System
+  Manager builds with it, and the output has a non-empty `m33_image.bin` and manifest and a linked ARM ELF. The
+  check does not run the image on a board or verify its behaviour, and it does not check the build is
+  reproducible. The base image does not need to change (#14).
 - Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
   `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
   checked.
