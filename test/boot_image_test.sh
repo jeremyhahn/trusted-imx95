@@ -197,6 +197,55 @@ check "image: an inputs.txt without an entry for a payload is refused" nonzero "
 
 run "$BI" verify "$img_out/boot-image.bin"
 check "verify: the written image verifies" 0 "verify: OK"
+
+# The M7 execution metadata of the built image, read back with nxpimage ahab parse.
+# The constants are docs/boot-container/boot-image.md:31 (container 2, entry "executable"):
+# core cortex-m7-1, load 0x00000000, entry 0x303C0000. The container offset is the place of
+# container 2 in the image: containers start at 0x0, 0x4000 and 0x8000 (AHAB tag 0x87 at +3).
+WANT_M7_CORE=cortex-m7-1
+WANT_M7_TYPE=executable
+WANT_M7_LOAD=0x00000000
+WANT_M7_ENTRY=0x303c0000
+WANT_M7_CONTAINER_OFFSET=$((0x4000))
+spsdk_venv=$("$ROOT/scripts/ahab/spsdk-venv.sh")
+mkdir -p "$TMP_ROOT/m7parse"
+run "$spsdk_venv/bin/nxpimage" ahab parse -f mimx9596 -r b0 -b "$img_out/boot-image.bin" -o "$TMP_ROOT/m7parse"
+expect "m7: nxpimage ahab parse reads the full image" [ "$RC" -eq 0 -a -f "$TMP_ROOT/m7parse/parsed_config.yaml" ]
+# m7_field <key>: <key> of the second image of the second container in parsed_config.yaml
+m7_field() {
+	local l ci=-1 ii=-1
+	while IFS= read -r l; do
+		l=${l%$'\r'}
+		case "$l" in
+		"    container:"*) ci=$((ci + 1)); ii=-1 ;;
+		*"image_path:"*) ii=$((ii + 1)) ;;
+		*"$1:"*)
+			if [ "$ci" -eq 1 ] && [ "$ii" -eq 1 ] && [[ "$l" != "#"* && "$l" != *"# "* ]]; then
+				l=${l#*"$1:"}; l=${l//[\'\" ]/}; echo "${l,,}"; return
+			fi ;;
+		esac
+	done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+}
+# m7_num_eq <got> <want>: numeric equality of two 0x addresses (SPSDK prints 0x0 for 0x00000000)
+m7_num_eq() { [[ "$1" =~ ^0x[0-9a-f]+$ && "$2" =~ ^0x[0-9a-f]+$ ]] && [ $(($1)) -eq $(($2)) ]; }
+got=$(m7_field core_id)
+expect "m7: the M7 entry's core is $WANT_M7_CORE (parsed '$got')" [ "$got" = "$WANT_M7_CORE" ]
+got=$(m7_field image_type)
+expect "m7: the M7 entry's image type is $WANT_M7_TYPE (parsed '$got')" [ "$got" = "$WANT_M7_TYPE" ]
+got=$(m7_field load_address)
+expect "m7: the M7 entry's load address is $WANT_M7_LOAD (parsed '$got')" m7_num_eq "$got" "$WANT_M7_LOAD"
+got=$(m7_field entry_point)
+expect "m7: the M7 entry's entry point is $WANT_M7_ENTRY (parsed '$got')" m7_num_eq "$got" "$WANT_M7_ENTRY"
+# the container offsets, from the image bytes: version 2 at +0, AHAB tag 0x87 at +3, every 0x400
+offsets=$(python3 -I - "$img_out/boot-image.bin" <<'PY'
+import sys
+d = open(sys.argv[1], "rb").read()
+print(" ".join(str(o) for o in range(0, len(d) - 4, 0x400) if d[o] == 2 and d[o + 3] == 0x87))
+PY
+)
+m7_offsets_ok() { [ "$#" -eq 3 ] && [ "$2" -eq "$WANT_M7_CONTAINER_OFFSET" ]; }
+expect "m7: the image holds three containers, the M7 one second, at $WANT_M7_CONTAINER_OFFSET (found: $offsets)" \
+	m7_offsets_ok $offsets
 # One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
 python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
 import sys
