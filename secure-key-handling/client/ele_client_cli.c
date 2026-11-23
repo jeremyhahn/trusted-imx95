@@ -105,16 +105,22 @@ int main(int argc, char **argv)
 		rc = ele_sign(&cl, cmd.key_id, (const uint8_t *)cmd.msg, strlen(cmd.msg), sig, &n) == 0 ? 0 : 1;
 		if (rc == 0 && cmd.raw) {
 			/* The signature bytes, exactly, on stdout. */
-			if (fwrite(sig, 1, n, stdout) != n)
+			if (fwrite(sig, 1, n, stdout) != n || ferror(stdout))
 				rc = 1;
 		} else if (rc == 0) {
 			/* One line of lowercase hex, two digits per byte. */
-			for (i = 0; i < n; i++)
-				printf("%02x", sig[i]);
-			putchar('\n');
+			for (i = 0; i < n && rc == 0; i++)
+				if (printf("%02x", sig[i]) < 0)
+					rc = 1;
+			if (rc == 0 && putchar('\n') == EOF)
+				rc = 1;
 		}
-		if (rc == 0 && fflush(stdout) != 0)
+		/* Every write above is checked; the flush and the stream error
+		 * flag catch what a buffer held back (/dev/full, a closed pipe). */
+		if (rc == 0 && (fflush(stdout) != 0 || ferror(stdout)))
 			rc = 1;
+		if (rc == 1 && st == ELE_NOT_COMMITTED && ferror(stdout))
+			fprintf(stderr, "ele_client: cannot write the signature to stdout\n");
 		break;
 	case ELE_CLI_DEL:
 		rc = ele_delete_key(&cl, cmd.key_id, &st) == 0 ? 0 : 1;
