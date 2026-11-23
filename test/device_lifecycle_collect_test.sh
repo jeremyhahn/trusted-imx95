@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# device_lifecycle_collect_test.sh: scripts/device-lifecycle/collect-evidence.sh
+# against doubles for the enclave command and tpm2_readpublic. No board, no
+# TPM, no enclave device. Keys are generated at test time.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=test/lib.sh
+source "$here/lib.sh"
+
+before=$(cd "$ROOT" && git status --porcelain --ignored)
+PY="$("$ROOT/scripts/ahab/spsdk-venv.sh")/bin/python"
+TOOL="$ROOT/scripts/device-lifecycle/evidence-bundle.py"
+COLLECT="$ROOT/scripts/device-lifecycle/collect-evidence.sh"
+W="$TMP_ROOT/w"
+BIN="$W/bin"
+LOG="$W/calls.log"
+mkdir -p "$BIN"
+NONCE=00112233445566778899aabbccddeeff
+
+# Fixtures: a synthetic signed region holding the nonce once, its signature,
+# and a synthetic TPM2B_PUBLIC.
+"$PY" -I - "$W" "$NONCE" <<'EOF'
+import os, sys
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+
+w, nonce = sys.argv[1], bytes.fromhex(sys.argv[2])
+key = ec.generate_private_key(ec.SECP384R1())
+signed = os.urandom(40) + nonce + os.urandom(40)
+r, s = utils.decode_dss_signature(key.sign(signed, ec.ECDSA(hashes.SHA384())))
+body = b"\x00\x23" + os.urandom(60)
+for name, data in (
+    ("fx_signed.bin", signed),
+    ("fx_sig.bin", r.to_bytes(48, "big") + s.to_bytes(48, "big")),
+    ("fx_ek.bin", len(body).to_bytes(2, "big") + body),
+    (
+        "ele.pem",
+        key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        ),
+    ),
+):
+    with open(f"{w}/{name}", "wb") as f:
+        f.write(data)
+EOF
+
+# Doubles. Each logs its argv; the enclave double honours FAIL_ELE, the TPM
+# double FAIL_TPM.
+cat >"$BIN/ele-attest" <<EOF
+#!/usr/bin/env bash
+echo "ele-attest \$*" >>"$LOG"
+[ -z "\${FAIL_ELE:-}" ] || exit 1
+cp "$W/fx_signed.bin" "\$2"
+cp "$W/fx_sig.bin" "\$3"
+EOF
+cat >"$BIN/tpm2_readpublic" <<EOF
+#!/usr/bin/env bash
+echo "tpm2_readpublic \$*" >>"$LOG"
+[ -z "\${FAIL_TPM:-}" ] || exit 1
+out=
+while [ \$# -gt 0 ]; do
+	[ "\$1" != -o ] || out=\$2
+	shift
+done
+cp "$W/fx_ek.bin" "\$out"
+EOF
+for n in tpm2_createek tpm2_clear tpm2_evictcontrol tpm2_nvwrite tpm2_nvdefine; do
+	printf '#!/usr/bin/env bash\necho "FORBIDDEN %s $*" >>"%s"\nexit 1\n' "$n" "$LOG" >"$BIN/$n"
+done
+chmod +x "$BIN"/*
+
+col() { # env and args pass through; the doubles come first on PATH
+	cat "$LOG" >>"$W/all.log" 2>/dev/null || true
+	: >"$LOG"
+	PATH="$BIN:$PATH" EVIDENCE_PYTHON="$PY" "$@"
+}
+HANDLE=0x81010001
+args=(--nonce "$NONCE" --response-version 3 --ek-handle "$HANDLE" --ek-template test-template)
+
+rm -f "$W/out.json"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "good run" 0 "wrote"
+run "$PY" -I "$TOOL" check "$W/out.json" --ele-pub "$W/ele.pem" --nonce "$NONCE" --ek-public "$W/fx_ek.bin"
+check "the bundle passes evidence-bundle.py check" 0 "valid"
+mapfile -t calls <"$LOG"
+if [ "${#calls[@]}" -eq 2 ] && [[ "${calls[0]}" == "ele-attest $NONCE "* ]] &&
+	[[ "${calls[1]}" == "tpm2_readpublic -c $HANDLE "* ]]; then
+	pass "the enclave command runs before tpm2_readpublic"
+else
+	fail "call order" "${calls[*]}"
+fi
+
+rm -f "$W/out.json"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" ELE_ATTEST_PUB="$W/ele.pem" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "good run with the optional self-check" 0
+expect "self-check run wrote OUT" test -s "$W/out.json"
+
+rm -f "$W/out.json"
+run col env FAIL_ELE=1 ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "enclave failure" nonzero
+expect "enclave failure: no OUT" test ! -e "$W/out.json"
+if [[ "$(<"$LOG")" != *tpm2_readpublic* ]]; then
+	pass "enclave failure: tpm2_readpublic never called"
+else
+	fail "enclave failure: tpm2_readpublic was called"
+fi
+
+rm -f "$W/out.json"
+run col env FAIL_TPM=1 ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "readpublic failure" nonzero
+expect "readpublic failure: no OUT" test ! -e "$W/out.json"
+
+# A wrong self-check key fails and leaves no OUT.
+"$PY" -I -c '
+import sys
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+open(sys.argv[1], "wb").write(ec.generate_private_key(ec.SECP384R1()).public_key().public_bytes(
+    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))' "$W/other.pem"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" ELE_ATTEST_PUB="$W/other.pem" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "self-check with a wrong key" nonzero
+expect "self-check failure: no OUT" test ! -e "$W/out.json"
+
+# Refusals happen before any double runs.
+refuse() { # name, then env assignments and collector arguments
+	local name=$1
+	shift
+	run col "$@"
+	check "$name" nonzero
+	if [ ! -s "$LOG" ]; then pass "$name: no double ran"; else fail "$name: a double ran" "$(<"$LOG")"; fi
+}
+refuse "missing ELE_ATTEST_CMD" env -u ELE_ATTEST_CMD "$COLLECT" "${args[@]}" -o "$W/out.json"
+refuse "bad nonce (short)" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce 0011 \
+	--response-version 3 --ek-handle "$HANDLE" --ek-template t -o "$W/out.json"
+refuse "bad nonce (not hex)" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" \
+	--nonce zz112233445566778899aabbccddeeff --response-version 3 --ek-handle "$HANDLE" \
+	--ek-template t -o "$W/out.json"
+refuse "non-persistent handle" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" \
+	--response-version 3 --ek-handle 0x80000001 --ek-template t -o "$W/out.json"
+refuse "handle past the persistent range" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" \
+	--nonce "$NONCE" --response-version 3 --ek-handle 0x82000000 --ek-template t -o "$W/out.json"
+refuse "missing handle" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" \
+	--response-version 3 --ek-template t -o "$W/out.json"
+expect "refusals left no OUT" test ! -e "$W/out.json"
+
+cat "$LOG" >>"$W/all.log"
+if [[ "$(<"$W/all.log")" != *FORBIDDEN* ]]; then
+	pass "no createek, clear, evictcontrol or nvwrite ever called"
+else
+	fail "a forbidden TPM command was called"
+fi
+
+after=$(cd "$ROOT" && git status --porcelain --ignored)
+if [ "$before" = "$after" ]; then pass "the clone is unchanged"; else fail "the clone is unchanged" "$after"; fi
+finish
