@@ -656,5 +656,12 @@ expect "docs/ftpm/build.md links to the fTPM design" has "$doc" 'README.md'
 expect "docs/ftpm/README.md points to build.md" has "$ROOT/docs/ftpm/README.md" '(build.md)'
 expect "docs/platform-image/build.md points to docs/ftpm/build.md" has "$ROOT/docs/platform-image/build.md" 'ftpm/build.md'
 expect "docs/ftpm/build.md names no /home path" none '/home/' "$doc"
+expect "docs/ftpm/build.md names the NV selector" has "$doc" "$sel"
+expect "docs/ftpm/build.md names the reefs value" has "$doc" '`reefs`'
+expect "docs/ftpm/build.md names the rpmb value" has "$doc" '`rpmb`'
+expect "docs/ftpm/build.md cites ruling 1234" has "$doc" 'ruling 1234'
+expect "docs/ftpm/build.md says nothing was built with rpmb" has "$doc" 'Nothing was parsed or built with `rpmb`'
+expect "docs/ftpm/README.md names the NV selector" has "$ROOT/docs/ftpm/README.md" "$sel"
+expect "docs/ftpm/README.md marks the RPMB frame route unconfirmed" has "$ROOT/docs/ftpm/README.md" 'Open, all **unconfirmed**'
 
 finish

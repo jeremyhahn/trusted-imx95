@@ -75,6 +75,13 @@ only after OEM close; the REE file system (the root file system) holds it on dev
 board therefore has no rollback protection, and a root rewrite wipes the NV. Programming the RPMB key is a
 provisioning-station step after OEM close and stays out of this repository: nothing here writes it.
 
+The build selects the location with `TRUSTED_IMX95_FTPM_NV`: `reefs` (default, development boards) or `rpmb`
+(production). Neither lets OP-TEE program the RPMB key, so RPMB writes fail until the provisioning station has
+programmed it after OEM close; nothing was parsed or built with `rpmb` ([build.md](build.md#the-defaults-each-provisional)).
+Open, all **unconfirmed**: how OP-TEE's RPMB frames reach the eMMC (`tee-supplicant`, or the kernel's in-kernel RPMB
+routing and `CONFIG_RPMB`); whether the pinned OP-TEE 4.10 has `CFG_REE_FS_INTEGRITY_RPMB` (the survey reads it in
+4.11.0) and what it means for `tee-nv-wipe` deleting `/data/tee` under `rpmb`; U-Boot's RPMB path on this board.
+
 **Where the NV lives (provisional).** `tee-supplicant` (the BSP's OP-TEE client, enabled in the image) keeps OP-TEE's
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system

@@ -14,14 +14,21 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
 |---|---|---|
 | Kernel driver | `platform-image/recipes-kernel/linux/files/ftpm.cfg`, listed in the `linux-imx` bbappend | `CONFIG_TCG_TPM=y` and `CONFIG_TCG_FTPM_TEE=y`, built in, so `/dev/tpmrm0` exists once `tee-supplicant` has started. Both symbols are in `platform-image/kernel-required.txt` |
 | TA recipe | `platform-image/recipes-security/optee/optee-ftpm_4.10.0.bb` | `optee_ftpm` 4.10.0 on `ms-tpm-20-ref`, at the commits [secure-world/build.md](../secure-world/build.md#the-pins) pins and `secure-world/bsp.lock` holds; no floating revision |
-| OP-TEE OS | `optee-os_%.bbappend` and `optee-os-tadevkit_%.bbappend`, with the shared `optee-ftpm-flags.inc` | `CFG_EARLY_TA=y` with the fTPM TA (UUID in the bbappend) in `EARLY_TA_PATHS` and the PKCS#11 TA in `CFG_IN_TREE_EARLY_TAS`, `CFG_REE_FS=y`, `CFG_RPMB_FS=n` |
+| OP-TEE OS | `optee-os_%.bbappend` and `optee-os-tadevkit_%.bbappend`, with the shared `optee-ftpm-flags.inc` | `CFG_EARLY_TA=y` with the fTPM TA (UUID in the bbappend) in `EARLY_TA_PATHS` and the PKCS#11 TA in `CFG_IN_TREE_EARLY_TAS`, and the NV storage flags chosen by `TRUSTED_IMX95_FTPM_NV`: `reefs` (default) `CFG_REE_FS=y`, `CFG_RPMB_FS=n`; `rpmb` `CFG_REE_FS=y`, `CFG_RPMB_FS=y`, `CFG_RPMB_WRITE_KEY=n`, `CFG_RPMB_TESTKEY=n` |
 | Debug image | `trusted-imx95-image-debug.bb` | tpm2-tools; the production image does not carry it |
 
 ## The defaults, each provisional
 
-1. **NV storage on the OP-TEE REE file system, RPMB off** ([question 1](README.md#open-questions-for-the-owner)).
-   The TA sets `CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE`. No RPMB key option is set anywhere in the
-   layer. The limits: **no rollback protection** (root on Linux can restore an older copy of the files), and
+1. **NV storage chosen by one selector, `TRUSTED_IMX95_FTPM_NV`** ([question 1](README.md#open-questions-for-the-owner),
+   owner ruling 1234). `reefs`, the default, is for development boards: the NV is in the OP-TEE REE file system
+   (`CFG_REE_FS=y`, `CFG_RPMB_FS=n`; the TA's `CFG_FTPM_TA_TEE_STORAGE_ID` is `TEE_STORAGE_PRIVATE_REE`). `rpmb` is the
+   production selection: the NV is in the eMMC RPMB (`CFG_RPMB_FS=y`, REE FS stays on for the PKCS#11 TA and other
+   objects; the TA's storage ID is `TEE_STORAGE_PRIVATE_RPMB`). Any other value stops the parse, and the debug image
+   refuses `rpmb`. In neither set does an option let OP-TEE program the RPMB key: `CFG_RPMB_WRITE_KEY=n` and
+   `CFG_RPMB_TESTKEY=n` are set explicitly in the `rpmb` set, so RPMB writes fail until the provisioning station has
+   programmed the key after OEM close ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5 and §10). That step is
+   outside this repository. **Nothing was parsed or built with `rpmb`** (no bitbake here). Under `reefs` the limits
+   are: **no rollback protection** (root on Linux can restore an older copy of the files), and
    **the NV is wiped whenever the root file system is reflashed** (SPEC row `ftpm`; a full-image flash recreates `tee-data` empty), which destroys the TPM's seeds and with them the EK.
 2. **The TA is `optee_ftpm` 4.10.0** (ms-tpm-20-ref), as an early TA linked into `tee.bin`
    ([question 2](README.md#open-questions-for-the-owner)).
