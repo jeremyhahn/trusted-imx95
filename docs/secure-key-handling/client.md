@@ -57,7 +57,10 @@ rollback-protected ([below](#delete-is-never-rollback-protected-a-gap-for-the-ow
 (`HSM_KEY_STORE_COUNTER`: accepted, counter not advanced, so the prior blob can still be replayed;
 [architecture.md](architecture.md#key-store-rollback-protection)), a missing strict acknowledgement, or a send of both
 flags that is not rollback-protected (counter not acknowledged, or the split not confirmed). The commit state is still
-returned and printed (`update refused (...)`), so the diagnostic is kept. A strict-only send (a delete) succeeds on the
+returned and printed (`update refused (...)`), so the diagnostic is kept. A generate the enclave accepted leaves a key
+even when its update is refused (a counter warning): its identifier is returned with the failure and the command
+prints it (`key N was generated and is NOT rollback-protected`) so it can be reconciled or deleted, not presented as a
+protected key. A strict-only send (a delete) succeeds on the
 strict acknowledgement, as committed and not rollback-protected.
 
 The host tests (`test/ele_client_test.sh`, run by `make test`) cover all four combinations, a counter warning, a
@@ -109,7 +112,11 @@ HSM call is made (a test asserts zero generate calls on the double).
 compares the output with the double's known signature bytes exactly.
 
 **Nonce handling.** The command first sets the process non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`) and `RLIMIT_CORE` to
-0. The nonce is held in one buffer locked with `mlock` where available. `ele_hsm_open` takes a pointer to it, and the
+0. The nonce is held in one slot, an anonymous mapping of its own, locked with `mlock` for its whole life: when the lock
+fails (for example `RLIMIT_MEMLOCK`) the command stops before it reads the credential, and the slot is unlocked only
+after it is erased (locks are per page, so a shared page would be unlocked under a live credential). A `gen` without
+`--split-confirmed` is refused straight after the arguments are parsed, before the nonce is read and before any HSM
+call (session, key store or service). `ele_hsm_open` takes a pointer to the slot's value, and the
 buffer, the library argument structure's `authentication_nonce` copy and the text buffer it was read through are erased
 with a non-elidable volatile erase (`ele_secure.h`) on every exit path, success or error. A test hook shows the buffer
 is zero after `ele_hsm_open` returns, on success, a key-store open failure and a session open failure.

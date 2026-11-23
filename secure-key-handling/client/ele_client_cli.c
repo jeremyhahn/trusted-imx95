@@ -29,7 +29,8 @@ int main(int argc, char **argv)
 	struct ele_hsm_ctx ctx;
 	struct ele_client cl;
 	enum ele_commit st = ELE_NOT_COMMITTED;
-	uint32_t nonce = 0, id = 0;
+	struct ele_nonce_slot *slot;
+	uint32_t id = 0;
 	uint8_t sig[128];
 	size_t n = sizeof(sig), i;
 	int rc = 1;
@@ -44,18 +45,29 @@ int main(int argc, char **argv)
 	/* Everything is validated before any HSM service is opened. */
 	if (ele_cli_parse(argc, argv, &cmd) != 0)
 		return usage();
-	(void)ele_lock_secret(&nonce, sizeof(nonce));
-	if (ele_read_nonce(cmd.nonce_fd, &nonce) != 0) {
-		ele_secure_zero(&nonce, sizeof(nonce));
+	/* A generate on an unconfirmed counter split is refused here, before the
+	 * credential is read and before any HSM call. */
+	if (cmd.op == ELE_CLI_GEN && !cmd.split_confirmed) {
+		fprintf(stderr, "ele_client: generate refused: the counter split is not confirmed (--split-confirmed); failed\n");
+		return 1;
+	}
+	/* Locked storage first: when it cannot be locked the credential is never read. */
+	slot = ele_nonce_slot_new();
+	if (!slot) {
+		fprintf(stderr, "ele_client: cannot lock memory for the nonce\n");
+		return 2;
+	}
+	if (ele_nonce_slot_read(cmd.nonce_fd, slot) != 0) {
+		ele_nonce_slot_free(slot);
 		fprintf(stderr, "ele_client: cannot read the nonce from fd %d\n", cmd.nonce_fd);
 		return 2;
 	}
-	if (ele_hsm_open(&ctx, cmd.store_id, &nonce) != 0) {
-		ele_secure_zero(&nonce, sizeof(nonce));
+	if (ele_hsm_open(&ctx, cmd.store_id, &slot->value) != 0) {
+		ele_nonce_slot_free(slot);
 		fprintf(stderr, "ele_client: cannot open the key store\n");
 		return 1;
 	}
-	ele_secure_zero(&nonce, sizeof(nonce));
+	ele_nonce_slot_free(slot);
 	ctx.counter_split_confirmed = cmd.split_confirmed;
 	ele_client_init(&cl, &ele_hsm_ops, &ctx);
 	switch (cmd.op) {
@@ -86,7 +98,12 @@ int main(int argc, char **argv)
 		break;
 	}
 	/* A failed update keeps its diagnostic state: print it, exit nonzero. */
-	if (rc != 0 && cmd.op != ELE_CLI_SIGN && st != ELE_NOT_COMMITTED)
+	if (rc != 0 && cmd.op == ELE_CLI_GEN && st != ELE_NOT_COMMITTED && id != 0)
+		/* The key exists but the update was refused: name it so it can be
+		 * reconciled or deleted. Not a protected key. */
+		fprintf(stderr, "ele_client: update refused (%s); key %u was generated and is NOT rollback-protected: reconcile or delete it\n",
+			ele_commit_name(st), id);
+	else if (rc != 0 && cmd.op != ELE_CLI_SIGN && st != ELE_NOT_COMMITTED)
 		fprintf(stderr, "ele_client: update refused (%s)\n", ele_commit_name(st));
 	else if (rc != 0)
 		fprintf(stderr, "ele_client: failed\n");

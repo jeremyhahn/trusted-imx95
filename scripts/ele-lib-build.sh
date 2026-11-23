@@ -16,7 +16,7 @@
 # Nothing here touches a board, a fuse or a block device.
 set -euo pipefail
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 lock=$root/secure-key-handling/ele-lib.lock
 work=
 out=
@@ -103,12 +103,54 @@ if [ "$src_only" = 1 ]; then
 else
 	[ -n "$work" ] && [ -n "$out" ] || die "give --check-lock, or --work and --out, or --work and --src-only"
 fi
-[ -n "$cache" ] || cache=$work/cache
-case $(cd "$(dirname "$work")" 2>/dev/null && pwd -P)/$(basename "$work")/ in
+# resolve_phys PATH: the physical location of PATH, which need not exist: the
+# deepest existing ancestor is resolved with pwd -P, every symlink on the way
+# (a final component included, dangling or not) is followed, and what does not
+# exist yet is appended. Fails (nonzero) on anything it cannot resolve.
+resolve_phys() {
+	local p=$1 rest="" base t d n=0
+	case $p in /*) ;; *) p=$PWD/$p ;; esac
+	while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
+	while :; do
+		n=$((n + 1))
+		[ "$n" -le 64 ] || return 1
+		if [ -L "$p" ]; then
+			t=$(readlink "$p") || return 1
+			case $t in /*) p=$t ;; *) p=${p%/*}/$t ;; esac
+			[ -n "$p" ] || return 1
+			continue
+		fi
+		if [ -e "$p" ]; then
+			d=$(cd "$p" 2>/dev/null && pwd -P) || return 1
+			[ "$d" = / ] && d=
+			printf '%s%s\n' "$d" "$rest"
+			return 0
+		fi
+		base=${p##*/}
+		case $base in '' | . | ..) return 1 ;; esac
+		rest=/$base$rest
+		p=${p%/*}
+		[ -n "$p" ] || p=/
+	done
+}
+
+# The work directory is resolved in full before anything is fetched or removed,
+# and must be outside the checkout and not contain it.
+work_phys=$(resolve_phys "$work") || die "cannot resolve --work $work"
+[ -n "$work_phys" ] || die "cannot resolve --work $work"
+case $work_phys/ in
 "$root"/*) die "--work must be outside the checkout" ;;
 esac
+case $root/ in
+"$work_phys"/*) die "--work must not contain the checkout" ;;
+esac
+work=$work_phys
+[ -n "$cache" ] || cache=$work/cache
 
 mkdir -p "$work"
+# The directory just made is where it was resolved to, and still outside.
+made=$(cd "$work" && pwd -P) || die "cannot enter $work"
+[ "$made" = "$work" ] || die "--work $work resolved elsewhere ($made)"
 [ "$src_only" = 1 ] || mkdir -p "$out" "$cache"
 rm -rf "$work/src" "$work/git" "$work/toolchain"
 

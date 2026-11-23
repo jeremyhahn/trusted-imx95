@@ -249,6 +249,24 @@ first=$OUT
 run "$ROOT/scripts/image-tag.sh" toolchain trusted-imx95
 expect "image-tag: the toolchain tag is stable" [ "$OUT" = "$first" ]
 
+# Every input the toolchain Dockerfile COPYs moves the tag, the ele-src stage's
+# included (a changed ELE pin must not reuse an image holding the old source).
+tc="$TMP_ROOT/tctag"
+mkdir -p "$tc/scripts/ahab" "$tc/build/docker/devcontainer" "$tc/secure-key-handling" "$tc/secure-world"
+for f in build/docker/devcontainer/Dockerfile scripts/tool-pins.sh scripts/fetch-tools.sh \
+	scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt \
+	scripts/ele-lib-build.sh secure-key-handling/ele-lib.lock secure-world/bsp.lock scripts/image-tag.sh; do
+	cp "$ROOT/$f" "$tc/$f"
+done
+run "$tc/scripts/image-tag.sh" toolchain trusted-imx95
+tc_base=$OUT
+for f in scripts/ele-lib-build.sh secure-key-handling/ele-lib.lock secure-world/bsp.lock; do
+	printf '\n# changed\n' >>"$tc/$f"
+	run "$tc/scripts/image-tag.sh" toolchain trusted-imx95
+	expect "image-tag: a change to $f changes the toolchain tag" [ "$OUT" != "$tc_base" ]
+	cp "$ROOT/$f" "$tc/$f"
+done
+
 repo="$TMP_ROOT/tags"
 fixture_repo "$repo"
 git -C "$repo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -qm fixture

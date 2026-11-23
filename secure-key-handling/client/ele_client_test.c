@@ -82,8 +82,8 @@ int main(void)
 		uint32_t id = 0;
 
 		ele_client_init(&c, &ele_stub_ops, &s);
-		CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 0,
-		      "counter warning fails, state kept, no key id returned");
+		CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 1,
+		      "counter warning fails, state kept, the accepted key id is returned");
 		st = ELE_NOT_COMMITTED;
 		CHECK(ele_delete_key(&c, 1, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
 		      "counter warning on delete fails, state kept");

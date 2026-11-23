@@ -44,6 +44,24 @@ check "duplicate name" 1 "appears twice"
 
 run bash "$script" --work "$ROOT/.ele-work" --out "$tmp/out"
 check "work inside the checkout" 1 "outside the checkout"
+# A nonexistent parent inside the checkout is still inside it, and nothing is created.
+run bash "$script" --work "$ROOT/.fresh-ele/work" --out "$tmp/out"
+check "work under a nonexistent directory of the checkout" 1 "outside the checkout"
+[ ! -e "$ROOT/.fresh-ele" ] || { rm -rf "$ROOT/.fresh-ele"; fail "the refused work directory was created in the checkout"; }
+run bash "$script" --work ".fresh-ele2/work" --out "$tmp/out"
+check "relative work under a nonexistent directory (cwd is the checkout)" 1 "outside the checkout"
+# A symlink as the final component, or on the way, that points into the checkout.
+ln -s "$ROOT/secure-key-handling" "$tmp/lnk"
+run bash "$script" --work "$tmp/lnk" --out "$tmp/out"
+check "work is a symlink into the checkout" 1 "outside the checkout"
+run bash "$script" --work "$tmp/lnk/new/work" --out "$tmp/out"
+check "work under a symlink into the checkout, nonexistent tail" 1 "outside the checkout"
+ln -s "$ROOT/.fresh-ele3" "$tmp/dangling"
+run bash "$script" --work "$tmp/dangling" --out "$tmp/out"
+check "work is a dangling symlink into the checkout" 1 "outside the checkout"
+[ ! -e "$ROOT/.fresh-ele3" ] || { rm -rf "$ROOT/.fresh-ele3"; fail "a dangling symlink work directory was created in the checkout"; }
+run bash "$script" --work "$ROOT/.." --out "$tmp/out"
+check "work that contains the checkout" 1 "must not contain the checkout"
 
 # The client policy tests, built with the host compiler.
 d=$ROOT/secure-key-handling/client
@@ -116,8 +134,8 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	cli 0 --split-confirmed 5 3 gen
 	check "gen with a confirmed split" 0 "rollback-protected"
 	cli 0 5 3 gen
-	check "gen with the split unconfirmed fails" 1 "failed"
-	if grep -q '^generate' "$tmp/hsm.log"; then fail "gen with the split unconfirmed made a generate call"; fi
+	check "gen with the split unconfirmed fails" 1 "refused"
+	no_hsm_call "gen with the split unconfirmed (no session, no service, no generate)"
 	cli 0 --split-confirmed 5 3 gen
 	check "gen with a confirmed split prints the key" 0 "key 7"
 	grep -q '^open_session dumpable=0$' "$tmp/hsm.log" || fail "the CLI did not set PR_SET_DUMPABLE 0 before opening the HSM"
@@ -135,6 +153,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "--raw on del refused" 2 "usage"
 	cli 0x10 --split-confirmed 5 3 gen
 	check "counter warning: nonzero exit" 1 "update refused"
+	check "counter warning: the accepted key id is reported" 1 "key 7 was generated and is NOT rollback-protected"
 	cli 0x10 --split-confirmed 5 3 del 7
 	check "counter warning on delete: nonzero exit" 1 "update refused"
 	cli 0xfe --split-confirmed 5 3 gen

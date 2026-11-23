@@ -41,7 +41,13 @@ static int nonce_from(const char *text, uint32_t *v)
 		return -2;
 	}
 	close(p[1]);
-	rc = ele_read_nonce(p[0], v);
+	{
+		struct ele_nonce_slot s;
+
+		memset(&s, 0, sizeof(s));
+		rc = ele_nonce_slot_read(p[0], &s);
+		*v = s.value;
+	}
 	close(p[0]);
 	return rc;
 }
@@ -89,7 +95,12 @@ int main(void)
 	CHECK(nonce_from("", &v) != 0, "empty nonce refused");
 	CHECK(nonce_from("\n", &v) != 0, "blank nonce refused");
 	CHECK(nonce_from("123456789012345678901234567890\n", &v) != 0, "long nonce refused");
-	CHECK(ele_read_nonce(-1, &v) != 0, "bad descriptor refused");
+	{
+		struct ele_nonce_slot s;
+
+		memset(&s, 0, sizeof(s));
+		CHECK(ele_nonce_slot_read(-1, &s) != 0, "bad descriptor refused");
+	}
 
 	{
 		char *ok[] = { "x", "--raw", "1", "3", "sign", "4", "m" };
@@ -111,6 +122,38 @@ int main(void)
 		struct rlimit rl;
 
 		CHECK(getrlimit(RLIMIT_CORE, &rl) == 0 && rl.rlim_cur == 0 && rl.rlim_max == 0, "RLIMIT_CORE is 0");
+	}
+
+	/* The nonce slot is its own locked mapping: read, then erased on free. */
+	{
+		struct ele_nonce_slot *s = ele_nonce_slot_new();
+		int p[2];
+
+		CHECK(s != NULL, "nonce slot allocated and locked");
+		if (s && pipe(p) == 0) {
+			CHECK(write(p[1], "77\n", 3) == 3, "pipe write");
+			close(p[1]);
+			CHECK(ele_nonce_slot_read(p[0], s) == 0 && s->value == 77, "slot read");
+			CHECK(s->text[0] == 0 && s->text[1] == 0, "text erased after the read");
+			close(p[0]);
+		}
+		ele_nonce_slot_free(s);
+	}
+	/* Fail closed: when memory cannot be locked there is no slot, so no
+	 * credential is read. Unprivileged only (root ignores the limit). */
+	{
+		struct rlimit rl = { 0, 0 };
+		void *probe;
+
+		if (setrlimit(RLIMIT_MEMLOCK, &rl) == 0) {
+			probe = ele_nonce_slot_new();
+			if (probe) {
+				printf("skip: memory locking is not limited for this user\n");
+				ele_nonce_slot_free(probe);
+			} else {
+				CHECK(1, "no slot when mlock fails");
+			}
+		}
 	}
 
 	if (fails)

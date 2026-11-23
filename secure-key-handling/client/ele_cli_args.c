@@ -1,4 +1,5 @@
 /* See ele_cli_args.h. PROVISIONAL. */
+#define _DEFAULT_SOURCE
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,23 +110,45 @@ static int read_nonce_text(int fd, char *buf, uint32_t *nonce)
 	return ele_parse_u32(buf, nonce);
 }
 
-int ele_read_nonce(int fd, uint32_t *nonce)
+/* The slot owns whole pages of its own (an anonymous mapping), so locking and
+ * unlocking it can never touch the lock state of any other object. */
+struct ele_nonce_slot *ele_nonce_slot_new(void)
 {
-	char buf[ELE_NONCE_BUF];
+	void *p = mmap(NULL, (size_t)sysconf(_SC_PAGESIZE), PROT_READ | PROT_WRITE,
+		       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+	if (p == MAP_FAILED)
+		return NULL;
+	if (mlock(p, sizeof(struct ele_nonce_slot)) != 0) {
+		munmap(p, (size_t)sysconf(_SC_PAGESIZE));
+		return NULL;
+	}
+#ifdef MADV_DONTDUMP
+	(void)madvise(p, (size_t)sysconf(_SC_PAGESIZE), MADV_DONTDUMP);
+#endif
+	return p;
+}
+
+int ele_nonce_slot_read(int fd, struct ele_nonce_slot *s)
+{
 	int rc;
 
-	/* The text of the credential is locked while it exists and erased on
-	 * every path. */
-	(void)mlock(buf, sizeof(buf));
-	rc = read_nonce_text(fd, buf, nonce);
-	ele_secure_zero(buf, sizeof(buf));
-	(void)munlock(buf, sizeof(buf));
+	if (!s)
+		return -1;
+	rc = read_nonce_text(fd, s->text, &s->value);
+	ele_secure_zero(s->text, sizeof(s->text));
+	if (rc != 0)
+		s->value = 0;
 	return rc;
 }
 
-int ele_lock_secret(void *p, size_t n)
+void ele_nonce_slot_free(struct ele_nonce_slot *s)
 {
-	return mlock(p, n);
+	if (!s)
+		return;
+	ele_secure_zero(s, sizeof(*s));
+	munlock(s, sizeof(*s));
+	munmap(s, (size_t)sysconf(_SC_PAGESIZE));
 }
 
 int ele_harden_process(void)

@@ -59,9 +59,13 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 		return -1;
 	*state = ele_classify(c->flags, &ack);
 	/* The state is kept for the caller's diagnostics even when the call fails. */
+	/* An accepted generate leaves a key even when the update is refused (a
+	 * counter warning): its identifier is returned with the failure so the
+	 * caller can reconcile or delete it. 0 is never a returned key. */
+	if (*state != ELE_NOT_COMMITTED)
+		*key_id = id;
 	if (!ele_update_ok(c->flags, &ack, *state))
 		return -1;
-	*key_id = id;
 	return 0;
 }
 

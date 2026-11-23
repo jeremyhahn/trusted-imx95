@@ -127,8 +127,8 @@ int main(void)
 	fake.err = HSM_KEY_STORE_COUNTER;
 	st = ELE_NOT_COMMITTED;
 	id = 0;
-	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 0,
-	      "HSM_KEY_STORE_COUNTER on generate: fails, state kept");
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 7,
+	      "HSM_KEY_STORE_COUNTER on generate: fails, state kept, accepted key id returned");
 
 	/* Any other code fails and commits nothing. */
 	fake.err = OTHER_ERR;

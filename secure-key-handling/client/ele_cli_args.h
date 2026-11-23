@@ -31,14 +31,22 @@ int ele_parse_u32(const char *s, uint32_t *out);
  * --raw is for sign only. Returns 0 or -1; nothing is opened here. */
 int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd);
 
-/* Read the nonce (one line, at most 16 characters) from fd and parse it
- * strictly. Refuses a terminal. Returns 0 or -1. */
-int ele_read_nonce(int fd, uint32_t *nonce);
+/* The one home of the credential: the text read from the descriptor and the
+ * parsed value, in an anonymous mapping of its own that is locked (mlock)
+ * for its whole life. ele_nonce_slot_new returns NULL when the lock fails
+ * (e.g. RLIMIT_MEMLOCK), and the caller must then refuse before reading any
+ * credential. ele_nonce_slot_free erases the slot and only then unlocks it. */
+struct ele_nonce_slot {
+	char text[18];
+	uint32_t value;
+};
+struct ele_nonce_slot *ele_nonce_slot_new(void);
+void ele_nonce_slot_free(struct ele_nonce_slot *s);
 
-/* The text buffer is locked (mlock) while it holds the credential and erased
- * on every path. ele_lock_secret locks the caller's storage (0 or -1; a
- * failure, e.g. RLIMIT_MEMLOCK, is not fatal to the caller). */
-int ele_lock_secret(void *p, size_t n);
+/* Read the nonce (one line, at most 16 characters) from fd into s->value,
+ * parsed strictly; the text is erased on every path. Refuses a terminal.
+ * Returns 0 or -1. */
+int ele_nonce_slot_read(int fd, struct ele_nonce_slot *s);
 
 /* Make the process non-dumpable (prctl PR_SET_DUMPABLE 0) and set
  * RLIMIT_CORE to 0, so no core file or ptrace carries the credential.
