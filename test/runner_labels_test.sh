@@ -728,4 +728,73 @@ else
 	pass "ci.yml: no full-tier expression admits ci/deps-bump"
 fi
 
+# #159 (Codex security P1): keys are read as Actions reads them, as source
+# strings, and a duplicate key is refused. YAML 1.1 reads `yes:` as true and
+# a plain safe_load keeps only the last of two equal keys.
+yes_dup="name: t
+on: [pull_request]
+jobs:
+  yes:
+    runs-on: [self-hosted, linux, x64, release]
+    steps:
+      - run: true
+  on:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true"
+rawfile "$yes_dup"
+check "a yes: release job followed by an on: hosted job is refused" 1 "names \`release\`"
+for k in yes no on off; do
+	rm -f "$work"/.github/workflows/*.yml
+	printf '%s\n' "name: t
+on: [pull_request]
+jobs:
+  $k:
+    uses: ./.github/workflows/c.yml" >"$work/.github/workflows/t.yml"
+	callfile c.yml "$rl_callee_rel"
+	stepcmd
+	check "a lone $k: job calling a release callee is refused" 1 "names \`release\`"
+done
+dup_job="name: t
+on: [pull_request]
+jobs:
+  a:
+    runs-on: [self-hosted, linux, x64, release]
+    steps:
+      - run: true
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true"
+rawfile "$dup_job"
+check "a duplicate job id is refused" 1 "duplicate key 'a'"
+rawfile "name: t
+on: [pull_request]
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true"
+check "a duplicate top-level key is refused" 1 "duplicate key 'on'"
+# In-memory mutants of the step: the strict loader swapped for safe_load, and
+# the duplicate-key check removed. Each must let a fixture above through.
+python3 -I - "$work/step.py" "$work/mut-safe.py" "$work/mut-dup.py" <<'PY'
+import sys
+s = open(sys.argv[1], encoding="utf-8").read()
+a = "yaml.load(text, Loader=StrictLoader)"
+b = "if key in out:"
+assert a in s and b in s
+open(sys.argv[2], "w", encoding="utf-8").write(s.replace(a, "yaml.safe_load(text)"))
+open(sys.argv[3], "w", encoding="utf-8").write(s.replace(b, "if False:"))
+PY
+for m in safe dup; do
+	rawfile "$dup_job"
+	run bash -c "cd '$work' && python3 -I mut-$m.py"
+	check "mutant $m: a duplicate job id slips through, so the strict loader is what refuses it" 0 "OK:"
+done
+rawfile "$yes_dup"
+run bash -c "cd '$work' && python3 -I mut-safe.py"
+check "mutant safe: the yes:/on: collapse slips through, so the strict loader is what refuses it" 0 "OK:"
+
 finish

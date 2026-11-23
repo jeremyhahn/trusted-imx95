@@ -2127,6 +2127,38 @@ jobs:
               return on, out
 
 
+          # v1.54 (#159, Codex security P1): PyYAML's safe_load reads a YAML 1.1 key
+          # such as `yes:` as true and silently keeps only the last of two equal
+          # keys, so a `yes:` release job followed by an `on:` hosted job collapsed
+          # into one job. Actions reads every key as its source string and rejects a
+          # duplicate; this loader does the same, so a job id and the lookup of its
+          # `uses:` are one string. `on` stays the string "on".
+          class StrictLoader(yaml.SafeLoader):
+              pass
+
+
+          def strict_mapping(loader, node):
+              loader.flatten_mapping(node)
+              out = {}
+              for knode, vnode in node.value:
+                  if not isinstance(knode, yaml.ScalarNode):
+                      raise yaml.constructor.ConstructorError(
+                          "a mapping key is not a plain scalar", knode.start_mark)
+                  key = knode.value
+                  if key in out:
+                      raise yaml.constructor.ConstructorError(
+                          f"duplicate key {key!r}", knode.start_mark)
+                  out[key] = loader.construct_object(vnode, deep=True)
+              return out
+
+
+          StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, strict_mapping)
+
+
+          def load_workflow(text):
+              return yaml.load(text, Loader=StrictLoader)
+
+
           def runs_on_lines(lines):
               """job -> the text line of its runs-on, read only for a `# self-hosted:` comment."""
               out = {}
@@ -2255,7 +2287,7 @@ jobs:
               for f in files:
                   base = os.path.basename(f)
                   try:
-                      d = yaml.safe_load(open(f, encoding="utf-8").read())
+                      d = load_workflow(open(f, encoding="utf-8").read())
                       con, _ = structure(d)
                       jr = d["jobs"]
                   except Exception:
@@ -2304,7 +2336,7 @@ jobs:
           def check(abspath, path):
               text = open(abspath, encoding="utf-8").read()
               try:
-                  doc = yaml.safe_load(text)
+                  doc = load_workflow(text)
               except yaml.YAMLError as e:
                   first = (str(e).splitlines() or ["error"])[0]
                   return [f"{path}: (a) is not parseable YAML ({first}), so no runs-on can be checked"]
