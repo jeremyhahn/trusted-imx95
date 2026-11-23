@@ -4,6 +4,9 @@
 # This test fails if any script, make target or workflow runs an OEM-close or
 # life-cycle-change command, the enclave's forward-life-cycle message, or a fuse
 # write. It reads files only; it runs none of them and touches no device.
+# Families: forward-lifecycle and OEM close/lock messages; ahab_close,
+# ahab_return_lifecycle, ahab_lock; fuse burns (nxpele commit -i <fuse group>,
+# ahab_commit, ahab_sec_fuse_prog, write-fuse verbs, fuse prog/override, blhost efuse).
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -29,6 +32,12 @@ PATTERNS=(
   'ele[_-]?write[_-]?fuse'
   'write[-_]fuse'
   'fuse[-_]burn'
+  'nxpele[^#]*[[:space:]]commit([[:space:]]|$)'
+  'ahab_commit'
+  'ahab_sec_fuse_prog'
+  'ahab_lock'
+  'ahab_return_lifecycle'
+  'oem[-_ ]?lock'
 )
 
 # scan <root>: print "<relative path>:<line>:<text>" for every hit, rc 0 when none.
