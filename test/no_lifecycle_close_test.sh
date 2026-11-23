@@ -98,4 +98,42 @@ rm "$scratch/scripts/copy.sh"
 if scan "$scratch" >/dev/null 2>&1; then ok "a comment naming the message passes"
 else bad "a comment naming the message was flagged"; fi
 
+# One independent fixture per family: each alone in its own scratch tree, so no
+# family passes on another family's pattern.
+rm -f "$scratch"/scripts/*
+i=0
+for fx in \
+  'forward-lifecycle|nxpele -p x forward-lifecycle --target oem-closed' \
+  'nxpele commit|nxpele -p x commit -i OEM_FW_FUSE' \
+  'ahab_commit|ahab_commit' \
+  'ahab_sec_fuse_prog|ahab_sec_fuse_prog' \
+  'ahab_lock|ahab_lock' \
+  'ahab_return_lifecycle|ahab_return_lifecycle'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  i=$((i + 1))
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' "$cmd" >"$scratch/scripts/fx$i.sh"
+  if out=$(scan "$scratch" 2>&1); then
+    bad "fixture $name was not flagged"
+  elif [[ $out == *scripts/fx$i.sh:* ]]; then
+    ok "fixture $name fails and names scripts/fx$i.sh"
+  else
+    bad "fixture $name failed but did not name the file: $out"
+  fi
+done
+
+# Positive control: every command named only on comment lines passes.
+rm -f "$scratch"/scripts/*
+{
+  echo '# nxpele -p x forward-lifecycle --target oem-closed'
+  echo '# nxpele -p x commit -i OEM_FW_FUSE'
+  echo '# ahab_commit'
+  echo '# ahab_sec_fuse_prog'
+  echo '# ahab_lock'
+  echo '# ahab_return_lifecycle'
+} >"$scratch/scripts/comments.sh"
+if scan "$scratch" >/dev/null 2>&1; then ok "every family named only in comments passes"
+else bad "a comment naming a family was flagged"; fi
+
 exit $fails
