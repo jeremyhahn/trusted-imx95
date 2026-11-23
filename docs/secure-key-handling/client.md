@@ -152,7 +152,11 @@ hard one and fails, naming the limit, on a host where the lock still cannot be t
 **A result that cannot be written.** `gen` and `del` check `printf` and `fflush`. When stdout cannot be written (a full
 disk, a closed pipe) the command exits 1 and prints the key id and its commit state on stderr
 (`key N was generated, commit state S`, `key N was deleted, commit state S`), because the HSM operation has already
-happened. A test sends stdout to `/dev/full` and asserts exit 1 and the key id on stderr.
+happened. A test sends stdout to `/dev/full` and asserts exit 1 and the key id on stderr. The command ignores `SIGPIPE`
+before any HSM call, so a reader that has gone away reaches the same checked path (`EPIPE`) instead of killing the
+process after the operation; a closed-reader test asserts exit 1 and the key id on stderr. Because the binding never
+reports a rollback-protected generate (above), a refused `gen` already names its key id on stderr; the checked
+stdout path of `gen` is kept for a backend that can acknowledge the counter.
 
 **Contract evidence and tests.** `scripts/ele-lib-build.sh` compiles `ele_hsm_consts_check.c`, whose `_Static_assert`s
 pin the flag and return-code values to the library's headers (a mismatch fails the build); that is the evidence the

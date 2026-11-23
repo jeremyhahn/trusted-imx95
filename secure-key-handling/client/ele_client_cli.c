@@ -9,6 +9,7 @@
  *   ele_client <store-id> <nonce-fd> del <key-id>
  * The nonce is a credential: read from the descriptor, never from argv.
  */
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -41,6 +42,19 @@ int main(int argc, char **argv)
 	if (ele_harden_process() != 0) {
 		fprintf(stderr, "ele_client: cannot make the process non-dumpable\n");
 		return 2;
+	}
+	/* A closed reader must surface as EPIPE on the checked write, not kill the
+	 * process after the HSM operation with the key id unreported. */
+	{
+		struct sigaction ign;
+
+		memset(&ign, 0, sizeof(ign));
+		ign.sa_handler = SIG_IGN;
+		sigemptyset(&ign.sa_mask);
+		if (sigaction(SIGPIPE, &ign, NULL) != 0) {
+			fprintf(stderr, "ele_client: cannot ignore SIGPIPE\n");
+			return 2;
+		}
 	}
 	/* Everything is validated before any HSM service is opened. */
 	if (ele_cli_parse(argc, argv, &cmd) != 0)

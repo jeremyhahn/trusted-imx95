@@ -181,6 +181,20 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	else
 		fail "/dev/full is not writable here"
 	fi
+	# A reader that has gone away: EPIPE reaches the checked write (SIGPIPE is
+	# ignored), so the exit is 1 and the key id is on stderr, not a signal death.
+	for op in "gen" "del 7"; do
+		rm -f "$tmp/pipe.rc" "$tmp/pipe.err"
+		{
+			sleep 0.5 # the reader below has closed its end by now
+			# shellcheck disable=SC2086
+			prc=0
+			"$tmp/ele_cli" --split-confirmed 5 3 $op 3<"$tmp/nonce" 2>"$tmp/pipe.err" || prc=$?
+			echo "$prc" >"$tmp/pipe.rc"
+		} | { exec 0<&-; sleep 1; }
+		[ "$(cat "$tmp/pipe.rc" 2>/dev/null)" = 1 ] || fail "$op with a closed reader: exit $(cat "$tmp/pipe.rc" 2>/dev/null), want 1"
+		grep -q 'key 7 was ' "$tmp/pipe.err" || fail "$op with a closed reader: the key id is not on stderr"
+	done
 elif [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
 	# The toolchain image sets REQUIRE_ELE_SRC=1 beside ELE_SRC, the verified
 	# pinned source. There, not finding it is a failure, not a skip.
