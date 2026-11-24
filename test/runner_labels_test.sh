@@ -464,14 +464,31 @@ check "a changed run line in a non-guard preflight step loses the exemption" 1 "
 # Codex security P1 at verify 11: what preflight inherits from the workflow
 # level is pinned too. Only a workflow-level defaults.run.shell wrapper, or only
 # a workflow-level env entry, is added to the real ci.yml.
-sed '0,/^env:$/s//defaults:\n  run:\n    shell: "bash {0}"\nenv:/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+# Portable (GNU and busybox sed differ on address ranges and newline escapes): python3 replaces
+# the first line that is exactly $1 with the text $2, or fails loudly.
+ci_edit() {
+	python3 -I -c '
+import sys
+anchor, text, src, dst = sys.argv[1:5]
+lines = open(src).read().split("\n")
+if anchor not in lines:
+    sys.exit("ci_edit: no line is exactly %r" % anchor)
+lines[lines.index(anchor)] = text
+open(dst, "w").write("\n".join(lines))
+' "$1" "$2" "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"
+}
+ci_edit 'env:' 'defaults:
+  run:
+    shell: "bash {0}"
+env:'
 if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
 	echo "FAIL fixture is identical to ci.yml: the defaults edit did not apply"
 	exit 1
 fi
 stepcmd
 check "a workflow-level defaults.run.shell wrapper loses the exemption" 1 "(a) its runs-on holds an expression"
-sed '0,/^env:$/s//env:\n  BASH_ENV: \/tmp\/wrapper.sh/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+ci_edit 'env:' 'env:
+  BASH_ENV: /tmp/wrapper.sh'
 if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
 	echo "FAIL fixture is identical to ci.yml: the env edit did not apply"
 	exit 1
@@ -614,7 +631,8 @@ check "this repository's workflows pass the runner-label check" 0 "OK:"
 # Codex security P1 at verify 12: the guard fails closed on its input.
 # (a) only a preflight `defaults.run.working-directory` added to the real ci.yml.
 rm -f "$work"/.github/workflows/*.yml "$work"/.github/workflows/*.yaml
-sed '0,/^        shell: bash$/s//        shell: bash\n        working-directory: \/tmp/' "$ROOT/.github/workflows/ci.yml" >"$work/.github/workflows/ci.yml"
+ci_edit '        shell: bash' '        shell: bash
+        working-directory: /tmp'
 if cmp -s "$ROOT/.github/workflows/ci.yml" "$work/.github/workflows/ci.yml"; then
 	echo "FAIL fixture is identical to ci.yml: the working-directory edit did not apply"
 	exit 1
