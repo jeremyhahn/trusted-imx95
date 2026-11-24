@@ -581,7 +581,21 @@ that tree on 2026-11-24 (**read twice**: the first reading is the one
 - Confirmable from this repository alone: the lock pins, the patch
   contents, that `system-manager/patches/` leaves `M7P` and `PERF_M7`
   alone, and (i).
-- **Not read**: the M7 level values and frequencies (device code).
+- Level values, read twice on 2026-11-24 (the first by symbol search with
+  context, the second by line number; **agreed**):
+  `devices/MIMX95/sm/dev_sm_perf.h:66` (domain 3), `:82-85` (indices 0-3);
+  `devices/MIMX95/sm/dev_sm_perf.c:49` (4 levels), `:415-441` (the M7
+  table), `:1204-1211` (the M7 domain entry), `:1347` and `:1525` (count);
+  `devices/MIMX95/MIMX95_elec_spec.h:134-136` (the three rates);
+  `sm/lmm/lmm_perf.c:100-160` (`LMM_PerfLevelSet`, checks at `:129-132`,
+  `MAX` at `:148`).
+- Callers of `LMM_PerfLevelSet` (grep of the tree, 2026-11-24):
+  `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` (LM start
+  list) and `:1272` (LM stop list), `sm/utilities/monitor/monitor_cmds.c:1809`
+  (monitor write), and the unit test `sm/test/lmm/test_lmm_perf.c`.
+- **Not read**: whether the M7 domain's supply index is the one set at
+  `dev_sm_perf.c:1347`; whether the monitor utility is built into the
+  image.
 
 To regenerate the PRO table by hand, from a checkout of the pinned commit
 with `system-manager/patches/*.patch` applied in name order (`git apply`,
@@ -655,8 +669,21 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    `PerformanceDescribeLevels` returns an index per level (`:870`), so
    the level argument is an index. `LMM_PerfLevelSet` rejects an index
    at or above the number of levels with `SM_ERR_INVALID_PARAMETERS`
-   (`sm/lmm/lmm_perf.c:130-132`). The level values and frequencies
-   come from device code that was not read: **unconfirmed**.
+   (`sm/lmm/lmm_perf.c:130-132`). The levels are in the MIMX95 device
+   code (cited only, read twice, 2026-11-24): `DEV_SM_PERF_M7` is domain 3
+   (`devices/MIMX95/sm/dev_sm_perf.h:66`); the domain uses the SoC level
+   table `s_perfDescM7` (`devices/MIMX95/sm/dev_sm_perf.c:415-441`) and
+   the count is `DEV_SM_NUM_PERF_LVL_SOC`, 4 (`dev_sm_perf.c:49`, stored
+   at `:1347`, returned by `:1525`). Index 0 is `DEV_SM_PERF_LVL_PRK`
+   (24 MHz, `dev_sm_perf.c:417-419`), 1 is `LOW` (`ES_LOW_KHZ_M7`,
+   `:423-425`), 2 is `NOM` (`:429-431`), 3 is `ODV` (`:435-437`)
+   (`dev_sm_perf.h:82-85`). The three rates are 400000, 666667 and 800000
+   KHz (`devices/MIMX95/MIMX95_elec_spec.h:134-136`). No level of this table
+   is marked reserved. Not read, so **unconfirmed**: that the M7
+   domain's supply index (`s_psCfgSoc`, `dev_sm_perf.c:1208`) is the one
+   `:1347` sets, and whether any build option or the board `.cfg` changes
+   the count (the only count adjustment seen, `:2677-2706`, is for the
+   ARM supply).
 7. An explicit API line does not lower an owned resource's grant. In
    `get_perms` the last `perf=` word seen for a resource wins
    (`configs/configtool.pl:2461-2474`, lines in file order). A line
