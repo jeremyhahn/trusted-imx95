@@ -271,8 +271,10 @@ for t in $targets; do
 	for f in "$deploy/$t-$machine"*; do
 		[ -f "$f" ] && [ ! -L "$f" ] || continue
 		case $f in
-		*.testdata.json | *.manifest | *.spdx.json | *.env) continue ;;
-		*.wic* | *.rootfs.*) ;;
+		*.testdata.json | *.manifest | *.spdx.json | *.env | *.qemuboot.conf) continue ;;
+		# Yocto names the rootfs ".rootfs-<timestamp>.<ext>" (IMAGE_NAME with
+		# IMAGE_VERSION_SUFFIX); the older ".rootfs.<ext>" form matches too.
+		*.wic* | *.rootfs*) ;;
 		*) continue ;;
 		esac
 		cp "$f" "$out/"

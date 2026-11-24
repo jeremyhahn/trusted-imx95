@@ -53,12 +53,21 @@ d=tmp/deploy/images/$BB_MACHINE
 mkdir -p "$d"
 for t in "$@"; do
 	[ -n "${BB_NOART:-}" ] && continue
-	echo wic-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.wic.zst"
-	echo tar-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.tar.zst"
+	# Yocto's real layout: <image>-<machine>.rootfs-<timestamp>.<ext>, plus
+	# unsuffixed symlinks. BB_TS sets the timestamp of this build.
+	ts=${BB_TS:-20261123000000}
+	b="$t-$BB_MACHINE.rootfs-$ts"
+	echo wic-$t >"$d/$b.wic.zst"
+	echo tar-$t >"$d/$b.tar.zst"
+	echo ext4-$t >"$d/$b.ext4"
+	echo bmap-$t >"$d/$b.wic.bmap"
 	# BB_NONDET: a run-dependent byte (the process id) in the rootfs tarball.
-	[ -z "${BB_NONDET:-}" ] || echo "$$" >>"$d/$t-$BB_MACHINE-20261123000000.rootfs.tar.zst"
-	echo mf-$t >"$d/$t-$BB_MACHINE-20261123000000.rootfs.manifest"
-	ln -sf "$t-$BB_MACHINE-20261123000000.rootfs.wic.zst" "$d/$t-$BB_MACHINE.rootfs.wic.zst"
+	[ -z "${BB_NONDET:-}" ] || echo "$$" >>"$d/$b.tar.zst"
+	echo mf-$t >"$d/$b.manifest"
+	echo tj-$t >"$d/$b.testdata.json"
+	ln -sf "$b.wic.zst" "$d/$t-$BB_MACHINE.rootfs.wic.zst"
+	ln -sf "$b.tar.zst" "$d/$t-$BB_MACHINE.rootfs.tar.zst"
+	ln -sf "$b.ext4" "$d/$t-$BB_MACHINE.rootfs.ext4"
 done
 EOF
 chmod +x "$stub/bitbake"
@@ -93,15 +102,20 @@ check "--check names a missing tool" nonzero "missing host tools:"
 # A full run with the production image only.
 rm -rf "$tmp/d" "$tmp/out"
 brun "$stub:$tools"
-check "build: passes" 0 "OK, 2 artefacts"
+check "build: passes" 0 "OK, 4 artefacts"
 expect "build: bitbake got the production target only" test "$(bbtargets)" = trusted-imx95-image
 expect "build: conf written from the templates" cmp -s "$ROOT/platform-image/conf/local.conf.template" "$tmp/d/build/conf/local.conf"
-expect "build: wic copied" test -f "$tmp/out/trusted-imx95-image-$want-20261123000000.rootfs.wic.zst"
-expect "build: rootfs copied" test -f "$tmp/out/trusted-imx95-image-$want-20261123000000.rootfs.tar.zst"
-expect "build: the symlink is not copied" test ! -e "$tmp/out/trusted-imx95-image-$want.rootfs.wic.zst"
-expect "build: the manifest file is not copied" test ! -e "$tmp/out/trusted-imx95-image-$want-20261123000000.rootfs.manifest"
+for e in wic.zst tar.zst ext4 wic.bmap; do
+	expect "build: real-layout $e copied" test -f "$tmp/out/trusted-imx95-image-$want.rootfs-20261123000000.$e"
+done
+for e in rootfs.wic.zst rootfs.tar.zst rootfs.ext4; do
+	expect "build: the $e symlink is not copied" test ! -e "$tmp/out/trusted-imx95-image-$want.$e"
+done
+for e in manifest testdata.json; do
+	expect "build: the $e file is not copied" test ! -e "$tmp/out/trusted-imx95-image-$want.rootfs-20261123000000.$e"
+done
 expect "build: SHA256SUMS verifies" bash -c "cd '$tmp/out' && sha256sum -c --quiet SHA256SUMS"
-expect "build: SHA256SUMS lists 2 files" test "$(wc -l <"$tmp/out/SHA256SUMS")" -eq 2
+expect "build: SHA256SUMS lists the 4 artefacts" test "$(wc -l <"$tmp/out/SHA256SUMS")" -eq 4
 info=$(cat "$tmp/out/build-info.txt")
 for s in "machine=$want" "distro=trusted-imx95" "SOURCE_DATE_EPOCH=1700000000" "manifest_commit=" "layer_bitbake_commit="; do
 	expect "build-info.txt holds $s" test "${info##*"$s"*}" != "$info"
@@ -110,13 +124,13 @@ done
 # PI_DEBUG=1 adds the debug image.
 rm -rf "$tmp/d" "$tmp/out"
 PI_DEBUG=1 brun "$stub:$tools"
-check "PI_DEBUG=1: passes" 0 "OK, 4 artefacts"
+check "PI_DEBUG=1: passes" 0 "OK, 8 artefacts"
 expect "PI_DEBUG=1: bitbake got both targets" test "$(bbtargets)" = "trusted-imx95-image trusted-imx95-image-debug"
 sums=$(cat "$tmp/out/SHA256SUMS")
 dbg=trusted-imx95-image-debug-
 nodebug=${sums//$dbg/}
-expect "PI_DEBUG=1: two debug files and two production files are listed" \
-	test "$(((${#sums} - ${#nodebug}) / ${#dbg}))" -eq 2
+expect "PI_DEBUG=1: four debug files and four production files are listed" \
+	test "$(((${#sums} - ${#nodebug}) / ${#dbg}))" -eq 4
 
 rm -rf "$tmp/d" "$tmp/out"
 PLATFORM_IMAGE_BITBAKE_ARGS=-k brun "$stub:$tools"
@@ -200,7 +214,7 @@ rm -rf "$tmp/d" "$tmp/out"
 for v in "$tmp/./out" "$tmp/out/" "$tmp//out"; do
 	brun "$stub:$tools" --check
 	orun "$v"
-	check "OUT $v: accepted like the plain path" 0 "OK, 2 artefacts"
+	check "OUT $v: accepted like the plain path" 0 "OK, 4 artefacts"
 	expect "OUT $v: marker in the plain path" test -f "$tmp/out/.platform-image-out"
 	rm -rf "$tmp/d" "$tmp/out"
 done
@@ -212,12 +226,12 @@ rm -rf "$tmp/d" "$tmp/out"
 brun "$stub:$tools" --check
 check "a fresh OUT: accepted" 0 "check: OK"
 brun "$stub:$tools"
-check "build writes the marker" 0 "OK, 2 artefacts"
+check "build writes the marker" 0 "OK, 4 artefacts"
 expect "the output dir carries the ownership marker" test -f "$tmp/out/.platform-image-out"
-expect "the marker is not in SHA256SUMS" test "$(wc -l <"$tmp/out/SHA256SUMS")" -eq 2
+expect "the marker is not in SHA256SUMS" test "$(wc -l <"$tmp/out/SHA256SUMS")" -eq 4
 : >"$tmp/out/stale"
 brun "$stub:$tools"
-check "a marked OUT: accepted" 0 "OK, 2 artefacts"
+check "a marked OUT: accepted" 0 "OK, 4 artefacts"
 expect "a marked OUT is rebuilt: the stale file is gone" test ! -e "$tmp/out/stale"
 
 # The fetch directory is canonical before the overlap guard: a ".." under a
@@ -239,15 +253,15 @@ rm -rf "$tmp/result"
 # value wins; only a decimal integer is accepted.
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT='export SOURCE_DATE_EPOCH="1700000000"' brun "$stub:$tools"
-check "exported SOURCE_DATE_EPOCH: build ok" 0 "OK, 2 artefacts"
+check "exported SOURCE_DATE_EPOCH: build ok" 0 "OK, 4 artefacts"
 expect "exported SOURCE_DATE_EPOCH: in build-info" grep -q '^SOURCE_DATE_EPOCH=1700000000$' "$tmp/out/build-info.txt"
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT='SOURCE_DATE_EPOCH="1700000001"' brun "$stub:$tools"
-check "plain SOURCE_DATE_EPOCH: build ok" 0 "OK, 2 artefacts"
+check "plain SOURCE_DATE_EPOCH: build ok" 0 "OK, 4 artefacts"
 expect "plain SOURCE_DATE_EPOCH: in build-info" grep -q '^SOURCE_DATE_EPOCH=1700000001$' "$tmp/out/build-info.txt"
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT=$(printf '%s\n' 'SOURCE_DATE_EPOCH="1"' 'export SOURCE_DATE_EPOCH="1700000002"') brun "$stub:$tools"
-check "two SOURCE_DATE_EPOCH lines: build ok" 0 "OK, 2 artefacts"
+check "two SOURCE_DATE_EPOCH lines: build ok" 0 "OK, 4 artefacts"
 expect "two lines: the last wins" grep -q '^SOURCE_DATE_EPOCH=1700000002$' "$tmp/out/build-info.txt"
 rm -rf "$tmp/d" "$tmp/out"
 BB_E_OUT='export SOURCE_DATE_EPOCH="12ab"' brun "$stub:$tools"
@@ -262,7 +276,7 @@ BB_E_OUT='' brun "$stub:$tools"
 check "no SOURCE_DATE_EPOCH: dies" nonzero "no SOURCE_DATE_EPOCH in bitbake -e"
 rm -rf "$tmp/d" "$tmp/out"
 brun "$stub:$tools"
-check "default stub (exported form): build ok" 0 "OK, 2 artefacts"
+check "default stub (exported form): build ok" 0 "OK, 4 artefacts"
 
 # build-info names this checkout's commit and whether platform-image/ is dirty.
 info=$(cat "$tmp/out/build-info.txt")
@@ -274,7 +288,7 @@ expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_
 # --repro: two builds in separate directories, compared, published on a match.
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
 brun "$stub:$tools" --repro
-check "--repro: deterministic stub passes" 0 "OK, 2 artefacts" "two builds identical"
+check "--repro: deterministic stub passes" 0 "OK, 4 artefacts" "two builds identical"
 expect "--repro: bitbake ran twice" test "$(wc -l <"$tmp/log")" -eq 4
 expect "--repro: SHA256SUMS published and verifies" bash -c "cd '$tmp/out' && sha256sum -c --quiet SHA256SUMS"
 expect "--repro: build-info published" test -f "$tmp/out/build-info.txt"
@@ -290,7 +304,7 @@ expect "--repro: the stale file in a build directory is gone" test ! -e "$tmp/d.
 
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
 BB_NONDET=1 brun "$stub:$tools" --repro
-check "--repro: a nondeterministic artefact fails" nonzero "rootfs.tar.zst differs" "not reproducible" "nothing published"
+check "--repro: a nondeterministic artefact fails" nonzero "tar.zst differs" "not reproducible" "nothing published"
 expect "--repro: nothing published" test ! -e "$tmp/out"
 
 # An existing, unmarked directory is never emptied.
