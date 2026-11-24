@@ -1,0 +1,215 @@
+#!/bin/sh
+# PID 1 of the rescue initramfs (see README.md). Mounts the pseudo filesystems,
+# brings the network up from the kernel command line, then serves a tiny
+# command protocol on one TCP port:
+#
+#   hash <dev> <bytes>               -> <sha256 of the first <bytes> of the device>
+#   write <dev> <bytes> <sha256>     -> OK | MISMATCH <sha256 read back> | ERR <why>
+#   reboot                           -> OK, then sync and reboot -f
+#
+# <dev> is mmcblk0, mmcblk0boot0 or mmcblk0boot1; anything else is refused.
+# The payload of `write` follows the command line on the same connection.
+# Every step is logged to the console; nothing is read from the eMMC but the
+# bytes a `hash` or a write's read-back hashes, and only their digest is shown.
+#
+# `init --handle` runs one command from stdin to stdout. The server loop uses
+# it, and the tests run it with RESCUE_DEV_DIR and RESCUE_SYS_DIR pointing at
+# plain files. The real boot never sets either.
+
+RESCUE_DEV_DIR=${RESCUE_DEV_DIR:-/dev}
+RESCUE_SYS_DIR=${RESCUE_SYS_DIR:-/sys}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH
+export PATH
+
+log() { echo "rescue: $*" >&2; }
+
+is_num() {
+	case $1 in '' | *[!0-9]*) return 1 ;; esac
+	return 0
+}
+
+is_sha() {
+	case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+	[ "${#1}" -eq 64 ]
+}
+
+valid_dev() {
+	case $1 in mmcblk0 | mmcblk0boot0 | mmcblk0boot1) return 0 ;; esac
+	return 1
+}
+
+# dev_size <path>: the size in bytes of a block device or a plain file.
+dev_size() {
+	if [ -b "$1" ]; then
+		blockdev --getsize64 "$1"
+	else
+		wc -c <"$1"
+	fi
+}
+
+# hash_dev <dev> <bytes>: the SHA-256 of the first <bytes> of the device.
+hash_dev() {
+	_h=$(head -c "$2" "$RESCUE_DEV_DIR/$1" | sha256sum) || return 1
+	echo "${_h%% *}"
+}
+
+drop_caches() {
+	# Read back from the medium, not the page cache (never on the test files).
+	[ "$RESCUE_DEV_DIR" = /dev ] || return 0
+	sync
+	echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
+}
+
+# check_args <dev> <bytes>: sets $path, or prints ERR and fails.
+check_args() {
+	valid_dev "$1" || { echo "ERR refused device $1"; return 1; }
+	is_num "$2" || { echo "ERR bad byte count"; return 1; }
+	[ "$2" -gt 0 ] || { echo "ERR bad byte count"; return 1; }
+	path=$RESCUE_DEV_DIR/$1
+	[ -e "$path" ] || { echo "ERR no such device $1"; return 1; }
+	size=$(dev_size "$path") || { echo "ERR cannot size $1"; return 1; }
+	[ "$2" -le "$size" ] || { echo "ERR $2 bytes exceed the $size of $1"; return 1; }
+}
+
+cmd_hash() {
+	check_args "$1" "$2" || return 0
+	log "hash $1 $2"
+	if h=$(hash_dev "$1" "$2"); then echo "$h"; else echo "ERR hash failed"; fi
+}
+
+cmd_write() {
+	check_args "$1" "$2" || return 0
+	is_sha "$3" || { echo "ERR bad sha256"; return 0; }
+	dev=$1 bytes=$2 want=$3
+	fro=$RESCUE_SYS_DIR/block/$dev/force_ro
+	oldro=
+	case $dev in
+	mmcblk0boot*)
+		if [ -e "$fro" ]; then
+			read -r oldro <"$fro"
+			log "force_ro $dev $oldro -> 0"
+			echo 0 >"$fro" || { echo "ERR cannot unlock $dev"; return 0; }
+		fi
+		;;
+	esac
+	log "write $dev $bytes bytes"
+	rc=0
+	head -c "$bytes" | dd of="$path" bs=4M iflag=fullblock conv=notrunc,fsync 2>&1 >/dev/null | tail -n 1 >&2 || true
+	# The pipeline's status is dd's through tail; judge by the read-back.
+	drop_caches
+	got=$(hash_dev "$dev" "$bytes") || rc=1
+	if [ -n "$oldro" ]; then
+		echo "$oldro" >"$fro" || log "force_ro $dev restore failed"
+		log "force_ro $dev restored to $oldro"
+	fi
+	if [ "$rc" -ne 0 ]; then
+		echo "ERR read-back failed"
+	elif [ "$got" = "$want" ]; then
+		log "write $dev OK $got"
+		echo OK
+	else
+		log "write $dev MISMATCH want $want got $got"
+		echo "MISMATCH $got"
+	fi
+}
+
+cmd_reboot() {
+	echo OK
+	if [ "$RESCUE_DEV_DIR" != /dev ]; then
+		log "reboot (test: not rebooting)"
+		return 0
+	fi
+	log "sync, reboot"
+	sync
+	sleep 1
+	reboot -f
+}
+
+handle() {
+	read -r cmd a1 a2 a3 extra || { echo "ERR no command"; return 0; }
+	[ -z "$extra" ] || { echo "ERR too many arguments"; return 0; }
+	case $cmd in
+	hash) [ -n "$a2" ] && [ -z "$a3" ] || { echo "ERR usage: hash <dev> <bytes>"; return 0; }
+		cmd_hash "$a1" "$a2" ;;
+	write) [ -n "$a3" ] || { echo "ERR usage: write <dev> <bytes> <sha256>"; return 0; }
+		cmd_write "$a1" "$a2" "$a3" ;;
+	reboot) cmd_reboot ;;
+	*) echo "ERR unknown command" ;;
+	esac
+}
+
+cmdline_get() {
+	# cmdline_get <key> <default>
+	read -r cl </proc/cmdline
+	for w in $cl; do
+		case $w in "$1="*) echo "${w#*=}"; return 0 ;; esac
+	done
+	echo "$2"
+}
+
+net_up() {
+	ifc=$(cmdline_get rescue.if eth0)
+	ipa=$(cmdline_get rescue.ip "")
+	gw=$(cmdline_get rescue.gw "")
+	n=0
+	while [ ! -e "/sys/class/net/$ifc" ] && [ "$n" -lt 60 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	[ -e "/sys/class/net/$ifc" ] || { log "no network interface $ifc"; return 1; }
+	ip link set lo up
+	ip link set "$ifc" up
+	if [ -n "$ipa" ]; then
+		log "static $ipa on $ifc gw ${gw:-none}"
+		ip addr add "$ipa" dev "$ifc" || return 1
+		[ -z "$gw" ] || ip route add default via "$gw" dev "$ifc" || return 1
+	else
+		log "dhcp on $ifc"
+		n=0
+		until udhcpc -i "$ifc" -n -q -s /usr/share/udhcpc/default.script; do
+			n=$((n + 1))
+			[ "$n" -lt 15 ] || { log "dhcp failed"; return 1; }
+			sleep 2
+		done
+	fi
+	ip -4 addr show dev "$ifc" | while read -r l; do log "$l"; done
+}
+
+serve() {
+	port=$(cmdline_get rescue.port 7777)
+	fifo=/tmp/rescue.fifo
+	mkfifo "$fifo"
+	while :; do
+		log "listening on port $port"
+		# The fifo carries the handler's replies back into nc, on purpose.
+		# shellcheck disable=SC2094
+		nc -l -p "$port" <"$fifo" | /init --handle >"$fifo"
+	done
+}
+
+main() {
+	mount -t proc proc /proc
+	mount -t sysfs sysfs /sys
+	mount -t devtmpfs devtmpfs /dev
+	exec >/dev/console 2>&1 </dev/console
+	log "start"
+	n=0
+	while [ ! -e /dev/mmcblk0 ] && [ "$n" -lt 30 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	if [ -e /dev/mmcblk0 ]; then log "mmcblk0 present"; else log "mmcblk0 absent"; fi
+	until net_up; do
+		log "network not up, retry"
+		sleep 5
+	done
+	serve
+}
+
+case ${1:-} in
+--handle)
+	handle
+	exit 0
+	;;
+esac
+main

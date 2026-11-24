@@ -39,7 +39,7 @@ export PATH := $(TOOLS_DIR):$(PATH)
 NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
 
 # Every shell script git tracks, and every Python script under scripts/.
-SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh scripts/xkms/*.sh scripts/xkms/burnin/*.sh test/*.sh test/integration/*.sh))
+SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh scripts/xkms/*.sh scripts/xkms/burnin/*.sh scripts/board-rescue/*.sh scripts/board-rescue/init scripts/board-rescue/udhcpc.script test/*.sh test/integration/*.sh))
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))

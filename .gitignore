@@ -15,3 +15,5 @@ it-image.tar
 # xkmsd build tree and output (scripts/xkms/xkmsd-build.sh)
 /build/go-xkms/
 /build/xkms/
+# rescue initramfs output and the cached busybox .deb (scripts/board-rescue/build-initramfs.sh)
+/build/board-rescue/
