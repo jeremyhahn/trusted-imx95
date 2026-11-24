@@ -152,6 +152,11 @@ int main(int argc, char **argv)
 		 * reconciled or deleted. Not a protected key. */
 		fprintf(stderr, "ele_client: update refused (%s); key %u was generated and is NOT rollback-protected: reconcile or delete it; %s\n",
 			ele_commit_name(st), id, CTR_REASON);
+	else if (rc != 0 && cmd.op == ELE_CLI_GEN && st != ELE_NOT_COMMITTED)
+		/* The counter acknowledgement failed or was absent: no key handle
+		 * is released (fail closed), though the enclave may hold a key. */
+		fprintf(stderr, "ele_client: update refused (%s); the generated key is NOT rollback-protected and no key handle is released without the counter acknowledgement: the key store may hold an unnamed key; %s\n",
+			ele_commit_name(st), CTR_REASON);
 	else if (rc != 0 && cmd.op == ELE_CLI_DEL && st != ELE_NOT_COMMITTED)
 		/* Every key-store update fails closed: the counter acknowledgement
 		 * cannot be established for a delete (client.md, "Fail-closed rule"). The delete may

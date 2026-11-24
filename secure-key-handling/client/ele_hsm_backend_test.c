@@ -137,10 +137,11 @@ static void isolation(void)
 	CHECK(fake.sign_calls == 1, "one sign call");
 	CHECK(ks_seen->scrubs >= 1 && ks_seen->scrub_bytes >= 4096, "the child scrubs its stack after the key store open");
 
-	/* Generate: HSM_NO_ERROR cannot show the counter advanced: refused, id kept. */
+	/* Generate: HSM_NO_ERROR cannot show the counter advanced: refused, and
+	 * no key handle is released without the counter acknowledgement. */
 	begin(&x, &c, &nonce, true);
-	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 7,
-	      "generate: not rollback-protected, refused, key id kept");
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 0,
+	      "generate: not rollback-protected, refused, no key handle");
 	CHECK(one_child(seq_gen, NSEQ), "generate: all vendor calls in one child pid, none in the parent");
 	CHECK(nonce == 0, "the parent's nonce buffer is zero after generate");
 	CHECK(fake.gen_flags == (HSM_OP_KEY_GENERATION_FLAGS_STRICT_OPERATION | HSM_OP_KEY_GENERATION_FLAGS_MONOTONIC_COUNTER),

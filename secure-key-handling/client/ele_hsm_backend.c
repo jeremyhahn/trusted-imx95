@@ -92,7 +92,7 @@ static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *a
 	 * so HSM_NO_ERROR does not show that the counter advanced. No per-flag
 	 * acknowledgement is exposed, so the counter flag is never reported
 	 * acknowledged and nothing is reported rollback-protected from here;
-	 * a generate is refused with the key id kept for reconciliation.
+	 * a generate is refused and the client releases no key handle.
 	 * PROVISIONAL: lifted only by evidence from the board or a library
 	 * that exposes the acknowledgement (the owner's call). */
 	ack->counter_acked = false;

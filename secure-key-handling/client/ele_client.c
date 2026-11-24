@@ -23,7 +23,9 @@ static bool ele_update_ok(uint32_t flags_sent, const struct ele_ack *ack, enum e
 {
 	if (st == ELE_NOT_COMMITTED || !ack || ack->counter_warning)
 		return false;
-	if ((flags_sent & ELE_REQ_MONOTONIC_COUNTER) && st != ELE_ROLLBACK_PROTECTED)
+	/* Fail closed (owner, Q2 (c)): a generate sent without the counter flag
+	 * (strict only) skips the acknowledgement, so it never succeeds. */
+	if (!(flags_sent & ELE_REQ_MONOTONIC_COUNTER) || st != ELE_ROLLBACK_PROTECTED)
 		return false;
 	return true;
 }
@@ -71,10 +73,13 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 		return -1;
 	*state = ele_classify(c->flags, &ack);
 	/* The state is kept for the caller's diagnostics even when the call fails. */
-	/* An accepted generate leaves a key even when the update is refused (a
-	 * counter warning): its identifier is returned with the failure so the
-	 * caller can reconcile or delete it. 0 is never a returned key. */
-	if (*state != ELE_NOT_COMMITTED)
+	/* No key handle is released unless the counter flag was sent and
+	 * acknowledged (fail closed, owner Q2 (c)). With the acknowledgement, a
+	 * refused update (a counter warning, no split) still returns the
+	 * identifier with the failure so the caller can reconcile or delete it.
+	 * 0 is never a returned key. */
+	if (*state != ELE_NOT_COMMITTED && (c->flags & ELE_REQ_MONOTONIC_COUNTER) &&
+	    ack.counter_acked)
 		*key_id = id;
 	if (!ele_update_ok(c->flags, &ack, *state))
 		return -1;

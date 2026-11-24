@@ -271,13 +271,13 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	no_hsm_call "bad nonce fd"
 	cli 0 --split-confirmed 5 3 gen
 	# HSM_NO_ERROR cannot show the counter advanced (a success-tagged warning maps to it): fail closed.
-	check "gen with a confirmed split is refused, never reported rollback-protected" 1 "key 7 was generated and is NOT rollback-protected"
-	case $OUT in *"key 7 rollback-protected"*) fail "gen claimed rollback protection" ;; esac
+	check "gen with a confirmed split is refused, never reported rollback-protected" 1 "no key handle is released without the counter acknowledgement"
+	case $OUT in *"key 7"*) fail "gen released a key handle without the counter acknowledgement" ;; esac
 	cli 0 5 3 gen
 	check "gen with the split unconfirmed fails" 1 "refused"
 	no_hsm_call "gen with the split unconfirmed (no session, no service, no generate)"
 	cli 0 --split-confirmed 5 3 gen
-	check "gen with a confirmed split names the key it generated" 1 "key 7"
+	check "gen with a confirmed split releases no key handle" 1 "no key handle"
 	grep -q '^open_session dumpable=0$' "$tmp/hsm.log" || fail "the CLI did not set PR_SET_DUMPABLE 0 before opening the HSM"
 	# sign prints the double's known signature bytes, byte i = (3i+1)&0xff.
 	want=
@@ -330,7 +330,13 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		ELE_FAKE_ERR=0 ELE_FAKE_LOG="$tmp/hsm.log" "$tmp/ele_cli" --split-confirmed 5 3 $op 3<"$tmp/nonce" >"$tmp/fc.out" 2>"$tmp/fc.err" || rc=$?
 		[ "$rc" = 1 ] || fail "$op over the shipped backend (HSM_NO_ERROR): exit $rc, want 1"
 		[ ! -s "$tmp/fc.out" ] || fail "$op over the shipped backend: stdout is not empty"
-		grep -q 'key 7' "$tmp/fc.err" || fail "$op fail-closed: the key id is missing on stderr"
+		if [ "$op" = gen ]; then
+			# No counter acknowledgement: no key handle is released (Q2 (c)).
+			grep -q 'no key handle is released' "$tmp/fc.err" || fail "gen fail-closed: 'no key handle is released' is missing on stderr"
+			if grep -q 'key 7' "$tmp/fc.err"; then fail "gen fail-closed: a key handle was released"; fi
+		else
+			grep -q 'key 7' "$tmp/fc.err" || fail "$op fail-closed: the key id is missing on stderr"
+		fi
 		grep -q 'NOT rollback-protected' "$tmp/fc.err" || fail "$op fail-closed: 'NOT rollback-protected' is missing on stderr"
 		grep -qF "$ctr_reason" "$tmp/fc.err" || fail "$op fail-closed: the fixed reason is missing on stderr"
 		if python3 -I -c 'import re,sys
@@ -338,7 +344,7 @@ t=open(sys.argv[1]).read()
 sys.exit(0 if re.search(r"(?<!NOT )(?<!not-)rollback-protected", t) else 1)' "$tmp/fc.err"; then
 			fail "$op fail-closed: stderr says rollback-protected without NOT"
 		fi
-		pass "$op over the shipped backend and HSM_NO_ERROR: exit 1, empty stdout, key id, NOT rollback-protected, fixed reason"
+		pass "$op over the shipped backend and HSM_NO_ERROR: exit 1, empty stdout, key id (del) or no key handle (gen), NOT rollback-protected, fixed reason"
 	done
 	# The child dies after the started marker (mode 3: SIGKILL, 4: exit 3 inside
 	# the update call): the outcome is unknown, exit 3, never a plain failure.

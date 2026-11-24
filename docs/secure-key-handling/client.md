@@ -59,7 +59,7 @@ split configured (owner decision 241; [architecture.md](architecture.md#key-stor
 |---|---|---|
 | Both | yes | rollback-protected |
 | Both | no (warning, or no split) | the call fails; state kept: committed, not rollback-protected |
-| Strict only | n/a | committed, not rollback-protected |
+| Strict only | n/a | the call fails, no key handle; state kept: committed, not rollback-protected |
 | Monotonic counter only | n/a | not committed (the call fails) |
 | Neither | n/a | not committed (the call fails) |
 
@@ -70,10 +70,14 @@ rollback-protected ([below](#delete-is-never-rollback-protected-a-gap-for-the-ow
 (`HSM_KEY_STORE_COUNTER`: accepted, counter not advanced, so the prior blob can still be replayed;
 [architecture.md](architecture.md#key-store-rollback-protection)), a missing strict acknowledgement, or a send of both
 flags that is not rollback-protected (counter not acknowledged, or the split not confirmed). The commit state is still
-returned and printed (`update refused (...)`), so the diagnostic is kept. A generate the enclave accepted leaves a key
-even when its update is refused (a counter warning): its identifier is returned with the failure and the command
-prints it (`key N was generated and is NOT rollback-protected`) so it can be reconciled or deleted, not presented as a
-protected key. A strict-only send (a delete) does **not** succeed:
+returned and printed (`update refused (...)`), so the diagnostic is kept. **Strict mode fails closed (owner, Q2 option
+(c)):** a generate returns an error and releases no key handle unless the counter flag was sent and acknowledged; a
+strict-only generate, or one whose counter acknowledgement failed or is absent (always so through the shipped
+library), returns key id 0 and the command prints `no key handle is released without the counter acknowledgement`.
+The enclave may still hold the key, unnamed. Only when the counter was acknowledged but the update was refused (a
+counter warning, or the split not confirmed) is the identifier returned with the failure and printed
+(`key N was generated and is NOT rollback-protected`) so it can be reconciled or deleted, not presented as a protected
+key. A strict-only send (a delete) does **not** succeed:
 `ele_delete_key` returns failure unless the counter is acknowledged, which the binding never reports (the fail-closed rule). The
 delete may nevertheless have taken effect on the device while failing the rollback policy, so a caller must treat the
 key as possibly deleted; the commit state is returned for that.

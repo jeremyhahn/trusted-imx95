@@ -43,6 +43,9 @@ static void case_flags(const char *name, uint32_t sent, bool strict_ack, bool co
 	CHECK((rc == 0) == want_ok, name);
 	if (want_ok)
 		CHECK(st == want, name);
+	/* Fail closed: no key handle without the counter acknowledgement. */
+	if (!((sent & ELE_REQ_MONOTONIC_COUNTER) && counter_ack))
+		CHECK(rc != 0 && id == 0, "no counter acknowledgement: generate fails, no key handle");
 	if (want_ok) {
 		/* A delete is never rollback-protected: strict flag only. */
 		rc = ele_delete_key(&c, id, &st);
@@ -84,8 +87,9 @@ int main(void)
 
 	/* The four flag combinations of decision 241. */
 	case_flags("both flags", both, true, true, false, true, ELE_ROLLBACK_PROTECTED, true);
+	/* Strict only skips the counter acknowledgement: fails closed (Q2 (c)). */
 	case_flags("strict only", ELE_REQ_STRICT_OPERATION, true, true, false, true,
-		   ELE_COMMITTED_UNPROTECTED, true);
+		   ELE_COMMITTED_UNPROTECTED, false);
 	case_flags("counter only", ELE_REQ_MONOTONIC_COUNTER, true, true, false, true,
 		   ELE_NOT_COMMITTED, false);
 	case_flags("neither", 0, true, true, false, true, ELE_NOT_COMMITTED, false);
