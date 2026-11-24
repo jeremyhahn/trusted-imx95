@@ -69,7 +69,7 @@ run fail "an installed 3.12.0 fails naming both versions" "3.12.0" SPSDK_VENV="$
 run pass "the pinned version passes" "ruling 1234" SPSDK_VENV="$work/venv-pin" -- --dry-run
 count=$(grep -c 'ruling 1234' <<<"$last" || true)
 if [ "$count" -ge 4 ]; then ok "four steps each name ruling 1234"; else bad "expected 4 steps with ruling 1234, got $count: $last"; fi
-[[ $last == *"ran none of these steps"* ]] && ok "it says it runs no step" || bad "it does not say it runs no step"
+if [[ $last == *"ran none of these steps"* ]]; then ok "it says it runs no step"; else bad "it does not say it runs no step"; fi
 
 if [ -s "$log" ]; then bad "a device double was called: $(cat "$log")"; else ok "the device doubles were never called"; fi
 exit $fails
