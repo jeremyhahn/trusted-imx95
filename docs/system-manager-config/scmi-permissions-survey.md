@@ -562,6 +562,21 @@ that tree on 2026-11-24 (**read twice**: the first reading is the one
   (`get_perms`), the write of `SM_SCMI_PERM_<PERM>` at `:2506`;
   `devices/MIMX95/configtool/m7mix.cfg:39` (`PERF_M7` bundled with `M7P`);
   `configs/other/mx95frdm-pro.cfg:396` (`M7P  OWNER`).
+- Second reading of the remaining vendor lines that 8.2 cites, by line
+  number, on 2026-11-24 (all **agreed**, one cite corrected):
+  `configs/configtool.pl:85-86` (permission names, `ALL` last);
+  `:244-257` (the `api=<perm>` word expanded to every protocol);
+  `:2461-2463` (the `<proto>=<perm>` word read per line) and `:2474` (one
+  value kept per resource, a later line replaces an earlier one);
+  `:2486-2506` (the `<proto>Perms[...] = SM_SCMI_PERM_<PERM>` write);
+  `configs/other/mx95frdm-pro.cfg:57-58` (dictionary `PRIV` and `ALL`),
+  `:344` (`OWNER`), `:377-392` (the API list, no `PERF_*` entry),
+  `:394-396` (Resources, then `M7P  OWNER`);
+  `sm/rpc/scmi/rpc_scmi_perf.c:870` (`levelIndex` set per described level),
+  `:1098-1104` (the PRIV check) and `:1107-1111` (the `LMM_PerfLevelSet`
+  call; the first reading cited `:1106`, a blank line, now `:1107`);
+  `configs/mx95evk/config_scmi.h:95` (`perfPerms[DEV_SM_PERF_M7]` is ALL;
+  not relied on).
 
 - Confirmable from this repository alone: the lock pins, the patch
   contents, that `system-manager/patches/` leaves `M7P` and `PERF_M7`
@@ -629,7 +644,7 @@ under the cite-only rule (the placement outcome of item 7 is checked by
 3. Function `PerformanceLevelSet` rejects the call with `SM_ERR_DENIED`
    when the agent's `perfPerms[domain]` is below `SM_SCMI_PERM_PRIV`
    (`sm/rpc/scmi/rpc_scmi_perf.c:1098-1104`), otherwise it calls
-   `LMM_PerfLevelSet` (`:1106-1111`). No other permission is read.
+   `LMM_PerfLevelSet` (`:1107-1111`). No other permission is read.
 4. `PerformanceLimitsSet` needs SET (`:955-961`) but then returns
    `SM_ERR_NOT_SUPPORTED` whatever the permission (`:963-967`). The M7
    cannot narrow a domain's limits at this revision, line or not.
