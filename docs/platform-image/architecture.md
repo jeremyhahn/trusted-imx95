@@ -109,8 +109,11 @@ is written to each device, its partition layout and the update path are not in a
   missing ([references/README.md](../references/README.md), "Still missing"). The boot ROM behaviour, including how
   it reads each boot device, comes from them.
 - **The System Manager documentation** is missing (docs/SPEC.md, Features, `system-manager-config`).
-- **The image's partition layout, its update and rollback path, and how it is written to each boot device** are
-  given by no document in [references/](../references/README.md).
+- **The image's partition layout** is put together, region by region and with its sources, in
+  [emmc-layout.md](emmc-layout.md) (proposed, pending owner approval); the vendor documents in
+  [references/](../references/README.md) do not give it, and the user-area part is #140's proposal (PR #158).
+- **The update and rollback path, and how the image is written to each boot device,** are given by no document in
+  [references/](../references/README.md).
 
 ## Open questions
 
