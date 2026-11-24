@@ -183,7 +183,10 @@ make platform-image ARGS=--check              # names missing host tools; fetche
 directory's conf from the templates (it refuses to overwrite a conf that
 differs unless `PLATFORM_IMAGE_BUILD_FORCE=1`), runs bitbake (extra bitbake
 arguments such as `-k` go in `PLATFORM_IMAGE_BITBAKE_ARGS`), then copies the
-real wic and rootfs files of the deploy directory (not the plain-name links)
+real wic and rootfs files of the deploy directory, with each target's package
+manifest (`.manifest`) and SPDX SBOM (`.spdx.json`; a target with an image
+artefact but no SBOM fails the build, because `create-spdx` stays on), not the
+plain-name links, `.testdata.json`, `.env` or `.qemuboot.conf`,
 to `.platform-image/out/` (git-ignored; `PLATFORM_IMAGE_OUT` overrides it),
 with `SHA256SUMS` and `build-info.txt` (machine, distro, targets,
 `SOURCE_DATE_EPOCH`, build seconds, this checkout's commit, whether

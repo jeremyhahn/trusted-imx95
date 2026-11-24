@@ -4,7 +4,8 @@
 # platform-image/manifest.lock pins. Fetches the pins into DIR (outside the
 # clone), writes the build directory's conf from the templates (refusing to
 # overwrite a conf that differs, unless PLATFORM_IMAGE_BUILD_FORCE=1), runs
-# bitbake, then copies the wic and rootfs artefacts, SHA256SUMS and
+# bitbake, then copies the wic and rootfs artefacts, each target's package
+# manifest and SPDX SBOM (a missing SBOM fails), SHA256SUMS and
 # build-info.txt into OUT (default <clone>/.platform-image/out, git-ignored).
 # --check names every missing host tool and prints the plan; it fetches and
 # builds nothing. --repro builds twice in separate directories and publishes
@@ -268,18 +269,26 @@ for t in $targets; do
 	# Real files only (the deploy directory links the latest build by a plain
 	# name): the wic image, its bmap, and the rootfs tarball and ext4. The
 	# debug image's prefix "-debug-" never matches the production one.
+	# The package manifest and the SPDX SBOM (create-spdx stays on) are
+	# published with them: what went into the image. A target with an image
+	# artefact but no SBOM is a build fault.
+	t_img=0
+	t_spdx=0
 	for f in "$deploy/$t-$machine"*; do
 		[ -f "$f" ] && [ ! -L "$f" ] || continue
 		case $f in
-		*.testdata.json | *.manifest | *.spdx.json | *.env | *.qemuboot.conf) continue ;;
+		*.testdata.json | *.env | *.qemuboot.conf) continue ;;
+		*.spdx.json) t_spdx=1 ;;
+		*.manifest) ;;
 		# Yocto names the rootfs ".rootfs-<timestamp>.<ext>" (IMAGE_NAME with
 		# IMAGE_VERSION_SUFFIX); the older ".rootfs.<ext>" form matches too.
-		*.wic* | *.rootfs*) ;;
+		*.wic* | *.rootfs*) t_img=1 ;;
 		*) continue ;;
 		esac
 		cp "$f" "$out/"
 		n=$((n + 1))
 	done
+	[ "$t_img" -eq 0 ] || [ "$t_spdx" -eq 1 ] || die "the build left no SPDX SBOM (.spdx.json) for $t"
 done
 [ "$n" -gt 0 ] || die "the build left no wic or rootfs artefact for: $targets"
 (cd "$out" && sha256sum -- * >SHA256SUMS)
