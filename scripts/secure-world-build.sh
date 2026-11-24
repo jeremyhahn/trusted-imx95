@@ -155,6 +155,24 @@ if [ "$bl32_base" -lt $((bl31_base + bl31_size)) ] && [ "$bl31_base" -lt $((bl32
 	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) overlaps the BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]})"
 fi
 
+# The BL31 window must be the one the pinned TF-A links BL31 at. The lock's pair
+# only describes BL31 to the checks above; the build does not pass it to TF-A,
+# so a pair that differs from the platform's own constants would let BL32 be
+# placed over the resident BL31. The constants are fixed here and the lock must
+# equal them (fail closed on any other value):
+#   BL31_BASE 0x8A200000: TF-A da738d5 (the commit docs/boot-container/boot-image.md
+#     cites), plat/imx/imx9/imx95/include/platform_def.h:34, `BL31_BASE U(0x8A200000)`.
+#   BL31_SIZE 0x00040000: the 256 KiB BL31 limit (BL31_LIMIT 0x8A240000) of the same
+#     imx95 platform_def.h, as recorded for both the NXP and the upstream tree in
+#     docs/secure-world/memory-protection-survey.md section 5.
+# The pinned imx-atf commit (TFA_COMMIT) was not read in this checkout; moving to
+# another commit or platform means re-reading these two values from its
+# platform_def.h and changing them here.
+plat_bl31_base=$((0x8A200000))
+plat_bl31_size=$((0x00040000))
+{ [ "$bl31_base" -eq "$plat_bl31_base" ] && [ "$bl31_size" -eq "$plat_bl31_size" ]; } ||
+	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) differs from the BL31 the pinned TF-A links at (BASE 0x8A200000, SIZE 0x00040000, imx95 platform_def.h)"
+
 if [ "$check_only" = 1 ]; then
 	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
 	exit 0

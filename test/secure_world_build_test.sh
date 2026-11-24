@@ -213,6 +213,18 @@ check "a BL31 window outside the SM window fails" nonzero "BL31 window (BL31_BAS
 f=$(lockcopy b31missing edit_b31missing)
 run bash "$sw" --lock "$f" --check-lock
 check "a lock without BL31_BASE fails" nonzero "BL31_BASE is missing"
+# The reviewer's case: a BL31 window that is sane, inside the SM window and clear
+# of BL32, but not where the pinned TF-A links BL31 (0x8A200000). BL32 at
+# 0x8A000000 (default 32 MiB) then covers the resident BL31.
+bl31msg="differs from the BL31 the pinned TF-A links at"
+W=([BL31_BASE]=0x8D000000 [BL32_BASE]=0x8A000000)
+f=$(lockcopy b31moved edit_b31moved)
+run bash "$sw" --lock "$f" --check-lock
+check "BL31_BASE 0x8D000000 with BL32_BASE 0x8A000000 is refused" nonzero "$bl31msg"
+W=([BL31_SIZE]=0x00200000)
+f=$(lockcopy b31size edit_b31size)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL31_SIZE other than the platform's is refused" nonzero "$bl31msg"
 W=()
 
 for c in "smexact|a BL32 window from above BL31 to the SM window end" "smlow|BL32_BASE just above BL31 with the default size"; do
