@@ -88,10 +88,10 @@ AN14471's model for the custody of the signing keys (AN14471 §3.1, §3.6). `mak
    public keys move to the build directory, a second `mktemp -d`.
 2. [scripts/ahab/test-hsm.py](../../scripts/ahab/test-hsm.py), a test stand-in for the HSM, holds
    SRK 0's private key and serves SPSDK 3.13.0's `proxy` signature provider (REST API 2.0) on
-   `127.0.0.1`, on an ephemeral port. It signs only a pre-hashed SHA-384 digest: it never sees the
+   the loopback interface, on an ephemeral port. It signs only a pre-hashed SHA-384 digest: it never sees the
    container.
 3. The M7 configuration ([m7-container.yaml](../../scripts/ahab/m7-container.yaml)) has its `signer`
-   set to `type=proxy;host=127.0.0.1;port=<port>;url_prefix=api;prehash=sha384`.
+   set to `type=proxy;host=<hsm-host>;port=<port>;url_prefix=api;prehash=sha384`.
    `nxpimage ahab export` signs through the HSM, and `nxpimage ahab verify` checks the container.
 4. The run fails when the build directory holds a private key, before or after the export, or when
    the HSM logged no SHA-384 sign request.

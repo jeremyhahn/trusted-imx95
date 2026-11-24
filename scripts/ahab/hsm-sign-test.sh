@@ -128,8 +128,9 @@ fi
 rm -f "$work"/*.bcf
 [ -s "$work/m7-container.bin" ] || die "nxpimage ahab export wrote no m7-container.bin"
 no_private_key "$work" "after export"
-[ -s "$hsm/hsm.log" ] && grep -q '^sign sha384 [0-9a-f]\{96\}$' "$hsm/hsm.log" ||
+if [ ! -s "$hsm/hsm.log" ] || ! grep -q '^sign sha384 [0-9a-f]\{96\}$' "$hsm/hsm.log"; then
 	die "the test HSM received no SHA-384 sign request"
+fi
 echo "test HSM: signed a SHA-384 digest ($(grep -c '^sign sha384' "$hsm/hsm.log") request(s))"
 
 if ! (cd "$work" && "$nxpimage" ahab verify -f "$FAMILY" -r "$REVISION" -b m7-container.bin) >"$work/verify.log" 2>&1; then
