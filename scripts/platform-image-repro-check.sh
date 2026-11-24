@@ -165,8 +165,11 @@ pick() {
 	[ "${#files[@]}" -ge 1 ] || return 1
 	# the plain file comes first in the callers' pattern order, then gz bz2 xz zst
 	for ((i = 1; i < ${#files[@]}; i++)); do
-		pa=$(deco "${files[0]}" "$tmp/pk.0") && pb=$(deco "${files[i]}" "$tmp/pk.1") || {
-			printf 'cannot decompress %s or %s' "${files[0]}" "${files[i]}" >"$tmp/why"; rm -f "$tmp/pk.0" "$tmp/pk.1"; return 1; }
+		if ! pa=$(deco "${files[0]}" "$tmp/pk.0") || ! pb=$(deco "${files[i]}" "$tmp/pk.1"); then
+			printf 'cannot decompress %s or %s' "${files[0]}" "${files[i]}" >"$tmp/why"
+			rm -f "$tmp/pk.0" "$tmp/pk.1"
+			return 1
+		fi
 		if ! cmp -s "$pa" "$pb"; then
 			printf 'formats of one image differ after decompression: %s and %s' "${files[0]}" "${files[i]}" >"$tmp/why"
 			rm -f "$tmp/pk.0" "$tmp/pk.1"
