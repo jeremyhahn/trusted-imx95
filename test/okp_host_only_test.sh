@@ -28,6 +28,7 @@ FILES=(
   scripts/okp/station-preflight.sh
   scripts/okp/record-check.py
   test/okp_record_check_test.sh
+  test/okp_record_drift_test.sh
   test/key_exchange_test.sh
   test/key_import_test.sh
   test/srk_hash_check_test.sh
