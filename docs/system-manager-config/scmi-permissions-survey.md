@@ -512,8 +512,7 @@ The CI job "System Manager build with the pinned Arm toolchain"
 `scripts/sm-toolchain-check.sh`, the script behind `make sm-toolchain-check`,
 which builds with `make system-manager`. That job runs only when the PR is
 not a draft; no CI run on the head that carries this text has run it yet,
-so no CI result is claimed. What was run is the lane run recorded in
-`docs/plans/167.md` ("Recorded run, 2026-11-24"), on the real pinned source
+so no CI result is claimed. What was run is a lane run of 2026-11-24 on the real pinned source
 and not in CI. `bash test/sm_build_test.sh`
 covers the check offline, on synthetic tables written in the test.
 
@@ -650,7 +649,7 @@ PRIV (item 3), and that an explicit line would not lower the grant
 (item 7) are cited at the pinned revision, not confirmable by review
 under the cite-only rule (the placement outcome of item 7 is checked by
 `scripts/sm-perf-placement-check.sh`, run by the non-draft CI job named in
-8.0 and by the lane run recorded in `docs/plans/167.md`).
+8.0 and by a lane run on the pinned source).
 
 ### 8.2 Evidence
 
@@ -674,8 +673,8 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    `scripts/sm-perf-check.sh` (lines 21 and 72-79), called from
    `scripts/sm-build.sh` (lines 189-190), fails unless the M7 record
    holds the one line at ALL; the CI job named in 8.0 runs it when the PR is
-   not a draft (no CI run of it is claimed here; the lane run is in
-   `docs/plans/167.md`); the manifest line is `m7_perf_m7=ALL`. The rest of this item is
+   not a draft (no CI run of it is claimed here; a lane run on the pinned
+   source passed it); the manifest line is `m7_perf_m7=ALL`. The rest of this item is
    cited only (ii). The tool derives such a line in `get_perms`
    (`configs/configtool.pl:2410`): it takes each protocol's `perf=<perm>`
    word on the agent's lines (`:2461-2463`), keeps one value per
@@ -690,6 +689,14 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    when the agent's `perfPerms[domain]` is below `SM_SCMI_PERM_PRIV`
    (`sm/rpc/scmi/rpc_scmi_perf.c:1098-1104`), otherwise it calls
    `LMM_PerfLevelSet` (`:1107-1111`). No other permission is read.
+
+   Reproduce the vendor read: the imx-sm repository is
+   `https://github.com/nxp-imx/imx-sm`, pinned at commit
+   `eec232878ab7dd460f5a8f3767d39dc7e9412efa`. A shallow fetch of that commit
+   gives the same tree (`git init imx-sm && cd imx-sm`, then
+   `git fetch --depth 1 https://github.com/nxp-imx/imx-sm.git eec232878ab7dd460f5a8f3767d39dc7e9412efa`
+   and `git checkout FETCH_HEAD`). Every vendor line cited in this section
+   is a line of that tree; no vendor code is copied here.
 4. `PerformanceLimitsSet` needs SET (`:955-961`) but then returns
    `SM_ERR_NOT_SUPPORTED` whatever the permission (`:963-967`). The M7
    cannot narrow a domain's limits at this revision, line or not.
@@ -733,8 +740,8 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    --want` (line 31). The anchors are found by content in the M7 block, and
    a missing one fails the check. The variants are not patches and are
    never committed. The CI job named in 8.0 runs the check when the PR is not
-   a draft; no CI run of it is claimed yet, and the lane run in
-   `docs/plans/167.md` observed ALL and PRIV. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
+   a draft; no CI run of it is claimed yet, and a lane run on the pinned
+   source observed ALL and PRIV. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
    later lines by two (0002 removes two test grants from the API list),
    which does not alter any entry cited here.
 
@@ -782,7 +789,7 @@ file.
   `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM; in the
   API list it changes nothing. Both placements are tested by
   `scripts/sm-perf-placement-check.sh` (item 7), which the non-draft CI job
-  named in 8.0 runs and the lane run in `docs/plans/167.md` ran. Proposed, pending owner
+  named in 8.0 runs and a lane run on the pinned source ran. Proposed, pending owner
   approval, and not needed for the M7 to set its level.
 - Check for the image build: done by #167 (`scripts/sm-perf-check.sh`,
   run by `scripts/sm-build.sh` on every build, 8.0 (i)). It asserts that
