@@ -207,6 +207,42 @@ negative_trace() {
 		fail "negative: $name" "$c did not detect it"
 	fi
 }
+
+# Each Sources row of the trace carries a 40-hex commit and a URL; every
+# "unconfirmed" mark is followed by a reason (3 or more words) on its line or the next.
+c_trace_sources() {
+	awk '
+		/^## Sources/ { s = 1; next }
+		/^## / { s = 0 }
+		s && /^\| [0-9]+ \|/ {
+			n++
+			if ($0 !~ /[0-9a-f]{40}/) print "Sources row " $2 " has no 40-hex commit"
+			if ($0 !~ /https:\/\/[^ |]+/) print "Sources row " $2 " has no URL"
+		}
+		END { if (n == 0) print "no Sources rows found" }
+	' "$1"
+}
+
+c_trace_unconfirmed() {
+	awk '
+		{ line[NR] = $0 }
+		END {
+			for (i = 1; i <= NR; i++) {
+				if (!match(tolower(line[i]), /unconfirmed/)) continue
+				rest = substr(line[i], RSTART + RLENGTH)
+				w = split(rest, a, /[^A-Za-z0-9]+/) - 1
+				if (w < 3 && i < NR) { w += split(line[i + 1], b, /[^A-Za-z0-9]+/) - 1 }
+				if (w < 3) print "line " i ": unconfirmed without a reason"
+			}
+		}
+	' "$1"
+}
+
+for c in c_trace_sources c_trace_unconfirmed; do
+	out=$("$c" "$TRACE")
+	if [ -z "$out" ]; then pass "$c on enclave-interface-trace.md"; else fail "$c on enclave-interface-trace.md" "$out"; fi
+done
+negative_trace "trace source row without its commit" c_trace_sources '/^| 1 /s/[0-9a-f]\{40\}/none/'
 negative_trace "trace status line dropped" c_trace_status '/^> \*\*Status:/d'
 negative_trace "trace section (c) emptied" c_trace_sections '/^## [(]c[)] /,/^## [(]d[)] /{/^## /!d;}'
 

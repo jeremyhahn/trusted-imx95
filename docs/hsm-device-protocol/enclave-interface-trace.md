@@ -13,11 +13,14 @@ No go-xkms code was read, and no wire-protocol detail is named here.
 |---|-------|--------------|-----|
 | 1 | NXP linux-imx, the kernel tree (secure-enclave driver under drivers/firmware/imx) | tag lf-6.18.37-2.1.0, peeled to commit 6e694eda40aabd6671fca82b5416dbd76beeebb9 | https://github.com/nxp-imx/linux-imx |
 | 2 | NXP imx-secure-enclave, the user-space library and NVM daemon | tag lf-6.18.37-2.1.0, peeled to commit 463845060a79dd9a6d39db3b3d8dff60225b9dfd | https://github.com/nxp-imx/imx-secure-enclave |
+| 3 | NXP meta-imx, the Yocto layer holding the kernel recipe (pinned by `platform-image/manifest.lock`, ref rel_imx_6.18.37_2.1.0) | commit 2eb758f42cfb96042344815b7dd7755b06ba1e3b | https://github.com/nxp-imx/meta-imx |
 
 Both tags are annotated; the commits above are what each tag peels to. The release name is the one pinned by
-`secure-world/bsp.lock` (LF_RELEASE) and `platform-image/manifest.lock` (manifest_tag). **Unconfirmed:** whether the
-kernel recipe the image builds uses exactly commit 1; the recipe's source revision lives in the NXP layers, which this
-repository does not hold, and it was not read. In the tables below, "S1" is source 1 and "S2" is source 2.
+`secure-world/bsp.lock` (LF_RELEASE) and `platform-image/manifest.lock` (manifest_tag). **Confirmed equal:** the kernel
+recipe at the pinned meta-imx commit (source 3) sets its source revision to exactly commit 1 (S3
+`meta-imx-bsp/recipes-kernel/linux/linux-imx_6.18.bb:24`), on branch `lf-6.18.y` (`:22`); the revision is a literal, not a
+variable. The recipe's local version suffix is `-2.1.0` (`:35`). This assumes the image builds that recipe; no
+bbappend in other layers was read. In the tables below, "S1" is source 1 and "S2" is source 2.
 
 ## (a) Device nodes on the i.MX 95
 
@@ -92,7 +95,9 @@ Any other code returns an invalid-argument error (`se_ctrl.c:2352-2357`). Beside
   command is not settled by the code read; recorded here as a question for the owner or NXP, not a finding about
   behaviour.
 - Per-descriptor data buffer: 128 KiB (`se_ctrl.h:19`, used at `se_ctrl.c:1292`, `1307`).
-- Hardware message length of the messaging unit: **unconfirmed**; the mailbox driver was not read.
+- Hardware message length of the messaging unit: **unconfirmed**; the mailbox driver was not read. Reason
+  (2026-11-24, lane s4): the driver tree was fetched, but the lane's read guard refused every read of vendor code files, so
+  this cell, the reset cell (e) and the session-flag cell (f) were not changed.
 - Timeouts: the receive wait defaults to 5000 ms and the ioctl path raises it to a long value (`se_ctrl.c:48-49`, `61`,
   `1623-1625`).
 
