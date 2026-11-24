@@ -50,7 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	boot-image-inputs boot-image-test \
+	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -231,6 +231,13 @@ okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a
 
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
+
+skh-policy-check: ## Check a trace of enclave operations against the secure-key-handling row (SKH_TRACE=<file.jsonl>; HSM API only, keys never in the clear, both rollback flags acknowledged; host-side, no enclave)
+	@[ -n "$(SKH_TRACE)" ] || { echo "skh-policy-check: set SKH_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/skh-policy-check.py "$(SKH_TRACE)"
+
+integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
+	@bash test/integration/secure_key_handling_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
