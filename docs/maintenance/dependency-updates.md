@@ -1,6 +1,6 @@
 # Dependency updates
 
-How a pin moves on `row/178-maintenance` (the standing maintenance row, plan in [`docs/plans/178.md`](../plans/178.md)). It applies to a dependabot bump, a `deps/*` branch and a manual one. Every step is offline except where it says so.
+How a pin moves on `row/178-maintenance` (the standing maintenance row). It applies to a dependabot bump, a `deps/*` branch and a manual one. Every step is offline except where it says so.
 
 ## Two checks, two questions
 
