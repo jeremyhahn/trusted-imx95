@@ -34,9 +34,10 @@ The output directory holds:
 
 **Host.** x86_64 Linux with glibc, with `git`, `curl`, `make`, `tar`, `xz`, `sha256sum`, CPython 3.13 and `uv` on
 `PATH`, and network access to the pinned URLs only: github.com, developer.arm.com and PyPI. The script checks the
-architecture and each tool and stops, naming any that is missing. The project's devcontainer image is Alpine (musl)
-and cannot run Arm's glibc-hosted toolchain, so `make docker-run` does not build this. The earlier builds ran in a
-Debian 13 container on a build node with no Docker.
+architecture and each tool and stops, naming any that is missing. The project's Alpine (musl) `toolchain` stage cannot
+run Arm's glibc-hosted toolchain or install the lock's glibc wheels, so `make docker-run` does not build this. CI uses
+the Dockerfile's `secure-world` stage instead (`make docker-build-sw`; below). The earlier builds ran in a Debian 13
+container on a build node with no Docker.
 
 ## The pins
 
@@ -131,10 +132,34 @@ The hashes below are of the final configuration: both OP-TEE builds set `CFG_REE
 `ree_fs_check_update_ta_version`, which `CFG_REE_FS_TA=n` leaves out, so the image did not link without it. The secure
 storage TA management PTA installs TAs into REE FS storage, which this build does not load from.
 
-Verified on 2026-11-21: two clean `make secure-world` builds of this script at the upstream TF-A v2.15.0 pin
-(`da738d5e`; the earlier hashes were of the imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each with an empty work,
-output and cache directory and the default `SOURCE_DATE_EPOCH`. The two builds' artefacts are identical byte for byte
-(`cmp`).
+`make secure-world` checks this itself (#166). It runs the build twice, each in its own clean directory
+(`work/build-1`, `work/build-2`; the work directory is recreated on each run, the pinned source and toolchain cache is
+shared and hash-checked), and compares `bl31.bin` and `tee.bin` by SHA-256. Only when both are byte-identical does it
+publish them, with `SHA256SUMS` (the agreed hashes) and `build-info.txt` (which ends with the `reproducible: yes` line
+and both hashes). On a difference it publishes nothing and fails naming the artefact and both hashes:
+
+```text
+secure-world-build: tee.bin build 1 <sha256-of-build-1>, build 2 <sha256-of-build-2>
+secure-world-build: tee.bin differs: build 1 <sha256-of-build-1>, build 2 <sha256-of-build-2>
+secure-world-build: not reproducible: the two clean builds differ; nothing published
+```
+
+On a match the end of the output is:
+
+```text
+secure-world-build: bl31.bin build 1 <sha256>, build 2 <sha256>
+secure-world-build: tee.bin build 1 <sha256>, build 2 <sha256>
+secure-world-build: reproducible, two clean builds identical, <out>:
+<sha256>  bl31.bin
+<sha256>  tee.bin
+```
+
+`test/secure_world_build_test.sh` covers a match and a difference with stubbed builds (no network). The hashes below
+were first matched by hand on 2026-11-21, at the upstream TF-A v2.15.0 pin (`da738d5e`; the earlier hashes were of the
+imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each build with an
+empty work, output and cache directory and the default `SOURCE_DATE_EPOCH`; the scripted check has not yet been run
+against the real sources and toolchain (provisional until a host with network access runs it). The BSP stays
+provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 
 | Build | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
 |---|---|---|
@@ -152,8 +177,29 @@ Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
-**Not in CI.** The build fetches about 150 MB, runs for about two minutes and needs the network. `make test`
-runs only the offline lock check and the script's unit tests.
+**In CI as its own job, not in `make test`.** The build fetches about 150 MB, runs twice (about two minutes
+each) and needs the network, so the `secure-world-build` job in `ci.yml` runs it in the project's devcontainer
+Dockerfile, its `secure-world` stage (docs/SPEC.md: CI runs in the project's devcontainer image). The stage is on
+`python:3.13-slim-bookworm` pinned by digest (glibc 2.36, CPython 3.13), takes its Debian packages from a dated
+snapshot.debian.org archive, and installs `uv` from a hash-pinned wheel; every pin is in `scripts/tool-pins.sh` (`SW_*`),
+and `make build` checks the Dockerfile matches. No setup step runs on the runner: the job builds the image
+(`make docker-build-sw`) and runs `make secure-world` in it through `scripts/in-toolchain-image.sh`, with sources, build
+trees and output under the container's `$TMPDIR`.
+
+*Scope.* `preflight` selects the inputs: its `secure_world` output is `false` only on a pull request whose changed files
+all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the Dockerfile, `in-toolchain-image.sh`,
+`image-tag.sh`, the unit test, the `Makefile`, `ci.yml`). The job's own `if:` ends in
+`needs.preflight.outputs.secure_world != 'false'`, so a README-only PR skips the whole job (image build, setup and
+build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
+`make test` runs only the offline lock check and the script's unit tests.
+
+*Wheel platform tags.* The lock's wheels (identified by SHA-256 on PyPI) are `cryptography-50.0.2-cp311-abi3-
+manylinux_2_28_x86_64`, `cffi-2.1.1-cp313-cp313-manylinux2014_x86_64`, and `pycparser` and `pyelftools` as `py3-none-any`.
+Offline check on a CPython 3.13.5, x86_64, glibc 2.41 host, run as `python3 -I -m pip debug --verbose` and looking up
+each tag in the compatible-tags list: all three tags are accepted. The image's glibc 2.36 is above the 2.28 floor, but
+that host is not the image. The authoritative check is in the `secure-world` stage: a `RUN` runs the same
+`pip debug --verbose` in the image and fails the image build if any of the three tags is missing. That `RUN` has not
+run yet (no Docker where this was written).
 
 ## Step (c) on the board
 
@@ -177,7 +223,7 @@ The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md
 not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
-- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; two clean builds at the upstream TF-A v2.15.0 pin
-  and the final OP-TEE configuration were identical ([Reproducibility](#reproducibility)). Not in CI. Nothing has run on the board.
+- `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; builds twice in clean directories and fails unless both
+  artefacts are byte-identical ([Reproducibility](#reproducibility)). The `secure-world-build` CI job runs `make secure-world` in the devcontainer Dockerfile's digest-pinned glibc `secure-world` stage, when secure-world inputs change, and is in the CI Gate. Nothing has run on the board.
 - `ftpm` (a): OP-TEE side built: `optee_ftpm` 4.10.0 on the pinned `ms-tpm-20-ref`, an early TA, NV in REE FS. The
   kernel's `CONFIG_TCG_FTPM_TEE` remains, with the image build.
