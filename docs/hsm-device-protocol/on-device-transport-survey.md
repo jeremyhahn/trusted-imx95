@@ -2,6 +2,8 @@
 
 > **Status: SURVEY, PROVISIONAL, pending owner-queue item 160 (go-xkms #1521); not a requirement (Software Department ruling 195)** · Row: hsm-device-protocol · Issue: #24 · Surveyed: 2026-11-22
 >
+> The owner has since decided that the HSM is an xkmsd node (rulings 1243 and 1244). The device-side design is in [xkmsd-node.md](xkmsd-node.md). This record stays a survey: it adds no requirement and its unconfirmed cells stay unconfirmed.
+>
 > This record uses public sources only. Each claim cites a source from the [Sources](#sources) table as **[Sn]**. Vendor text is summarised, never copied. Anything the sources did not show is marked **unconfirmed**. The record builds nothing, writes no requirement for the device, and runs or scripts no fuse, life-cycle or provisioning step.
 
 ## Question
