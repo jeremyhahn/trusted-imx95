@@ -283,6 +283,55 @@ expect "TF-A is built twice, once in each clean build directory" two_builds
 expect "the reproducibility result is recorded" has_line 'reproducible: yes' "$TMP_ROOT/ok/out/build-info.txt"
 expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/build-1" -a -d "$TMP_ROOT/ok/work/build-2"
 
+# The BL31 build call (the only make call in the TF-A tree): its platform is the
+# TFA_PLAT of the lock (read here with the script's NAME=value rule, not typed
+# twice), the dispatcher is OP-TEE, the target is bl31, the output is under the
+# build directory, and each clean build makes exactly one such call.
+# lock_value <lock> <NAME>: the value of the one NAME=value line.
+lock_value() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == "$2="* ]] && { printf '%s\n' "${l#"$2="}"; return 0; }; done <"$1"; return 1; }
+# tfa_call_ok <log> <work> <plat>: one correct BL31 call in each of build-1 and build-2
+tfa_call_ok() {
+	local log=$1 work=$2 plat=$3 n l c w
+	for n in 1 2; do
+		c=0 w=$work/build-$n
+		while IFS= read -r l; do
+			[[ "$l" == *"-C $w/src/tfa "* ]] || continue
+			c=$((c + 1))
+			[[ " $l " == *" PLAT=$plat "* && " $l " == *" SPD=opteed "* ]] || return 1
+			[[ "$l" == *" BUILD_BASE=$w/build/"* && "$l" == *" bl31" ]] || return 1
+			[[ "$l" != *" PLAT="*" PLAT="* && "$l" != *" SPD="*" SPD="* ]] || return 1
+		done <<<"$log"
+		[ "$c" -eq 1 ] || return 1
+	done
+}
+tfa_plat=$(lock_value "$good" TFA_PLAT)
+tfa_log_ok() { tfa_call_ok "$mlog" "$TMP_ROOT/ok/work" "$tfa_plat"; }
+tfa_log_ok_with() { tfa_call_ok "$1" "$TMP_ROOT/ok/work" "$tfa_plat"; }
+tfa_log_bad() { ! tfa_log_ok_with "$1"; }
+expect "the BL31 build is one make call per clean build: PLAT=$tfa_plat (from bsp.lock) SPD=opteed bl31, output under the build dir" tfa_log_ok
+bl31_line="-C $TMP_ROOT/ok/work/build-1/src/tfa -j1 BUILD_BASE=$TMP_ROOT/ok/work/build-1/build/tfa PLAT=$tfa_plat SPD=opteed bl31"
+bl31_line2=${bl31_line//build-1/build-2}
+expect "the TF-A call check accepts a planted good log" tfa_log_ok_with "$(printf '%s\n%s\n' "$bl31_line" "$bl31_line2")"
+expect "a planted SPD=trusty fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//SPD=opteed/SPD=trusty}" "$bl31_line2")"
+expect "a planted other PLAT fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "$bl31_line" "${bl31_line2//PLAT=$tfa_plat/PLAT=imx8mp}")"
+expect "a planted missing bl31 target fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line% bl31}" "$bl31_line2")"
+expect "a planted BUILD_BASE outside the build dir fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//\/build\/tfa//elsewhere}" "$bl31_line2")"
+expect "a planted second TF-A call fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n%s\n' "$bl31_line" "$bl31_line" "$bl31_line2")"
+expect "a planted missing TF-A call fails the TF-A call check" tfa_log_bad "$bl31_line"
+expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
+
+# A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's
+# release directory, so publication shows the script stages from the matching path.
+edit_altplat() { [[ "$1" == TFA_PLAT=* ]] && echo TFA_PLAT=imx95x || edit_tcsum "$1"; }
+altlock=$(lockcopy altplat edit_altplat)
+fullrun altplat "$altlock"
+check "a build with another TFA_PLAT reaches publication" 0 "secure-world-build: OK"
+altlog=$(<"$TMP_ROOT/altplat/make.log")
+alt_ok() { tfa_call_ok "$altlog" "$TMP_ROOT/altplat/work" imx95x; }
+expect "another TFA_PLAT is passed to the TF-A make call" alt_ok
+expect "the other platform's bl31.bin is published" test -s "$TMP_ROOT/altplat/out/bl31.bin"
+expect "bl31.bin was staged from the other platform's release path" test -s "$TMP_ROOT/altplat/work/build-1/build/tfa/imx95x/release/bl31.bin" -a ! -e "$TMP_ROOT/altplat/work/build-1/build/tfa/imx95/release/bl31.bin"
+
 # A difference between the two builds: the second build's tee.bin differs.
 fullrun differ "$oklock" STUB_DIFF_TEE=1
 check "builds that differ fail naming the artefact and both hashes" nonzero "tee.bin differs: build 1" "build 2" "not reproducible"

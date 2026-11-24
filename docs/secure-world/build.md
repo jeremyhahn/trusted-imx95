@@ -92,7 +92,7 @@ board.
 
 ## The flags
 
-TF-A: `PLAT=imx95 SPD=opteed bl31`, the upstream TF-A imx95 platform build arguments this repository uses.
+TF-A: `PLAT=imx95 SPD=opteed bl31`, the `imx-atf` platform `imx95` build arguments this repository uses (owner ruling 1234).
 
 OP-TEE, set on each OP-TEE make:
 
