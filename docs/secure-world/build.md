@@ -173,7 +173,7 @@ The test fails when any pin, toolchain or wheel line of the lock, or any build a
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `441425bbcec5355554e522151b9f9f1b512b05ffdea5e667555596dfec381444`
+Build configuration digest: `01216e12714a4e5beb6429cef99a49d410d51bbc82783d7174f09e7cc4f9a867`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 

@@ -91,8 +91,22 @@ edit_smorder() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8E00000
 edit_smbasealign() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8A000001 || printf '%s\n' "$1"; }
 edit_smendalign() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFFFE || printf '%s\n' "$1"; }
 # Inside the SM window: the exact fit, and the lowest base with the default size.
-edit_smexact() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A000000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x04000000; else printf '%s\n' "$1"; fi; }
-edit_smlow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8A000000 || printf '%s\n' "$1"; }
+edit_smexact() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x03C00000; else printf '%s\n' "$1"; fi; }
+edit_smlow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8A400000 || printf '%s\n' "$1"; }
+
+# BL32 against BL31 (default BL31 window 0x8A200000, 256 KiB). W holds the
+# values a fixture overrides; lockset applies them to a lock line.
+declare -A W=()
+lockset() { local k=${1%%=*}; if [[ "$1" == *=* && -n "${W[$k]:-}" ]]; then echo "$k=${W[$k]}"; else printf '%s\n' "$1"; fi; }
+edit_ovstart() { lockset "$1"; }
+edit_ovend() { lockset "$1"; }
+edit_ovcontain() { lockset "$1"; }
+edit_ovdefault() { lockset "$1"; }
+edit_ovadjacent() { lockset "$1"; }
+edit_b31zero() { lockset "$1"; }
+edit_b31wrap() { lockset "$1"; }
+edit_b31outside() { lockset "$1"; }
+edit_b31missing() { [[ "$1" == BL31_BASE=* ]] || printf '%s\n' "$1"; }
 edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
@@ -133,7 +147,51 @@ for c in \
 	check "a lock with $name fails" nonzero "$want"
 done
 
-for c in "smexact|a BL32 window exactly equal to the SM window" "smlow|BL32_BASE at the SM window start with the default size"; do
+ovmsg="overlaps the BL31 window"
+# BL32 starts inside BL31 (BL31 moved to 0x8A100000, 2 MiB, so 0x8A200000 is inside it).
+W=([BL31_BASE]=0x8A100000 [BL31_SIZE]=0x00200000 [BL32_BASE]=0x8A200000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovstart edit_ovstart)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window starting inside BL31 fails" nonzero "$ovmsg"
+# BL32 ends inside BL31.
+W=([BL31_BASE]=0x8A100000 [BL31_SIZE]=0x00200000 [BL32_BASE]=0x8A000000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovend edit_ovend)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window ending inside BL31 fails" nonzero "$ovmsg"
+# BL32 contains BL31 (the case a containment-only check accepted).
+W=([BL32_BASE]=0x8A000000 [BL32_SIZE]=0x04000000)
+f=$(lockcopy ovcontain edit_ovcontain)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window containing BL31 fails" nonzero "$ovmsg"
+# The reviewer's case: BL32_BASE 0x8A000000 with the default 32 MiB size.
+W=([BL32_BASE]=0x8A000000)
+f=$(lockcopy ovdefault edit_ovdefault)
+run bash "$sw" --lock "$f" --check-lock
+check "BL32_BASE 0x8A000000 with the default size fails" nonzero "$ovmsg"
+# BL32 ending exactly at BL31_BASE does not intersect: passes.
+W=([BL32_BASE]=0x8A000000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovadjacent edit_ovadjacent)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window ending exactly at BL31_BASE passes" 0 "OK"
+# The BL31 pins are validated like BL32's.
+W=([BL31_SIZE]=0x0)
+f=$(lockcopy b31zero edit_b31zero)
+run bash "$sw" --lock "$f" --check-lock
+check "BL31_SIZE zero fails" nonzero "BL31_SIZE must be nonzero"
+W=([BL31_BASE]=0x7FFFFFFFFFFFF000 [BL31_SIZE]=0x00002000)
+f=$(lockcopy b31wrap edit_b31wrap)
+run bash "$sw" --lock "$f" --check-lock
+check "a wrapping BL31 window fails" nonzero "BL31_BASE 0x7FFFFFFFFFFFF000 + BL31_SIZE 0x00002000 wraps"
+W=([BL31_BASE]=0x90000000)
+f=$(lockcopy b31outside edit_b31outside)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL31 window outside the SM window fails" nonzero "BL31 window (BL31_BASE 0x90000000"
+f=$(lockcopy b31missing edit_b31missing)
+run bash "$sw" --lock "$f" --check-lock
+check "a lock without BL31_BASE fails" nonzero "BL31_BASE is missing"
+W=()
+
+for c in "smexact|a BL32 window from above BL31 to the SM window end" "smlow|BL32_BASE just above BL31 with the default size"; do
 	name=${c%%|*}
 	f=$(lockcopy "$name" "edit_$name")
 	run bash "$sw" --lock "$f" --check-lock
@@ -388,14 +446,14 @@ expect "a planted other CFG_TZDRAM_START fails the OP-TEE window check" optee_wi
 expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
 
 # A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
-edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A000000; else edit_tcsum "$1"; fi; }
+edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; else edit_tcsum "$1"; fi; }
 baselock=$(lockcopy altbase edit_altbase)
 fullrun altbase "$baselock"
 check "a build with another BL32_BASE reaches publication" 0 "secure-world-build: OK"
 baselog=$(<"$TMP_ROOT/altbase/make.log")
-base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A000000 "$bl32_size"; }
+base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A400000 "$bl32_size"; }
 expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
-expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A000000 "$bl32_size"
+expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A400000 "$bl32_size"
 expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
 expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
 

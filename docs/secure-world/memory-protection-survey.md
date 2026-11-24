@@ -147,7 +147,8 @@ hand-kept, checked at the first `make system-manager`.
 Status note (2026-11-24, 175-sw-s5): the SM secure window of §4 and §6 is now pinned beside the pair, as
 `SM_SECURE_BASE=0x8A000000` and `SM_SECURE_END=0x8DFFFFFF` (inclusive) in `secure-world/bsp.lock`, proposed and pending
 owner approval. The build script refuses a lock whose BL32 window is not inside it, so a `BL32_BASE` edit to
-`0x8E000000` is now an offline error. Still not checked: that the real SM configuration has this window (its rule
+`0x8E000000` is now an offline error. The script also refuses a BL32 window that intersects the BL31 window
+(`BL31_BASE=0x8A200000`, `BL31_SIZE=0x00040000`, section 5, pinned in `secure-world/bsp.lock`). Still not checked: that the real SM configuration has this window (its rule
 lines are vendor source, absent here); that stays with the first `make system-manager`.
 
 ## 7. Linux side: reserved memory and what the normal world sees

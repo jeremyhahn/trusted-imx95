@@ -66,7 +66,7 @@ done
 
 declare -A pin=()
 wheels=()
-names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
+names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE BL31_BASE BL31_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
 
 [ -f "$lock" ] || die "$lock: no such lock file"
 n=0
@@ -88,7 +88,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	*_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || die "$lock:$n: $name must be a 40-hex commit, not $value" ;;
 	*_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "$lock:$n: $name must be a 64-hex SHA-256, not $value" ;;
 	*_REPO | *_URL) [[ "$value" =~ ^https://[A-Za-z0-9./_-]+$ ]] || die "$lock:$n: $name must be an https URL, not $value" ;;
-	BL32_BASE | BL32_SIZE | SM_SECURE_BASE | SM_SECURE_END) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
+	BL32_BASE | BL32_SIZE | BL31_BASE | BL31_SIZE | SM_SECURE_BASE | SM_SECURE_END) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
 	*) [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]] || die "$lock:$n: $name has characters outside [A-Za-z0-9._-]: $value" ;;
 	esac
 	pin[$name]=$value
@@ -119,6 +119,20 @@ sm_end=$((pin[SM_SECURE_END]))
 [ $(((sm_end + 1) % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_END + 1 must be 2 MiB aligned, not ${pin[SM_SECURE_END]}"
 [ "$sm_base" -le "$bl32_base" ] && [ $((bl32_base + bl32_size - 1)) -le "$sm_end" ] ||
 	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
+
+# BL31's own window (pinned from survey section 5) must be sane and inside the
+# SM window, and the BL32 window must not intersect it: OP-TEE's secure memory
+# may not cover resident EL3 firmware. Half-open ranges [base, base+size).
+bl31_base=$((pin[BL31_BASE]))
+bl31_size=$((pin[BL31_SIZE]))
+[ "$bl31_size" -gt 0 ] || die "$lock: BL31_SIZE must be nonzero, not ${pin[BL31_SIZE]}"
+[ "$bl31_base" -ge 0 ] && [ "$bl31_size" -ge 0 ] && [ $((bl31_base + bl31_size)) -gt "$bl31_base" ] ||
+	die "$lock: BL31_BASE ${pin[BL31_BASE]} + BL31_SIZE ${pin[BL31_SIZE]} wraps past 64 bits"
+[ "$sm_base" -le "$bl31_base" ] && [ $((bl31_base + bl31_size - 1)) -le "$sm_end" ] ||
+	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
+if [ "$bl32_base" -lt $((bl31_base + bl31_size)) ] && [ "$bl31_base" -lt $((bl32_base + bl32_size)) ]; then
+	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) overlaps the BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]})"
+fi
 
 if [ "$check_only" = 1 ]; then
 	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
