@@ -94,6 +94,28 @@ edit_smendalign() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFF
 edit_smexact() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x03C00000; else printf '%s\n' "$1"; fi; }
 edit_smlow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8A400000 || printf '%s\n' "$1"; }
 
+# The lock's SM window against the System Manager's DDR EXEC grant (the reviewer's
+# example: the lock's end raised to 0x8FFFFFFF with BL32 at 0x8E000000 stays inside
+# the pinned window, but not inside what the System Manager grants).
+edit_grantend() {
+	if [[ "$1" == SM_SECURE_END=* ]]; then echo SM_SECURE_END=0x8FFFFFFF
+	elif [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8E000000
+	else printf '%s\n' "$1"; fi
+}
+# A grants file with the DDR EXEC line replaced by $2 (one line, or none when empty).
+grantscopy() {
+	local f=$TMP_ROOT/grants-$1.txt line
+	: >"$f"
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [[ "$line" == "DDR EXEC"* ]]; then
+			[ -z "$2" ] || printf '%b\n' "$2" >>"$f"
+		else
+			printf '%s\n' "$line" >>"$f"
+		fi
+	done <"$sm_grants"
+	printf '%s\n' "$f"
+}
+
 # BL32 against BL31 (default BL31 window 0x8A200000, 256 KiB). W holds the
 # values a fixture overrides; lockset applies them to a lock line.
 declare -A W=()
@@ -197,6 +219,33 @@ for c in "smexact|a BL32 window from above BL31 to the SM window end" "smlow|BL3
 	run bash "$sw" --lock "$f" --check-lock
 	check "$name: ${c#*|} passes" 0 "OK"
 done
+
+sm_grants=$ROOT/system-manager/ap-s-grants.txt
+f=$(lockcopy grantend edit_grantend)
+run bash "$sw" --lock "$f" --check-lock
+check "the lock's SM window raised to 0x8FFFFFFF with BL32 at 0x8E000000 fails" nonzero "differs from the System Manager's DDR EXEC grant"
+run bash "$sw" --lock "$good" --grants "$sm_grants" --check-lock
+check "the committed lock passes against the committed DDR EXEC grant" 0 "OK"
+for c in \
+	"missing|" \
+	"dup|DDR EXEC, begin=0x08A000000, end=0x08DFFFFFF\nDDR EXEC, begin=0x08A000000, end=0x08DFFFFFF" \
+	"junk|DDR EXEC, begin=0x08A000000" \
+	"size|DDR EXEC, begin=0x08A000000, size=64M" \
+	"low|DDR EXEC, begin=0x089E00000, end=0x08DFFFFFF" \
+	"high|DDR EXEC, begin=0x08A000000, end=0x08FFFFFFF"; do
+	name=${c%%|*}
+	g=$(grantscopy "$name" "${c#*|}")
+	run bash "$sw" --lock "$good" --grants "$g" --check-lock
+	case $name in
+	missing) want="no DDR EXEC grant line" ;;
+	dup) want="2 DDR EXEC grant lines" ;;
+	junk | size) want="the DDR EXEC grant is not" ;;
+	*) want="differs from the System Manager's DDR EXEC grant" ;;
+	esac
+	check "a grants file with the DDR EXEC line '$name' fails" nonzero "$want"
+done
+run bash "$sw" --lock "$good" --grants "$TMP_ROOT/no-such-grants.txt" --check-lock
+check "a missing grants file fails" nonzero "no such AP-S grants file"
 
 # The host and the work directory: stubs make the host look like x86_64
 # Linux with every tool, and curl fail, so a run stops at the first fetch.

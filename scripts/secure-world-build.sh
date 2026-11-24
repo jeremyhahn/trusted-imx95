@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR]
-#                       [--jobs N] [--check-lock]
+# secure-world-build.sh [--lock FILE] [--grants FILE] [--work DIR] [--out DIR]
+#                       [--cache DIR] [--jobs N] [--check-lock]
 #
 # `make secure-world`: builds the Cortex-A secure world from the pins in
 # secure-world/bsp.lock (docs/secure-world/build.md): TF-A BL31 for i.MX 95
@@ -29,6 +29,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 lock=$root/secure-world/bsp.lock
+grants=$root/system-manager/ap-s-grants.txt
 # The sources and build trees stay outside the checkout: the tree secret scan
 # reads every file under it, and the fetched trees carry test keys.
 base=${XDG_CACHE_HOME:-${HOME:?HOME is unset}/.cache}/trusted-imx95/secure-world
@@ -47,6 +48,7 @@ die() {
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--lock) lock=${2:?--lock needs a file} && shift 2 ;;
+	--grants) grants=${2:?--grants needs a file} && shift 2 ;;
 	--work) work=${2:?--work needs a directory} && shift 2 ;;
 	--out) out=${2:?--out needs a directory} && shift 2 ;;
 	--cache) cache=${2:?--cache needs a directory} && shift 2 ;;
@@ -54,7 +56,7 @@ while [ $# -gt 0 ]; do
 	--check-lock) check_only=1 && shift ;;
 	--single) single=1 && shift ;;
 	-h | --help)
-		echo "usage: secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
+		echo "usage: secure-world-build.sh [--lock FILE] [--grants FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
 		exit 0
 		;;
 	*) die "unknown argument: $1" ;;
@@ -110,13 +112,32 @@ bl32_size=$((pin[BL32_SIZE]))
 	die "$lock: BL32_BASE ${pin[BL32_BASE]} + BL32_SIZE ${pin[BL32_SIZE]} wraps past 64 bits"
 
 # The BL32 window must lie inside the SM's secure window (SM_SECURE_END is
-# inclusive). Pinned, not read from the SM configuration (vendor source absent).
+# inclusive). The window is pinned in the lock, and the lock's pin must equal
+# the System Manager's own secure memory grant: the `DDR EXEC` line of the
+# AP-S allowlist (system-manager/ap-s-grants.txt, checked against the built
+# configuration by scripts/sm-build.sh). A pin that drifts from the grant would
+# put BL31 or BL32 outside what the System Manager protects.
 sm_base=$((pin[SM_SECURE_BASE]))
 sm_end=$((pin[SM_SECURE_END]))
 [ "$sm_base" -ge 0 ] && [ "$sm_end" -ge 0 ] && [ "$sm_base" -lt "$sm_end" ] ||
 	die "$lock: SM_SECURE_BASE ${pin[SM_SECURE_BASE]} must be below SM_SECURE_END ${pin[SM_SECURE_END]}"
 [ $((sm_base % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_BASE must be 2 MiB aligned, not ${pin[SM_SECURE_BASE]}"
 [ $(((sm_end + 1) % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_END + 1 must be 2 MiB aligned, not ${pin[SM_SECURE_END]}"
+[ -f "$grants" ] || die "$grants: no such AP-S grants file"
+ddr_n=0 ddr_line=
+while IFS= read -r line || [ -n "$line" ]; do
+	if [[ "$line" =~ ^DDR[[:space:]]+EXEC([[:space:]]|,|$) ]]; then
+		ddr_n=$((ddr_n + 1))
+		ddr_line=$line
+	fi
+done <"$grants"
+[ "$ddr_n" -ne 0 ] || die "$grants: no DDR EXEC grant line"
+[ "$ddr_n" -eq 1 ] || die "$grants: $ddr_n DDR EXEC grant lines, want one"
+[[ "$ddr_line" =~ ^DDR[[:space:]]+EXEC,[[:space:]]*begin=(0x[0-9A-Fa-f]{1,16}),[[:space:]]*end=(0x[0-9A-Fa-f]{1,16})[[:space:]]*$ ]] ||
+	die "$grants: the DDR EXEC grant is not 'DDR EXEC, begin=0x..., end=0x...': $ddr_line"
+ddr_base_s=${BASH_REMATCH[1]} ddr_end_s=${BASH_REMATCH[2]}
+{ [ "$sm_base" -eq $((ddr_base_s)) ] && [ "$sm_end" -eq $((ddr_end_s)) ]; } ||
+	die "$lock: SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]} differs from the System Manager's DDR EXEC grant $ddr_base_s to $ddr_end_s ($grants)"
 [ "$sm_base" -le "$bl32_base" ] && [ $((bl32_base + bl32_size - 1)) -le "$sm_end" ] ||
 	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
 
