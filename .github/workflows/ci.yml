@@ -1682,14 +1682,14 @@ jobs:
   # compose stack on the runner host started by `make integration-test`. The
   # stack is named per run under the repo's prefix, the job reaps stale stacks
   # first (v1.18) and keeps its own teardown last under `if: always()`.
-  # v1.23: full tier only (CI_FULL_TIER's expression); never on a plain PR.
+  # Every event but a docs-only PR (CI Gate `code`).
   integration:
     name: Integration [integration image]
-    # v1.26: never on a draft PR, ci:full or not. v1.29.3: on a schedule run,
+    # v1.26: never on a draft PR. v1.29.3: on a schedule run,
     # only on the schedule guard's `run`. v1.30: only on `run` on every event
     # (a proven main push and a refused run skip it).
     needs: preflight   # v1.34
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')) && !github.event.pull_request.draft && needs.preflight.outputs.verdict == 'run' }}
+    if: ${{ !github.event.pull_request.draft && needs.preflight.outputs.verdict == 'run' && needs.preflight.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60       # CUSTOMIZE: ceil(1.5 x this job's 72-hour p95), ci-standard.md §12
     env:
@@ -2227,6 +2227,6 @@ jobs:
           check releasability "${{ needs.releasability.result }}" always
           check image       "${{ needs.image.result }}" code
           check lint-gates  "${{ needs.lint-gates.result }}" scoped
-          check integration "${{ needs.integration.result }}" full
+          check integration "${{ needs.integration.result }}" code
           check soak        "${{ needs.soak.result }}" nightly
           exit $BAD
