@@ -61,8 +61,9 @@ path and shares the upstream structure, memory map and SCMI client; its
 - **Extra SiP calls that drive other cores.** `imx95_m7.c` adds an SRC SiP
   service that lets the normal world set the Cortex-M7 reset address, prepare
   it, start it, stop it and query it. Depending on the SM configuration, it does
-  this by core control or by booting and shutting down the M7 logical machine,
-  and on stop it resets the M7 agent's SCMI configuration. `imx95_lmm.c` adds
+  this by core control (two LMs) or by booting and shutting down the M7 logical
+  machine (any other count); only the core-control stop also resets the M7
+  agent's SCMI configuration (section 2.2.1). `imx95_lmm.c` adds
   an LMM SiP service that boots or force-shuts down a logical machine whose
   number the caller passes, without an allow-list in TF-A [S4]. Both act with
   the rights of the secure SCMI agent (section 2.4), so whatever bounds them is
@@ -108,6 +109,8 @@ its LMM path, not its core path, for start, stop and prepare.
 | `IMX_SIP_SRC`, `START` (atf `imx95_m7.c:80-104`) | none | none | `AP-S` | the pinned config has three LMs, so the LMM path runs (atf `imx95_m7.c:83-93`): set LM 1's reset vector (sm `rpc_scmi_lmm.c:1490-1527` `LmmResetVectorSet`: foreign LM needs `lmmPerms >= EXCLUSIVE`), then boot LM 1 (as `LMM_BOOT` below): both denied | refused |
 | `IMX_SIP_SRC`, `STARTED` (atf `imx95_m7.c:107`) | none | none | `AP-S` | sm `rpc_scmi_cpu.c:1362-1385` `CpuInfoGet` has no permission check: answered (run mode, sleep mode, reset vector of the M7) | allowed, read-only, no control |
 | `IMX_SIP_SRC`, `STOP` (atf `imx95_m7.c:117-132`) | none | none | `AP-S` | LMM path (three LMs): force shutdown of LM 1 (atf `imx95_m7.c:119`), same check as `LMM_SHUTDOWN` below: denied | refused |
+| `IMX_SIP_SRC`, `STOP`, the agent reset after a stop: `scmi_base_reset_agent_config(M7 agent, 0)` (atf `imx95_m7.c:128`; client `drivers/arm/css/scmi/scmi_base_proto.c:92`) | none | none; the M7 agent id comes from base discovery (atf `imx95_m7.c:40-60`, agent named `M7`) | `AP-S` | **not reached under the pinned config.** The call sits after the `num_lm != 2` block (atf `imx95_m7.c:117-124`), which ends in `break` at `:123`, so it runs only in the core-control path, taken when the SM reports exactly two LMs; the pinned config has three (`SM_NUM_LM 3U`, answered by `LmmProtocolAttributes`, sm `rpc_scmi_lmm.c:614-634`). In the core path it is also guarded: `scmi_core_stop` is checked (`:125-127`, `return ret` on error) before the reset, so a denied stop never reaches it. If it were reached, sm `rpc_scmi_base.c:912-964` `BaseResetAgentConfiguration` needs `basePerms[agent] >= PRIV` (`:941-945`); `mx95frdm-pro.cfg` has no `BASE_AGENT_n` line, so `AP-S` holds `SM_SCMI_PERM_NONE` (0, sm `rpc_scmi_config.h:82`) over the M7 agent: `SM_ERR_DENIED` | refused (unreached, and denied if reached) |
+| `IMX_SIP_SRC`, every subcommand: SCMI calls made before the switch (atf `imx95_m7.c:40-68`): base protocol attributes, base discover agent (once, cached in statics), LMM protocol attributes (once) | none | none | `AP-S` | sm `rpc_scmi_base.c:453-477` `BaseProtocolAttributes`, `:731-784` `BaseDiscoverAgent` and `rpc_scmi_lmm.c:614-634` `LmmProtocolAttributes` have no permission check: answered; an error is returned to the caller (atf `:45`, `:66`) before any control call | allowed, read-only, no control |
 | `IMX_SIP_SRC`, `PREP` (atf `imx95_m7.c:134-136`) | none | none | `AP-S` | LMM power-on of LM id 1 (atf passes the CPU id `1` as the LM id); sm `rpc_scmi_lmm.c:1400-1430` `LmmPowerOn`: foreign LM needs `lmmPerms >= EXCLUSIVE`: denied | refused |
 | `IMX_SIP_SRC`, `PREPED` (atf `imx95_m7.c:142`) | none | none | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_power.c:689-710` `PowerStateGet` has no permission check: answered | allowed, read-only, no control |
 | `IMX_SIP_LMM` `0xC200000F`, `LMM_BOOT` (atf `imx_sip_svc.c:120-124`, `plat/imx/imx9/imx95/imx95_lmm.c:19`) | none | none: `x2` (LM id) passed as is, no allow-list | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_lmm.c:813-843` `LmmBoot`: a foreign LM needs `lmmPerms[lm] >= EXCLUSIVE`, its own LM needs `PRIV`, else `SM_ERR_DENIED`. `AP-S` grants no `LMM_*` (sm `configs/other/mx95frdm-pro.cfg:503-519`), so LM 0, 1 and 2 are denied and any other id is rejected as out of range (`lmId < SM_NUM_LM`) | refused |
@@ -308,9 +311,16 @@ sources above:
   to the lane; **unconfirmed** here.
 - **SiP surface.** Traced call by call for the pinned build in section 2.2.1
   (2026-11-24). Still not confirmed there: (a) the refusal was read from SM
-  source and generated configuration, not observed on a board; (b) whether
-  imx-atf acts on an SCMI error (for example stops after a denied reset-vector
-  set) was not traced, since every step it takes is denied anyway; (c) no
+  source and generated configuration, not observed on a board; (b) imx-atf's error
+  handling is traced for the SRC handler (`imx95_m7.c`): every SCMI call's
+  return value is tested and returned at once (`:44-45`, `:65-66`, `:75-76`,
+  `:84-85`, `:90-91`, `:120-121`, `:126-127`), so nothing follows a denied
+  call, and the M7 agent reset (`:128`) is in the two-LM core-control path
+  only, after a checked `scmi_core_stop`; the pinned config also gives `AP-S`
+  no right over the M7 agent's base protocol (section 2.2.1). Not traced:
+  the LMM handler `imx95_lmm.c` and `imx_sip_svc.c` beyond the single call each
+  makes, and how the returned SCMI status maps to the SMC result seen by
+  Linux; (c) no
   offline test pins the `AP-S` API list, because `test/secure_world_build_test.sh`
   runs without network and the configuration is vendor source outside the
   repo; it is pinned only by `sm_config_sha256` and `sm_patched_config_sha256`
