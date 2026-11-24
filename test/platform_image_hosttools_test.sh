@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Offline checks of scripts/platform-image-hosttools.sh (provisional default,
-# pending the owner's answer on #14): stub curl, apt-get and dpkg, in a mktemp
-# dir outside the clone. No network, no apt, no Yocto.
+# Offline checks of scripts/platform-image-hosttools.sh with stub curl, apt-get and dpkg.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

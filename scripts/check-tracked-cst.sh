@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# check-tracked-cst.sh [repo-dir]
-#
-# Fails when any path git tracks is a Code Signing Tool archive (cst-*.tgz)
-# or lies inside a directory named cst-* (an extracted tree). The CST stays
-# outside the repository (docs/references/README.md §The Code Signing Tool in
-# the build); .gitignore keeps it out, and this check catches a forced add.
-# A finding prints the path and the rule only. An unreadable index fails.
+# check-tracked-cst.sh [repo-dir]: fails when git tracks a Code Signing Tool archive or extracted tree.
 set -euo pipefail
 
 dir=${1:-.}

@@ -13,7 +13,7 @@ not cover TRDC memory and peripheral access-control programming in
 depth; that is #55's scope. Everything here comes from public
 sources. Vendor text is summarised, not quoted.
 
-Sources surveyed (all reached from the lane on 2026-11-12):
+Sources surveyed (all reached from the survey on 2026-11-12):
 
 | Id | Title | Version or tag | URL |
 |----|-------|----------------|-----|
@@ -304,7 +304,7 @@ Two structural limits stay even with a correct SCMI set:
 
 - `configtool.pl` (S5) turns the `.cfg` into headers and can write a
   log (`-l`) with a section per stage, including "SCMI agent info"
-  and the TRDC data (S2, "Configuration Tool"). On the lane, running
+  and the TRDC data (S2, "Configuration Tool"). On the survey, running
   it on `mx95frdm.cfg` at `rel_imx_sm_2026q3` with Perl 5.40 gave a
   `config_scmi.h` byte-identical to the one NXP commits. The
   generation is reproducible, so a check can regenerate and compare.
@@ -375,7 +375,7 @@ This is a proposal for #55 to adopt or reject, not a design:
   HTTP 404); TF-A was not surveyed.
 - How the SM handles a set-level sensor enable or disable from
   several agents.
-- The version of the Arm SCMI specification (S9). The lane reached
+- The version of the Arm SCMI specification (S9). The survey reached
   the "latest" page but did not record its version.
 - No claim here was tested on hardware.
 

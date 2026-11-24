@@ -95,7 +95,7 @@ is written to each device, its partition layout and the update path are not in a
 
 ## Missing
 
-- **UM12527 not checked in this lane.** The vendor context repository was not reachable from this clone. Every
+- **UM12527 not checked in this survey.** The vendor context repository was not reachable from this clone. Every
   UM12527 fact above is taken from the SPEC row's citations and is not yet checked against UM12527 Rev. 1.0 itself:
   the eMMC's size and its uSDHC1 controller, the eMMC as the default boot device, the microSD and the FlexSPI NOR as
   the SW4 alternatives (§1.2 Table 1, §2.3 Table 7, §2.6, §2.9, §2.10), the USB serial downloader (§2.3), the boot on

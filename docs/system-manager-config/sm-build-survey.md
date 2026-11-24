@@ -44,7 +44,7 @@ S4 in detail: NXP `meta-imx` at tag `rel_imx_6.18.37_2.1.0` (`2eb758f`):
   `$(TOOLS)/arm-gnu-toolchain-$(TC_VERSION)-x86_64-arm-none-eabi/`; `SM_CROSS_COMPILE` overrides
   the whole prefix (`sm/makefiles/gcc_cross.mak`). Host packages: `make gcc g++-multilib srecord`;
   hosts named as supported are Ubuntu 20.04, 22.04 and 24.04 (S1 `README.md`). The README says the
-  release notes give the exact tested toolchain; the lane did not build the release notes
+  release notes give the exact tested toolchain; the survey did not build the release notes
   (they need doxygen and LaTeX).
 - Build: `make config=<name> cfg` regenerates the C headers in `configs/<name>/` from
   `configs/<name>.cfg` (only needed after the `.cfg` changes), and `make config=<name> all` builds
@@ -66,7 +66,7 @@ S4 in detail: NXP `meta-imx` at tag `rel_imx_6.18.37_2.1.0` (`2eb758f`):
 - The DDR firmware (the LPDDR PHY training blobs, `lpddr5_imem_v202409.bin` and friends) is not in
   imx-oei. mkimage appends it to the OEI image to make `m33-oei-ddrfw.bin` (S3 `iMX95/soc.mak`,
   variables `LPDDR_TYPE`, `LPDDR_FW_VERSION`, target `m33-oei-ddrfw.bin`). Where the blobs come from
-  in the BSP (NXP's `firmware-imx` package, under its EULA) was not confirmed by this lane.
+  in the BSP (NXP's `firmware-imx` package, under its EULA) was not confirmed by this survey.
 
 ## 4. The board configuration for the FRDM-IMX95-PRO
 
@@ -95,7 +95,7 @@ S4 in detail: NXP `meta-imx` at tag `rel_imx_6.18.37_2.1.0` (`2eb758f`):
   `MIMX95_LPDDR5_EVK_19X19_6400MTS_FW2024.09_timing` (or the `_ECC_enabled_` one) and the 2024.09
   LPDDR5 training firmware (S4 machine conf, `OEI_BOARD`, `OEI_DDR_CONFIG`, `DDR_FIRMWARE_NAME`).
   So, in NXP's BSP, the PRO's DDR is set up as the 19x19 EVK's.
-- A second tool, imx-smct, can edit SM configurations (S1 `README.md`, S7); the lane did not
+- A second tool, imx-smct, can edit SM configurations (S1 `README.md`, S7); the survey did not
   survey it.
 
 ## 5. How meta-imx pins imx-sm and the OEI
@@ -222,12 +222,12 @@ Proposal for #31 and #33, from sections 2 to 7. Each point is a recommendation, 
 
 ## 9. Not confirmed
 
-- That `make config=mx95frdm-pro` builds cleanly at `eec2328` with `board=mcimx95evk`: the lane read
+- That `make config=mx95frdm-pro` builds cleanly at `eec2328` with `board=mcimx95evk`: the survey read
   the sources but built nothing.
-- The exact tested toolchain in the SM release notes (the README defers to them; the lane did not
+- The exact tested toolchain in the SM release notes (the README defers to them; the survey did not
   build them). The makefiles' default `15.2.rel1` is confirmed.
 - Whether V2X firmware sits in its own NXP-signed container in `flash.bin` on the PRO; S9's figure
-  shows it beside the ELE firmware, but the lane did not read the AHAB container itself.
+  shows it beside the ELE firmware, but the survey did not read the AHAB container itself.
 - The exact CSF offsets for an i.MX95 `flash.bin`: they come from mkimage's output at build time.
 - The SPSDK example (S10), the imx-smct tool (S7), the SM reference manual (built from imx-sm with
   doxygen) and NXP's i.MX Linux User's Guide and Security Reference Manual were not opened.
@@ -255,7 +255,7 @@ Proposal for #31 and #33, from sections 2 to 7. Each point is a recommendation, 
    Recommendation: (a) (S4 machine conf).
 4. **SM debug monitor in production?** NXP's Yocto build passes `M=2` (S4).
    (a) keep it; (b) `M=0`, no monitor; (c) keep it in development images only.
-   Recommendation: (c), with `M=0` in signed release images. This is the lane's inference, not a
+   Recommendation: (c), with `M=0` in signed release images. This is the survey's inference, not a
    source's: a debug console on the M33, which owns clocks, power and resources (S1 `README.md`),
    looks at odds with `hsm-self-defence`. The sources do not say what each mode
    exposes beyond "debug monitor"; the SM reference manual should be read first.

@@ -1,14 +1,4 @@
-# trusted-imx95: the five CI stages of the handbook CI standard
-# (software/conventions/ci-standard.md §1) and the targets the canonical
-# .github/workflows/ci.yml and the devcontainer image need
-# (software/conventions/devcontainer.md §6).
-#
-# There is no firmware code yet, so each stage checks what the tree holds:
-# the scripts, the workflows, the Markdown links, the secrets and the Code
-# Signing Tool guard. Each target checks something or fails naming what is
-# missing; none passes by doing nothing.
-#
-# Run every target in the devcontainer image: make docker-run CMD='make test'.
+# trusted-imx95: the five handbook CI stages and the targets ci.yml and the devcontainer image need; run them with make docker-run CMD='make test'.
 
 SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
@@ -30,10 +20,7 @@ TOOLCHAIN_IMAGE    ?= $(shell scripts/image-tag.sh toolchain $(REPO_NAME))
 SW_IMAGE           ?= $(shell scripts/image-tag.sh secure-world $(REPO_NAME))
 export APK_INDEX_SUM
 
-# The pinned tools outside the devcontainer image: `make tools` installs the
-# same digest-checked releases the image's fetch stage does (scripts/
-# fetch-tools.sh) into this gitignored directory, which every recipe sees
-# first on PATH. A gate whose tool is in neither place fails naming it.
+# Pinned tools outside the devcontainer image: `make tools` installs them here, first on PATH.
 TOOLS_DIR := $(CURDIR)/.tools/bin
 export PATH := $(TOOLS_DIR):$(PATH)
 NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
@@ -169,12 +156,7 @@ sm-toolchain-check: ## In the devcontainer image: build the System Manager with 
 
 ## --- The Cortex-A secure world (docs/secure-world/build.md) ---
 
-# Its own CI job (secure-world-build, in the Dockerfile's secure-world stage:
-# make docker-build-sw), not in `make test`: it fetches the pinned sources, the
-# toolchain (about 150 MB) and the Python wheels, and builds for about two
-# minutes. SW_WORK is recreated on each run; SW_OUT receives the artefacts.
-# The work and cache directories stay outside the checkout: the tree secret
-# scan reads every file under it, and the fetched sources carry test keys.
+# Fetches pinned sources and the toolchain and builds for minutes, so it is its own CI job; work and cache stay outside the checkout.
 SW_BASE  ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/secure-world
 SW_WORK  ?= $(SW_BASE)/work
 SW_OUT   ?= $(CURDIR)/.secure-world/out
@@ -236,36 +218,12 @@ toolchain-image: ## Print the toolchain image tag (by content)
 it-image: ## Print the integration image tag (by content)
 	@echo $(IT_IMAGE)
 
-# A trusted run (CI on any event but a pull request: a push to main, a
-# schedule, a dispatch) never trusts a tag the daemon already holds. Pull
-# request jobs share the runners' persistent Docker daemon and run their own
-# Makefile with Docker access, so a pull request can tag any image with
-# main's tag; the same daemon's build cache is just as writable (a committed
-# container answers a RUN step's cache lookup). A trusted run therefore uses
-# the toolchain image only by the ID scripts/ci-image-cache.sh pulled by
-# digest from the registry (TOOLCHAIN_VERIFIED_ID, which that script exports
-# to the job), while the daemon holds it, and
-# otherwise rebuilds from source with no cache; it always rebuilds the
-# integration image that way. Locally, and on a pull request, a tag the
-# daemon holds is used as before.
-#
-# Checking the tag once is not enough (Codex security P1 on #19): every later
-# `docker create` or `docker run` would resolve the tag again, and a pull
-# request's job can move it in between. So a trusted build records the image
-# ID it settles on, the verified pull's or its own `docker build --iidfile`,
-# in TOOLCHAIN_ID_FILE (IT_ID_FILE for the integration image), both in the
-# job's RUNNER_TEMP. `make -s toolchain-ref` (`it-ref`) prints that ID on a
-# trusted run and the tag otherwise; ci.yml exports it as TOOLCHAIN_IMAGE, so
-# every container a trusted job starts names an image ID, never a tag.
+# A trusted run (not a pull request) uses the toolchain image only by the ID verified from the registry, else rebuilds without cache, and records the image ID in TOOLCHAIN_ID_FILE / IT_ID_FILE so every container names an ID, never a tag.
 TRUSTED_RUN := $(if $(filter-out pull_request pull_request_target,$(GITHUB_EVENT_NAME)),1)
 TOOLCHAIN_ID_FILE ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/toolchain-image.id)
 IT_ID_FILE        ?= $(if $(RUNNER_TEMP),$(RUNNER_TEMP)/it-image.id)
 IT_IMAGE_ID       ?=
-# Each trusted rebuild moves the integration image's content tag to a new ID
-# and leaves the old one dangling. Every integration build carries this
-# label, the image's repository (<CI_STACK_PREFIX>it), so
-# scripts/reap-stale-ci-stacks.sh (v6) finds those IDs and removes the ones
-# no lease or stack uses.
+# Label every integration build so scripts/reap-stale-ci-stacks.sh can remove dangling IDs.
 IT_REAP_LABEL      = ci.reap.repository=$(firstword $(subst :, ,$(IT_IMAGE)))
 # The same for the toolchain image (reaper v7): a trusted run without a
 # verified pull rebuilds it with --no-cache under its content tag, and each
@@ -326,12 +284,7 @@ docker-build: docker-build-toolchain ## Build both images, each only when the da
 				-t $(IT_IMAGE) -f $(DOCKERFILE) .; \
 	fi
 
-# The CST extraction lives outside the checkout (scripts/cst-check.sh), so a
-# set CST_PATH is bind-mounted read-only at /cst and named there; unset, it
-# stays unset in the container and cst-check fails naming it.
-# The mount source is the canonical (pwd -P) path. A CST_PATH inside the
-# checkout is refused here, as scripts/cst-check.sh refuses it on the host:
-# once remapped to /cst, the container's cst-check can no longer tell.
+# Bind-mount CST_PATH (its canonical path) read-only at /cst; a CST_PATH inside the checkout is refused.
 CST_MOUNT = $(if $(CST_PATH),-v "$$(cd "$$CST_PATH" && pwd -P):/cst:ro" -e CST_PATH=/cst)
 
 sw-image: ## Print the secure-world image tag (by content)

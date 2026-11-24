@@ -23,7 +23,7 @@ All text below is a summary in my own words. Vendor text is not quoted.
 | S6 | NXP i.MX 95 Security Reference Manual | n/a | no public URL found | **no**: does not seem to be public |
 | S7 | NXP i.MX Linux User's Guide | n/a | https://www.nxp.com/docs/en/user-manual/IMX_LINUX_USERS_GUIDE.pdf | **no**: HTTP 404 at this URL |
 | S8 | NXP Linux kernel fork (`linux-imx`) | tag `lf-6.18.37-2.1.0` exists | https://github.com/nxp-imx/linux-imx/tree/lf-6.18.37-2.1.0 | tag seen, source **not surveyed** |
-| S9 | Issue #44 text on the forge | n/a | (forge issue #44) | **no**: the lane has no forge credentials; I worked from the brief and SPEC.md |
+| S9 | Issue #44 text on the forge | n/a | (forge issue #44) | **no**: the survey has no forge credentials; I worked from the brief and SPEC.md |
 
 I could not reach the GitHub REST API (HTTP 403, rate limit), so I got tags and
 sources with `git ls-remote` and `git clone --depth 1`.
@@ -147,7 +147,7 @@ no procedure that uses them.
 - S8 (the Linux ELE driver and NVM manager). The driver's userspace surface and failure
   reporting are now in the [A55 signals survey](a55-signals-survey.md). Where the key
   store blob is kept is still open.
-- S9 (the text of issue #44). This survey follows the lane brief and may not
+- S9 (the text of issue #44). This survey follows the survey brief and may not
   cover every point the issue lists.
 
 ## Questions for the owner

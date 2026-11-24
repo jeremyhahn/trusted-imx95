@@ -96,12 +96,7 @@ else
 	run "$ROOT/scripts/secret-scan.sh" history "$mrg"
 	check "secret-scan: a key added only by a merge resolution and removed later fails the history scan" 1 "merged.ini:1:"
 
-	# A proven main push (Codex security P1, the tree proof): after a green
-	# run, two commits add a credential and remove it, so the tree is the
-	# proven one. test/ci-proven-sim.py evaluates ci.yml's job and step `if:`
-	# for that push, runs the history scan where a running step scans the
-	# history, and writes CI Gate's script with the job results; the gate
-	# must fail. On a clean history it passes.
+	# A main push whose tree equals a proven one but whose new commits added and removed a credential must fail CI Gate; a clean history passes.
 	pv="$TMP_ROOT/proven"
 	mkdir -p "$pv"
 	pg() { git -C "$pv" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
@@ -417,12 +412,7 @@ EOF
 check "ci.yml: the pull_request types include ready_for_review beside the others" 0 \
 	"types: opened synchronize reopened ready_for_review"
 
-# --- ci.yml: every event runs the tree secret scan ---------------------------
-#
-# The tree secret scan runs in the lint job's `make gosec` step or in the
-# image job's `make security` step. This evaluates their `if:` conditions
-# (and their jobs') for each tier and for a docs-only change, so a condition
-# that leaves an event with neither fails here.
+# --- ci.yml: every event runs the tree secret scan (lint's make gosec or the image job's make security) ---
 sel="$TMP_ROOT/scan-selection.py"
 cat >"$sel" <<'EOF'
 import re, sys
@@ -542,12 +532,7 @@ if [ -z "$missing" ]; then pass ".dockerignore: every resources/ rule of .gitign
 expect ".dockerignore: the build output /out/ is excluded from the Docker context" grep -qxF -- '/out/' "$ROOT/.dockerignore"
 expect ".gitignore: the resources/ vendor rules the check above reads exist" grep -q '^resources/' "$ROOT/.gitignore"
 
-# --- .dockerignore: the Docker context, by Docker's matching rules -------------
-#
-# No Docker here, so ctx.py applies .dockerignore the way Docker's pattern
-# matcher does (each pattern filepath.Clean'd; `**` any number of components,
-# `*` and `?` within one; a path is out when it or a parent directory
-# matches, the last matching pattern deciding) and prints what stays in.
+# --- .dockerignore: ctx.py applies Docker's pattern rules and prints what stays in the context ---
 cat >"$TMP_ROOT/ctx.py" <<'EOF'
 import os, re, sys
 def rx(p):
@@ -614,16 +599,7 @@ if [ "$(printf '%s\n' "$tracked" | ctx_in "$ROOT/.dockerignore")" = "$tracked" ]
 printf '**/cst-*/\n' >"$TMP_ROOT/slash.dockerignore"
 expect "ctx.py: Docker's cleaning makes **/cst-*/ drop scripts/cst-check.sh" test -z "$(echo scripts/cst-check.sh | ctx_in "$TMP_ROOT/slash.dockerignore")"
 
-# --- forge credentials: never into a container, never in a PR job's env -------
-#
-# The runner injects GIT_CONFIG_COUNT/KEY_0/VALUE_0 (dependency-resolution.md
-# §6). in-toolchain-image.sh, with a network, runs a pull request's scripts:
-# a stub docker records what `docker create` is given.
-#
-# The devcontainer image's tar is BusyBox v1.37.0, which refuses GNU tar's long
-# options (#19 CI run 43168703612). Every in-toolchain-image.sh run here puts
-# this BusyBox-style tar first on PATH, so the gate catches a GNU-only flag on
-# a host whose tar is GNU tar.
+# --- forge credentials: never into a container, never in a PR job's env; a stub docker records `docker create` and a BusyBox-style tar is first on PATH ---
 bbtar="$TMP_ROOT/bbtar"
 mkdir -p "$bbtar"
 real_tar=$(command -v tar)
@@ -670,10 +646,7 @@ names = {t.name for t in m}
 sys.exit(0 if "./sub/file" in names and all((t.uid, t.gid, t.uname, t.gname) == (10001, 10001, "", "") for t in m) else 1)
 ' "$TC_TAR"
 
-# ci.yml, read as text: no loop copies a credential into an env file, a
-# container's --env or GITHUB_ENV; no --env names one; the workflow env blanks
-# the runner's GIT_CONFIG_*; and a *TOKEN secret is read only on an event that
-# is not a pull request.
+# ci.yml as text: no credential reaches an env file, --env or GITHUB_ENV, GIT_CONFIG_* is blanked, and *TOKEN secrets are read only outside pull requests.
 cat >"$TMP_ROOT/creds.py" <<'EOF'
 import re, sys
 lines = open(sys.argv[1]).read().split("\n")
@@ -713,20 +686,7 @@ run python3 "$TMP_ROOT/creds.py" "$TMP_ROOT/creds-old.yml"
 check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a loop copies GOPRIVATE GIT_CONFIG_COUNT"
 
 # --- A trusted run never uses a toolchain tag the shared daemon holds ---
-# (Codex security P1: a pull request's job can tag any image with main's tag.)
-# The stub docker keeps each local reference's image ID, and its RepoDigests,
-# as files under $IMG_STATE; an image ID is a reference to itself. The
-# registry is $IMG_STATE/registry/, present while it is up: a tag's file
-# holds its manifest digest, a digest's file its image ID. A build gives
-# sha256:<sha256 of its target> and writes it to its --iidfile; a buildx
-# build pushes its result as sha256:<sha256 of manifest:<target>>. Every
-# container start (create, run) is logged to $IMG_STARTS. The races another
-# job on the shared daemon can run:
-#   IMG_RACE_PULL   after any pull, the toolchain's remote tag is moved to an
-#                   older image the registry still holds ($IMG_OLD, $DOLD)
-#   IMG_RACE_PUSH   a push first finds the tag moved to $IMG_EVIL
-#   IMG_REG_OVERWRITE  after a buildx push, the registry's tag names $DOLD
-#   IMG_NOBUILDX    the runner has no buildx plugin
+# Stub docker state lives in $IMG_STATE (registry under registry/), container starts log to $IMG_STARTS; races: IMG_RACE_PULL, IMG_RACE_PUSH, IMG_REG_OVERWRITE, IMG_NOBUILDX.
 mkdir -p "$TMP_ROOT/imgbin"
 cat >"$TMP_ROOT/imgbin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -1121,12 +1081,7 @@ else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
 fi
 
-# --- reap-stale-ci-stacks.sh v6: the dangling images a rebuild leaves --------
-# (Codex reliability P1: each trusted rebuild moves the content tag to a new
-# ID and leaves the old ID dangling, which the tag loop never sees.) A stub
-# docker holds images as lines "<id> <created> <label> <tag or ->" in
-# $RP/images and containers as "<id> <image id>" in $RP/containers; `docker
-# image rm` refuses an image a container uses, as Docker does.
+# --- reap-stale-ci-stacks.sh: dangling integration images; stub docker images in $RP/images, containers in $RP/containers ---
 mkdir -p "$TMP_ROOT/reapbin"
 cat >"$TMP_ROOT/reapbin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -1229,11 +1184,7 @@ expect "reap-stale-ci-stacks: the dry run left every image" cmp -s "$RP/images" 
 expect "Makefile: the label the reaper reads is the one every integration build sets" \
 	grep -q 'IT_REAP_LABEL *= ci.reap.repository=' "$ROOT/Makefile"
 
-# --- reap-stale-ci-stacks.sh v7: the toolchain images fallback rebuilds leave
-# (Codex P1: without a verified registry pull, each trusted run rebuilds the
-# toolchain image with --no-cache under the same tag, and nothing removed the
-# IDs it left.) Three trusted fallback rebuilds through the Makefile, on the
-# stub docker above, then the reaper.
+# --- reap-stale-ci-stacks.sh: toolchain images left by trusted fallback rebuilds ---
 tc_tag=$(make -s --no-print-directory -C "$ROOT" toolchain-image)
 tc_repo=${tc_tag%%:*}
 : >"$RP/images" && : >"$RP/containers" && : >"$RP/removed" && : >"$RP/log"
@@ -1262,10 +1213,7 @@ expect "reap-stale-ci-stacks: the current toolchain tag's image is kept, however
 expect "reap-stale-ci-stacks: an old toolchain tag no container uses is removed" grep -qx "$(rid tc-stale-tag)" "$RP/removed"
 expect "reap-stale-ci-stacks: a toolchain tag made within the image age is kept" grep -q "^$(rid tc-fresh-tag) " "$RP/images"
 
-# --- reap-stale-ci-stacks.sh v8: the secure-world image family (Codex P2: the
-# Makefile labels docker-build-sw images for reaping, but the reaper scanned
-# only the integration and toolchain repositories). Stub docker, images this
-# test made up.
+# --- reap-stale-ci-stacks.sh: the secure-world image family ---
 sw_tag=$(make -s --no-print-directory -C "$ROOT" sw-image)
 sw_repo=${sw_tag%%:*}
 : >"$RP/images" && : >"$RP/containers" && : >"$RP/removed" && : >"$RP/log"
@@ -1284,17 +1232,12 @@ expect "reap-stale-ci-stacks: the current secure-world tag's image is kept, howe
 expect "reap-stale-ci-stacks: a secure-world tag a container uses is kept" grep -q "^$(rid sw-used-tag) " "$RP/images"
 expect "reap-stale-ci-stacks: a secure-world tag made within the image age is kept" grep -q "^$(rid sw-fresh-tag) " "$RP/images"
 
-# --- the toolchain image carries ssh-keygen ------------------------------------
-# (Codex P1: git's SSH signature checks below run ssh-keygen -Y; Alpine's
-# git package does not supply it.)
+# --- the toolchain image carries ssh-keygen for SSH signature checks ---
 expect "Dockerfile: the toolchain stage installs openssh-keygen" \
 	python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"FROM base AS toolchain\n(.*?)\n(?:FROM|\Z)", t, re.S); sys.exit(0 if m and re.search(r"apk add [^\n]*\bopenssh-keygen\b", m.group(1)) else 1)' \
 	"$ROOT/build/docker/devcontainer/Dockerfile"
 
-# --- the image carries every tool secure-world-build.sh requires ---------------
-# (Codex round 3 P1: the build test runs tar -cJf, and the image had no xz.)
-# A tool is covered by an `apk add` package of the same name, or by coreutils
-# (sha256sum).
+# --- the image carries every tool secure-world-build.sh requires (an apk package of the same name, or coreutils) ---
 expect "Dockerfile: every tool scripts/secure-world-build.sh requires is installed by an apk add line" \
 	python3 -I -c '
 import re, sys
@@ -1311,10 +1254,7 @@ if not tools or missing:
     sys.exit(1)
 ' "$ROOT/scripts/secure-world-build.sh" "$ROOT/build/docker/devcontainer/Dockerfile"
 
-# --- signatures.yml: the adoption push, against real SSH-signed git fixtures ---
-# (Codex P1: the adoption merge's push has a before with no registry.) The
-# step's script is taken from the workflow and run as written; it fetches
-# from no origin here, so it reads only the fixture's objects.
+# --- signatures.yml: the adoption push, against real SSH-signed git fixtures; the step script runs as written ---
 python3 - "$ROOT/.github/workflows/signatures.yml" >"$TMP_ROOT/sigstep.sh" <<'EOF'
 import sys
 lines = open(sys.argv[1]).read().split("\n")
@@ -1423,11 +1363,7 @@ printf '          RELEASABILITY_PATTERNS: ${{ secrets.RELEASABILITY_PATTERNS }}\
 run prsecret "$wfo"
 check "releasability: the check fails a ci.yml that hands the secret to a pull_request run" 1 \
 	"runs on pull_request and names the private pattern secret: ci.yml"
-# relenv <dir>: the secret lives in the `releasability` environment, whose
-# branch policy is main alone (Codex finding on #19: a repository-scope secret
-# is open to any same-repo pull_request run). Fails, naming the file and job,
-# when a job that names the secret declares no `environment: releasability`,
-# or when a workflow that runs on `pull_request` declares that environment.
+# relenv <dir>: fails when a job naming the secret lacks `environment: releasability`, or a pull_request workflow declares it.
 relenv() {
 	python3 - "$1" <<'EOF'
 import glob, os, re, sys
@@ -1543,8 +1479,7 @@ rg rm -q bad.txt
 printf 'see host-17.corp.example (lab-string-ok: a fixture)\n' >"$rr/waived.txt"
 rg add -A && rg commit -qm waived
 RWAIVED=$(rg rev-parse HEAD)
-# A waiver-shaped file name waives nothing: the waiver is read from the
-# matched line's text only (Codex finding on #19).
+# A waiver-shaped file name waives nothing: only the matched line's text is read.
 rg rm -q waived.txt
 printf 'see host-17.corp.example\n' >"$rr/lab-string-ok: a name.txt"
 rg add -A && rg commit -qm named
@@ -1646,9 +1581,7 @@ run relgate pull_request "[]" 404
 check "ci.yml releasability: an unreadable API fails closed" 1 "cannot be read"
 run relgate push '{"check_runs":[{"id":2,"name":"Releasability","status":"completed","conclusion":"success"}]}' 200 https://github.com
 check "ci.yml releasability: the github.com mirror reads the check run" 0 "OK   Releasability: success"
-# The requirement follows the base commit's releasability.yml (Codex finding
-# on #19): a base without it is the bootstrap and passes with a notice; a base
-# with it needs the status, whatever the pull request's head holds.
+# The requirement follows the base commit's releasability.yml: a base without it passes with a notice.
 relbase=404
 run relgate pull_request "[]"
 check "ci.yml releasability: no releasability.yml at the base passes as the bootstrap" 0 "::notice::bootstrap:" "OK   bootstrap: no releasability.yml at ${B:0:12}"

@@ -171,7 +171,7 @@ is #9's decision.
 - Whether an SGK certificate is supported for the PQC table, and with which algorithms (§3.3).
 - How CST 4.x or SPSDK reaches an HSM-held key in go-xkms (§5). CST 4.x itself was not surveyed: its PKI script's
   options are known here only through U-Boot's guide [S1]; NXP's CST download is behind NXP's licence page.
-- Unreachable or not public from this lane: NXP's AN14471, the CST user and HSM guides, RM00284, UM12527 (all in
+- Unreachable or not public from this survey: NXP's AN14471, the CST user and HSM guides, RM00284, UM12527 (all in
   the private context repository), IMX95RM and the i.MX 95 Security Reference Manual.
 
 ## 8. Questions for the owner

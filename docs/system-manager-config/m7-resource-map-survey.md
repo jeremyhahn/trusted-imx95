@@ -27,15 +27,15 @@ All imx-sm paths below are at tag `rel_imx_sm_2026q3`, the newest tag on the pub
 | Id | Title | Version or tag | URL |
 |---|---|---|---|
 | S1 | nxp-imx/imx-sm, `configs/mx95frdm.cfg` (SM configuration for the **15x15** i.MX 95 FRDM board; **reference only**, not this device's file) | `rel_imx_sm_2026q3` (commit `eec2328`, 2026-09-03) | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg |
-| S10 | nxp-imx/imx-sm, `configs/other/mx95frdm-pro.cfg` (SM configuration for the 19x19 FRDM-IMX95-PRO, **this device**); not read line by line in this lane, its contents are taken from [public-source-survey.md](public-source-survey.md) items 12-16 | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/other/mx95frdm-pro.cfg |
+| S10 | nxp-imx/imx-sm, `configs/other/mx95frdm-pro.cfg` (SM configuration for the 19x19 FRDM-IMX95-PRO, **this device**); not read line by line in this survey, its contents are taken from [public-source-survey.md](public-source-survey.md) items 12-16 | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/other/mx95frdm-pro.cfg |
 | S2 | nxp-imx/imx-sm, `devices/MIMX95/configtool/m7mix.cfg` (M7MIX resources) | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/devices/MIMX95/configtool/m7mix.cfg |
 | S3 | nxp-imx/imx-sm, `devices/MIMX95/configtool/netcmix.cfg` (NETCMIX resources) | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/devices/MIMX95/configtool/netcmix.cfg |
 | S4 | nxp-imx/imx-sm, `sm/doc/imp.md` (Implementation details: the POWER_STATE_SET flow and aggregation) | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/imp.md |
 | S5 | nxp-imx/imx-sm, `sm/rpc/scmi/proto.md` (supported SCMI protocols, messages and access controls) | `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/rpc/scmi/proto.md |
-| S6 | Arm, System Control and Management Interface (SCMI) Platform Design Document, DEN0056 | 3.2, the version imx-sm's `sm/doc/intro.md` names; not read in this lane | https://developer.arm.com/documentation/den0056/latest/ |
+| S6 | Arm, System Control and Management Interface (SCMI) Platform Design Document, DEN0056 | 3.2, the version imx-sm's `sm/doc/intro.md` names; not read in this survey | https://developer.arm.com/documentation/den0056/latest/ |
 | S7 | zephyrproject-rtos/zephyr, `dts/arm/nxp/nxp_imx95_m7.dtsi` (the M7's SCMI node) | `v4.3.0` | https://github.com/zephyrproject-rtos/zephyr/blob/v4.3.0/dts/arm/nxp/nxp_imx95_m7.dtsi |
 | S8 | torvalds/linux, `arch/arm64/boot/dts/freescale/imx95.dtsi`, `imx95-power.h`, `imx95-clock.h` | `v6.18`; fetched, **not read** (see §8) | https://github.com/torvalds/linux/tree/v6.18/arch/arm64/boot/dts/freescale |
-| S9 | NXP UM12527, FRDM-IMX95-PRO Board User Manual, §1.2 Table 1, §2.18 | Rev. 1.0; in `jeremyhahn/vendor-nxp`, **not reachable** from this lane | private context repository (see [references](../references/README.md)) |
+| S9 | NXP UM12527, FRDM-IMX95-PRO Board User Manual, §1.2 Table 1, §2.18 | Rev. 1.0; in `jeremyhahn/vendor-nxp`, **not reachable** from this survey | private context repository (see [references](../references/README.md)) |
 
 Missing, as [references/](../references/README.md) records: IMX95RM and the System Manager documentation as NXP
 publishes it for the BSP release. The imx-sm repository's own Doxygen sources (S4, S5) stand in for the latter
@@ -93,7 +93,7 @@ resets the M7 LM (`lm_reset`); S10 lists the lock-up, reset and `WDOG5` faults, 
 reaction on the M7 LM alone leaves the A55 running without the tamper responder, which is fail-open; this
 repository's configuration must put those faults on `sys_reset` or `sys_shutdown` (fault-recovery-survey.md §7,
 §10 question 1). Whether the M7 firmware needs any SCMI reset domain (Reset domain protocol) for its own
-peripherals is **unconfirmed**: the reset-domain identifiers are in imx-sm's generated headers, which this lane
+peripherals is **unconfirmed**: the reset-domain identifiers are in imx-sm's generated headers, which this survey
 could not read (§8).
 
 ### 3.4 Performance domains
@@ -104,7 +104,7 @@ could not read (§8).
 
 ## 4. Tamper-response targets
 
-UM12527 §1.2 Table 1 and §2.18 (Ethernet) are in the private repository `jeremyhahn/vendor-nxp`, which this lane
+UM12527 §1.2 Table 1 and §2.18 (Ethernet) are in the private repository `jeremyhahn/vendor-nxp`, which this survey
 could not read; the board's PHY part numbers, their reset and power pins, and which ENET port each serves are
 **unconfirmed** here and are not guessed.
 
@@ -187,7 +187,7 @@ reference). For this device (S10), only the LMM rows are confirmed (`LMM_2` with
 "In S10" is this device's file: **yes** only where the repository records it (public-source-survey.md items
 14-16), otherwise **unconfirmed**. "In S1 (reference)" says whether the M7 agent (`SCMI_AGENT0`, LM1) of the 15x15
 file holds the right at `rel_imx_sm_2026q3`; it is reference material, not a fact about this device. Numeric SCMI
-domain and clock IDs are not given: they are in headers this lane could not read (§8).
+domain and clock IDs are not given: they are in headers this survey could not read (§8).
 
 | Resource | imx-sm identifier | SCMI protocol | Used by | In S10 (this device) | In S1 (reference) | Source |
 |---|---|---|---|---|---|---|
@@ -257,14 +257,14 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
 ## 8. Unconfirmed items
 
 1. **S10's grants beyond what is recorded.** The board file is settled: this device uses
-   `configs/other/mx95frdm-pro.cfg` (S10), not the 15x15 `mx95frdm.cfg` (S1). This lane did not read S10 itself.
+   `configs/other/mx95frdm-pro.cfg` (S10), not the 15x15 `mx95frdm.cfg` (S1). This survey did not read S10 itself.
    Its M7 ownership of `M7P`, `PERF_M7` and `MU_ELE5`, its `SYS` grant, the owners of `PD_NETC`, `NETC_EMDIO0` and
    the ENET pins, and what GPIO_IO36/37 are wired to on the PRO are **unconfirmed** until S10 is read for them.
 2. **Ethernet PHYs.** Part numbers, which NETC port each serves, their reset and supply-enable pins, and whether a
-   supply is SM-controlled. Needs UM12527 §1.2 Table 1 and §2.18 (S9, unreachable from this lane).
+   supply is SM-controlled. Needs UM12527 §1.2 Table 1 and §2.18 (S9, unreachable from this survey).
 3. **Numeric identifiers.** The SCMI power-domain, clock, performance-domain and reset-domain IDs (for example the
    number behind `PD_NETC` or `PERF_M7`). They are in imx-sm's generated `configs/mx95frdm-pro/config_*.h` (generated from S10) and device
-   headers, and in Linux's `imx95-power.h` and `imx95-clock.h` (S8). This lane's read guard does not allow reading
+   headers, and in Linux's `imx95-power.h` and `imx95-clock.h` (S8). This survey's read guard does not allow reading
    C headers outside the repository, so they were not read.
 4. **Reset domains.** Whether the M7 needs any SCMI reset domain, and which. Needs the device headers (item 3) and
    IMX95RM (missing).
@@ -277,7 +277,7 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
    (S7) points its SCMI node at `mu5`; and S7 declares only the Power, Clock, Pin control and CPU protocols, not
    Performance, System or LMM. How S1's MU index maps to the MU names is **unconfirmed**; the imx-sm source survey
    (#33) owns it.
-8. **SCMI 3.2 text.** S6 was not read in this lane; protocol and message IDs here are S5's.
+8. **SCMI 3.2 text.** S6 was not read in this survey; protocol and message IDs here are S5's.
 
 ## 9. Owner questions
 

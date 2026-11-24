@@ -10,7 +10,7 @@ references give about the cores and the enclave the secure world runs beside, an
 
 ## Scope (owner ruling 771)
 
-Owner ruling 771 (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
+docs/SPEC.md (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
 row, Release criteria). The SPEC.md text that records it was approved by the owner on 2026-11-21 (PR #138).
 
 - **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31), at a tagged upstream release (ruling
@@ -18,7 +18,7 @@ row, Release criteria). The SPEC.md text that records it was approved by the own
   configures it, builds it reproducibly, and puts its images in the boot container that AHAB verifies
   ([SPEC.md](../SPEC.md), `boot-container` row).
 - **Trusted applications.** OP-TEE runs the PKCS#11 TA, which go-xkms's PKCS#11 backend uses, and hosts the
-  firmware TPM TA, which Linux sees as `/dev/tpmrm0`. Owner ruling 927 gives the firmware TPM its own row, `ftpm`:
+  firmware TPM TA, which Linux sees as `/dev/tpmrm0`. docs/SPEC.md gives the firmware TPM its own row, `ftpm`:
   the TA, the kernel driver, its NV storage, the EK and measured boot are designed in [ftpm/](../ftpm/README.md).
   Any custom TA is reached through `/dev/tee0`.
 - **Linux.** go-trusted-platform and go-xkms run in Linux, on the Cortex-A55 cluster
@@ -90,7 +90,7 @@ world reaches it, is an open question for the owner ([SPEC.md](../SPEC.md), `sec
 trusted-firmware's `imx95` row states what its Cortex-M7 firmware assumes of the board's secure world and of the
 enclave key tier; that row is the authority and this file does not restate it. This repository records one
 consequence of it: the board's keys stay in the enclave's key store as that row requires of the key tier
-([SPEC.md](../SPEC.md), `secure-key-handling` row). Owner ruling 771 settles the firmware split
+([SPEC.md](../SPEC.md), `secure-key-handling` row). docs/SPEC.md settles the firmware split
 between this repository and that row ([Scope](#scope-owner-ruling-771)).
 
 ## Boundaries

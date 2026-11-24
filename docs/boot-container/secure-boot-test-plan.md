@@ -162,7 +162,7 @@ device, which this repository does not do.
 Sources and limits: the way to read the log is public (S4 §1.7, S7). The
 encoding of an event word (which field gives the command, the status and the
 failure indicator) and the indicator names for each case are **not
-confirmed**: no public prose document reached by the lane gives them for the
+confirmed**: no public prose document reached by the survey gives them for the
 i.MX 95. U-Boot's `ahab_status` decodes them in S8, and the i.MX 95 Security
 Reference Manual (S9) would define them; neither was read. The rows above
 therefore give the kind of entry, not its code.
@@ -197,7 +197,7 @@ Proposed, in order:
 ## 8. Not confirmed
 
 1. Event word encoding and the failure indicator for each case (section 6).
-   Public basis would be S8 (code, not read by the lane) or S9 (not public).
+   Public basis would be S8 (code, not read by the survey) or S9 (not public).
 2. Whether in OEM open a failed authentication is only reported, and boot
    continues, on the i.MX 95 (section 5); inferred from S4 §1.7–1.8, not stated.
 3. Whether the enclave checks anything against the SRK table when no SRK hash

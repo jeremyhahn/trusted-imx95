@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Offline checks of the kernel hardening fragment (proposed, pending owner
-# approval, issue #14; hardening-survey section 10, Q1 (c) and Q5 (b)).
+# Offline checks of the kernel hardening fragment.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

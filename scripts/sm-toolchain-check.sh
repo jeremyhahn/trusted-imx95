@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Run in the devcontainer image (make sm-toolchain-check, the CI job
-# system-manager-build): build the pinned System Manager with the real pinned
-# Arm toolchain, then check the toolchain starts and the artefacts are there.
-# A script, not a Make recipe: no `$` passes through Make twice.
+# make sm-toolchain-check: build the pinned System Manager with the pinned Arm toolchain and check the artefacts; a script so no `$` passes through Make twice.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

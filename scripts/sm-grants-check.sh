@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# sm-grants-check.sh <patched cfg> <allowlist>   check the M7 LM's grants
-# sm-grants-check.sh --print <cfg>               print them, normalised
-#
-# The M7 LM (LMn name="M7") block of the patched System Manager configuration
-# must grant exactly what the reviewed allowlist (system-manager/m7-grants.txt)
-# lists: a grant the list lacks is UNLISTED, a listed grant the file lacks is
-# STALE. Normalisation: comments and blank lines dropped, backslash
-# continuations joined, whitespace collapsed, sorted (C locale), so the order of
-# the file does not matter. The LM header line itself is not a grant.
-# Host side only.
+# sm-grants-check.sh <patched cfg> <allowlist> | --print <cfg>: the M7 LM's normalised grants must equal system-manager/m7-grants.txt (UNLISTED or STALE otherwise).
 set -euo pipefail
 
 die() {

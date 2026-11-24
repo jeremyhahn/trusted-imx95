@@ -6,7 +6,7 @@ This page proposes the one evidence bundle the Cortex-A55 hands to go-xkms for e
 
 ## Decision basis
 
-Owner ruling 1234 (Tenant, 2026-11-23), as recorded in [architecture.md](architecture.md#decision): go-xkms's endorse-01 requires an EdgeLock enclave attestation before it certifies the fTPM's endorsement key (EK), and the Cortex-A55 calls the enclave's key API. Owner ruling 927 sets the endorse-01, enroll-01, device-attest-01 sequence in the `tpm` format. The ruling decides only that order and that caller. It does not decide the root (A2), the EK binding (B1, B3), the EK template (B5) or the wire encoding (C2, F2); labels are those of the [README](README.md).
+docs/SPEC.md, as recorded in [architecture.md](architecture.md#decision): go-xkms's endorse-01 requires an EdgeLock enclave attestation before it certifies the fTPM's endorsement key (EK), and the Cortex-A55 calls the enclave's key API. docs/SPEC.md sets the endorse-01, enroll-01, device-attest-01 sequence in the `tpm` format. The SPEC decides only that order and that caller. It does not decide the root (A2), the EK binding (B1, B3), the EK template (B5) or the wire encoding (C2, F2); labels are those of the [README](README.md).
 
 Provisional defaults followed here: B1 (a) now with (d) as the carried evidence, and B3 (b), the nonce stays the verifier's ([evidence-binding-survey.md](evidence-binding-survey.md#questions-for-the-owner)); A3 (a), response versions 2 and 3 and a 16-byte verifier nonce ([attestation-survey.md](attestation-survey.md#questions-for-the-owner)). That the 96-byte signature is ECDSA P-384 is an inference, marked unconfirmed in attestation-survey.md section 1.1.
 

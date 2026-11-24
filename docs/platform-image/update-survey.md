@@ -64,7 +64,7 @@ So an update scheme must: (a) verify a signature on the update before it writes 
 
 - **Artifact signing.** The device is provisioned with a public verification key, set through the client's `ArtifactVerifyKey(s)` option. A signing system signs each Artifact after it is built [S9]. The documented algorithms are RSASSA-PKCS1-v1_5 (with a key of at least 3072 bits recommended) and ECDSA on P-256 [S9].
 - **HSM signing.** On Linux, `mender-artifact` can sign with a key named by a PKCS#11 URI through the OpenSSL PKCS#11 engine, so the key can stay in an HSM or smart card. It can also sign with cloud key services (GCP KMS, Vault transit, Azure Key Vault, Keyfactor SignServer) [S9].
-- **Not confirmed from the sources I reached.** Mender's A/B rollback mechanics with U-Boot (its boot-count variables), and whether the client refuses downgrades, are not covered by the page I read. The device-side overview page returned 404 from this lane. Mender's server-side features (the hosted or self-hosted server) are outside this survey.
+- **Not confirmed from the sources I reached.** Mender's A/B rollback mechanics with U-Boot (its boot-count variables), and whether the client refuses downgrades, are not covered by the page I read. The device-side overview page returned 404 from this survey. Mender's server-side features (the hosted or self-hosted server) are outside this survey.
 
 ### 3.4 OSTree with TUF (Foundries.io Linux microPlatform, aktualizr-lite)
 
@@ -116,14 +116,14 @@ Against the requirements (a)–(e) in section 2:
 
 ## 8. What could not be confirmed
 
-- **Issue #66 text.** The issue could not be read from the lane (`gh` is not authenticated, and the public API hit its rate limit). This survey follows the lane brief's description of the issue.
+- **Issue #66 text.** The issue could not be read from the survey (`gh` is not authenticated, and the public API hit its rate limit). This survey follows the survey brief's description of the issue.
 - **i.MX 95 boot ROM fallback.** Whether the boot ROM, on an AHAB authentication failure, falls back to the other eMMC boot partition or to a secondary container set. The sources are IMX95RM and the i.MX 95 Security Reference Manual, which are missing from the references (SPEC).
 - **The fuse version on the i.MX 95.** The public source read for this ([verified-boot survey §3.8](verified-boot-survey.md)) says the ELE checks the container `fuse_version` against fuses, and that `sw_version` is for software to choose among images. Two things are unconfirmed: whether the ELE checks `sw_version` at all, and which fuse word holds the fuse version and how many steps it has. This needs the same missing manuals. I read only the U-Boot command text [S16] and the mkimage options [S19, S20].
 - **Mender.** Its A/B rollback mechanics with U-Boot and its downgrade policy. The device-side overview page returned 404.
 - **SWUpdate.** Build-side signing from an HSM, and whether it can update the eMMC boot partitions.
 - **LmP on the i.MX 95.** Whether LmP supports the FRDM-IMX95-PRO, and whether its boot firmware floor maps to the AHAB version.
 - **go-xkms as a PKCS#11 provider.** This decides whether RAUC's or Mender's PKCS#11 signing can use the project's HSM custody (SPEC, row `boot-container`, AN14471 model).
-- **NXP's own OTA guidance for the i.MX 95**, such as an i.MX Linux User's Guide chapter or an application note. None was reached from public pages in this lane, and the NXP Linux BSP documentation is listed as missing in SPEC.
+- **NXP's own OTA guidance for the i.MX 95**, such as an i.MX Linux User's Guide chapter or an application note. None was reached from public pages in this survey, and the NXP Linux BSP documentation is listed as missing in SPEC.
 
 ## 9. Questions for the owner
 

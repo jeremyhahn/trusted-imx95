@@ -47,7 +47,7 @@ malformed lock.
 
 ## 2. The reproducibility result
 
-**Reproducible.** `make system-manager` was run twice on 2026-11-20 in the lane's Linux x86_64 container, each run
+**Reproducible.** `make system-manager` was run twice on 2026-11-20 in the survey's Linux x86_64 container, each run
 building twice in clean trees. All four images are byte-identical, and the two runs wrote identical manifests:
 
 | | SHA-256 of `m33_image.bin` (188036 bytes) |
@@ -56,7 +56,7 @@ building twice in clean trees. All four images are byte-identical, and the two r
 | Run 2, build 1 and build 2 | `10ec33fe9ff80cbbda962cb08c524dd58f1e2b67f29d0b55671e49fda723af96` |
 
 Build time: about 80 s a run (two builds) with the downloads cached; a first run also downloads the 155 MB
-toolchain and the tag, which took about 2 minutes on the lane's link.
+toolchain and the tag, which took about 2 minutes on the survey's link.
 
 The first two clean builds differed in four bytes: the build date and time. imx-sm's `sm/makefiles/build_info.mak`
 writes them into the generated `build_info.h` with `date +FORMAT`, which ignores `SOURCE_DATE_EPOCH`. Rather than
@@ -155,7 +155,7 @@ downloading anything, then in each build checks the upstream file's SHA-256, app
 fault lines, each from `lm_reset` to `sys_reset` or `sys_shutdown`. Section 4's plan is thus followed, with the patch
 under `system-manager/patches/`. Any change rebuilds the image and the boot container, which must be re-signed.
 
-`make system-manager` with the patch ran on 2026-11-21 in the lane's container: both builds are byte-identical,
+`make system-manager` with the patch ran on 2026-11-21 in the survey's container: both builds are byte-identical,
 `m33_image.bin` SHA-256 `3ef1c54c829a8bd775dfc3d4f263eb06d8a61e565a3f4f74025d51d9a82f6e85`. The image is a build
 output only.
 
@@ -226,16 +226,16 @@ check offline, and a fake build whose patched file widens the M7 block.
 
 ## 8. Not confirmed
 
-- The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
+- The run recorded in section 2 was in the survey's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
   installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. **The real
-  compiler has not yet built the System Manager in the image on the lane's node** (no Docker there). The CI job
+  compiler has not yet built the System Manager in the image on the survey's node** (no Docker there). The CI job
   `system-manager-build` runs `make sm-toolchain-check` (`scripts/sm-toolchain-check.sh` in the image): it runs
   `make system-manager` with the real pinned toolchain, then checks the compiler starts, `m33_image.bin` and the
   manifest exist and the linked `.elf` is an ARM ELF. The result of its first run is not recorded here yet. If
   `gcompat` is not enough to start the compiler, the base image would have to change, which is the owner's choice (#14).
 - Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
-  `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
+  `g++-multilib` and `srecord`; the survey's container had `gcc`, and whether the build uses any of the three was not
   checked.
 - The monitor mode for production images (`M=2` here), the BSP release (#14 Q2) and the boot container target
   stay open.

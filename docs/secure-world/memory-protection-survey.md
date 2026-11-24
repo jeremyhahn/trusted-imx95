@@ -8,7 +8,7 @@ runs or scripts a fuse, life-cycle or provisioning step.
 The question: on the FRDM-IMX95-PRO, which memory belongs to the secure world, which mechanism keeps the
 other bus masters out of it, and which software sets that up. The `secure-world` row of
 [SPEC.md](../SPEC.md) notes that no document in [references/](../references/README.md) gives the i.MX 95's
-TrustZone configuration. Owner ruling 771 has since set the scope: upstream TF-A and the NXP BSP's OP-TEE on the
+TrustZone configuration. docs/SPEC.md sets the scope: upstream TF-A and the NXP BSP's OP-TEE on the
 A55 ([architecture.md](architecture.md#scope-owner-ruling-771)).
 
 Issue #63 asks for three things, each covered here:
@@ -40,9 +40,9 @@ copied from the cited configuration files and are physical addresses.
 | S9 | NXP Linux kernel (linux-imx), `drivers/iommu/Kconfig` (default IOMMU domain type) | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx |
 | S10 | NXP System Manager (imx-sm), EVK configuration `configs/mx95evk.cfg` and SoC headers `devices/MIMX95/` | tag `rel_imx_sm_2026q3` | https://github.com/nxp-imx/imx-sm |
 
-S1-S5 and S10 were reached from the lane by `git clone` at the tags shown, S6-S9 by fetching each file at
+S1-S5 and S10 were reached from the survey by `git clone` at the tags shown, S6-S9 by fetching each file at
 its tag. NXP's public i.MX 95 product page and fact sheet were tried at their usual nxp.com addresses and
-returned "not found" to the lane, so no NXP marketing or data-sheet claim is used here.
+returned "not found" to the survey, so no NXP marketing or data-sheet claim is used here.
 The i.MX 95 Reference Manual, the Security Reference Manual and NXP's System Manager user guide were not
 reached (not public, or not found as public pages) and are not used.
 
@@ -56,7 +56,7 @@ secure/privileged attribute of each bus master are set by per-master formatting 
 `sa=secure`, `sa=nonsecure` or `sa=bypass`, which passes the core's own TrustZone state through). The SM
 programs these rules into the resource domain controller's memory region checkers, DDR among them
 (`devices/MIMX95/sm/dev_sm_rdc.c` in S1); NXP calls this block the Trusted Resource Domain Controller (TRDC). The register-level behaviour of the TRDC is in IMX95RM,
-which this lane could not read (§11).
+which this survey could not read (§11).
 
 So the secure world's DRAM on this part is "the DRAM regions whose rule for the A55's domain says
 secure-only", and it is protected against the other cores and DMA masters only to the extent that their
@@ -147,7 +147,7 @@ entries that bear on §4. (The smaller FRDM-IMX95 board's `imx95-15x15-frdm.dts`
 
 So the device tree on its own does not keep Linux off the secure window. In NXP's flow the reservation is
 presumably added at boot (TF-A defines a `BL32_FDT_OVERLAY_ADDR`, and OP-TEE can add a reserved-memory node
-to the DT it is handed); this lane did not trace where. If Linux did touch the window, the SM rules of §4
+to the DT it is handed); this survey did not trace where. If Linux did touch the window, the SM rules of §4
 would block the access; the effect would be a bus fault rather than a leak, but the reservation is still
 needed for a working system.
 
@@ -233,8 +233,8 @@ is that long-term secrets must stay in the EdgeLock enclave (the `secure-key-han
 - **Where the Linux reservation of the secure window is added** (§7).
 - **The board's DRAM size.** OP-TEE's EVK flavour assumes 16 GiB in two banks; the FRDM-IMX95-PRO's size
   is in UM12527, not checked here.
-- **The issue text of #63** could not be read from the lane (the forge API refused the request); this survey
-  is written from the lane brief and the `secure-world` row of SPEC.md.
+- **The issue text of #63** could not be read from the survey (the forge API refused the request); this survey
+  is written from the survey brief and the `secure-world` row of SPEC.md.
 - **Upstream Linux** was not surveyed; only NXP's tree (S6-S9).
 - **Inline DDR encryption.** Whether the i.MX 95 silicon has one is not stated in any public source reached (§8).
 - **DMA masters under the TRDC.** That PCIe and NETC transactions carry the A55 non-secure domain and

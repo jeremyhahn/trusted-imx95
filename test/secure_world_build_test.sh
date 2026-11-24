@@ -16,7 +16,7 @@ check "help prints the usage" 0 "usage: secure-world-build.sh"
 run bash "$sw" --check-lock
 check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "toolchain 15.2.rel1"
 
-# Owner ruling 771 and docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
+# docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
 tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
 case "$tfa_repo" in
 https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
@@ -285,14 +285,7 @@ fullrun badhash "$oklock" STUB_CORRUPT_CP=1
 check "a wrong artefact hash stops the build" nonzero "differs from the build output" "nothing published"
 expect "a wrong artefact hash publishes nothing" nothing_published badhash
 
-# --- build.md records the script's build configuration -------------------------
-# The artefact hashes in docs/secure-world/build.md hold for one build
-# configuration. build.md records the SHA-256 of that configuration: every
-# non-comment, non-blank line of bsp.lock (all the source, toolchain and wheel
-# pins), the uuid assignments, the optee_flags array and every make build step
-# of the script (bl31, optee-devkit, ftpm and optee, with their flags and
-# continuation lines), whitespace squeezed. This check recomputes it from the
-# files, so a changed pin or flag cannot leave old hashes standing.
+# --- build.md records the SHA-256 of the build configuration (bsp.lock pins, uuids, optee_flags, make steps), recomputed here ---
 # optee_config_digest [lock [script]]: defaults to the committed files.
 optee_config_digest() {
 	local lk=${1:-$good} sc=${2:-$sw} l on=0 acc=
