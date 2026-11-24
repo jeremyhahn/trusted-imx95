@@ -14,7 +14,7 @@ public advisories exist.
 
 Method: shallow clones of NXP's public GitHub repositories at the tags in
 §2, read through their documentation, configuration files and commit
-history; public CVE records from NVD. The lane's tooling did not allow
+history; public CVE records from NVD. The survey's tooling did not allow
 reading C source in those clones, so statements about code are drawn from
 commit messages and file names and say so. Nothing was built or run.
 
@@ -27,7 +27,7 @@ commit messages and file names and say so. Nothing was built or run.
 | S3 | NXP OP-TEE OS (`imx-optee-os`), i.MX and ELE driver history | tag `lf-6.18.37-2.1.0` (commit `99f4089`, upstream base 4.10.0) | https://github.com/nxp-imx/imx-optee-os |
 | S4 | NXP Linux kernel (`linux-imx`), `drivers/firmware/imx` file list | branch `lf-6.18.y`, read 2026-11-12 | https://github.com/nxp-imx/linux-imx/tree/lf-6.18.y/drivers/firmware/imx |
 | S5 | Upstream Linux, `drivers/firmware/imx` file list | `master`, read 2026-11-12 | https://github.com/torvalds/linux/tree/master/drivers/firmware/imx |
-| S7 | Linux OP-TEE driver and OP-TEE documentation | not read in this lane | https://optee.readthedocs.io/ |
+| S7 | Linux OP-TEE driver and OP-TEE documentation | not read in this survey | https://optee.readthedocs.io/ |
 | S8 | NIST National Vulnerability Database, CVE API 2.0 | queried 2026-11-12 | https://services.nvd.nist.gov/rest/json/cves/2.0 |
 | S9 | TF-A security advisories TFV-1 to TFV-13 (copy in the NXP tree) | `imx-atf` `lf_v2.14` `docs/security_advisories` | https://trustedfirmware-a.readthedocs.io/en/latest/security_advisories/ |
 
@@ -37,7 +37,7 @@ commit messages and file names and say so. Nothing was built or run.
 
 Source: NXP `imx-atf`, branch `lf_v2.14` at commit `af9eb2c` (2026-09-01),
 platform `plat/imx/imx9/imx95`, read through its commit history [S2].
-The lane could not read the C source itself (see §6), so the list below is
+The survey could not read the C source itself (see §6), so the list below is
 built from commit subjects, commit messages and the files each commit
 touches, not from the SMC dispatcher.
 
@@ -78,7 +78,7 @@ a privileged proxy for those requests.
 
 Sources: NXP `imx-optee-os`, tag `lf-6.18.37-2.1.0` (commit `99f4089`,
 2026-09-07), read through its commit history [S3]; TF-A i.MX 95 OP-TEE
-support [S2]; Linux `drivers/tee/optee` (upstream, not read in this lane)
+support [S2]; Linux `drivers/tee/optee` (upstream, not read in this survey)
 [S7].
 
 The path is: a Linux user process opens the TEE device, the kernel's OP-TEE
@@ -111,7 +111,7 @@ What the NXP history shows for the i.MX 9 family [S3]:
   (the tag's head commit).
 
 Which TAs and pseudo-TAs the i.MX 95 build enables by default is **not
-confirmed**; the lane could not read the platform's `conf.mk` (§6).
+confirmed**; the survey could not read the platform's `conf.mk` (§6).
 
 ### 3.3 EdgeLock Enclave messaging unit
 
@@ -141,7 +141,7 @@ the NXP kernel carries an ELE driver set (`se_ctrl`, `ele_base_msg`,
 kernel does not have [S4, S5]. In the NXP BSP the `se_ctrl` driver exposes
 the MU to user space as a character device used by NXP's `imx-secure-enclave`
 library; this is from the file names and public BSP practice and is
-**not confirmed** from source in this lane.
+**not confirmed** from source in this survey.
 
 The ELE firmware decides what a given MU may ask for (for example, which
 HSM commands are allowed from a non-secure MU); that policy is in the ELE
@@ -190,7 +190,7 @@ programs from the same file [S1].
 Linux's side is the upstream `arm_scmi` driver plus NXP's vendor protocol
 extensions for the i.MX 95; the upstream and NXP trees both carry `sm-cpu`,
 `sm-lmm` and `sm-misc` client files [S4, S5] (a BBM extension is also
-expected, not confirmed in this lane). Each SCMI message
+expected, not confirmed in this survey). Each SCMI message
 Linux can send is an input the SM firmware parses.
 
 ## 4. What Linux needs on this board, and what can be closed or restricted
@@ -204,7 +204,7 @@ This section is the survey's reading of §3 against the board's use in
 | NXP SiP: M7 start/stop/reset address, LM boot/shutdown (TF-A) | Only if Linux manages the M7 (remoteproc). SPEC leaves the M7's role open. | Leave the M7 SiP calls out of the TF-A build, or have TF-A refuse them, if the M7 is started by the SM and Linux does not control it. Whether the i.MX 95 build has a switch for this is not confirmed [S2]. |
 | Other NXP SiP calls (SoC info and older families' calls) | SoC info is used for identification; the rest is not known to be needed. | Audit which handlers the i.MX 95 build compiles in (not confirmed, §6). |
 | SDEI (TF-A) | Not known to be needed. | Leave disabled; this also removes the TFV-11 class [S9]. |
-| OP-TEE SMC and TA sessions | Only if a secure-side service is wanted (secure storage, PKCS#11 TA, ELE-backed keys through OP-TEE). SPEC's key rows put keys in the ELE and leave the caller open. ELE-backed keys through OP-TEE on the i.MX 95 need opaque-key integration that neither tree is shown to have (§3.2). | If OP-TEE is not needed, do not load it (TF-A then has no SPD). If it is: build only the TAs needed, and rebase to OP-TEE 4.11.0 or carry the §5.2 fixes. Owner ruling 771 loads OP-TEE with the firmware TPM and PKCS#11 TAs, so this second case applies. |
+| OP-TEE SMC and TA sessions | Only if a secure-side service is wanted (secure storage, PKCS#11 TA, ELE-backed keys through OP-TEE). SPEC's key rows put keys in the ELE and leave the caller open. ELE-backed keys through OP-TEE on the i.MX 95 need opaque-key integration that neither tree is shown to have (§3.2). | If OP-TEE is not needed, do not load it (TF-A then has no SPD). If it is: build only the TAs needed, and rebase to OP-TEE 4.11.0 or carry the §5.2 fixes. docs/SPEC.md loads OP-TEE with the firmware TPM and PKCS#11 TAs, so this second case applies. |
 | ELE MUs `MU_ELE3`/`MU_ELE4` (Linux) | Yes if Linux calls the ELE HSM API directly, which is one of SPEC's open options. | Remove them from the "AP-NS" resources in the SM configuration if only the secure side (OP-TEE) or the M7 calls the ELE; the TRDC then blocks Linux from the MUs in hardware [S1]. |
 | SCMI "AP-NS" agent (SM) | Yes: clocks, performance, sensors, RTC, power domains of Linux's peripherals. | Already narrowed: no `SYS` control and only `LMM` notifications [S1]. Further narrowing is possible per item (for example the `BRD_SM_CTRL_TEST_A` and `BUTTON ... test` grants) by editing the board configuration and rebuilding the SM. |
 | TRDC resource isolation (SM) | Defines what memory and peripherals the non-secure A55 can touch. | The FRDM file gives the non-secure A55 broad ownership of display, camera, NETC, eDMA1 and others [S1]. DMA-capable peripherals owned by Linux can reach memory the TRDC lets them; the memory ranges for secure DDR (TF-A, OP-TEE) must be outside what those masters may write. The secure A55 DDR range in the file is `0x8A000000` to `0x8DFFFFFF` [S1]; that its exclusion from non-secure masters is complete is not confirmed. |
@@ -282,7 +282,7 @@ compromised, and are listed for completeness.
 - **C source not read.** The SiP call table, the list of handlers compiled
   into the i.MX 95 TF-A build, whether SDEI is enabled, OP-TEE's i.MX 95
   `conf.mk` (TAs, crypto-extension flag, CAAM use), and the Linux ELE and
-  OP-TEE drivers were not read: the lane's tools refused to open C source
+  OP-TEE drivers were not read: the survey's tools refused to open C source
   outside the repository. Statements about them come from commit messages
   and file names.
 - **Device-tree use.** Which ELE MU and SCMI channel Linux's device tree
@@ -296,7 +296,7 @@ compromised, and are listed for completeness.
   format and the `sm/doc` file names, not a tested claim.
 - **NXP PSIRT.** The NXP product security page
   (https://www.nxp.com/company/about-nxp/product-security-incident-response-team:PSIRT)
-  returned HTTP 404 to the lane on 2026-11-12. NXP security bulletins that
+  returned HTTP 404 to the survey on 2026-11-12. NXP security bulletins that
   are only published there, or only to registered customers, are not
   covered.
 - **GitHub advisory database.** The OP-TEE GitHub security-advisory API

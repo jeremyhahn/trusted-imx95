@@ -22,7 +22,7 @@ All sources are public. Paths are inside the source tree of the tag named.
 | S8 | `meta-imx` machine configuration `meta-imx-bsp/conf/machine/imx95-19x19-lpddr5-frdm-pro.conf` | as S7 | https://github.com/nxp-imx/meta-imx/blob/wrynose-6.18.37-2.1.0/meta-imx-bsp/conf/machine/imx95-19x19-lpddr5-frdm-pro.conf |
 
 Line numbers quoted below are at these versions. The C sources of S1 were
-not read for this survey (the lane could read build files and documentation
+not read for this survey (the survey could read build files and documentation
 only); claims about code behaviour rest on the SM's own documentation and
 build files and are marked where they are inference.
 
@@ -201,7 +201,7 @@ by NXP as a production gate; they follow from S5 and S7.
    with the release, next to the hash of the signed boot container, so the
    claim "no monitor" can be checked later against the image that shipped.
 
-Checks 2 to 5 have not been run here: this lane builds nothing.
+Checks 2 to 5 have not been run here: this survey builds nothing.
 
 ## 5. Where System Manager logs go in production, and what they reveal
 

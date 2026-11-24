@@ -184,10 +184,10 @@ root filesystem.
 
 ## 8. What could not be confirmed
 
-- Issue #56's own text: the forge was not reachable from this lane (the `gh` CLI had no
-  credentials). This survey follows the lane brief and the `platform-image` row of the SPEC.
+- Issue #56's own text: the forge was not reachable from this survey (the `gh` CLI had no
+  credentials). This survey follows the survey brief and the `platform-image` row of the SPEC.
 - NXP's "i.MX Yocto Project User's Guide" and "i.MX Linux Release Notes" for `lf-6.18.37-2.1.0`. The
-  NXP Embedded Linux for i.MX page answers [S14], but the guides are PDFs on nxp.com, and this lane did
+  NXP Embedded Linux for i.MX page answers [S14], but the guides are PDFs on nxp.com, and this survey did
   not read them. Whether NXP states anything about reproducibility or SBOMs in them is unknown.
 - Whether NXP's tags (`rel_imx_6.18.37_2.1.0`, `lf-6.18.37-2.1.0`) have ever been moved.
 - The current state of Go reproducibility in `yocto-6.0.2`, and the live Yocto reproducibility results.

@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# make ahab-policy-test (issue #12): scripts/ahab/policy-check.sh compares a
-# signed container's SRK table hash, used_srk_id, srk_revoke_mask and
-# fuse_version with a policy file (test plan C2, C3, C4). The container comes
-# from sign-test.sh (a throwaway test PKI); the policy files are written here,
-# in a temp directory, from the container's own parsed values. Nothing is
-# committed: no key, container or policy.
+# make ahab-policy-test: policy-check.sh against a sign-test.sh container and policy files written to a temp directory from its own parsed values.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -31,10 +26,7 @@ mkman() {
 		done
 	} >"$f"
 }
-# The field tests below run policy-check.sh on A55-only images: POLICY is the
-# real script with PC_MANIFEST (default: one OEM A55 container) as its manifest;
-# single.yaml is written once the container exists (its image values are read
-# from the container below).
+# Field tests run on A55-only images with PC_MANIFEST as the manifest; single.yaml is written once the container exists.
 # shellcheck disable=SC2016 # the wrapper's own $# and $@ stay literal
 printf '#!/usr/bin/env bash\n[ $# -eq 2 ] && set -- "$@" "${PC_MANIFEST:-%s}"\nexec "%s" "$@"\n' "$TMP_ROOT/single.yaml" "$REAL" >"$TMP_ROOT/pc"
 chmod +x "$TMP_ROOT/pc"
@@ -75,8 +67,7 @@ if [[ ! "$hash" =~ ^[0-9A-Fa-f]{16,}$ || ! "$id" =~ ^[0-9]+$ || ! "$mask" =~ ^(0
 	exit 1
 fi
 
-# imgrec <bin>: "<sha256 of the first image's bytes> <load address> <entry point>"
-# as SPSDK parses the first container's first image entry.
+# imgrec <bin>: "<sha256 of the first image> <load address> <entry point>" as SPSDK parses them.
 imgrec() {
 	"$venv/bin/python" -I -c '
 import hashlib, sys
@@ -104,9 +95,7 @@ read -r A55_SHA A55_LOAD _ <<<"$(imgrec "$bin")"
 M7_SHA=$A55_SHA M7_LOAD=0x00000000 M7_ENTRY=0x303C0000
 mkman "$TMP_ROOT/single.yaml" a55
 
-# mkpol <file> <hash> <id> <mask> <min>: a complete policy file; the vendor
-# record is a placeholder (VREC) unless a test sets it: an image with no nxp
-# container never compares it, but the file must carry it.
+# mkpol <file> <hash> <id> <mask> <min>: a complete policy file with a placeholder vendor record unless a test sets it.
 VREC=(NXP_SRK_TABLE_HASH=00 NXP_USED_SRK_ID=0 NXP_SRK_REVOKE_MASK=0 NXP_FUSE_VERSION=0)
 mkpol() {
 	{
@@ -367,14 +356,7 @@ if mkbin oem-none 0:0 0:0:none; then
 	check "an OEM container then an srk_set none container fails" 1 "srk_set none" "policy: FAILED"
 fi
 
-# Mixed-signer images (container manifest, per-role records): an nxp fixture
-# container (its own SRK table, srk4..7), the OEM M7 container, the OEM A55
-# container. The nxp container is held to its pinned sha256 only.
-# nxpdigest <name>: sha256 of the nxp binary container SPSDK extracts from <name>.bin.
-#
-# The digest is left in DG (not echoed: a command substitution would run in a
-# subshell and lose the failure count). A parse failure, or a missing extracted
-# container, is a recorded test failure with the parser log, never a silent skip.
+# Mixed-signer images: an nxp fixture container (srk4..7), the OEM M7 and the OEM A55 containers; nxpdigest <name> leaves the nxp container's sha256 in DG, a parse failure is a recorded failure.
 nxpdigest() {
 	local d="$pki/$1.parsed" s
 	DG=
@@ -601,7 +583,7 @@ check "an nxp position without sha256 fails" 1 "takes exactly role and sha256" "
 printf 'containers: [\n' >"$TMP_ROOT/syntax.yaml"
 run "$REAL" "$bin" "$good" "$TMP_ROOT/syntax.yaml"
 check "a manifest that is not YAML fails" 1 "cannot be read" "policy: FAILED"
-# The A55-only test container no longer passes under the repository manifest.
+# The A55-only test container fails under the repository manifest.
 run "$REAL" "$bin" "$good"
 check "an A55-only container fails under the repository manifest (no nxp pin given)" 1 "no 64-hex sha256 pin" "policy: FAILED"
 mixpol "$TMP_ROOT/a55-pin.policy" "$hash" "$(printf '%064d' 1)"

@@ -45,12 +45,12 @@ UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
+	deps-check pins-check pins-report lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager integration-test-system-manager-config secure-world ahab-sign-test \
-	sw-image sw-ref docker-build-sw \
+	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	boot-image-inputs boot-image-test \
+	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -76,6 +76,8 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 		'ARG SW_DEBIAN_SNAPSHOT=$(SW_DEBIAN_SNAPSHOT)' 'ARG SW_UV_VERSION=$(SW_UV_VERSION)' 'ARG SW_UV_SHA256=$(SW_UV_SHA256)'; do \
 		found=0; while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
 		[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }; done
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
 	@echo "build: OK ($(words $(SH_SCRIPTS)) shell and $(words $(PY_SCRIPTS)) Python scripts parse)"
 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
@@ -113,6 +115,13 @@ integration-test-local: ## Integration tests in the current environment (in the 
 	done; exit $$fail
 
 security: check-tracked-cst secret-scan-tree secret-scan-history ## Security stage: CST guard and secret scans of the tree and the history
+
+pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent, and no doc or script restates a moved python/alpine version
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
+
+pins-report: ## Offline: print every pin (tools, images, requirements, workflow actions) from the files in the tree
+	@scripts/pins-report.sh scripts/tool-pins.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt .github/workflows
 
 deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs the network)
 	@scripts/deps-check.sh scripts/tool-pins.sh
@@ -183,9 +192,16 @@ SW_BASE  ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/secure-world
 SW_WORK  ?= $(SW_BASE)/work
 SW_OUT   ?= $(CURDIR)/.secure-world/out
 SW_CACHE ?= $(SW_BASE)/cache
+SW_LOCK  ?= $(CURDIR)/secure-world/bsp.lock
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
-	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>): its pins and owner ruling 771's sources; no fetch, no build
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --check-lock
+
+integration-test-secure-world: ## The secure-world integration test (test/integration/secure_world_test.sh), offline
+	@bash test/integration/secure_world_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
@@ -234,6 +250,13 @@ okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a
 
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
+
+skh-policy-check: ## Check a trace of enclave operations against the secure-key-handling row (SKH_TRACE=<file.jsonl>; HSM API only, keys never in the clear, both rollback flags acknowledged; host-side, no enclave)
+	@[ -n "$(SKH_TRACE)" ] || { echo "skh-policy-check: set SKH_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/skh-policy-check.py "$(SKH_TRACE)"
+
+integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
+	@bash test/integration/secure_key_handling_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }

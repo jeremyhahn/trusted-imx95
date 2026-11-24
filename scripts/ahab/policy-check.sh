@@ -1,47 +1,7 @@
 #!/usr/bin/env bash
-# policy-check.sh: host policy check of a signed AHAB container against
-# recorded values (issue #12; docs/boot-container/secure-boot-test-plan.md
-# cases C2, C3, C4; docs/boot-container/signing-pipeline.md "Policy check").
-#
-#   policy-check.sh <container.bin> <policy file> [<manifest>]
-#
-# The manifest (default scripts/ahab/container-manifest.yaml) lists the image's
-# containers in order, each with a role (nxp or oem): an oem position names the
-# image entries (core_id, image_type) its container must carry exactly; an nxp
-# position carries the sha256 pin of the vendor container. A missing, empty or
-# malformed manifest, or a container count, order or entry list that differs
-# from it, FAILS.
-#
-# Parses the image with the pinned SPSDK (nxpimage ahab parse and SPSDK's own
-# AHAB parser). Each OEM container is checked against the policy file: the hash
-# of its own SRK table, used_srk_id, srk_revoke_mask and fuse_version. The nxp
-# container is checked against its pinned digest and the complete vendor
-# record (NXP_* keys below, all mandatory, all exact). Each OEM image entry
-# is checked for core_id, image_type, the sha256 of the image bytes its header
-# references, load_address and (if listed) entry_point. A missing, empty or unreadable
-# policy file, or a missing field in either input, FAILS: nothing is skipped.
-# Every non-zero byte of the image and of each nxp binary container must lie
-# inside a parsed container's header, signature block or referenced image;
-# otherwise it FAILS naming the offset.
-#
-# The policy file is plain KEY=VALUE lines, parsed here and never sourced:
-#   SRK_TABLE_HASH=<hex>        compared as a case-insensitive hex string
-#   USED_SRK_ID=<integer>       compared numerically
-#   SRK_REVOKE_MASK=<hex|int>   compared numerically
-#   FUSE_VERSION_MIN=<integer>  every OEM container's fuse_version must be >= this
-#   NXP_CONTAINER_SHA256=<hex>  the pin an nxp manifest position says "policy"
-#                               for (else the environment variable of that name)
-#   NXP_SRK_TABLE_HASH, NXP_USED_SRK_ID, NXP_SRK_REVOKE_MASK,
-#   NXP_FUSE_VERSION            the vendor record, mandatory; every value is
-#                               compared exactly (no floor for the vendor)
-#   <NAME>_IMAGE_SHA256, <NAME>_LOAD_ADDRESS, <NAME>_ENTRY_POINT
-#                               values a manifest image entry names as
-#                               policy:<KEY> (else the environment)
-# Comments (#) and blank lines are allowed; an unknown, repeated or missing
-# key is an error.
-#
-# Never touches a board, a fuse or a key. The .bcf fuse scripts nxpimage
-# writes are deleted unread. Exit 0 ("policy: OK") or 1 ("policy: FAILED").
+# policy-check.sh <container.bin> <policy file> [<manifest>]: checks a signed AHAB image against the manifest and the KEY=VALUE policy file; any difference, missing field or unaccounted non-zero byte fails.
+# Policy keys: SRK_TABLE_HASH, USED_SRK_ID, SRK_REVOKE_MASK, FUSE_VERSION_MIN, NXP_CONTAINER_SHA256, NXP_SRK_TABLE_HASH, NXP_USED_SRK_ID, NXP_SRK_REVOKE_MASK, NXP_FUSE_VERSION, <NAME>_IMAGE_SHA256, <NAME>_LOAD_ADDRESS, <NAME>_ENTRY_POINT.
+# Never touches a board, fuse or key; exit 0 "policy: OK" or 1 "policy: FAILED".
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -87,10 +47,7 @@ num() { # <text> <max>
 	echo "$d"
 }
 
-# Field widths. The script states none, so each is the narrowest width the
-# container header holds as nxpimage ahab parse reports it: used_srk_id is a
-# 2-bit selector (0..3), srk_revoke_mask a 4-bit mask (0..0xF), fuse_version
-# one byte (0..255). The policy and the container are held to the same range.
+# Field ranges: used_srk_id 0..3, srk_revoke_mask 0..0xF, fuse_version 0..255.
 MAX_ID=3
 MAX_MASK=15
 MAX_FUSE=255
@@ -156,14 +113,7 @@ for k in "${!pol[@]}"; do
 	case "$k" in *_IMAGE_SHA256 | *_LOAD_ADDRESS | *_ENTRY_POINT) printf '%s=%s\n' "$k" "${pol[$k]}" >>"$work/extras" ;; esac
 done
 
-# Every container the image holds is accounted for, and none is skipped. SPSDK's
-# own parser reads the whole image: the containers in file order, grouped by
-# role (a run of nxp containers is one position: SPSDK merges them into one
-# binary container), checked against the manifest for count, order, image
-# entries, the nxp digest pin and byte coverage. srk_set none, or anything not
-# nxp or oem, FAILS. Output: "I <text>" info lines and one
-# "R <index> <role> <used_srk_id> <revoke mask> <fuse_version> <srk table hash>"
-# record per AHAB container.
+# Account for every container against the manifest; output "I <text>" lines and one "R <index> <role> <used_srk_id> <revoke mask> <fuse_version> <srk table hash>" record per container.
 pcfg=$work/parsed/parsed_config.yaml
 [ -f "$pcfg" ] || fail "nxpimage ahab parse wrote no parsed_config.yaml"
 records=$("$venv/bin/python" -I -c '
@@ -327,10 +277,7 @@ done <<<"$records"
 [ "$count" -ge 1 ] || fail "the image holds no container"
 [ "$n_oem" -ge 1 ] || fail "no OEM container: nothing in the image is signed with the OEM SRK table"
 
-# Cross-check: SPSDK writes one ahab_<set>[<n>]_srk0_hash.txt per OEM container,
-# or a single shared file when every OEM table is identical. Their number is
-# the number of OEM containers, or one, and each must be a hash this check
-# computed from an OEM container's own SRK table.
+# Each SPSDK srk0_hash file must match a hash computed from an OEM container's own SRK table.
 nf=0
 for f in "$work"/parsed/ahab_*_hash.txt; do
 	[ -f "$f" ] || continue

@@ -30,7 +30,7 @@ beyond where it shares the commit mechanism with revocation (section 7).
 | S6 | NXP SPSDK, `spsdk/ele/ele_constants.py` (`EleInfo2Commit`) and `spsdk/apps/nxpele.py` (`commit` command) | as S5 | https://github.com/nxp-mcuxpresso/spsdk/tree/master/spsdk/ele | yes |
 | S7 | NXP imx-mkimage, `src/mkimage_imx8.c` and `Readme.imx95` | tag lf-6.18.20-2.0.0 at 1b577853 | https://github.com/nxp-imx/imx-mkimage/tree/lf-6.18.20-2.0.0 | yes |
 | S8 | NXP SPSDK, `docs/release_notes.rst` | as S5 | https://github.com/nxp-mcuxpresso/spsdk/blob/master/docs/release_notes.rst | yes |
-| U1 | NXP AN12312 and AN14471 (application notes) | not determined | https://www.nxp.com/docs/en/application-note/AN12312.pdf, https://www.nxp.com/docs/en/application-note/AN14471.pdf | no (HTTP 404 from the lane) |
+| U1 | NXP AN12312 and AN14471 (application notes) | not determined | https://www.nxp.com/docs/en/application-note/AN12312.pdf, https://www.nxp.com/docs/en/application-note/AN14471.pdf | no (HTTP 404 from the survey) |
 | U2 | NXP CST 3.1.0 user guide (`CST_UG.pdf`) | 3.1.0 | NXP download, login required | no |
 | U3 | i.MX 95 Security Reference Manual and IMX95RM | not determined | NDA | no |
 
@@ -154,9 +154,9 @@ Notes:
 | Whether the enclave refuses a revoke mask that includes the SRK signing the same container, and whether all four SRKs can be revoked | Not stated in the sources reached; our section 4 reasoning assumes the revoking container must use a surviving SRK | as above |
 | Whether the i.MX 95 has more than one OEM SRK set (for example a post-quantum set beside the classical one), and which sets it accepts | SPSDK models several sets per family (S5), but we did not trace the i.MX 95 family data | SPSDK family database for `mx95`; the SRM |
 | Whether there is any SGK-level revocation | No public source we reached mentions one | the SRM; CST user guide |
-| CST 3.1.0 key types and CSF keywords | The tarball and its CST_UG are in the private vendor repository, not reachable from this lane | `release/docs/CST_UG.pdf` in CST 3.1.0 |
+| CST 3.1.0 key types and CSF keywords | The tarball and its CST_UG are in the private vendor repository, not reachable from this survey | `release/docs/CST_UG.pdf` in CST 3.1.0 |
 | Whether U-Boot's binman `nxp-imx93cst` etype exposes `Revocations` and works for the i.MX 95 | Not read in this survey | U-Boot `tools/binman/etype/nxp_imx8mcst.py` and siblings |
-| NXP application notes on AHAB secure boot, among them AN12312 and AN14471 | `www.nxp.com/docs/en/application-note/AN12312.pdf` and `AN14471.pdf` returned HTTP 404 from the lane | nxp.com with a browser session, or the private vendor repository |
+| NXP application notes on AHAB secure boot, among them AN12312 and AN14471 | `www.nxp.com/docs/en/application-note/AN12312.pdf` and `AN14471.pdf` returned HTTP 404 from the survey | nxp.com with a browser session, or the private vendor repository |
 | The rotation levels and ordering in sections 4 and 5 | Our reading of the mechanism; no public source gives it as a procedure | the SRM; NXP support |
 
 ## 9. Questions for the owner
