@@ -50,6 +50,9 @@ RE_CMD="${PRE}${WRAP}${CMD}"
 RE_QUOTED="[\"'][[:space:]]*${WRAP}([^[:space:]]*/)?(${TOOLS})[[:space:]]"
 # NXPELE=$venv/bin/nxpele (the tool's path held in a variable).
 RE_ASSIGN="[A-Za-z_][A-Za-z0-9_]*=[\"']?([^[:space:]]*/)?(${TOOLS})[\"']?([[:space:]]|\$)"
+# subprocess.run(["fastboot", "flash", ...]) and ['/usr/bin/uuu', x]: the tool is the
+# first element of a Python or JSON argument list.
+RE_LIST="\\[[[:space:]]*[\"'][[:space:]]*([^[:space:]\"']*/)?(${TOOLS})[\"']"
 RE_MODULE="spsdk\\.apps\\.(${TOOLS}|el2go_host)"
 RE_IMPORT="^[[:space:]]*(import|from)[[:space:]]+(spsdk\\.apps\\.nxpele|libuuu|serial)([[:space:].,]|\$)"
 RE_IMPORT2="^[[:space:]]*from[[:space:]]+spsdk\\.apps[[:space:]]+import[[:space:]]+[^#]*nxpele"
@@ -57,7 +60,7 @@ RE_IMPORT2="^[[:space:]]*from[[:space:]]+spsdk\\.apps[[:space:]]+import[[:space:
 # hit <text>: rc 0 when the logical line shows device-transport use.
 hit() {
   local t=$1 rest
-  if [[ $t =~ $RE_CMD || $t =~ $RE_QUOTED || $t =~ $RE_ASSIGN || $t =~ $RE_MODULE ||
+  if [[ $t =~ $RE_CMD || $t =~ $RE_QUOTED || $t =~ $RE_ASSIGN || $t =~ $RE_LIST || $t =~ $RE_MODULE ||
     $t =~ $RE_IMPORT || $t =~ $RE_IMPORT2 ]]; then return 0; fi
   rest=$t
   while [[ $rest =~ /dev/([A-Za-z0-9_.-]*) ]]; do
@@ -202,6 +205,12 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
   fixture "sdpshost after if" hit $ks 'if sdpshost -h; then :; fi'
   fixture "el2go-host module" hit $ks 'python -m spsdk.apps.el2go_host dev'
   fixture "sdpshost module" hit $ks 'python -m spsdk.apps.sdpshost -h'
+  fixture "list form fastboot" hit scripts/ahab/key-import-check.py 'subprocess.run(["fastboot", "flash", "boot", image], check=True)'
+  fixture "list form nxpele" hit scripts/ahab/key-import-check.py "subprocess.check_call(['nxpele', '-p', 'usb', 'commit'])"
+  fixture "list form uuu path" hit scripts/ahab/key-import-check.py 'Popen(["/usr/bin/uuu", x])'
+  fixture "list form sdpshost spaced" hit scripts/ahab/key-import-check.py 'run([ "sdpshost" , "-p", "usb"])'
+  fixture "list naming fastboot-docs" pass scripts/ahab/key-import-check.py 'names = ["fastboot-docs"]'
+  fixture "prose naming fastboot" pass scripts/ahab/key-import-check.py 'print("use fastboot later")'
   fixture "keyword word in prose" pass $ks 'echo "if you want, do not run it"'
   fixture "comment naming the tools" pass scripts/ahab/srk-hash-check.sh '# no nxpele, no uuu, no /dev/sda'
   fixture "dev null and urandom" pass $ks 'head -c 4 /dev/urandom >/dev/null'

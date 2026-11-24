@@ -45,7 +45,7 @@ PATTERNS=(
   'ele[_-]?write[_-]?fuse'
   'write[-_]fuse'
   'fuse[-_]burn'
-  "nxpele[^#]*[[:space:]]${Q}commit${Q}([[:space:]]|\$)"
+  "nxpele[^#]*[[:space:],[]${Q}commit${Q}([],)[:space:]]|\$)"
   "nxpele[^#]*[[:space:]]${Q}signed[-_ ]?message${Q}([[:space:]]|\$)"
   'ahab_commit'
   'ahab_sec_fuse_prog'
@@ -66,7 +66,9 @@ PATTERNS=(
   'nxpfuses'
   # Device transports: fastboot flashing and the SDPS and EdgeLock 2GO host tools
   # (matched anywhere on the line, so after if/while/then/do/&&/$( too).
-  "fastboot[^#]*[[:space:]]${Q}(flash|flashall|flashing|erase|format|oem|boot|update|stage)${Q}([[:space:]]|\\$)"
+  # A Python or JSON argument list too: ["fastboot", "flash", ...] (comma or bracket
+  # before the subcommand, comma, bracket or paren after it).
+  "fastboot[^#]*[[:space:],[]${Q}(flash|flashall|flashing|erase|format|oem|boot|update|stage)${Q}([],)[:space:]]|\\$)"
   'sdpshost'
   'el2go[-_]host'
   # A write (redirect, tee, dd of=) to an nvmem or ocotp node under /sys.
@@ -254,6 +256,10 @@ for fx in \
   'fastboot flash after if|if fastboot flash boot image.bin; then :; fi' \
   'fastboot flash after while|while ! fastboot flash boot x.bin; do :; done' \
   "fastboot flash in substitution|x=\$(fastboot erase userdata)" \
+  'fastboot list form|subprocess.run(["fastboot", "flash", "boot", image], check=True)' \
+  'fastboot list form tight|run(["fastboot","erase","userdata"])' \
+  'fastboot list form single quotes|subprocess.call(['"'fastboot', 'oem', 'unlock'"'])' \
+  'nxpele list form commit|subprocess.check_call(['"'nxpele', '-p', 'usb', 'commit'"'])' \
   'sdpshost direct|sdpshost -p usb write-file 0x0 x.bin' \
   'el2go-host direct|el2go-host dev -h' \
   'el2go-host module|python3 -m spsdk.apps.el2go_host dev' \
@@ -292,7 +298,10 @@ for fx in \
   'dd reads nvmem|dd if=/sys/bus/nvmem/devices/imx-ocotp0/nvmem of=/tmp/ocotp.bin bs=4' \
   'nvmem read piped to tee elsewhere|xxd /sys/bus/nvmem/devices/imx-ocotp0/nvmem | tee /tmp/x.txt' \
   'nxpele info with quoted word|nxpele -p x "get-info"' \
-  'quoted word that is not a subcommand|echo "commit message" > /tmp/m.txt'; do
+  'quoted word that is not a subcommand|echo "commit message" > /tmp/m.txt' \
+  'list naming fastboot-docs|names = ["fastboot-docs", "flash-notes"]' \
+  'prose naming fastboot|print("use fastboot later")' \
+  'list form fastboot getvar|run(["fastboot", "getvar", "all"])'; do
   name=${fx%%|*}
   cmd=${fx#*|}
   rm -f "$scratch"/scripts/*
