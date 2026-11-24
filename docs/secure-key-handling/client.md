@@ -184,6 +184,29 @@ script with the double added, and checks with `nm` that a host CLI built the shi
 - (a) A build-time patch of the pinned library, outside the tree, to surface the raw SAB rating.
 - (b) Accept strict plus `HSM_NO_ERROR` as a committed but not rollback-protected success.
 
+## Import of a wrapped key
+
+`ele_client [--split-confirmed] <store-id> <nonce-fd> import <blob-file>` imports a key that is **already wrapped**. The
+client reads the blob from the file as opaque bytes and hands it to `hsm_import_key`; it has no clear-key input, no
+plaintext flag and no other key-bytes argument, and it never looks inside the blob. The call goes through the same
+`ele_classify` policy as generate: both request flags are sent (strict operation, monotonic counter increment) and it
+succeeds only with **rollback-protected**. One flag acknowledged, a counter warning or an unconfirmed split fails with the
+commit state set and the new key id kept (as generate: an id is kept once the state is past not-committed). A lost,
+short or error result after the started marker is the unknown outcome (exit 3), as for generate and delete.
+
+Refused before any HSM call, with nothing opened: an unconfirmed split, an empty blob, a blob over the
+4096-byte cap (`ELE_IMPORT_MAX_BLOB`, **provisional**: the vendor sets no limit that was read, only non-null and non-zero),
+and a blob file that cannot be read. The whole command line is validated before any service opens.
+
+Because the shipped backend never reports the counter acknowledgement (see the fail-closed section), an import through it
+fails closed exactly as generate does; success is exercised on the stub and on the test-only success double. The blob
+format accepted is the library's ELE TLV form; the E2GO TLV and KEK-group variants are not supported here.
+
+*Vendor call path (citations only, pinned commit 463845060a79).* `include/hsm/internal/hsm_importkey.h`
+(`op_import_key_args_t`; strict flag `1<<7`, monotonic counter increment `1<<5`), `src/common/hsm_api/hsm_importkey.c:29`
+(input pointer and size must be non-null and non-zero), `src/common/sab_msg/sab_import_key.c:29-39` (request) and `:61`
+(the new key identifier is written back). `ele_hsm_consts_check.c` asserts the flag values against the header.
+
 ## Delete is never rollback-protected (a gap, for the owner)
 
 The library's key delete takes the strict-operation flag only: `op_delete_key_args_t` has a key identifier and

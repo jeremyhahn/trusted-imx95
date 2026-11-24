@@ -78,6 +78,68 @@ static void case_success_then_failure(void)
 	CHECK(st == ELE_NOT_COMMITTED, "a failed delete reports not committed, not the previous state");
 }
 
+/* The import goes through the generate policy. The blob is fixed, non-secret
+ * bytes standing in for a wrapped blob. */
+static void case_import(void)
+{
+	static const uint8_t blob[6] = { 0xde, 0xad, 0xbe, 0xef, 0x00, 0x01 };
+	const uint32_t both = ELE_REQ_STRICT_OPERATION | ELE_REQ_MONOTONIC_COUNTER;
+	struct ele_stub s;
+	struct ele_client c;
+	enum ele_commit st;
+	uint32_t id;
+
+	/* (a) both acknowledged, no warning, split set: success, protected. */
+	s = make(true, true, false, true);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) == 0 && st == ELE_ROLLBACK_PROTECTED && id == 1,
+	      "import: both acknowledged succeeds, protected");
+	CHECK(s.last_flags == both, "import sends both flags");
+	/* (f) the stub saw the blob unchanged. */
+	CHECK(s.imp_len == sizeof(blob) && memcmp(s.imp_head, blob, sizeof(blob)) == 0,
+	      "import: the blob reaches the library unchanged");
+
+	/* (b) one flag acknowledged: failure, state set, key id kept. */
+	s = make(true, false, false, true);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 1,
+	      "import: strict acknowledged only fails, id kept");
+	s = make(false, true, false, true);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_NOT_COMMITTED && id == 0,
+	      "import: counter acknowledged only fails (no key id, as generate)");
+
+	/* (c) a counter warning is refused, the id kept. */
+	s = make(true, true, true, true);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED && id == 1,
+	      "import: counter warning refused");
+
+	/* An unconfirmed split in the reply is refused. */
+	s = make(true, true, false, false);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_COMMITTED_UNPROTECTED,
+	      "import: split not configured refused");
+
+	/* (d) an empty or over-long blob never reaches the library. */
+	s = make(true, true, false, true);
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, 0, &id, &st) != 0 && s.imp_calls == 0, "import: empty blob refused before the call");
+	CHECK(ele_import_key(&c, blob, ELE_IMPORT_MAX_BLOB + 1, &id, &st) != 0 && s.imp_calls == 0,
+	      "import: over-long blob refused before the call");
+	CHECK(ele_import_key(&c, NULL, 4, &id, &st) != 0 && s.imp_calls == 0, "import: NULL blob refused");
+
+	/* (e) a lost result is the unknown outcome, never success. */
+	s = make(true, true, false, true);
+	s.fail = 2;
+	ele_client_init(&c, &ele_stub_ops, &s);
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_OUTCOME_UNKNOWN && id == 0,
+	      "import: lost result is ELE_OUTCOME_UNKNOWN");
+	s.fail = 1;
+	CHECK(ele_import_key(&c, blob, sizeof(blob), &id, &st) != 0 && st == ELE_NOT_COMMITTED,
+	      "import: failure before the start is not committed");
+}
+
 int main(void)
 {
 	const uint32_t both = ELE_REQ_STRICT_OPERATION | ELE_REQ_MONOTONIC_COUNTER;
@@ -148,6 +210,7 @@ int main(void)
 		CHECK(ele_classify(both, NULL) == ELE_NOT_COMMITTED, "null ack");
 	}
 
+	case_import();
 	case_success_then_failure();
 	CHECK(strcmp(ele_commit_name(ELE_ROLLBACK_PROTECTED), "rollback-protected") == 0, "name");
 

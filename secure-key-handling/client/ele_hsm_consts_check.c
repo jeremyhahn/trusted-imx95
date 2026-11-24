@@ -22,6 +22,14 @@ _Static_assert(HSM_OP_KEY_GENERATION_FLAGS_STRICT_OPERATION == (1u << 7), "gener
 
 _Static_assert(HSM_OP_DEL_KEY_FLAGS_STRICT_OPERATION == (1u << 7), "delete STRICT_OPERATION");
 
+/* hsm_importkey.h: the import's flags (ELE TLV input, automatic group, the
+ * monotonic-counter and strict-operation bits). */
+_Static_assert(HSM_OP_IMPORT_KEY_INPUT_ELE_TLV == 0, "import INPUT_ELE_TLV");
+_Static_assert(HSM_OP_IMPORT_KEY_INPUT_E2GO_TLV == (1u << 0), "import INPUT_E2GO_TLV");
+_Static_assert(HSM_OP_IMPORT_KEY_FLAGS_AUTOMATIC_GROUP == 0, "import AUTOMATIC_GROUP");
+_Static_assert(HSM_OP_IMPORT_KEY_FLAGS_MONOTONIC_COUNTER_INCREMENT == (1u << 5), "import MONOTONIC_COUNTER_INCREMENT");
+_Static_assert(HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION == (1u << 7), "import STRICT_OPERATION");
+
 _Static_assert(HSM_NO_ERROR == 0x0, "HSM_NO_ERROR");
 _Static_assert(HSM_NVM_ERROR == 0x5, "HSM_NVM_ERROR");
 _Static_assert(HSM_KEY_STORE_ERROR == 0xA, "HSM_KEY_STORE_ERROR");

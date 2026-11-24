@@ -398,6 +398,69 @@ sys.exit(0 if re.search(r"(?<!NOT )(?<!not-)rollback-protected", t) else 1)' "$t
 		[ "$(cat "$tmp/pipe.rc" 2>/dev/null)" = 1 ] || fail "$op with a closed reader: exit $(cat "$tmp/pipe.rc" 2>/dev/null), want 1"
 		grep -Eq 'cannot write the result; key 7 (was generated|was deleted)' "$tmp/pipe.err" || fail "$op with a closed reader: the key id is not on stderr"
 	done
+
+	# import <blob-file>: an already wrapped blob, the same policy as gen. The
+	# blob is fixed non-secret bytes. Over the shipped backend the counter
+	# acknowledgement is never reported (fail closed), so a clean HSM_NO_ERROR
+	# is a refusal with the key id kept; the success path runs on the stub
+	# (ele_client_test) and the success double below.
+	printf 'wrapped-blob-001' >"$tmp/blob.bin"
+	: >"$tmp/blob.empty"
+	dd if=/dev/zero of="$tmp/blob.big" bs=4097 count=1 2>/dev/null
+	want_sum=$(python3 -I -c 'import sys
+h=2166136261
+for b in open(sys.argv[1],"rb").read():
+    h=((h^b)*16777619)&0xffffffff
+print("%08x" % h)' "$tmp/blob.bin")
+	cli 0 --split-confirmed 5 3 import "$tmp/blob.bin"
+	check "import, HSM_NO_ERROR over the shipped backend: refused, not rollback-protected, key id kept" 1 "key 9 was imported and is NOT rollback-protected"
+	case $OUT in *"key 9 rollback-protected"*) fail "import claimed rollback protection" ;; esac
+	grep -qx "import flags=0xa0 len=16 sum=$want_sum" "$tmp/hsm.log" || fail "the fake did not see both import flags and the blob bytes unchanged"
+	run "$tmp/ele_cli_ok" --split-confirmed 5 3 import "$tmp/blob.bin" 3<"$tmp/nonce"
+	check "import that commits with both acknowledgements prints the key and exits 0" 0 "key 9 rollback-protected"
+	cli 0x10 --split-confirmed 5 3 import "$tmp/blob.bin"
+	check "import, counter warning (0x10) after the marker: refused, exit 3, unknown outcome" 3 "outcome unknown"
+	cli 0xfe --split-confirmed 5 3 import "$tmp/blob.bin"
+	check "import, vendor error after the marker: exit 3" 3 "the result of the import was lost"
+	ELE_FAKE_ID_ZERO=1 cli 0 --split-confirmed 5 3 import "$tmp/blob.bin"
+	check "import, HSM_NO_ERROR with key id zero: exit 3" 3 "outcome unknown"
+	for mode in 3 4; do
+		ELE_FAKE_MODE=$mode cli 0 --split-confirmed 5 3 import "$tmp/blob.bin"
+		check "import, child dies after the started marker (mode $mode): exit 3" 3 "the key store may have changed"
+	done
+	cli 0 5 3 import "$tmp/blob.bin"
+	check "import with the split unconfirmed is refused" 1 "split is not confirmed"
+	no_hsm_call "import with the split unconfirmed"
+	cli 0 --split-confirmed 5 3 import "$tmp/blob.empty"
+	check "import of an empty blob file is refused" 1 "unreadable, empty or over"
+	no_hsm_call "import of an empty blob"
+	cli 0 --split-confirmed 5 3 import "$tmp/blob.big"
+	check "import of an over-long blob file is refused" 1 "unreadable, empty or over"
+	no_hsm_call "import of an over-long blob"
+	cli 0 --split-confirmed 5 3 import "$tmp/no-such-blob"
+	check "import of an unreadable blob file is refused" 1 "unreadable, empty or over"
+	no_hsm_call "import of an unreadable blob file"
+	cli 0 --split-confirmed 5 3 import
+	check "import without a file is a usage error" 2 "usage"
+	cli 0 --split-confirmed 5 3 import "$tmp/blob.bin" extra
+	check "import with a stray argument is a usage error" 2 "usage"
+	no_hsm_call "import usage errors"
+	# (f) no plaintext-key flag and no key-bytes argument reaches the import.
+	python3 -I -c 'import re,sys
+b=open(sys.argv[1]).read()
+h=open(sys.argv[2]).read()
+f=re.search(r"static uint8_t imp_flags.*?\n}\n", b, re.S).group(0)
+m=re.search(r"int \(\*import\)\(.*?;", h, re.S).group(0)
+o=re.search(r"hsm_err_t err;\s*\n\s*memset\(&a, 0, sizeof\(a\)\);\s*\n\s*a\.input_lsb_addr.*?hsm_import_key", b, re.S).group(0)
+bad = [x for x in (f, m, o) if re.search(r"PLAINTEXT|plaintext|clear_key", x)]
+sys.exit(1 if bad or "HSM_OP_IMPORT_KEY" not in f else 0)' "$d/ele_hsm_backend.c" "$d/ele_client.h" || fail "the import flags, ops entry or call mention a plaintext key"
+	pass "no plaintext-key flag in the import flag mapping, the ops entry or the call"
+	# The import constants check bites too.
+	python3 -I -c 'import sys
+s=open(sys.argv[1]).read().replace("HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION == (1u << 7)","HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION == (1u << 6)")
+open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_imp_consts.c"
+	run cc -std=gnu11 -fsyntax-only "${inc[@]}" "$tmp/bad_imp_consts.c"
+	check "a wrong import constant fails the check" nonzero "static assertion failed"
 elif [ "${REQUIRE_ELE_SRC:-}" = 1 ]; then
 	# The toolchain image sets REQUIRE_ELE_SRC=1 beside ELE_SRC, the verified
 	# pinned source. There, not finding it is a failure, not a skip.

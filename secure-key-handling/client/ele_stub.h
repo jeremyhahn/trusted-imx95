@@ -10,7 +10,10 @@ struct ele_stub {
 	uint32_t last_flags;	/* flags the last update carried */
 	uint32_t next_id;
 	int live;		/* keys present */
-	int fail;		/* nonzero: every call fails */
+	int fail;		/* nonzero: every call fails (an import: 2 = the unknown-outcome result) */
+	int imp_calls;		/* import calls made */
+	size_t imp_len;		/* the blob length the import saw */
+	uint8_t imp_head[8];	/* its first bytes */
 };
 
 extern const struct ele_ops ele_stub_ops;
