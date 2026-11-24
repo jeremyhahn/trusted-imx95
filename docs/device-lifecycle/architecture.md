@@ -17,13 +17,23 @@ A device-side proposal for what step 3 hands over is in [evidence-bundle.md](evi
 
 Which channel carries step 3 (F2) stays with go-xkms's `hsm-device-protocol` and go-trusted-platform's enrollment API.
 
+## What the public references give about the root
+
+This section fixes no root. A2 stays open for go-xkms. It records only what [attestation-survey.md](attestation-survey.md) says.
+
+- Which key signs the device attestation response is unconfirmed: the sources read do not say whether it is per device or per product, how its public key or certificate is published, or whether NXP runs a CA for it ([survey section 2](attestation-survey.md#2-key-and-certificate-chain)).
+- Response version 2 carries the OEM SRK hash, the hash of the OEM's boot-signing root keys. The survey calls this signing-root identity evidence, not image attestation ([survey 1.1](attestation-survey.md#11-device-attestation-ele-command-0xdb), [survey 1.4](attestation-survey.md#14-what-the-enclave-evidence-does-not-cover)).
+- The signature algorithm of the response is unconfirmed; 96 bytes fits ECDSA P-384, which the survey marks as an inference ([survey 1.1](attestation-survey.md#11-device-attestation-ele-command-0xdb)).
+- Public key attestation chains to whatever key the caller names as the attesting key, so its trust depends on how that key was put in place ([survey section 2](attestation-survey.md#2-key-and-certificate-chain)).
+- NXP's HSM API reference (RM00284 §3.12) was not read by the survey and may answer which key signs the response ([survey section 2](attestation-survey.md#2-key-and-certificate-chain)).
+
 ## Open items for go-xkms
 
 The public references do not give these. Nothing here fixes them.
 
 | Item | Why open | Belongs to |
 |---|---|---|
-| The root the enclave attestation chains to (A2) | RM00284 §3.12 is the only public source; no root is named in the references | go-xkms endorse-01 verifier; no issue exists yet |
+| The root the enclave attestation chains to (A2) | No root is named in the references; see [what the public references give](#what-the-public-references-give-about-the-root) | go-xkms endorse-01 verifier; no issue exists yet |
 | How the attestation binds the EK (B1, B3) | The attestation's nonce is the verifier's; the EK is read separately in step 2, so nothing yet ties the two | go-xkms endorse-01; no issue exists yet |
 | The wire format of the attestation and its carriage (C2, F2) | Not specified in the references; a device-side proposal exists ([evidence-bundle.md](evidence-bundle.md), proposed, pending owner approval) | go-trusted-platform #884 (enrollment and attestation API); go-xkms #1521 (`hsm-device-protocol`) |
 
