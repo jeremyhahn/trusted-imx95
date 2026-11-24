@@ -15,7 +15,11 @@
 #   - machine=, manifest_commit= and every layer_*_commit= equal LOCK's (a
 #     layer missing from either side, or extra, fails);
 #   - platform_image_dirty=yes fails unless --allow-dirty;
-#   - every target in targets= has a listed <target>-<machine>*.spdx.json.
+#   - every target in targets= has a listed <target>-<machine>*.spdx.json;
+#   - trusted-imx95-image has a listed, non-empty .manifest naming none of the
+#     packages that IMAGE_INSTALL:append in trusted-imx95-image-debug.bb adds
+#     (read from that recipe; exit 2 if it cannot be parsed). The debug target
+#     is not checked. Provisional, pending #14; not run on real artefacts.
 # Exit 0 OK, 1 mismatch, 2 usage error.
 set -u
 LC_ALL=C
@@ -49,6 +53,13 @@ out=${args[0]}
 lock=${args[1]:-$self/../platform-image/manifest.lock}
 [ -d "$out" ] || usage "$out is not a directory"
 [ -f "$lock" ] || usage "$lock is not a file"
+
+# The debug packages: the one list, read from the debug recipe.
+debug_recipe=$self/../platform-image/recipes-core/images/trusted-imx95-image-debug.bb
+declare -A dbgpkg=()
+dbgline=$(sed -n 's/^IMAGE_INSTALL:append[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$debug_recipe" 2>/dev/null | head -n 1)
+for p in $dbgline; do dbgpkg[$p]=1; done
+[ "${#dbgpkg[@]}" -gt 0 ] || usage "cannot parse IMAGE_INSTALL:append in $debug_recipe"
 
 # The hash check and the unlisted-file check: the compare script's own, run
 # with OUT on both sides; each message appears twice, so keep one.
@@ -122,6 +133,25 @@ else
 				case $n in "$t-${lk[machine]:-${bi[machine]:-}}"*.spdx.json) found=1 ;; esac
 			done <"$out/SHA256SUMS"
 			[ "$found" -eq 1 ] || fail "$t: no .spdx.json listed in SHA256SUMS"
+
+			# The production target's package manifest holds no debug package.
+			[ "$t" = trusted-imx95-image ] || continue
+			mfound=0
+			while IFS= read -r line || [ -n "$line" ]; do
+				n=${line#*[ ]}
+				n=${n#[ *]}
+				case $n in "$t-${lk[machine]:-${bi[machine]:-}}"*.manifest) ;; *) continue ;; esac
+				mfound=1
+				mpk=0
+				while IFS= read -r ml || [ -n "$ml" ]; do
+					[ -n "${ml//[[:space:]]/}" ] || continue
+					mpk=1
+					read -r pkg _ <<<"$ml"
+					[ -z "${dbgpkg[$pkg]+x}" ] || fail "$n: debug package $pkg is in the production manifest"
+				done <"$out/$n" || fail "$n: cannot read the production manifest"
+				[ "$mpk" -eq 1 ] || fail "$n: the production manifest is empty"
+			done <"$out/SHA256SUMS"
+			[ "$mfound" -eq 1 ] || fail "$t: no .manifest listed in SHA256SUMS"
 		done
 	fi
 fi

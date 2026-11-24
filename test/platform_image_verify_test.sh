@@ -109,6 +109,57 @@ rm "$d/$t-$machine.rootfs-20261123000001.spdx.json"
 run bash "$script" "$d"
 check "a missing SBOM" 1 "$t: no .spdx.json listed"
 
+# The production manifest holds no debug package (named in the debug recipe).
+mf=$d/$t-$machine.rootfs-20261123000001.manifest
+rehash() {
+	local f l=()
+	cd "$d"
+	for f in *; do
+		case $f in SHA256SUMS | build-info.txt) ;; *) l+=("$f") ;; esac
+	done
+	sha256sum -- "${l[@]}" >SHA256SUMS
+	cd - >/dev/null
+}
+mk "$d"
+printf 'busybox cortexa55 1.36\ngdb cortexa55 14.2\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "gdb in the production manifest" 1 "debug package gdb is in the production manifest" "$t-$machine.rootfs-20261123000001.manifest"
+
+mk "$d"
+printf 'busybox cortexa55 1.36\nstrace cortexa55 6.8\nimx-test cortexa55 1\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "two debug packages" 1 "debug package strace is" "debug package imx-test is"
+
+mk "$d"
+printf 'busybox cortexa55 1.36\ngdbserver cortexa55 14.2\nbash-completion all 2\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "a prefix of a debug package name" 0 "OK, 3 artefacts"
+
+mk "$d"
+: >"$mf"
+rehash
+run bash "$script" "$d"
+check "an empty production manifest" 1 "the production manifest is empty"
+
+mk "$d"
+rm "$mf"
+rehash
+run bash "$script" "$d"
+check "no production manifest" 1 "no .manifest listed"
+
+# The debug target's manifest may hold them: only the production target is read.
+mk "$d"
+dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
+printf 'busybox cortexa55 1.36\ngdb cortexa55 14.2\n' >"$dm.manifest"
+echo spdx >"$dm.spdx.json"
+rehash
+sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
+run bash "$script" "$d"
+check "debug package in the debug target's manifest" 0 "OK, 5 artefacts"
+
 # Several problems are all named.
 mk "$d" yes
 sed -i "s/^machine=.*/machine=other/" "$info"
