@@ -145,3 +145,35 @@ Still open:
 - The board check ([secure-world/build.md](../secure-world/build.md#step-c-on-the-board)).
 
 
+
+## Effective OP-TEE storage flags and the device tree's fTPM node (lane 140-ftpm-s2)
+
+Read from shallow fetches of the pinned commits (not copied; cited only).
+
+**`CFG_REE_FS` and `CFG_RPMB_FS` in the built OP-TEE.** `nxp-imx/imx-optee-os` `99f40897dd1f`:
+
+- Default: `mk/config.mk:161` is `CFG_REE_FS ?= y`; `mk/config.mk:170` is `CFG_RPMB_FS ?= n`
+  (`CFG_REE_FS_INTEGRITY_RPMB` follows `CFG_RPMB_FS` at `mk/config.mk:174`). `CFG_REE_FS_TA ?= y` is at `:380`,
+  `CFG_SECSTOR_TA ?=` at `:706` and `CFG_SECSTOR_TA_MGMT_PTA ?=` at `:710`.
+- Platform override: none. `core/arch/arm/plat-imx/conf.mk` exists, and a search of `core/arch/arm/plat-imx` for
+  `REE_FS` and `RPMB` found no match.
+- Effective value with our recipe (`optee-ftpm-flags.inc`, default `TRUSTED_IMX95_FTPM_NV = "reefs"`, on the make
+  command line through `EXTRA_OEMAKE`): `CFG_REE_FS=y`, `CFG_RPMB_FS=n`. A command-line value wins over `?=`, so the
+  recipe and the default agree; the recipe's line is explicit, not load-bearing. No recipe change was needed.
+  `CFG_REE_FS_TA=n` and `CFG_SECSTOR_TA_MGMT_PTA=n` stay set explicitly, as the defaults above are `y`.
+  `test/platform_image_ftpm_test.sh` already fails when the `reefs` set drops either flag.
+- Not read: the meta-imx recipe's own `EXTRA_OEMAKE` (a platform-wide flag there would be visible only on a parse).
+
+**The device tree's fTPM node.** `nxp-imx/linux-imx` `6e694eda40aa`, `arch/arm64/boot/dts/freescale/`:
+
+- Files searched: the whole `freescale/` directory (1121 files) for `ftpm` and `microsoft,ftpm`; the FRDM-IMX95 board
+  is `imx95-15x15-frdm.dts`, which includes only `imx95.dtsi` (`imx95-15x15-frdm.dts:11`), and `imx95.dtsi` includes
+  only dt-bindings and local `imx95-*.h` headers (`imx95.dtsi:5-14`). No match. The `firmware` node at
+  `imx95.dtsi:368` holds `scmi` and no OP-TEE or fTPM node, and no `linaro,optee` string occurs in the `imx95*` files.
+- The driver's compatible is `microsoft,ftpm` (`drivers/char/tpm/tpm_ftpm_tee.c:312`); without a node the platform
+  path never probes, and the driver binds through the TEE bus (`tpm_ftpm_tee.c:328-345`) when the TA's device is
+  enumerated, which is the supplicant-triggered scan traced in `docs/plans/140.md` entry 32.
+- Meaning for `trusted-imx95-tpm.target`: no node, so nothing probes the fTPM before `tee-supplicant`; the ordering
+  (`After=tee-supplicant@teepriv0.service`, `dev-tpmrm0.device`) holds as written.
+- Limit: only the kernel tree's DTS was read. U-Boot or the boot container may add or patch nodes at boot (the
+  absence of an OP-TEE node in the kernel DTS suggests the firmware node is added at runtime); that was not read.
