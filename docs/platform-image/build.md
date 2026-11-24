@@ -289,8 +289,36 @@ it calls); `build-info.txt` lacks a key or has one twice; `machine=`,
 `manifest_commit=` or a `layer_*_commit=` differs from `LOCK` (default
 `platform-image/manifest.lock`), or a layer is missing or extra;
 `platform_image_dirty=yes` without `--allow-dirty`; or a target in `targets=`
-has no `.spdx.json` listed. Exit 0 is OK, 1 a mismatch, 2 a usage error.
+has no `.spdx.json` listed; or the production target `trusted-imx95-image` has
+no listed `.manifest`, an empty one, or one that names a package the debug
+recipe adds (`IMAGE_INSTALL:append` in `trusted-imx95-image-debug.bb`, read
+from that file, so the list is not typed twice; exit 2 if it cannot be parsed).
+A package is matched by its whole name, so `gdbserver` is not `gdb`. The debug
+target's manifest is not checked. Exit 0 is OK, 1 a mismatch, 2 a usage error.
 
 A consumer runs it before AHAB signing (#14 Q4 (b)) or provisioning. Nothing has
 been checked on real artefacts: the EULA (#14) blocks the build, so only the
 stub test, `test/platform_image_verify_test.sh`, has run it.
+
+## Operator procedure (provisional, after the owner accepts the EULA)
+
+For the run after the owner accepts the NXP EULA. Accepting it is the owner's
+(#14): a lane never sets `ACCEPT_FSL_EULA`, and no step below does. Nothing here
+has run on real artefacts.
+
+1. `make platform-image-hosttools`, then `source` the `env.sh` it prints.
+2. `make platform-image ARGS=--check`: names missing host tools; builds nothing.
+3. `make platform-image ARGS=--repro`: two builds and the compare; the output is
+   published to `.platform-image/out/` only when they match. Add `PI_DEBUG=1`
+   to build `trusted-imx95-image-debug` too.
+4. `make platform-image-verify OUT=.platform-image/out`: the pins, the SBOMs and
+   the production manifest check (see "Checking an output directory"). Add
+   `ALLOW_DIRTY=1` only if `platform_image_dirty=yes` is expected, and say so.
+5. Write back into this file, under "The first build": the sha256 of each
+   artefact from `SHA256SUMS`; wall time of each build and the disk used;
+   every failure, with the task and the message; the compare result (match, or
+   the artefact and both hashes); and the verify result. Replace the "no image
+   was built" result and the "not run" notes in the same commit.
+
+If a step fails, stop there and record it; do not work around the compare or the
+verify (neither has an exception option).
