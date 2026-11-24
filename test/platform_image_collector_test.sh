@@ -31,7 +31,22 @@ check_recipe() {
 		if grep -qF "$NAME" "$f"; then echo "no image installs it: $(basename "$f") names it"; fi
 	done
 	grep -rqF "$NAME" "$pi/conf" && echo "no image installs it: conf names it"
+	# wrynose OE-Core: file:// sources unpack into UNPACKDIR, and S = WORKDIR is rejected at parse
+	while IFS= read -r f; do
+		bad_workdir "$f"
+	done < <(find "$pi" -name '*.bb' -o -name '*.bbappend' -o -name '*.bbclass' | sort)
 	return 0
+}
+
+# bad_workdir FILE: prints a problem for each obsolete WORKDIR form in a recipe.
+bad_workdir() {
+	local f=$1
+	if grep -qE '^[[:space:]]*S[[:space:]]*(:=|\?=|=)[[:space:]]*"\$\{WORKDIR\}"' "$f"; then
+		echo "S = \"\${WORKDIR}\" is rejected at parse time ($(basename "$f")); use \${UNPACKDIR}"
+	fi
+	if grep -qE '\$\{WORKDIR\}/[A-Za-z0-9_.-]+\.(sh|conf|service|patch|txt)' "$f"; then
+		echo "task reads a fetched file from \${WORKDIR}/ ($(basename "$f")); use \${UNPACKDIR} or \${S}"
+	fi
 }
 
 problems=$(check_recipe "$PI")
@@ -58,5 +73,9 @@ neg "https SRC_URI" "$REL" 's|^SRC_URI = .*|SRC_URI = "https://example.invalid/c
 neg "RDEPENDS drops bash" "$REL" 's/^(RDEPENDS:\$\{PN\} = ")bash /\1/'
 neg "RDEPENDS drops coreutils" "$REL" 's/ coreutils//'
 neg "BBFILES line removed" conf/layer.conf '/^BBFILES \+= .*\*\.bb"$/d'
+# shellcheck disable=SC2016  # the sed text carries a literal ${WORKDIR}
+neg "S = WORKDIR" "$REL" 's|^S = .*|S = "${WORKDIR}"|'
+# shellcheck disable=SC2016
+neg "install reads from WORKDIR" "$REL" 's|\$\{S\}/collect-evidence|${WORKDIR}/collect-evidence|'
 
 finish

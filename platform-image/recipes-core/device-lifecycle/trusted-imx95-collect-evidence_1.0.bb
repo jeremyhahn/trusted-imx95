@@ -17,11 +17,11 @@ LICENSE = "CLOSED"
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../scripts/device-lifecycle:"
 SRC_URI = "file://collect-evidence.sh"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/collect-evidence.sh ${D}${sbindir}/collect-evidence.sh
+    install -m 0755 ${S}/collect-evidence.sh ${D}${sbindir}/collect-evidence.sh
 }
 
 # Run-time needs only. tpm2-tools is meta-security's meta-tpm sublayer
