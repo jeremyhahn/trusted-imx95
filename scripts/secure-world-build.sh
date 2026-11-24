@@ -66,7 +66,7 @@ done
 
 declare -A pin=()
 wheels=()
-names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
+names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
 
 [ -f "$lock" ] || die "$lock: no such lock file"
 n=0
@@ -88,7 +88,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	*_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || die "$lock:$n: $name must be a 40-hex commit, not $value" ;;
 	*_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "$lock:$n: $name must be a 64-hex SHA-256, not $value" ;;
 	*_REPO | *_URL) [[ "$value" =~ ^https://[A-Za-z0-9./_-]+$ ]] || die "$lock:$n: $name must be an https URL, not $value" ;;
-	BL32_BASE | BL32_SIZE) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
+	BL32_BASE | BL32_SIZE | SM_SECURE_BASE | SM_SECURE_END) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
 	*) [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]] || die "$lock:$n: $name has characters outside [A-Za-z0-9._-]: $value" ;;
 	esac
 	pin[$name]=$value
@@ -108,6 +108,17 @@ bl32_size=$((pin[BL32_SIZE]))
 [ $((bl32_size % 0x200000)) -eq 0 ] || die "$lock: BL32_SIZE must be 2 MiB aligned, not ${pin[BL32_SIZE]}"
 [ "$bl32_base" -ge 0 ] && [ "$bl32_size" -ge 0 ] && [ $((bl32_base + bl32_size)) -gt "$bl32_base" ] ||
 	die "$lock: BL32_BASE ${pin[BL32_BASE]} + BL32_SIZE ${pin[BL32_SIZE]} wraps past 64 bits"
+
+# The BL32 window must lie inside the SM's secure window (SM_SECURE_END is
+# inclusive). Pinned, not read from the SM configuration (vendor source absent).
+sm_base=$((pin[SM_SECURE_BASE]))
+sm_end=$((pin[SM_SECURE_END]))
+[ "$sm_base" -ge 0 ] && [ "$sm_end" -ge 0 ] && [ "$sm_base" -lt "$sm_end" ] ||
+	die "$lock: SM_SECURE_BASE ${pin[SM_SECURE_BASE]} must be below SM_SECURE_END ${pin[SM_SECURE_END]}"
+[ $((sm_base % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_BASE must be 2 MiB aligned, not ${pin[SM_SECURE_BASE]}"
+[ $(((sm_end + 1) % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_END + 1 must be 2 MiB aligned, not ${pin[SM_SECURE_END]}"
+[ "$sm_base" -le "$bl32_base" ] && [ $((bl32_base + bl32_size - 1)) -le "$sm_end" ] ||
+	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
 
 if [ "$check_only" = 1 ]; then
 	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"

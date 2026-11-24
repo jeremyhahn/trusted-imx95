@@ -50,6 +50,14 @@ OPTEE_PLATFORM=imx-mx95evk
 BL32_BASE=0x8C000000
 BL32_SIZE=0x02000000
 
+# The SM's secure window for the A55 (SM_SECURE_BASE, SM_SECURE_END inclusive):
+# the BL32 window above must lie inside it. Read from
+# docs/secure-world/memory-protection-survey.md sections 4 and 6. PROPOSED,
+# PENDING OWNER APPROVAL, unverified against the SM configuration (vendor
+# source absent here); the first `make system-manager` is the real check.
+SM_SECURE_BASE=0x8A000000
+SM_SECURE_END=0x8DFFFFFF
+
 # The fTPM TA: OP-TEE's optee_ftpm at its tag 4.10.0 (peeled), matching the
 # OP-TEE 4.10 above; OP-TEE 4.10 carries no fTPM TA of its own. Its
 # README names the ms-tpm-20-ref commit it needs, pinned below.

@@ -79,6 +79,20 @@ edit_b32zero() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x0 || printf '%s\n
 edit_b32align() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8C000001 || printf '%s\n' "$1"; }
 edit_b32sizealign() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x02000001 || printf '%s\n' "$1"; }
 edit_b32wrap() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x7FFFFFFFFFE00000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x00400000; else printf '%s\n' "$1"; fi; }
+
+edit_smabove() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8E000000 || printf '%s\n' "$1"; }
+edit_smbelow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x89E00000 || printf '%s\n' "$1"; }
+edit_smlong() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x02200000 || printf '%s\n' "$1"; }
+edit_smbasemissing() { [[ "$1" == SM_SECURE_BASE=* ]] || printf '%s\n' "$1"; }
+edit_smendmissing() { [[ "$1" == SM_SECURE_END=* ]] || printf '%s\n' "$1"; }
+edit_smbasehex() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=8A000000 || printf '%s\n' "$1"; }
+edit_smendhex() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFFFZ || printf '%s\n' "$1"; }
+edit_smorder() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8E000000 || printf '%s\n' "$1"; }
+edit_smbasealign() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8A000001 || printf '%s\n' "$1"; }
+edit_smendalign() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFFFE || printf '%s\n' "$1"; }
+# Inside the SM window: the exact fit, and the lowest base with the default size.
+edit_smexact() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A000000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x04000000; else printf '%s\n' "$1"; fi; }
+edit_smlow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8A000000 || printf '%s\n' "$1"; }
 edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
@@ -102,11 +116,28 @@ for c in \
 	"b32zero|BL32_SIZE must be nonzero" \
 	"b32align|BL32_BASE must be 2 MiB aligned" \
 	"b32sizealign|BL32_SIZE must be 2 MiB aligned" \
-	"b32wrap|wraps past 64 bits"; do
+	"b32wrap|wraps past 64 bits" \
+	"smabove|is not inside the SM secure window" \
+	"smbelow|is not inside the SM secure window" \
+	"smlong|is not inside the SM secure window" \
+	"smbasemissing|SM_SECURE_BASE is missing" \
+	"smendmissing|SM_SECURE_END is missing" \
+	"smbasehex|SM_SECURE_BASE must be hex with a 0x prefix" \
+	"smendhex|SM_SECURE_END must be hex with a 0x prefix" \
+	"smorder|SM_SECURE_BASE 0x8E000000 must be below SM_SECURE_END" \
+	"smbasealign|SM_SECURE_BASE must be 2 MiB aligned" \
+	"smendalign|SM_SECURE_END + 1 must be 2 MiB aligned"; do
 	name=${c%%|*} want=${c#*|}
 	f=$(lockcopy "$name" "edit_$name")
 	run bash "$sw" --lock "$f" --check-lock
 	check "a lock with $name fails" nonzero "$want"
+done
+
+for c in "smexact|a BL32 window exactly equal to the SM window" "smlow|BL32_BASE at the SM window start with the default size"; do
+	name=${c%%|*}
+	f=$(lockcopy "$name" "edit_$name")
+	run bash "$sw" --lock "$f" --check-lock
+	check "$name: ${c#*|} passes" 0 "OK"
 done
 
 # The host and the work directory: stubs make the host look like x86_64
@@ -357,14 +388,14 @@ expect "a planted other CFG_TZDRAM_START fails the OP-TEE window check" optee_wi
 expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
 
 # A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
-edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x90000000; else edit_tcsum "$1"; fi; }
+edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A000000; else edit_tcsum "$1"; fi; }
 baselock=$(lockcopy altbase edit_altbase)
 fullrun altbase "$baselock"
 check "a build with another BL32_BASE reaches publication" 0 "secure-world-build: OK"
 baselog=$(<"$TMP_ROOT/altbase/make.log")
-base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x90000000 "$bl32_size"; }
+base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A000000 "$bl32_size"; }
 expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
-expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x90000000 "$bl32_size"
+expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A000000 "$bl32_size"
 expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
 expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
 
