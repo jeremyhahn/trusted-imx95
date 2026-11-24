@@ -176,8 +176,51 @@ configured is unconfirmed.
 4. Which messaging unit each world uses to reach the enclave, and whether both may use it at once beyond the RNG
    caveat: needs IMX95RM and the Security Reference Manual (missing); #51.
 5. RM00284's content (S11): not reachable from the lane; only SPEC.md's section topics are used.
-6. The Linux kernel's firmware-TPM driver and its start-up dependency on `tee-supplicant`: general knowledge, no
-   kernel tag read here.
+6. **Resolved (2026-11-24, REE FS, development boards).** How `/dev/tpmrm0` appears and why it waits for
+   `tee-supplicant`, read from the pinned sources (shallow fetches; cite the repo, commit and path:line to fetch the
+   same files):
+   - (a) The TA, `OP-TEE/optee_ftpm` at `a09269b15de6`: `include/user_ta_header_defines.h:53-56` sets
+     `TA_FLAG_SINGLE_INSTANCE | TA_FLAG_INSTANCE_KEEP_ALIVE | TA_FLAG_INSTANCE_KEEP_CRASHED |
+     TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE`. `TA_FLAG_DEVICE_ENUM_SUPP` is **not** set. `TA_CreateEntryPoint`
+     (`fTPM.c:133`) calls `_plat__NVEnable` (`fTPM.c:156`, `:166`; a failure is `TEE_Panic`), which opens the NV
+     objects with `TEE_OpenPersistentObject` (`platform/NVMem.c:167`, `:311`). The NV is therefore needed when the
+     first session opens.
+   - (b) OP-TEE OS (`nxp-imx/imx-optee-os` at `99f40897dd1f`, the pin in `secure-world/bsp.lock`),
+     `core/pta/device.c:97-105`: `PTA_CMD_GET_DEVICES` lists TAs flagged `TA_FLAG_DEVICE_ENUM`;
+     `PTA_CMD_GET_DEVICES_SUPP` lists those flagged `_SUPP`, and, when `CFG_REE_FS` is on (or RPMB FS needs the
+     supplicant), also those flagged `TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE` (`:101-104`; `add_ta` accepts one
+     flag per TA, `:26-33`). So the fTPM TA is listed only by the `_SUPP` command, never by the first. Linux
+     (`nxp-imx/linux-imx` at `6e694eda40aa`, the commit `meta-imx` `2eb758f42cfb` pins in
+     `meta-imx-bsp/recipes-kernel/linux/linux-imx_6.18.bb:23`): the OP-TEE driver enumerates once at its own
+     probe with `PTA_CMD_GET_DEVICES` (`drivers/tee/optee/smc_abi.c:1936`), and with `PTA_CMD_GET_DEVICES_SUPP`
+     from a work item scheduled by `optee_open()` the first time the supplicant's device (`teepriv0`) is opened
+     (`drivers/tee/optee/core.c:108-126`, work `optee_bus_scan` at `:65-68`). Each UUID found becomes a device on
+     the TEE bus (`drivers/tee/optee/device.c:78-107`, `:164-168`).
+   - (c) `drivers/char/tpm/tpm_ftpm_tee.c`: the driver matches the TA UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`
+     (`:328-332`); `ftpm_tee_probe` (`:171-251`) opens a session with the TA (`:201`, so the NV is read here),
+     allocates the chip (`:221`) and calls `tpm_chip_register` (`:232`). That reaches `tpm_add_char_device`
+     (`tpm-chip.c:423-452`), which adds `/dev/tpm0` (`:427`) and, for a TPM 2 chip, calls `tpm_devs_add`
+     (`:436-437`); that creates the `tpmrm%d` device in class `tpmrm` (`tpm2-space.c:608-631`). The same probe
+     also serves a platform device with the compatible `microsoft,ftpm` (`:253-258`, `:312`); whether the
+     BSP device tree has such a node was not read, and a node would probe at boot without the supplicant.
+   - (d) Built in (`=y`) changes nothing about the order. The TEE bus exists from `subsys_initcall`
+     (`drivers/tee/tee_core.c:1446`); the driver registers in `module_init` (`tpm_ftpm_tee.c:369`, `:354`); the
+     device does not exist until the `_SUPP` scan runs, and registering a device probes the already-registered
+     driver. A module would behave the same and would only need loading.
+   - Conclusion: with REE FS, `/dev/tpmrm0` appears after `tee-supplicant` opens `/dev/teepriv0`, then the scan,
+     the probe and the TA's NV open, in that order. It appears without any other trigger. Not shown here: that
+     `CFG_REE_FS` is on in the built OP-TEE (the recipe sets it, `optee-ftpm-flags.inc`; the default in
+     `core/core.mk` was not read), and the time from the supplicant opening `teepriv0` to the device.
+   - (e) systemd, `systemd/systemd` at `b3d8fc43e9cb` (the `SRCREV` of `systemd.inc` in the pinned
+     `openembedded-core` `5d1aa5c806c0`, `meta/recipes-core/systemd/systemd.inc:17`, version 259.5):
+     `rules.d/99-systemd.rules.in:89-90` tags `SUBSYSTEM=="tpmrm"` and `"tpm"` with `systemd`, so
+     `dev-tpmrm0.device` exists as a unit once the device appears, and the first rule also sets
+     `SYSTEMD_WANTS+="tpm2.target"`. `units/tpm2.target:14-16` is `After=` and `Wants=` on `dev-tpmrm0.device`
+     and `dev-tpm0.device`. `tpm2.target` is thus started when the device appears, and does not by itself hold a
+     unit that does not name it. The generator that queues it at boot (`src/tpm2-setup/tpm2-generator.c:9-14`,
+     `:37-57`) does so only when firmware reports a TPM 2 device; `tpm2_support()` (in `tpm2-util.h`) was not
+     read, but a device-tree board has no EFI or ACPI report, so it is not expected to queue it. A TPM user
+     needs `Wants=` and `After=` on a unit it names. No udev rule needs adding for the pinned systemd.
 7. NXP's fork (S10): what it changes for the i.MX 95 was not surveyed.
 8. go-xkms's TPM2 and PKCS#11 backend configuration: go-xkms not read.
 

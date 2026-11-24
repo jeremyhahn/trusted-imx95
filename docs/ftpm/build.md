@@ -32,7 +32,9 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
    **the NV is wiped whenever the root file system is reflashed** (SPEC row `ftpm`; a full-image flash recreates `tee-data` empty), which destroys the TPM's seeds and with them the EK.
 2. **The TA is `optee_ftpm` 4.10.0** (ms-tpm-20-ref), as an early TA linked into `tee.bin`
    ([question 2](README.md#open-questions-for-the-owner)).
-3. **The kernel driver is built in**, not a module.
+3. **The kernel driver is built in**, not a module. The trace ([ta-options-survey.md](../secure-world/ta-options-survey.md#unconfirmed-items),
+   item 6 (d)) shows this does not change when the device appears: the TA is put on the TEE bus only after
+   `tee-supplicant` opens `/dev/teepriv0`.
 4. **No EK template is chosen in the image** ([question 3](README.md#open-questions-for-the-owner)). The EK is
    created at first boot by provisioning; RSA 2048 or ECC P-256 stays open.
 5. **tpm2-tools only in the debug image**, which never holds production keys.

@@ -46,9 +46,12 @@ hands the A55 its first image is in the `boot-container` row and the missing IMX
    whether the BSP's U-Boot builds it for this board is **unconfirmed**. Without it U-Boot cannot extend PCRs.
 7. **Linux with `tpm_ftpm_tee`.** The kernel's firmware-TPM driver (`CONFIG_TCG_FTPM_TEE`) finds the TA on the TEE
    bus and registers a TPM 2.0 device; the kernel's resource manager exposes it as `/dev/tpmrm0`. With REE FS
-   storage the TA's NV needs `tee-supplicant`, so the device appears only once the supplicant runs
-   ([ta-options-survey.md](../secure-world/ta-options-survey.md), unconfirmed item 6). "`/dev/tpmrm0` present at
-   boot" therefore means present once the supplicant has started, before any service that uses the TPM.
+   storage the TA's NV needs `tee-supplicant`: the kernel lists the TA on the TEE bus only when the supplicant first
+   opens `/dev/teepriv0`, and the driver's probe then opens the TA and registers the chip
+   ([trace, item 6](../secure-world/ta-options-survey.md#unconfirmed-items), read at the pinned kernel,
+   OP-TEE and systemd commits). "`/dev/tpmrm0` present at boot" therefore means present once the supplicant has
+   started. The pinned systemd's udev rules already provide `dev-tpmrm0.device`; a TPM user must name a unit that
+   waits for it.
 8. **Users.** go-xkms's TPM 2.0 workflows and go-trusted-platform reach the TPM through `/dev/tpmrm0`.
 
 ## NV storage
