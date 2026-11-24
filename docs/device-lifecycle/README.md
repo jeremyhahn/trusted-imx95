@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` row (see [SPEC.md](../SPEC.md), row `device-lifecycle`). Ruling 927 gives the board a firmware TPM, so the device attests through that TPM, and go-xkms's `device-attest-01` challenge, `tpm` format, is the route to a certificate. The go-trusted-platform row is blocked, so everything here is survey and provisional (#25). docs/SPEC.md decides the order and the caller: the enclave attestation comes first and the Cortex-A55 calls the enclave ([architecture.md](architecture.md)); the rest stays survey and provisional. This index lists the documents and gathers their owner questions in one place; it decides nothing.
+This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` row (see [SPEC.md](../SPEC.md), row `device-lifecycle`). Ruling 927 gives the board a firmware TPM, so the device attests through that TPM, and go-xkms's `device-attest-01` challenge, `tpm` format, is the route to a certificate. The go-trusted-platform row is blocked, so everything here is survey and provisional (#25). Owner ruling 1234 decides the order and the caller: the enclave attestation comes first and the Cortex-A55 calls the enclave ([architecture.md](architecture.md)); the rest stays survey and provisional. This index lists the documents and gathers their owner questions in one place; it decides nothing.
 
 ## Documents
 
@@ -14,13 +14,13 @@ This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` r
 | [enrollment-survey.md](enrollment-survey.md) | Which enrollment protocol carries the evidence, and what authorises the first request | survey, input to the owner's choice | 5 (C1 to C5) |
 | [decommission-survey.md](decommission-survey.md) | What end of life, RMA and decommissioning mean for a board | draft survey for the owner | 7 (E1 to E7) |
 | [evidence-binding-survey.md](evidence-binding-survey.md) | How the firmware TPM's identity could be bound to the chip's own attestation | SURVEY, PROVISIONAL, pending go-trusted-platform's hsm-device-lifecycle row and the owner (#25) | 4 (B1 to B4) |
-| [architecture.md](architecture.md) | The device-side order under the SPEC, and the open items for go-xkms | PROVISIONAL, pending go-xkms and go-trusted-platform | none (points at A2, B1, B3, C2, F2) |
-| [evidence-bundle.md](evidence-bundle.md) | What the device hands to endorse-01 under the SPEC | PROPOSED, pending owner approval, go-xkms and go-trusted-platform | none (points at A2, B1, B3, B5, C2, F2) |
+| [architecture.md](architecture.md) | The device-side order under ruling 1234, and the open items for go-xkms | PROVISIONAL, pending go-xkms and go-trusted-platform | none (points at A2, B1, B3, C2, F2) |
+| [evidence-bundle.md](evidence-bundle.md) | What the device hands to endorse-01 under ruling 1234 | PROPOSED, pending owner approval, go-xkms and go-trusted-platform | none (points at A2, B1, B3, B5, C2, F2) |
 | [../ftpm/README.md](../ftpm/README.md) | The firmware TPM design: components, NV storage, EK lifecycle, measured boot | NORMATIVE | 7 (B5 to B10, D2) |
 
 ## How the pieces fit
 
-- The decided order and the open items for go-xkms: [architecture.md](architecture.md).
+- The decided order and the open items for go-xkms (ruling 1234): [architecture.md](architecture.md).
 - Enclave evidence: [attestation-survey.md](attestation-survey.md).
 - TPM evidence and its binding to the chip: [ftpm](../ftpm/README.md) for the TPM, [evidence-binding-survey.md](evidence-binding-survey.md) for the binding.
 - The evidence handed to endorse-01 (proposed): [evidence-bundle.md](evidence-bundle.md), and the A55 collector (`scripts/device-lifecycle/collect-evidence.sh`; it needs no Python, run-time needs in evidence-bundle.md). Verification and the wire format belong to go-xkms and go-trusted-platform; this repository ships no verifier.
@@ -39,7 +39,7 @@ The NXP root is the one answer that matters most. A2 (attestation Q2), C3 (enrol
 
 | Label | Question | Source | Rec. | Overlap |
 |---|---|---|---|---|
-| A1 | What evidence does the board present (enclave response, plus key attestation, token wrapper, or OP-TEE evidence)? | [attestation Q1](attestation-survey.md#questions-for-the-owner) | answered, see [architecture.md](architecture.md#decision) | C2 (wire encoding), B1 |
+| A1 | What evidence does the board present (enclave response, plus key attestation, token wrapper, or OP-TEE evidence)? | [attestation Q1](attestation-survey.md#questions-for-the-owner) | answered: ruling 1234, see [architecture.md](architecture.md#decision) | C2 (wire encoding), B1 |
 | A2 | What root does the evidence chain to (NXP key or CA, factory-pinned key, OEM-imported key)? | [attestation Q2](attestation-survey.md#questions-for-the-owner) | no recommendation | C3 and B1 turn on it; the answer here unblocks them |
 | A3 | Which response versions are accepted, and how is freshness enforced? | [attestation Q3](attestation-survey.md#questions-for-the-owner) | (a), verifier-chosen 16-byte nonce | B3 (nonce field) |
 | A4 | Should EdgeLock 2GO be used for provisioning or attestation certificates? | [attestation Q6](attestation-survey.md#questions-for-the-owner) | (c), decide after NXP confirms i.MX 95 support | C4 (NXP cloud in the enrollment path) |
@@ -92,7 +92,7 @@ The NXP root is the one answer that matters most. A2 (attestation Q2), C3 (enrol
 
 | Label | Question | Source | Rec. | Overlap |
 |---|---|---|---|---|
-| F1 | Which side calls the attestation API: Cortex-A55 Linux or Cortex-M7? | [attestation Q5](attestation-survey.md#questions-for-the-owner) | answered, see [architecture.md](architecture.md#decision) | none |
+| F1 | Which side calls the attestation API: Cortex-A55 Linux or Cortex-M7? | [attestation Q5](attestation-survey.md#questions-for-the-owner) | answered: ruling 1234, see [architecture.md](architecture.md#decision) | none |
 | F2 | Over which channel is the evidence carried: go-xkms's `hsm-device-protocol` or go-trusted-platform's enrollment and attestation API? | [attestation Q7](attestation-survey.md#questions-for-the-owner) | no recommendation here | C1 |
 
 ## What is blocked on what
@@ -107,6 +107,6 @@ This list is a reading of the sources, not a ruling. Where it is uncertain, the 
 
 ## Proposed SPEC changes (proposed, pending owner approval)
 
-Text only; this survey does not edit [SPEC.md](../SPEC.md) or the roadmap.
+Text only; this lane does not edit [SPEC.md](../SPEC.md) or the roadmap.
 
 - None left. The SPEC `device-lifecycle` row now links [architecture.md](architecture.md) as its feature folder entry.

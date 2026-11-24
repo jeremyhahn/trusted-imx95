@@ -51,7 +51,7 @@ Not reached, or not public: NXP AN12312 and AN13994 (HTTP 404 at the
 i.MX 95 Security Reference Manual, which [SPEC.md](../SPEC.md) already lists
 as missing; NXP's EdgeLock Secure Enclave user guides (AN14861 says the
 RT1180 one, UG10192, is available only through NXP sales [S9]); go-xkms's
-own documentation (not public as far as this survey could tell).
+own documentation (not public as far as this lane could tell).
 
 ## 3. The key ceremony in public sources
 
@@ -317,7 +317,7 @@ Before the step, the station confirms and records:
    which the container's fast-boot modes depend on [S6]. Whether such fuses
    can still be written after the move to OEM closed is **not confirmed**;
    the monotonic counter fuse configuration that [SPEC.md](../SPEC.md)
-   names comes from a manual this survey could not reach.
+   names comes from a manual this lane could not reach.
 7. **Versions are recorded.** The enclave firmware version and status
    (`get-ele-fw-version`, `get-ele-fw-status`) [S7], the SPSDK version, and
    the digest of the signed boot image.

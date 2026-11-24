@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-# sm-build.sh [--check] [lock]: builds NXP's System Manager (m33_image.bin) from system-manager/sm.lock twice and fails unless both images are identical; output in SM_OUT.
+# sm-build.sh [--check] [lock]: build NXP's System Manager (m33_image.bin)
+# from the pins in the lock (default system-manager/sm.lock), twice, each in
+# its own clean tree, and fail unless both images are identical.
+#
+#   --check  validate the lock and stop (offline)
+#
+# Every input is pinned and checked: the imx-sm commit behind the tag, the
+# board configuration file's SHA-256 (the upstream file, unchanged), and the
+# Arm GNU Toolchain tarball's SHA-256. The image's build date and time are the
+# commit's (SOURCE_DATE_EPOCH, and a `date` shim below), so they do not vary
+# between builds.
+#
+# Output in SM_OUT (default out/system-manager, gitignored): m33_image.bin,
+# SHA256SUMS and sm-manifest.txt (the pins and both builds' digests), with
+# the downloads cached under cache/ for the next run. Run it in the
+# devcontainer image with `make docker-run CMD='make system-manager'`, or in
+# any Linux x86_64 environment with git, curl, tar, xz, make and perl
+# (docs/system-manager-config/build.md).
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -61,7 +78,10 @@ out=$(cd "$out" && pwd -P)
 start=$SECONDS
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 
-# m7_clean <config>: the M7 LM block holds no `test` key and no BRD_SM_CTRL_TEST* grant; a missing M7 block is an error.
+# m7_clean <config>: the M7 LM's block of the (patched) configuration, from its
+# "LM<n> ... name="M7"" line to the next LM line, holds no `test` key and no
+# BRD_SM_CTRL_TEST* grant (the survey's production rule; the delta in
+# system-manager/patches/0002). No M7 block is an error too.
 m7_clean() {
 	local l in=0 seen=0 bad=""
 	while IFS= read -r l; do
@@ -124,7 +144,10 @@ got=$(git -C "$src" rev-parse "$tag_ref^{commit}")
 [ "$got" = "${pin[sm_commit]}" ] || die "${pin[sm_tag]} is commit $got, the lock pins ${pin[sm_commit]}"
 epoch=$(git -C "$src" log -1 --format=%ct "${pin[sm_commit]}")
 
-# build_info.mak stamps the image with `date +FORMAT`; this shim answers it with the commit's UTC time and passes other calls through.
+# imx-sm's sm/makefiles/build_info.mak stamps the image with `date +FORMAT`,
+# which ignores SOURCE_DATE_EPOCH. A `date` first on PATH answers any
+# `date +FORMAT` with the commit's time in UTC and passes every other call
+# to the real one; NXP's makefiles stay unchanged.
 real_date=$(command -v date)
 mkdir -p "$out/shim"
 # shellcheck disable=SC2016 # expands in the shim, not here

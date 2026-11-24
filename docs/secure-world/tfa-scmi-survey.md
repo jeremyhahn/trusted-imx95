@@ -127,7 +127,7 @@ and the platform values from the i.MX 95 `platform.mk` [S2, S4].
 | `LOG_LEVEL` | 20 (notice) in release, 40 (info) in debug [S7] | The console is the boot-scope LPUART (section 2.1); a lower level prints less about the memory map and the boot. |
 | `ENABLE_ASSERTIONS` | follows `DEBUG` [S7] | Can be turned on in a release build to keep input checks that are written as `assert()`. |
 | `CRASH_REPORTING` | follows `DEBUG` [S7] | Dumps register state to the console on an unexpected exception. |
-| `ENABLE_STACK_PROTECTOR` | `none` [S7] | The guide recommends `strong` where wanted; the platform must supply a canary source, which this survey did not find in the i.MX 95 port (section 6). |
+| `ENABLE_STACK_PROTECTOR` | `none` [S7] | The guide recommends `strong` where wanted; the platform must supply a canary source, which this lane did not find in the i.MX 95 port (section 6). |
 | `BRANCH_PROTECTION` | 0 [S7] | Needs Armv8.3 pointer authentication or Armv8.5 BTI. The Cortex-A55 is an Armv8.2-A core [S10], so not applicable. |
 | `HARDEN_SLS` | 0 [S7] | Compiler hardening against straight-line speculation; costs code size only. |
 | `SEPARATE_CODE_AND_RODATA` | 0 [S7] | Puts code and read-only data on separate pages so data is not executable; costs some of the 256 KiB. |
@@ -141,7 +141,7 @@ and the platform values from the i.MX 95 `platform.mk` [S2, S4].
 `mx95evk` flavour in `plat-imx` [S8]. It uses the ELE over an MU and disables
 the CAAM, SNVS, OCOTP and TZC-380 drivers on this SoC. There is no FRDM flavour
 upstream; a board port, or the EVK flavour with board values overridden, would
-be needed. This survey did not check that the DDR size and UART in the EVK
+be needed. This lane did not check that the DDR size and UART in the EVK
 flavour fit the FRDM-IMX95.
 
 ## 4. Resources that stay secure-only
@@ -182,7 +182,7 @@ only split secure from non-secure, and that whatever the non-secure side can
 reach, the secure side can reach too. The design point that follows: the
 non-secure agent must not hold the CPU, PLL, MU1 or ELE MUs, or the secure
 DDR window. In the 15x15 board's `mx95frdm.cfg` it does not [S5]; for the PRO
-this is **unverified**. This survey did not audit the
+this is **unverified**. This lane did not audit the
 whole non-secure resource list line by line (see section 6).
 
 ## 5. Placement in the boot container and verification (input to #32, #55)
@@ -253,14 +253,14 @@ sources above:
 - **NXP documents.** NXP web pages (product pages, the i.MX Linux User's Guide
   and Reference Manual, AHAB and code-signing application notes, the i.MX 95
   reference manual and security reference manual) could not be fetched
-  from the survey; www.nxp.com returned HTTP 404 to automated requests. Nothing
+  from the lane; www.nxp.com returned HTTP 404 to automated requests. Nothing
   here relies on them. This means: the AHAB behaviour per life-cycle state,
   the ELE's rollback enforcement against fuses, the i.MX 95 TrustZone and
   resource-domain hardware model beyond what the SM documentation says, and
   the CST signing flow for container 2 are **unconfirmed** in this survey.
 - **Cortex-A55 architecture level.** Armv8.2-A (hence no PAuth, BTI or
   S-EL2) is stated from the Arm product page [S10], which returned HTTP 403
-  to the survey; **unconfirmed** here.
+  to the lane; **unconfirmed** here.
 - **SiP surface.** The full list of SiP calls the i.MX 95 build answers, and
   how each checks its arguments, was not traced call by call. Section 2.2
   covers only the M7 and LMM services.
@@ -284,7 +284,7 @@ sources above:
 
 ## Sources
 
-All reached from the survey on 2026-11-12 unless marked unreachable.
+All reached from the lane on 2026-11-12 unless marked unreachable.
 
 - [S1] Trusted Firmware-A, upstream repository, tag `v2.15.0` (commit
   `da738d5`) and `master` (commit `d70b52d`, 2026-11-11).
@@ -316,13 +316,13 @@ All reached from the survey on 2026-11-12 unless marked unreachable.
   2025-11-14): `iMX95/soc.mak`, `Readme.imx95`.
   https://github.com/nxp-imx/imx-mkimage/tree/lf-6.12.49_2.2.0
 - [S10] Arm, "Cortex-A55" product page. https://developer.arm.com/Processors/Cortex-A55
-  **Unreachable from the survey (HTTP 403).**
+  **Unreachable from the lane (HTTP 403).**
 - [S11] U-Boot, `master` commit `ece349a` (2026-07-06):
   `common/spl/spl_imx_container.c`, `arch/arm/mach-imx/ele_ahab.c`.
   https://github.com/u-boot/u-boot/tree/master/arch/arm/mach-imx
 - Unreachable, not used: NXP i.MX 95 product page, FRDM-IMX95 board page and
   "Embedded Linux for i.MX Applications Processors" (i.MX Linux User's Guide
-  and Reference Manual), all on https://www.nxp.com, HTTP 404 to the survey.
+  and Reference Manual), all on https://www.nxp.com, HTTP 404 to the lane.
 
 ## Questions for the owner
 

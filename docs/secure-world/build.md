@@ -63,7 +63,7 @@ wheels.
 
 Two choices here differ from the wording elsewhere:
 
-- **TF-A is upstream Arm TF-A**, as docs/SPEC.md says, at the release tag `v2.15.0` with `PLAT=imx95 SPD=opteed`.
+- **TF-A is upstream Arm TF-A**, as owner ruling 771 says, at the release tag `v2.15.0` with `PLAT=imx95 SPD=opteed`.
   It is not the BSP release's `imx-atf` fork, whose revision the release carries. `make secure-world` builds this
   BL31 with the pinned OP-TEE. That the BL31 boots and starts this OP-TEE on the board is not checked: upstream's
   `BL32_BASE` (`0x8C000000`) and the OP-TEE flavour's secure memory start were read as the same address, not run.
@@ -107,7 +107,7 @@ OP-TEE, set on each OP-TEE make:
 | `CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n` | No TA is loaded from the file system. The PTA that installs TAs into REE FS storage needs REE FS TA support and would not link |
 | `CFG_PKCS11_TA=y` | The PKCS#11 TA (already the default; stated) |
 | `CFG_EARLY_TA=y` | Early TAs, linked into `tee.bin` |
-| `EARLY_TA_PATHS=<fTPM TA's stripped ELF>` | The fTPM TA, UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`, as an early TA |
+| `EARLY_TA_PATHS=<fTPM TA's stripped ELF>` | The fTPM TA, UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`, as an early TA (ruling 927) |
 | `CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee` | The PKCS#11 TA as an early TA too, so `tee.bin` carries both and neither depends on the root file system |
 
 The fTPM TA is built against the TA dev kit of a first OP-TEE build with the same flags. It uses
@@ -219,8 +219,8 @@ lab's board host, one lane at a time, and any boot-media change is announced fir
 
 ## ROADMAP state
 
-The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md](../../ROADMAP.md). This survey could
-not write that file: the survey's write guard protects it.
+The `secure-world` (a) and (b) and `ftpm` (a) states below belong in [ROADMAP.md](../../ROADMAP.md). This lane could
+not write that file: the lane's write guard protects it.
 
 - `secure-world` (a): pinned in `secure-world/bsp.lock`, release `lf-6.18.37-2.1.0` provisional (#14 Q2).
 - `secure-world` (b): `make secure-world` builds both artefacts with a SHA-256 manifest; builds twice in clean directories and fails unless both

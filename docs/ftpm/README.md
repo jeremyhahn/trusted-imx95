@@ -3,7 +3,7 @@
 > **Status: NORMATIVE** · Scope: trusted-imx95 `ftpm` · Last verified: 2026-11-20
 > The detail of the `ftpm` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
-docs/SPEC.md (2026-11-18) gives the board a firmware TPM 2.0, so that it is provisioned like any other system
+Owner ruling 927 (2026-11-18) gives the board a firmware TPM 2.0, so that it is provisioned like any other system
 through go-xkms's existing TPM 2.0 workflows: endorse-01, then enroll-01, then device-attest-01 in the `tpm`
 format. Issue #140. The SPEC.md row this file details was approved by the owner on 2026-11-21 (PR #138).
 
@@ -114,7 +114,7 @@ Each "unconfirmed" above is a gap until the board shows otherwise. The depth dev
 ## Later steps, not this design
 
 The image build and the board test ([ROADMAP.md](../../ROADMAP.md), `ftpm`) come after the owner approves this
-row. The redeploy is done together with the xkmsd web-console build and the barrier re-init;
+row. The redeploy is coordinated with Infra together with the xkmsd web-console build and the barrier re-init;
 hardware runs happen on the lab's board host, one lane at a time. The boot media does not change (owner ruling
 769).
 
@@ -133,7 +133,7 @@ hardware runs happen on the lab's board host, one lane at a time. The boot media
 4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a rootfs reflash under REE FS),
    who may do it, and what happens to the issued EK certificate: revoked, or reissued through endorse-01.
 5. **Image scope for the redeploy.** The full image, or only `flash.bin`, `tee.bin` and the kernel. The boot media
-   does not change.
+   does not change (ruling 769).
 6. **Measured-boot depth for device-attest-01.** Which of the gaps above device-attest-01 must close, and whether
    evidence that starts at U-Boot or at the kernel is accepted.
 7. **The TPM identity and the key tier.** Confirm that the EK and the attestation keys are the device's TPM

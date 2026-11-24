@@ -1,6 +1,6 @@
 # hsm-device-protocol: public survey of the on-device transport paths on the i.MX 95
 
-> **Status: SURVEY, PROVISIONAL, pending go-xkms #1521; not a requirement** · Row: hsm-device-protocol · Issue: #24 · Surveyed: 2026-11-22
+> **Status: SURVEY, PROVISIONAL, pending owner-queue item 160 (go-xkms #1521); not a requirement (Software Department ruling 195)** · Row: hsm-device-protocol · Issue: #24 · Surveyed: 2026-11-22
 >
 > This record uses public sources only. Each claim cites a source from the [Sources](#sources) table as **[Sn]**. Vendor text is summarised, never copied. Anything the sources did not show is marked **unconfirmed**. The record builds nothing, writes no requirement for the device, and runs or scripts no fuse, life-cycle or provisioning step.
 
@@ -16,7 +16,7 @@
 
 It does not repeat [ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md) (which side calls the HSM API), [attestation-survey.md](../device-lifecycle/attestation-survey.md) (carrying evidence to a remote verifier), [memory-protection-survey.md](../secure-world/memory-protection-survey.md) (NETC ports and 10 GbE DMA), [cortex-m7-isolation-survey.md](../secure-world/cortex-m7-isolation-survey.md) or [m7-resource-map-survey.md](../system-manager-config/m7-resource-map-survey.md) (M7 resources).
 
-**Limit of this reading.** The survey's read guard refused reading C sources and headers, so every claim here rests on Kconfig files, kernel documentation pages, directory listings and file names. Where a claim needs the code (ioctl set, concurrency, message limits of the enclave interface), it is marked **unconfirmed**.
+**Limit of this reading.** The lane's read guard refused reading C sources and headers, so every claim here rests on Kconfig files, kernel documentation pages, directory listings and file names. Where a claim needs the code (ioctl set, concurrency, message limits of the enclave interface), it is marked **unconfirmed**.
 
 ## 1. A55 Linux to the enclave
 
@@ -52,11 +52,11 @@ It does not repeat [ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-su
 - **Kernel side [S1, S5].** The generic TEE subsystem is a kernel option (`TEE`) with the OP-TEE driver beneath it [S1 `drivers/tee/Kconfig`]. The kernel's own TEE page describes the in-kernel client-driver bus, where a Trusted Application is a device identified by UUID [S5]. The uapi header `include/uapi/linux/tee.h` exists in the NXP tree [S1 listing]. The device node names, session limits and shared-memory limits were not read: **unconfirmed**.
 - **What bears on moving requests to a key service.** A user-space daemon can open a session to a Trusted Application by its UUID through the client library, and the secure world can call back to the normal world through `tee-supplicant` [S6]. How many clients may hold sessions at once, and the request size limit, are **unconfirmed** here.
 - **Survives a reset.** A secure-world restart restarts the whole device; no separate-reset case exists for this path. Whether `tee-supplicant` loss is survivable was not read: **unconfirmed**.
-- **On the i.MX 95.** OP-TEE's messaging-unit support for the i.MX 95 enclave is recorded in [ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md). A PKCS#11 or key-service Trusted Application working on the i.MX 95 is **unconfirmed** by this survey.
+- **On the i.MX 95.** OP-TEE's messaging-unit support for the i.MX 95 enclave is recorded in [ele-hsm-api-survey.md](../secure-key-handling/ele-hsm-api-survey.md). A PKCS#11 or key-service Trusted Application working on the i.MX 95 is **unconfirmed** by this lane.
 
 ## 4. A local-socket front for a daemon
 
-The pages for `unix(7)` and `systemd.socket` were fetched but not read in this survey (see [Sources not reached or not read](#sources-not-reached-or-not-read-unconfirmed)). The table names the mechanisms only; their details are **unconfirmed** here.
+The pages for `unix(7)` and `systemd.socket` were fetched but not read in this lane (see [Sources not reached or not read](#sources-not-reached-or-not-read-unconfirmed)). The table names the mechanisms only; their details are **unconfirmed** here.
 
 | Mechanism | Role as the host-side seam | Status |
 |---|---|---|
@@ -83,7 +83,7 @@ go-xkms has not chosen the network transport. The candidates the SPEC names are 
 
 - the wire protocol, the network transport or the 10 GbE card (go-xkms #1521, item 160);
 - which side calls the HSM API (the existing SPEC open question);
-- any device-side requirement for `hsm-device-protocol`;
+- any device-side requirement for `hsm-device-protocol` (ruling 195);
 - whether the platform image builds on NXP's kernel tree or on carried patches.
 
 ## Sources
@@ -103,7 +103,7 @@ S7 was read only at heading level; no claim above rests on it.
 
 ### Sources not reached or not read (unconfirmed)
 
-- The C sources and headers of S1 (`se_ctrl.c`, `se_ioctl.h`, `rpmsg_char.c`, `rpmsg_tty.c`, `imx_rproc.c`, the enclave devicetree binding): fetched in part, not read, because the survey's read guard refused code. Each claim that needs them is marked unconfirmed.
+- The C sources and headers of S1 (`se_ctrl.c`, `se_ioctl.h`, `rpmsg_char.c`, `rpmsg_tty.c`, `imx_rproc.c`, the enclave devicetree binding): fetched in part, not read, because the lane's read guard refused code. Each claim that needs them is marked unconfirmed.
 - The `imx-secure-enclave` README at S8: fetched, not read.
 - The kernel tty Kconfig (`RPMSG_TTY`) and the mainline `drivers/remoteproc/Kconfig`: fetched, not read.
 - `unix(7)` (https://man7.org/linux/man-pages/man7/unix.7.html), `systemd.socket` and `sd_listen_fds` (https://www.freedesktop.org/software/systemd/man/latest/systemd.socket.html): fetched, not read.
@@ -112,6 +112,6 @@ S7 was read only at heading level; no claim above rests on it.
 
 ## Questions for the owner
 
-1. **Is a read of the C sources of NXP's driver and the public libraries permitted for the next slice?** Options: (a) yes, to settle the unconfirmed cells of section 5; (b) no, keep the survey at documentation level; (c) have someone with code access do it. *Provisional default:* (a), since the unconfirmed cells are all in code.
+1. **Is a read of the C sources of NXP's driver and the public libraries permitted for the next slice?** Options: (a) yes, to settle the unconfirmed cells of section 5; (b) no, keep the survey at documentation level; (c) have a lane with code access do it. *Provisional default:* (a), since the unconfirmed cells are all in code.
 2. **Should the survey be extended to the board's M7 rpmsg setup once a board test exists?** Options: (a) wait for a board test; (b) extend from the NXP device-tree variants only. *Provisional default:* (a), because the public tree shows no rpmsg variant for the FRDM-IMX95-PRO name.
-3. **Proposed, pending owner approval (text only; this survey edits neither SPEC.md nor ROADMAP.md):** add to the `hsm-device-protocol` row a line pointing to this survey as provisional input. Options: (a) add the pointer; (b) leave the row as is until go-xkms #1521 answers. *Provisional default:* (b), in line with ruling 195.
+3. **Proposed, pending owner approval (text only; this lane edits neither SPEC.md nor ROADMAP.md):** add to the `hsm-device-protocol` row a line pointing to this survey as provisional input. Options: (a) add the pointer; (b) leave the row as is until go-xkms #1521 answers. *Provisional default:* (b), in line with ruling 195.

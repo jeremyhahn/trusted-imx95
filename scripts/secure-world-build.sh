@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
-# secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]: builds TF-A BL31 and OP-TEE (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock twice and publishes only byte-identical artefacts.
-# TAs are signed with OP-TEE's upstream default test key; nothing is flashed.
+# secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR]
+#                       [--jobs N] [--check-lock]
+#
+# `make secure-world`: builds the Cortex-A secure world from the pins in
+# secure-world/bsp.lock (docs/secure-world/build.md): TF-A BL31 for i.MX 95
+# with the OP-TEE dispatcher, and OP-TEE OS with the fTPM TA and the PKCS#11
+# TA linked in as early TAs, secure storage on the REE file system. It writes
+# bl31.bin, tee.bin, SHA256SUMS and build-info.txt to the output directory.
+#
+# The build runs twice, each in its own clean directory under the work
+# directory, and the artefacts are published only if bl31.bin and tee.bin are
+# byte-identical (SHA-256) between the two; otherwise it fails naming the
+# artefact and both hashes. SHA256SUMS holds the agreed hashes.
+#
+# Every source is fetched at its pinned commit and checked; the toolchain
+# tarball and the Python wheels are checked against their pinned SHA-256.
+# The work directory is created fresh on each run, so each build starts from
+# a clean tree. SOURCE_DATE_EPOCH, when unset, is the pinned OP-TEE commit's
+# committer time.
+#
+# --check-lock parses and checks the lock file and exits: offline, no build.
+#
+# The TAs are signed with the upstream OP-TEE default test key that the
+# fetched optee_os tree carries (keys/default_ta.pem). No key is read from
+# or written to this repository. Nothing is flashed; RPMB and fuses are not
+# touched.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -103,7 +127,11 @@ out=$(cd "$out" && pwd -P)
 cache=$(cd "$cache" && pwd -P)
 : >"$work/$marker"
 
-# --- Twice, and compared: publish only when both clean builds produce identical bl31.bin and tee.bin.
+# --- Twice, and compared ------------------------------------------------------
+# Without --single this run is the driver: it runs this script twice in
+# separate, clean build directories (work/build-1, work/build-2), compares
+# bl31.bin and tee.bin byte for byte by SHA-256 and publishes only when both
+# builds agree. A difference fails naming the artefact and both SHA-256s.
 if [ "$single" = 0 ]; then
 	for i in 1 2; do
 		echo "secure-world-build: clean build $i of 2"
@@ -217,7 +245,10 @@ pkcs11_uuid=fd02c9da-306c-48c7-a49c-bbd827ae86ee
 step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cross" \
 	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
 
-# REE FS secure storage, PKCS#11 TA, both TAs early and CFG_REE_FS_TA=n, so the public default TA key trusts nothing.
+# OP-TEE's flags: the release recipe's log levels, REE FS secure storage
+# (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early. Both
+# required TAs are early TAs, so loading TAs from the REE file system is off
+# (CFG_REE_FS_TA=n): the public default TA key then trusts nothing.
 optee_flags=(
 	PLATFORM="${pin[OPTEE_PLATFORM]}" CFG_ARM64_core=y
 	CROSS_COMPILE="$cross" CROSS_COMPILE64="$cross"

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Offline structure test for docs/hsm-device-protocol/on-device-transport-survey.md; checkers take the survey path and print one problem per line.
+# test/hsm_device_protocol_docs_test.sh: offline structure test for
+# docs/hsm-device-protocol/on-device-transport-survey.md (issue #24).
+# Host-side and provisional (ruling 195): it guards the shape and the honesty
+# marks of the survey and says nothing about what the device shall do.
+# Checkers take the survey path and print one problem per line.
 set -uo pipefail
 
 # shellcheck source=test/lib.sh

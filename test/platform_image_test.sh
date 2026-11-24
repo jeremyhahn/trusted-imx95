@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Offline checks of platform-image/: the lock parses, commits are 40 hex, the machine matches sm.lock, and the distro names no signing step.
+# Offline checks of platform-image/ (provisional default, pending the owner's
+# answer on #14): the lock parses, every commit is 40 hex, the machine matches
+# sm.lock, and the distro configuration names no signing step.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -162,9 +164,20 @@ check_local() {
 # The layers the image lists, as full paths under the fetch directory. Each is
 # a pinned path or lies inside one.
 expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-oe sources/meta-openembedded/meta-python sources/meta-openembedded/meta-perl sources/meta-openembedded/meta-multimedia sources/meta-openembedded/meta-networking sources/meta-openembedded/meta-filesystems sources/meta-yocto/meta-poky sources/meta-arm/meta-arm sources/meta-arm/meta-arm-toolchain sources/meta-freescale sources/meta-freescale-3rdparty sources/meta-freescale-distro sources/meta-imx/meta-imx-bsp sources/meta-imx/meta-imx-sdk '
-# Pinned paths not in BBLAYERS: sources/bitbake and sources/base (not layers) and the optional layers outside meta-imx's LAYERDEPENDS; meta-yocto is listed via meta-poky.
+# Pinned paths that are not listed in BBLAYERS, and why:
+#   sources/bitbake                 not a layer: the BitBake tool itself
+#   sources/base                    not a layer: fsl-community-bsp-base, the setup scripts
+#   sources/meta-clang, meta-freescale-ml, meta-qt6, meta-browser, meta-security,
+#   meta-timesys, meta-virtualization, meta-nxp-connectivity, meta-nxp-demo-experience
+#                                   optional, not in LAYERDEPENDS of meta-imx-bsp/meta-imx-sdk
+#                                   (a claim from the manifest's layer set, NOT checked
+#                                   against the pinned conf/layer.conf files: no fetched
+#                                   copy is available offline)
+# sources/meta-yocto is not exempt: its meta-poky sublayer is listed.
 notlisted=' sources/bitbake sources/base sources/meta-clang sources/meta-freescale-ml sources/meta-qt6 sources/meta-browser sources/meta-security sources/meta-timesys sources/meta-virtualization sources/meta-nxp-connectivity sources/meta-nxp-demo-experience '
-# check_layers BBLAYERS: exactly expected_layers, each in a pinned path, every pinned path listed or exempt, platform-image listed.
+# check_layers BBLAYERS: the listed set is exactly expected_layers (full paths),
+# each inside a pinned path; every pinned path is the root of a listed layer or
+# exempt; the repo's platform-image layer is listed.
 check_layers() {
 	local l p q k listed=' ' pinned=' ' repo=0 ok
 	while IFS= read -r l || [ -n "$l" ]; do

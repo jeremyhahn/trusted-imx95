@@ -15,7 +15,7 @@ undone.
 Only public sources were used: upstream open-source code on GitHub and NXP's
 public GitHub repositories. The i.MX 95 Reference Manual (IMX95RM), the i.MX 95
 Security Reference Manual and the ELE API reference manual (RM00284) are
-NXP-controlled documents that this survey cannot read; every point that only
+NXP-controlled documents that this lane cannot read; every point that only
 those documents can settle is listed in section 7. Every statement below is a
 summary in this document's own words, not vendor text. Where a statement is an
 inference from code rather than something the code or a document says, it is
@@ -227,7 +227,7 @@ sanitised before that validation is done.
 
 ## 7. What could not be confirmed
 
-Each of these needs a document the survey could not read (IMX95RM, the i.MX 95
+Each of these needs a document the lane could not read (IMX95RM, the i.MX 95
 Security Reference Manual, RM00284 ELE API reference, all NXP-controlled), or
 the go-trusted-platform `hsm-device-lifecycle` design, which does not exist
 yet.
@@ -248,7 +248,7 @@ yet.
    deletion and a reset, a restored pre-deletion blob must be shown to be
    rejected. Until then, step 3 is not counted as irreversible (section 6).
 7. Which go-trusted-platform operation moves a device record to revoked (5).
-8. NXP's public web site answered, but this survey did not
+8. NXP's public web site answered from the lane, but this survey did not
    find or read a public NXP application note on i.MX 95 field return or
    decommissioning; if one exists it should be added as a source.
 9. That life-cycle changes are one-way. Every command in S1 to S3 moves the

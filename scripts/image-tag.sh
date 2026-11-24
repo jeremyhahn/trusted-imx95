@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# image-tag.sh <toolchain|secure-world|integration> <repo-name>: prints the CI image tag named by its content hash.
+# image-tag.sh <toolchain|secure-world|integration> <repo-name>
+#
+# Prints a CI image tag named by its content (handbook ci-standard.md §9):
+#   toolchain    <repo>-toolchain:<hash of the Dockerfile and the pin files>
+#   secure-world <repo>-secure-world:<hash of the Dockerfile and scripts/tool-pins.sh>
+#   integration  <repo>-ci-it:<hash of the commit's tree, on a dirty checkout
+#                the diff and every untracked file .gitignore keeps, and
+#                APK_INDEX_SUM>
 set -euo pipefail
 
 family=${1:?usage: image-tag.sh <toolchain|secure-world|integration> <repo-name>}

@@ -16,7 +16,7 @@ Only public sources were used: NXP's public GitHub repositories and public docum
 | S2 | U-Boot, *i.MX Secure and Encrypted Boot using AHAB* (`doc/imx/ahab/introduction_ahab.rst`) | U-Boot `master` at commit `3cb2cbbc75aa` | https://github.com/u-boot/u-boot/blob/3cb2cbbc75aa7fe2391f662607d6b2f46c1292a7/doc/imx/ahab/introduction_ahab.rst | yes |
 | S3 | NXP `imx-secure-enclave`, ELE HSM API reference (`doc/ele_hsm_api_document.rtf`) | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/imx-secure-enclave/blob/lf-6.18.37-2.1.0/doc/ele_hsm_api_document.rtf | yes |
 | S4 | U-Boot, *fuse command* (`doc/usage/cmd/fuse.rst`) | U-Boot `master` at commit `3cb2cbbc75aa` | https://github.com/u-boot/u-boot/blob/3cb2cbbc75aa7fe2391f662607d6b2f46c1292a7/doc/usage/cmd/fuse.rst | yes |
-| S5 | NXP AN14861 (cited by SPEC.md for the provisioning flow) | PDF as served on 2026-11-12; revision not read | https://www.nxp.com/docs/en/application-note/AN14861.pdf | downloaded, but the survey has no PDF text tool; contents not read |
+| S5 | NXP AN14861 (cited by SPEC.md for the provisioning flow) | PDF as served on 2026-11-12; revision not read | https://www.nxp.com/docs/en/application-note/AN14861.pdf | downloaded, but the lane has no PDF text tool; contents not read |
 
 ## 3. Interruption cases
 
@@ -90,7 +90,7 @@ Life cycle as the enclave reports it (S1 §6, §7; S3). "Inferred" marks a class
 
 ## 5. Ordering and checks for each irreversible step (input to #99)
 
-Three steps are irreversible: writing the SRK-hash fuses, each strict key-store operation (it blows a monotonic-counter bit), and the life-cycle change to OEM closed. This list describes order and gates: steps 1–5 are the provisioning operations, step 6 is the read-only gate re-run after the last reset, and step 7 is the owner-approved close. It is not a procedure, and nothing here is to be scripted from it. The steps are survey checks for a future station's design: nothing here programs fuses, runs strict key-store operations or closes the life cycle.
+Three steps are irreversible: writing the SRK-hash fuses, each strict key-store operation (it blows a monotonic-counter bit), and the life-cycle change to OEM closed. This list describes order and gates: steps 1–5 are the provisioning operations, step 6 is the read-only gate re-run after the last reset, and step 7 is the owner-approved close. It is not a procedure, and nothing here is to be scripted from it. The steps are survey checks for a future station's design: no lane programs fuses, runs strict key-store operations or closes the life cycle.
 
 1. **Before any fuse write.** First identify the silicon revision, and with it the SRK-hash width and word range (eight words for A0/A1, sixteen for B0; [fuse-map-survey.md](fuse-map-survey.md) §3.1). If the revision cannot be identified, stop. Then read the life cycle and every SRK-hash word of that range, freshly loaded. Go on only if the life cycle is OEM open and every hash word in the range reads either 0 or its expected value. Any other value means scrap (§3.1, §3.3).
 2. **Check the hash off the device first.** Recompute the hash of the SRK table embedded in the signed image to be booted, with the revision's hash algorithm and full width (SHA-256 for A0/A1, SHA-512 for B0). Compare it with the fuse words the station is about to write, in the device's word order, not in the form of a host dump (S2 §2.2).
@@ -102,7 +102,7 @@ Three steps are irreversible: writing the SRK-hash fuses, each strict key-store 
 8. **After the close.** Power-cycle, read the life cycle as OEM closed, and require zero AHAB events on the signed image (S1 §7).
 9. **Power.** Because the result of losing power during step 3 and the close (step 7) is not confirmed (§3.1), the station should hold the board on a supply it controls through those steps. This is a station design choice, not a source statement.
 
-Whether the key import (step 5) must instead come after the close is not confirmed. SPEC.md's reading of AN14861 lists key exchange and wrapped-key import before the move to OEM closed, but AN14861 itself could not be read in this survey (S5).
+Whether the key import (step 5) must instead come after the close is not confirmed. SPEC.md's reading of AN14861 lists key exchange and wrapped-key import before the move to OEM closed, but AN14861 itself could not be read in this lane (S5).
 
 ## 6. Not confirmed
 
@@ -111,8 +111,8 @@ Whether the key import (step 5) must instead come after the close is not confirm
 - Whether an SRK-hash word that reads 0 can be written in a later session after a partial write, and what a word interrupted mid-write reads as.
 - What the enclave does if power is lost during the change to OEM closed.
 - What the enclave does if power is lost between the monotonic-counter blow and the NVM write.
-- AN14861 (S5): fetched as a PDF from NXP's public site, but the survey has no PDF text tool, so its contents (including its §2, §5.2 and §5.3 cited in SPEC.md) were not read. AN14861 is written for the RT1180 in any case (SPEC.md).
-- U-Boot's `ahab_close` and ELE fuse driver source (`arch/arm/mach-imx/ele_ahab.c`, `drivers/misc/imx_ele/fuse.c`) were fetched but not read: the survey's tooling does not allow reading code outside this repository. Whether `ahab_close` checks any precondition itself is therefore not confirmed.
+- AN14861 (S5): fetched as a PDF from NXP's public site, but the lane has no PDF text tool, so its contents (including its §2, §5.2 and §5.3 cited in SPEC.md) were not read. AN14861 is written for the RT1180 in any case (SPEC.md).
+- U-Boot's `ahab_close` and ELE fuse driver source (`arch/arm/mach-imx/ele_ahab.c`, `drivers/misc/imx_ele/fuse.c`) were fetched but not read: the lane's tooling does not allow reading code outside this repository. Whether `ahab_close` checks any precondition itself is therefore not confirmed.
 
 ## 7. Questions for the owner
 
@@ -128,7 +128,7 @@ Whether the key import (step 5) must instead come after the close is not confirm
 4. **What happens to a part found in an unexpected state (a hash word neither 0 nor expected, or AHAB events after fusing)?**
    Options: (a) scrap and record; (b) keep as an engineering sample, marked; (c) retry.
    Recommendation: (b), physically marked and never closed. Sources support no repair (§3.3).
-5. **May the survey obtain the non-public i.MX 95 Security Reference Manual and Reference Manual, or a readable AN14861, to close the items in §6?**
+5. **May the lane obtain the non-public i.MX 95 Security Reference Manual and Reference Manual, or a readable AN14861, to close the items in §6?**
    Options: (a) yes, through the private context repository; (b) no, keep the survey public-only.
    Recommendation: (a), for the fuse-word lock rules and the interrupted-close behaviour; #99 should not be finalised without them.
 6. **How many monotonic-counter bits may provisioning spend per device?**

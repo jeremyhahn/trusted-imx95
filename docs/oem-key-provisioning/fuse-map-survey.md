@@ -18,8 +18,8 @@ plan the owner approves before any fuse is touched.
 Method: NXP's public GitHub repositories (the U-Boot fork and SPSDK) were read at the
 branches and tags in section 2. The i.MX 95 Reference Manual (IMX95RM), the i.MX 95
 Security Reference Manual and the EdgeLock Enclave API reference are not public:
-they need an NXP account, and some need an NDA. This survey could not reach them, and
-the project's vendor-nxp context repository was not readable from the survey either.
+they need an NXP account, and some need an NDA. This lane could not reach them, and
+the project's vendor-nxp context repository was not readable from the lane either.
 So every fuse index below comes from public source code or guides, and none from
 those manuals. The index of a field that only one source gives is marked as such.
 
@@ -35,13 +35,13 @@ those manuals. The index of a field that only one source gives is marked as such
 | S6 | SPSDK, `nxpele` command-line tool, `spsdk/apps/nxpele.py` | tag `v3.13.0` | https://github.com/nxp-mcuxpresso/spsdk/blob/v3.13.0/spsdk/apps/nxpele.py |
 | S7 | SPSDK example, i.MX95 anti-rollback protection, `examples/ahab/imx95/imx95_anti_rollback_protection.md` | tag `v3.13.0` | https://github.com/nxp-mcuxpresso/spsdk/blob/v3.13.0/examples/ahab/imx95/imx95_anti_rollback_protection.md |
 
-Sources this survey could not reach, or did not read:
+Sources this lane could not reach, or did not read:
 
 | Title | Why | Where it would help |
 |-------|-----|---------------------|
-| i.MX 95 Applications Processor Reference Manual (IMX95RM) | not public; vendor-nxp repository unreachable from the survey | fuse map, boot fuses, life-cycle fuse encoding |
+| i.MX 95 Applications Processor Reference Manual (IMX95RM) | not public; vendor-nxp repository unreachable from the lane | fuse map, boot fuses, life-cycle fuse encoding |
 | i.MX 95 Security Reference Manual | not public | debug fuses, lock semantics, life-cycle rules |
-| EdgeLock Secure Enclave API reference (RM00284, cited in SPEC) | in the vendor-nxp repository, unreachable from the survey | write-fuse, forward life cycle and commit service rules |
+| EdgeLock Secure Enclave API reference (RM00284, cited in SPEC) | in the vendor-nxp repository, unreachable from the lane | write-fuse, forward life cycle and commit service rules |
 | NXP AN14533, anti-rollback application note (linked from S7: https://www.nxp.com/doc/AN14533) | not fetched in this slice | version fuse layout and commit rules |
 | `spsdk/apps/nxpfuses.py` (SPSDK v3.13.0) | present in the tag, not read | whole-configuration fuse programming |
 
@@ -253,7 +253,7 @@ They are written when the owner approves this plan, not here.
 - How the 16-bit, redundant debug words map onto 32-bit enclave writes.
 - The values the boot configuration fuses need for this board.
 - Everything in IMX95RM, the i.MX 95 Security Reference Manual, RM00284 and AN14533,
-  none of which this survey read.
+  none of which this lane read.
 
 ## 7. Questions for the owner
 

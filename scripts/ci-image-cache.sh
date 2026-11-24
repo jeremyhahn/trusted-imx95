@@ -1,7 +1,74 @@
 #!/usr/bin/env bash
-# ci-image-cache.sh pull|publish [make args]: pulls the content-tagged toolchain image from the forge registry, or builds and pushes it on a push to main; does nothing on github.com.
-# A trusted run reads the digest from the registry, pulls by digest and exports TOOLCHAIN_VERIFIED_ID; publish fails unless the registry digest is the build's.
-# The namespace is CI_IMAGE_NAMESPACE; publish uses RELEASE_REGISTRY, RELEASE_REGISTRY_USER and RELEASE_REGISTRY_TOKEN, the token on stdin only. pull exits 1 on a miss.
+# ci-image-cache.sh v5 (2026-11-12, Codex security P1s on trusted-imx95 #19):
+# v4 still resolved the shared daemon's tags at two points. The trusted pull
+# read the registry digest from the RepoDigests of the tag it had just
+# pulled, and another job could retag that in between. Publish tagged the
+# built ID and then pushed the tag, which could be retagged before the push.
+# Now a trusted run reads the tag's digest from the registry itself
+# (`docker buildx imagetools inspect`, which asks the registry, not the
+# daemon), pulls that digest and takes TOOLCHAIN_VERIFIED_ID from the
+# by-digest reference. A digest reference cannot be retagged. Publish builds
+# with `docker buildx build --output type=registry`, which pushes the build's
+# own result. It then reads the registry's digest for the tag and fails
+# unless that digest is the build's (its --metadata-file).
+# Both need the runner's docker buildx CLI plugin; this runs on the runner
+# host, not in the toolchain image. Without buildx a trusted pull falls back
+# to the local build, and publish fails.
+# ci-image-cache.sh v4 (2026-11-12, Codex security P1 on trusted-imx95 #19):
+# checking the tag once left a race, because later steps resolved it again.
+# The Makefile now records the image ID a trusted build settles on (the
+# verified pull's, or its own build's) and `make -s toolchain-ref` prints it;
+# publish tags and pushes that ID, never the local tag.
+# ci-image-cache.sh v3 (2026-11-12, Codex security P1 on trusted-imx95 #19):
+# pull request jobs share the runners' persistent Docker daemon and run their
+# own Makefile with Docker access, so a pull request can tag any image with
+# main's toolchain tag. A trusted run (GITHUB_EVENT_NAME set and not
+# pull_request or pull_request_target) therefore never trusts a tag the
+# daemon holds: pull always pulls from the registry, takes the registry's
+# digest from the image's RepoDigests, pulls that digest, tags it, and
+# exports its image ID to the job as TOOLCHAIN_VERIFIED_ID (GITHUB_ENV). The
+# Makefile's docker-build-toolchain uses that ID on a trusted run while the
+# daemon holds it, and otherwise rebuilds from source with no cache.
+# test/ci_scripts_test.sh holds this. A pull request run, and a run outside
+# CI, keep v2's behaviour.
+# ci-image-cache.sh v2 (2026-11-08, Company Agent m2101 item 2): the
+# namespace comes only from CI_IMAGE_NAMESPACE, the repository Actions
+# variable; unset, the script stops.
+# ci-image-cache.sh v1 (ci-template v1.30, fix 1 of the 72-hour CI evaluation):
+# the toolchain image's registry cache. It ships beside ci.yml as
+# scripts/ci-image-cache.sh.
+#
+#   ci-image-cache.sh pull                 before `make docker-build`: when the
+#                                          daemon lacks the toolchain tag, pull it
+#                                          from the forge registry and tag it locally
+#   ci-image-cache.sh publish [make args]  on the release runner, on a push to main
+#                                          only: build and push the toolchain image
+#                                          when the registry lacks its tag
+#
+# The toolchain tag is `make -s toolchain-image`, <repo>-toolchain:<hash>, the
+# hash of the Dockerfile, the tool pin file and every devcontainer module's
+# go.mod and go.sum (ci-standard.md §9). The published name is
+# <registry>/<namespace>/<repo>-toolchain:<hash>-main, so the image is built
+# once per change to those files, by the release runner, and every other job
+# and runner pulls it instead of building it. The registry is the forge's own,
+# host[:port] from GITHUB_SERVER_URL, as in go-qrdb's scripts/ci-registry.sh;
+# no address is written here. The namespace is CI_IMAGE_NAMESPACE, the
+# repository Actions variable (v2: no default here), public for anonymous
+# pull (ruling 217(4)); only the release
+# runner writes there (rulings 169 and 173). On github.com both commands do
+# nothing.
+#
+# pull exits 0 when the daemon holds the tag after it, and 1 otherwise; the
+# caller runs `scripts/ci-image-cache.sh pull || true`, so a miss, an
+# unreachable registry or a failed pull falls back to the local build, never to
+# a red job. A pulled image keeps its digest in the log.
+#
+# publish reads the release runner's credential contract (ruling 173):
+# RELEASE_REGISTRY, which must be this forge's registry, RELEASE_REGISTRY_USER
+# and RELEASE_REGISTRY_TOKEN. No credential value is printed or put on a
+# command line: docker reads the token on stdin, into a private DOCKER_CONFIG
+# that is removed on exit. A pull logs in with nothing, through an empty
+# DOCKER_CONFIG.
 set -euo pipefail
 
 die() { echo "ci-image-cache: $*" >&2; exit 1; }

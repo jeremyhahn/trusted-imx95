@@ -8,7 +8,7 @@ It is documentation: it runs no step and scripts none.
 Command and API names appear below only to show what a source offers, not as a procedure.
 
 All sources were retrieved on 2026-11-12.
-A claim marked **unconfirmed** could not be checked against a source that this survey could reach.
+A claim marked **unconfirmed** could not be checked against a source that this lane could reach.
 
 ## Sources
 
@@ -30,13 +30,13 @@ A claim marked **unconfirmed** could not be checked against a source that this s
 
 | Source | Why | Effect |
 |---|---|---|
-| Issue #35 itself | The forge API answered 403 from the survey | The survey follows the survey brief and the SPEC row; any scope in the issue text that they do not repeat is not covered |
-| NXP AN14861, Secure OEM Key Provisioning with EdgeLock Secure Enclave, https://www.nxp.com/docs/en/application-note/AN14861.pdf | 404 from the survey (nxp.com's home page answered 200, so the documents may be gated or blocked for automated clients) | Whether AN14861 is public is **unconfirmed**. The SPEC row cites it from the private reference set; this survey does not |
-| NXP AN14533 (anti-rollback, which S2 cites), https://www.nxp.com/doc/AN14533 | 404 from the survey | **Unconfirmed** |
-| IMX95RM, the i.MX 95 Security Reference Manual, the ELE firmware API reference manual | Not public, or 404 from the survey | The fuse map, the number of version fuse bits and the exact life-cycle effects stay **unconfirmed**, as the SPEC row already says |
-| NXP EdgeLock 2GO product page and the FRDM-IMX95 product page on nxp.com | 404 from the survey | **Unconfirmed** |
-| SPSDK documentation on readthedocs for 3.13.0 | 404 from the survey | S1 and S4 cover the same content from the source tree and the installed tool's help |
-| The source bodies of S5, S7 and S9 (C headers, `ele_ahab.c`, the OP-TEE ELE driver) and the YAML templates SPSDK generates | The survey's read guard does not allow reading code outside this repository | For these sources only the file names and the documentation are surveyed; what the code does is **unconfirmed** |
+| Issue #35 itself | The forge API answered 403 from the lane | The survey follows the lane brief and the SPEC row; any scope in the issue text that they do not repeat is not covered |
+| NXP AN14861, Secure OEM Key Provisioning with EdgeLock Secure Enclave, https://www.nxp.com/docs/en/application-note/AN14861.pdf | 404 from the lane (nxp.com's home page answered 200, so the documents may be gated or blocked for automated clients) | Whether AN14861 is public is **unconfirmed**. The SPEC row cites it from the private reference set; this survey does not |
+| NXP AN14533 (anti-rollback, which S2 cites), https://www.nxp.com/doc/AN14533 | 404 from the lane | **Unconfirmed** |
+| IMX95RM, the i.MX 95 Security Reference Manual, the ELE firmware API reference manual | Not public, or 404 from the lane | The fuse map, the number of version fuse bits and the exact life-cycle effects stay **unconfirmed**, as the SPEC row already says |
+| NXP EdgeLock 2GO product page and the FRDM-IMX95 product page on nxp.com | 404 from the lane | **Unconfirmed** |
+| SPSDK documentation on readthedocs for 3.13.0 | 404 from the lane | S1 and S4 cover the same content from the source tree and the installed tool's help |
+| The source bodies of S5, S7 and S9 (C headers, `ele_ahab.c`, the OP-TEE ELE driver) and the YAML templates SPSDK generates | The lane's read guard does not allow reading code outside this repository | For these sources only the file names and the documentation are surveyed; what the code does is **unconfirmed** |
 | GitHub REST API (release metadata) | Rate limited (unauthenticated) | Versions were taken from `git ls-remote` tags instead |
 | imx-mkimage, https://github.com/nxp-imx/imx-mkimage | Its tags were listed, but its content was not surveyed | Not used |
 
@@ -132,4 +132,4 @@ A claim marked **unconfirmed** could not be checked against a source that this s
 
    No recommendation until the blob protection is confirmed.
 7. **Which silicon revision is the FRDM-IMX95-PRO in the kit, A0 or B0?** The ELE firmware container (S8) and SPSDK's keystore-reprovisioning support (S4) differ by revision. Recommendation: record the revision in [references/](../references/README.md) before any provisioning design is written.
-8. **Can AN14861 and AN14533 be cited publicly?** This survey could not reach them on nxp.com. Recommendation: confirm whether they are public, and add IMX95RM, the Security Reference Manual and the ELE firmware API reference to [references/](../references/README.md), because F1, F2 and F4 stay unconfirmed without them.
+8. **Can AN14861 and AN14533 be cited publicly?** This lane could not reach them on nxp.com. Recommendation: confirm whether they are public, and add IMX95RM, the Security Reference Manual and the ELE firmware API reference to [references/](../references/README.md), because F1, F2 and F4 stay unconfirmed without them.

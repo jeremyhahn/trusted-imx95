@@ -23,7 +23,7 @@ Out of scope, cited only:
 
 ## Sources
 
-Tags are the newest release tags on 2026-11-12. "Read" means the survey read the file at that tag; build files and
+Tags are the newest release tags on 2026-11-12. "Read" means the lane read the file at that tag; build files and
 documentation were read, C sources were not (see [Unconfirmed items](#unconfirmed-items)).
 
 | ID | Title | Version or tag | URL |
@@ -38,7 +38,7 @@ documentation were read, C sources were not (see [Unconfirmed items](#unconfirme
 | S8 | Microsoft TPM 2.0 Reference Implementation (pinned by S7, not read) | commit 98b60a44aba79b15fcce1c0d1e46cf5918400f6a | https://github.com/microsoft/ms-tpm-20-ref |
 | S9 | OP-TEE client (`libckteec`, the PKCS#11 library for the normal world; tag listed, not read) | 4.9.0 | https://github.com/OP-TEE/optee_client/tree/4.9.0 |
 | S10 | NXP's OP-TEE fork for its Linux BSP (tag listed, not read) | lf-6.18.37-2.1.0 | https://github.com/nxp-imx/imx-optee-os |
-| S11 | NXP RM00284, EdgeLock Enclave Hardware Security Module API, §3.4, §3.8, §3.12, §3.45 (private context repository, not reachable from the survey; section topics as cited in SPEC.md) | Rev. 4.5 | private: `jeremyhahn/vendor-nxp`, `docs/edgelock/RM00284.pdf` |
+| S11 | NXP RM00284, EdgeLock Enclave Hardware Security Module API, §3.4, §3.8, §3.12, §3.45 (private context repository, not reachable from the lane; section topics as cited in SPEC.md) | Rev. 4.5 | private: `jeremyhahn/vendor-nxp`, `docs/edgelock/RM00284.pdf` |
 | S12 | trusted-imx95 `docs/SPEC.md`, rows secure-world and secure-key-handling (read) | base 4b753a7 | [../SPEC.md](../SPEC.md) |
 
 Missing vendor documents a fact below needs: the i.MX 95 Applications Processor Reference Manual (IMX95RM) and the
@@ -64,7 +64,7 @@ Upstream status at OP-TEE os 4.9.0 (S1):
   user TA (S7).
 - The defaults place secure DRAM (30 MiB) and the shared-memory window (2 MiB) at the top of the first DDR region
   whose size the `mx95evk` defaults set to 2 GiB, with a second, non-secure DDR region above 4 GiB (S1). Our
-  board's memory size is in UM12527, which the survey did not read; the overrides it implies are #32's.
+  board's memory size is in UM12527, which the lane did not read; the overrides it implies are #32's.
 - With the ELE driver enabled, the build defaults OP-TEE to a software PRNG. The build file's comment gives the
   reason: the enclave firmware does not let OP-TEE and the Linux kernel use the enclave's RNG at the same time, so
   runtime enclave RNG in OP-TEE needs the kernel's enclave driver off (S2). This is also the only evidence in the
@@ -133,7 +133,7 @@ login enabled, raw RSA (`CKM_RSA_X_509`) disabled, key digest and check-value at
 The secure-key-handling row of SPEC.md (S12) already places the board's keys in the enclave's key store, never in
 the clear outside it, with signing and data storage through the HSM API (RM00284 §3.4, §3.8) and attestation
 through §3.12; the Generic Crypto APIs are not available on the i.MX 95 (RM00284 §3.45). RM00284 was not reachable
-from the survey (S11); the section topics are taken from SPEC.md and nothing about the API's calls is stated here.
+from the lane (S11); the section topics are taken from SPEC.md and nothing about the API's calls is stated here.
 The HSM API's detail is #51.
 
 | | fTPM TA | PKCS#11 TA | Enclave HSM API, direct |
@@ -152,7 +152,7 @@ worlds has firmware limits.
 
 ## Fit with go-xkms backends
 
-go-xkms's repository was not read in this survey; the backend names are those in the brief, and how each backend is
+go-xkms's repository was not read in this lane; the backend names are those in the brief, and how each backend is
 configured is unconfirmed.
 
 - **TPM2 backend.** The fTPM is the only option here that it can use unchanged. Keys would be fTPM keys, not enclave
@@ -166,7 +166,7 @@ configured is unconfirmed.
 
 ## Unconfirmed items
 
-1. The survey's read guard blocked reading C sources, so these are unconfirmed at 4.9.0: what the OP-TEE ELE driver
+1. The lane's read guard blocked reading C sources, so these are unconfirmed at 4.9.0: what the OP-TEE ELE driver
    implements (HUK, die ID, RNG, any key-store call), whether OP-TEE's HUK on the i.MX 95 comes from the enclave,
    how the fTPM derives its endorsement seed, and whether the PKCS#11 TA has any hardware key hook.
 2. That the i.MX 95 OP-TEE port runs on the FRDM-IMX95-PRO: there is no flavour for it upstream; DDR size and
@@ -175,7 +175,7 @@ configured is unconfirmed.
    Reference Manual (missing); #63.
 4. Which messaging unit each world uses to reach the enclave, and whether both may use it at once beyond the RNG
    caveat: needs IMX95RM and the Security Reference Manual (missing); #51.
-5. RM00284's content (S11): not reachable from the survey; only SPEC.md's section topics are used.
+5. RM00284's content (S11): not reachable from the lane; only SPEC.md's section topics are used.
 6. The Linux kernel's firmware-TPM driver and its start-up dependency on `tee-supplicant`: general knowledge, no
    kernel tag read here.
 7. NXP's fork (S10): what it changes for the i.MX 95 was not surveyed.
@@ -183,11 +183,11 @@ configured is unconfirmed.
 
 ## Owner questions
 
-docs/SPEC.md (2026-11-17) enables both the firmware TPM TA (`/dev/tpmrm0`) and the PKCS#11 TA for go-xkms's
+Owner ruling 771 (2026-11-17) enables both the firmware TPM TA (`/dev/tpmrm0`) and the PKCS#11 TA for go-xkms's
 PKCS#11 backend, which is option (d) of question 1, and takes OP-TEE from NXP's Linux BSP, option (c) of question 4
 ([architecture.md](architecture.md#scope-owner-ruling-771)). The concern behind the (a) recommendation of question 1
 still holds: keys these TAs hold sit in A55 secure DRAM and OP-TEE storage, not in the enclave, so the board's keys
-that the `secure-key-handling` row puts in the enclave's key store must not be moved into them. docs/SPEC.md (2026-11-18) answers
+that the `secure-key-handling` row puts in the enclave's key store must not be moved into them. Owner ruling 927 (2026-11-18) answers
 question 3 with (b): the fTPM serves provisioning and device evidence through go-xkms's TPM 2.0 workflows, and gets
 its own row, `ftpm` ([../ftpm/README.md](../ftpm/README.md)). The questions are kept below as surveyed.
 

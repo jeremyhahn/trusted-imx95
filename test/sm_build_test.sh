@@ -325,7 +325,13 @@ expect "ci: system-manager-build does not call make sm-toolchain-check" \
 # shellcheck disable=SC2016 # expands in the child shell
 expect "ci: system-manager-build does not call docker-run" \
 	bash -c '! grep -Eq "docker-run" <<<"$1"' _ "$job"
-# SM_OUT must point under the container's $TMPDIR and be expanded by the container's shell; run the step's arguments as the wrapper does against a recording stub.
+# The container's /src is root-owned (only the copied files are the image
+# user's), so the job must point SM_OUT under the container's $TMPDIR, and the
+# container's shell, not the runner's, must expand it. Behavioural: take the
+# arguments the step hands in-toolchain-image.sh, compose them as the wrapper
+# does (`sh -c "$guard; $*"`), and run them where sm-toolchain-check.sh is a
+# stub that records SM_OUT and fails. The old `sh -c 'SM_OUT=...' script` form
+# ran only the assignment, exited 0 and never ran the script.
 step_line=$(grep -F 'scripts/in-toolchain-image.sh' <<<"$job" | head -n1)
 expect "ci: system-manager-build has one in-toolchain-image.sh call" [ -n "$step_line" ]
 wrapper_guard=$(awk '/^guard=/' "$ROOT/scripts/in-toolchain-image.sh")

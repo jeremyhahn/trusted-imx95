@@ -4,7 +4,7 @@
 
 ## Decision
 
-docs/SPEC.md: go-xkms's endorse-01 requires an EdgeLock enclave attestation before it certifies the fTPM's endorsement key (EK), and the Cortex-A55 calls the enclave's key API. This answers the earlier question of what further evidence the device presents (A1 and F1 in [README.md](README.md)). The SPEC does not name a root, a binding or a wire format. docs/SPEC.md gives the board its firmware TPM and the endorse-01, enroll-01, device-attest-01 sequence ([ftpm](../ftpm/README.md)).
+Owner ruling 1234 (Tenant, 2026-11-23): go-xkms's endorse-01 requires an EdgeLock enclave attestation before it certifies the fTPM's endorsement key (EK), and the Cortex-A55 calls the enclave's key API. This answers the earlier question of what further evidence the device presents (A1 and F1 in [README.md](README.md)). The ruling does not name a root, a binding or a wire format. Owner ruling 927 gives the board its firmware TPM and the endorse-01, enroll-01, device-attest-01 sequence ([ftpm](../ftpm/README.md)).
 
 ## Device-side order
 

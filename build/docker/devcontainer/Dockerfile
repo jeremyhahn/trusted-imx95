@@ -1,6 +1,15 @@
 # syntax=docker/dockerfile:1
 #
-# Stages: base, toolchain, integration and secure-world (glibc); every pin is in scripts/tool-pins.sh, which `make build` checks. No vendor tool enters the image.
+# The project's one image (handbook devcontainer.md §1): `base`, then
+# `toolchain` (every tool the Makefile uses) and `integration` (base plus the
+# source only), both FROM base. `secure-world` is the same toolchain on a glibc
+# base, for `make secure-world`. Every pin is in scripts/tool-pins.sh; the
+# ALPINE_IMAGE and SW_IMAGE defaults below must equal its ALPINE_VERSION@
+# ALPINE_DIGEST and SW_PYTHON_VERSION@SW_PYTHON_DIGEST, which `make build` checks.
+#
+# No vendor tool is in any stage: the NXP Code Signing Tool is read from
+# CST_PATH at build time and never enters the image (docs/references/README.md
+# §The Code Signing Tool in the build).
 
 ARG ALPINE_IMAGE=alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 # The secure-world stage's glibc base (below). Must equal scripts/tool-pins.sh's
@@ -8,7 +17,10 @@ ARG ALPINE_IMAGE=alpine:3.24.4@sha256:f59abe656b692d901e184be3445e08478660210859
 ARG SW_IMAGE=python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
 
 FROM ${ALPINE_IMAGE} AS base
-# coreutils for GNU date -d; GNU tar for --owner/--group/--numeric-owner; safe.directory for checkouts owned by another uid.
+# coreutils: the scripts and tests use GNU date -d. safe.directory: the
+# checkout a stage runs on may belong to another uid than the stage's.
+# tar: GNU tar, for scripts/in-toolchain-image.sh's --owner/--group/
+# --numeric-owner stream (BusyBox tar refuses those options).
 RUN apk upgrade --no-cache \
  && apk add --no-cache bash coreutils make git python3 tar xz \
  && git config --system --add safe.directory '*' \
@@ -24,10 +36,21 @@ COPY scripts/tool-pins.sh scripts/fetch-tools.sh /pins/
 RUN sh /pins/fetch-tools.sh /pins/tool-pins.sh /out/bin
 
 FROM base AS toolchain
-# openssh-keygen for SSH signature tests; uv for hash-checked wheels; xz and perl for imx-sm; gcompat for the glibc-built Arm toolchain.
+# openssh-keygen: git's SSH signature verification (gpg.format ssh) runs
+# ssh-keygen -Y, which test/ci_scripts_test.sh's signature fixtures need;
+# Alpine's git package does not supply it. Like every package here, its
+# version is the pinned Alpine release's.
+# uv: scripts/secure-world-build.sh's hash-checked wheel install.
+# xz, perl: scripts/sm-build.sh and scripts/secure-world-build.sh unpack .tar.xz;
+# imx-sm's build requires perl. test/sm_build_test.sh runs it here.
+# gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
+# is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
 RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat
 COPY --from=fetch /out/bin/ /usr/local/bin/
-# SPSDK 3.13.0 venv for make ahab-sign-test, hash-checked, built here because CI stages run offline.
+# SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
+# scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
+# SHA-256 in scripts/ahab, into /opt/spsdk. CI stages run without network, so
+# the venv is built here. py3-pip is needed for the install only.
 COPY scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt /pins/ahab/
 RUN apk add --no-cache --virtual .spsdk-build py3-pip \
  && SPSDK_VENV=/opt/spsdk bash /pins/ahab/spsdk-venv.sh \
@@ -42,7 +65,13 @@ RUN echo "apk index ${APK_INDEX_SUM}" >/dev/null && apk upgrade --no-cache
 COPY --chown=10001:10001 . /src
 USER 10001
 
-# `make secure-world` on a glibc base: its pinned wheels and the Arm toolchain need glibc; Debian packages come from a dated snapshot.
+# `make secure-world` (docs/secure-world/build.md): the same project image, on a
+# glibc base. secure-world/bsp.lock pins CPython 3.13 wheels for x86_64 glibc
+# (cryptography cp311-abi3-manylinux_2_28, cffi cp313-manylinux2014) and Arm's
+# toolchain is glibc-hosted, so the Alpine (musl) toolchain stage cannot run it.
+# Every pin is in scripts/tool-pins.sh (SW_*); the ARG defaults below must equal
+# them, which `make build` checks. Debian packages come from a dated
+# snapshot.debian.org archive, so the same Dockerfile resolves the same versions.
 FROM ${SW_IMAGE} AS secure-world
 ARG SW_DEBIAN_SNAPSHOT=20261122T000000Z
 ARG SW_UV_VERSION=0.13.9
