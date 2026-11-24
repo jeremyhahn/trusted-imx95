@@ -26,7 +26,7 @@ json.dump(rec, open(sys.argv[2], "w"))
 # expect NAME FILE RC WANT [NOWANT]: run the checker; rc, output has WANT and the file, not NOWANT
 expect() {
   local name=$1 f=$2 rc=$3 want=$4 nowant=${5:-} out got
-  out=$(python3 -I "${CHK:-$chk}" "$f" 2>&1); got=$?
+  out=$(python3 -I "${CHK:-$chk}" ${FLAG:+"$FLAG"} "$f" 2>&1); got=$?
   if [ "$got" != "$rc" ]; then bad "$name: rc=$got want $rc"; return; fi
   if [ -n "$want" ] && [[ $out != *"$want"* ]]; then bad "$name: output lacks '$want'"; return; fi
   if [ -n "$want" ] && [[ $out != *"$f"* ]]; then bad "$name: output lacks the file name"; return; fi
@@ -85,6 +85,22 @@ mut "$work/hash-b0.json" "rec['soc_revision'] = 'B0'"
 expect "256-bit hash on B0 refused" "$work/hash-b0.json" 1 "\$.srk_hash"
 mut "$work/hash-b0-ok.json" "rec['soc_revision'] = 'B0'; rec['srk_hash'] = '00' * 64"
 expect "512-bit hash on B0 passes" "$work/hash-b0-ok.json" 0 "ok"
+# unknown silicon revisions fail in both modes; the width follows the known revision only
+for flag in "" --pre-close; do
+  m=${flag:-default}
+  pc="rec['life_cycle_before'] = 'oem open'; "
+  mut "$work/rev-c0.json" "${pc}rec['soc_revision'] = 'C0'"
+  FLAG=$flag expect "revision C0 refused ($m)" "$work/rev-c0.json" 1 "\$.soc_revision" 
+  mut "$work/rev-empty.json" "${pc}rec['soc_revision'] = ''"
+  FLAG=$flag expect "empty revision refused ($m)" "$work/rev-empty.json" 1 "\$.soc_revision"
+  mut "$work/rev-b0-256.json" "${pc}rec['soc_revision'] = 'b0'"
+  FLAG=$flag expect "revision b0 with a 256-bit hash refused on width ($m)" "$work/rev-b0-256.json" 1 "\$.srk_hash"
+  mut "$work/rev-b0-512.json" "${pc}rec['soc_revision'] = ' b0 '; rec['srk_hash'] = '00' * 64"
+  FLAG=$flag expect "revision b0 with a 512-bit hash passes ($m)" "$work/rev-b0-512.json" 0 "ok"
+done
+out=$(python3 -I "$chk" "$work/rev-c0.json" 2>&1)
+if [[ $out == *"'C0'"* && $out == *"A0, A1, B0"* ]]; then ok "unknown revision message names the value and the allowed set"
+else bad "unknown revision message lacks the value or the allowed set: $out"; fi
 mut "$work/pk-hash.json" "rec['public_keys'][0]['public_key_hash'] = '11' * 20"
 expect "wrong public key hash width refused" "$work/pk-hash.json" 1 "\$.public_keys[0].public_key_hash"
 mut "$work/ids.json" "rec['secure_object_ids'] = ['fake-object-1']"

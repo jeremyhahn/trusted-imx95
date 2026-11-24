@@ -59,7 +59,7 @@ ITEM_FIELDS = {
 # --- required fields: end
 
 # Hash width in hex characters. SRK hash by silicon revision (survey section 3: 256-bit on
-# A0/A1, 512-bit on B0); the other hashes take either width.
+# A0/A1, 512-bit on B0); the other hashes take either width. An unknown revision fails.
 # --pre-close (proposed): the state a record must show before the step, and the fields it cannot yet hold.
 PRE_CLOSE_STATE = "oem open"
 PRE_CLOSE_LATER = ("life_cycle_after", "outcome", "step_times")
@@ -95,11 +95,28 @@ def type_ok(value, typ):
     return isinstance(value, typ)
 
 
+def norm_revision(value):
+    """The silicon revision with case and surrounding whitespace removed, or None."""
+    return value.strip().upper() if isinstance(value, str) else None
+
+
+def revision_errors(rec):
+    """soc_revision must be a documented revision (A0, A1, B0), in every mode."""
+    value = rec.get("soc_revision")
+    if not isinstance(value, str) or norm_revision(value) in SRK_WIDTH:
+        return []  # a missing or non-string value is reported by fields_errors
+    return [
+        "$.soc_revision: %r is not a known silicon revision (allowed: %s)"
+        % (value, ", ".join(sorted(SRK_WIDTH)))
+    ]
+
+
 def fields_errors(rec, fields=None):
     fields = FIELDS if fields is None else fields
     errs = []
     if not isinstance(rec, dict):
         return ["$: the record is not a JSON object"]
+    errs += revision_errors(rec)
     for name, typ, required, _src in fields:
         if name not in rec:
             if required:
@@ -126,11 +143,13 @@ def hash_slots(rec):
     """Yield (path, value, allowed widths) for every declared hash field that holds a string."""
     if not isinstance(rec, dict):
         return
-    width = SRK_WIDTH.get(rec.get("soc_revision"))
-    srk = (width,) if width else OTHER_HASH_WIDTHS
-    for name, widths in (("srk_hash", srk), ("pqc_srk_hash", srk)):
-        if isinstance(rec.get(name), str):
-            yield "$." + name, rec[name], widths
+    # The SRK hash width follows the known revision only; an unknown revision is an
+    # error of its own (revision_errors), so its hashes are not checked against a guess.
+    width = SRK_WIDTH.get(norm_revision(rec.get("soc_revision")))
+    if width:
+        for name in ("srk_hash", "pqc_srk_hash"):
+            if isinstance(rec.get(name), str):
+                yield "$." + name, rec[name], (width,)
     for name, sub in (("public_keys", "public_key_hash"),):
         if isinstance(rec.get(name), list):
             for i, item in enumerate(rec[name]):
