@@ -3,6 +3,9 @@
 Build, deploy and burn in the go-xkms daemon on the i.MX95 board. The board's
 ssh target is always an argument; no address is kept in the repository.
 
+Scope: the `xkms-board` row of [SPEC.md](../SPEC.md#features), proposed,
+pending owner approval. It is not done.
+
 | Step | Command | Result |
 | --- | --- | --- |
 | Build | `scripts/xkms/xkmsd-build.sh [<commit>]` | `build/xkms/<commit>/{xkmsd,xkmsctl,manifest.txt}`, static linux/arm64 |
@@ -24,11 +27,17 @@ Preflight, upload and hash check, stop, back up `/usr/local/bin/xkmsd`,
 `/etc/xkms` and `/var/lib/xkms` with a SHA256SUMS list, install, start, then a
 health check: unit active, a listener owned by the daemon, the version names
 the build's commit, the unit stays up. Any failure restores the backup and
-exits nonzero. The newest 5 backups are kept. `--dry-run` contacts nothing.
+exits nonzero. A restore first stops the unit and proves it stopped (the
+stop succeeded, the unit is inactive with no MainPID, no xkmsd process is
+left); otherwise it refuses and leaves the live tree untouched. Preflight
+reserves room on each filesystem for the backup, the staged binary and the
+copies a rollback makes beside the live trees. The newest 5 backups are kept. `--dry-run` contacts nothing.
 xkmsd has no config validate mode, so a bad config shows as a failed start.
 The board needs systemctl and one of `ss`, `netstat` or `/proc/net/tcp` (tried
 in that order) to find the listener; `XKMS_PORT` pins the port.
 
 `bash test/xkms_board_tools_test.sh` runs the deploy against a fake board
-(stub ssh, systemctl and, per case, ss, netstat or /proc/net/tcp) and every burn-in `--help` and `--dry-run`.
+(stub ssh, systemctl, df and, per case, ss, netstat or /proc/net/tcp), the
+burn-in ledger, restart proofs and `concurrency.sh` against a stub xkmsctl,
+and every burn-in `--help` and `--dry-run`.
 It does not touch a real board.

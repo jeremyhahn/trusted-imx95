@@ -18,9 +18,15 @@ Test keys have ids `bi-*` and stay on the server; the work directory holds
 ledgers (ids, hashes, ciphertexts, signatures) but no key material.
 
 A write counts as acknowledged only when xkmsctl returned success. The ledger
-records it then, with an artefact made by the key and a fingerprint of its
-metadata. Verification decrypts the old ciphertext, verifies the old
-signature, and compares the fingerprint and any certificate.
+records the key id at once, before any follow-up call, then an artefact made
+by the key and a fingerprint of its metadata; a follow-up that fails never
+drops the id. Verification checks that every acknowledged id exists, decrypts
+the old ciphertext, verifies the old signature, and compares the fingerprint
+and any certificate.
+
+A restart counts only when it is proven: every systemctl step must succeed, a
+graceful or `kill -9` restart must change xkmsd's MainPID, and a hard reboot
+must change the board's `/proc/sys/kernel/random/boot_id`.
 
 | Script | Proves | Fails when |
 | --- | --- | --- |
@@ -29,7 +35,7 @@ signature, and compares the fingerprint and any certificate.
 | `durability.sh` | acknowledged writes survive a graceful restart and two `kill -9` | any ledger entry lost or changed (CRITICAL) |
 | `powerloss.sh` | acknowledged writes survive `echo b > /proc/sysrq-trigger` (no sync). Off unless `--hard-reboot`. Does not test the eMMC's own write cache | any acknowledged write lost (CRITICAL) |
 | `diskfull.sh` | with the state filesystem full, writes are acknowledged or refused promptly, xkmsd stays up, nothing acknowledged is lost, writes work again once the filler is removed | a hang, a crash, a loss, or no recovery. The filler `.burnin-filler` is removed on exit |
-| `concurrency.sh` | parallel clients racing on one key id: at most one create wins, concurrent signatures verify, delete leaves the key gone, unique-id writes all survive | two creates acknowledged, a bad signature, a lost write |
+| `concurrency.sh` | parallel clients racing on one key id: at most one create wins, concurrent signatures verify, delete leaves the key gone, unique-id writes all survive | two creates acknowledged, a failed or bad signature (each client needs one verified signature), a lost write |
 | `restart-load.sh` | restarts and `kill -9` while writers run: xkmsd comes back each time and no acknowledged write is lost | a restart that does not recover, or any loss (CRITICAL) |
 
 ## Running
