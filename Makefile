@@ -48,7 +48,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	sw-image sw-ref docker-build-sw \
+	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
@@ -180,9 +180,16 @@ SW_BASE  ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/secure-world
 SW_WORK  ?= $(SW_BASE)/work
 SW_OUT   ?= $(CURDIR)/.secure-world/out
 SW_CACHE ?= $(SW_BASE)/cache
+SW_LOCK  ?= $(CURDIR)/secure-world/bsp.lock
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
-	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>): its pins and owner ruling 771's sources; no fetch, no build
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --check-lock
+
+integration-test-secure-world: ## The secure-world integration test (test/integration/secure_world_test.sh), offline
+	@bash test/integration/secure_world_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
