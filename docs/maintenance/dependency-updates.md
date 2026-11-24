@@ -9,6 +9,8 @@ How a pin moves on `row/178-maintenance` (the standing maintenance row, plan in 
 
 Read `make pins-report` (`scripts/pins-report.sh`) before the network `make deps-check`: it prints, from the files in the tree only, every tool with its version, repo, release tag and `_HOLD` reason, the Alpine, Python, uv and Debian snapshot pins, the requirement count of each requirements file, and every workflow action as `owner/repo@<12 hex> # <tag>`. It reports and does not judge; it exits 1 only when a file is missing.
 
+`make build` and `make pins-check` also run `scripts/pins-drift-check.sh` (rule j): every `python:<ver>-slim` and `alpine:<ver>` restated in `docs/**/*.md`, `scripts/` and `test/` must agree with `SW_PYTHON_VERSION` and `ALPINE_VERSION` (a dotted prefix such as `alpine:3.24` agrees). It fails naming file, line and the pin, so after moving one of those two pins, fix the prose it names. The script lists its few excluded files by name.
+
 A bump is done when `make pins-check` passes and `make deps-check` no longer lists the pin (or the pin carries a `_HOLD` reason).
 
 ## A tool in `scripts/tool-pins.sh`

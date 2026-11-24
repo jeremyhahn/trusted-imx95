@@ -76,6 +76,7 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 		found=0; while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
 		[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }; done
 	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
 	@echo "build: OK ($(words $(SH_SCRIPTS)) shell and $(words $(PY_SCRIPTS)) Python scripts parse)"
 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
@@ -114,8 +115,9 @@ integration-test-local: ## Integration tests in the current environment (in the 
 
 security: check-tracked-cst secret-scan-tree secret-scan-history ## Security stage: CST guard and secret scans of the tree and the history
 
-pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent
+pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent, and no doc or script restates a moved python/alpine version
 	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
 
 pins-report: ## Offline: print every pin (tools, images, requirements, workflow actions) from the files in the tree
 	@scripts/pins-report.sh scripts/tool-pins.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt .github/workflows
