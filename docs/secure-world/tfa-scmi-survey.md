@@ -204,10 +204,10 @@ the `system-manager-config` row.
 NXP's SM repository ships a configuration for the FRDM board,
 `configs/mx95frdm.cfg` [S5]. That file is for the 15x15 FRDM-IMX95 board, not
 the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`), which names an SM
-configuration `mx95frdm-pro` whose source is unconfirmed
-([upstream-survey.md](upstream-survey.md)). Everything in this section is
-therefore **unverified for the PRO** until that configuration is read. As
-published in `mx95frdm.cfg`:
+configuration `mx95frdm-pro`; its source is `configs/other/mx95frdm-pro.cfg`
+at the pinned `imx-sm` commit (section 2.2.1). The list below was read from
+`mx95frdm.cfg` and is **unverified for the PRO** except where section 2.2.1
+cites the PRO file. As published in `mx95frdm.cfg`:
 
 - The Cortex-A55 side is one logical machine, `LM2` "AP", holding two SCMI
   agents: `AP-S`, marked secure, on MU1 (the MU BL31 uses, section 2.4), and
@@ -320,8 +320,7 @@ sources above:
   no right over the M7 agent's base protocol (section 2.2.1). Not traced:
   the LMM handler `imx95_lmm.c` and `imx_sip_svc.c` beyond the single call each
   makes, and how the returned SCMI status maps to the SMC result seen by
-  Linux; (c) no
-  offline test pins the `AP-S` API list, because `test/secure_world_build_test.sh`
+  Linux; (c) no offline test pins the `AP-S` API list, because `test/secure_world_build_test.sh`
   runs without network and the configuration is vendor source outside the
   repo; it is pinned only by `sm_config_sha256` and `sm_patched_config_sha256`
   in `system-manager/sm.lock`, which `scripts/sm-build.sh` checks when it
@@ -337,16 +336,34 @@ sources above:
   i.MX 95 port's sources as listed in `platform.mk` [S2]. That suggests
   `ENABLE_STACK_PROTECTOR` needs a platform addition first; not confirmed by a
   build.
-- **SM configuration audit.** Only the A55 secure agent's section of
-  `mx95frdm.cfg` was read in full; the non-secure resource list was skimmed.
+- **SM configuration audit.** In `configs/other/mx95frdm-pro.cfg` (the pinned
+  configuration) the `AP-S` agent's section (`:496-519`) was read in full and
+  checked for `BASE_AGENT_n`, `LMM_*`, `CPU_*` and `PD_M7` lines; the rest of
+  the file, including the non-secure `AP-NS` agent, was skimmed.
 - **OP-TEE on FRDM.** Upstream OP-TEE has only `mx95evk`; whether its DDR and
   UART values fit the FRDM-IMX95 was not checked.
 - **SPMD/FF-A on i.MX 95.** No source shows `SPD=spmd` built or run on this
   SoC.
-- **Release alignment.** The NXP branch heads surveyed (`imx-atf`
-  `lf_v2.14`, `imx-sm` `master`) were not matched to one NXP BSP release
-  tag. `imx-mkimage` was read at release tag `lf-6.12.49_2.2.0`. Matching
-  versions across the three repositories is for #32.
+- **Release alignment.** The sections above that cite branch heads (`imx-atf`
+  `lf_v2.14` at `af9eb2c`, `imx-sm` at `eec2328`) predate the pins. The pins
+  are now set: `imx-atf` at the `SRCREV` of the `imx-atf_2.14.bb` recipe of
+  BSP release `lf-6.18.37-2.1.0` (`secure-world/bsp.lock`, `TFA_COMMIT`) and
+  `imx-sm` at the commit that release tag points to (`system-manager/sm.lock`),
+  both for that one release, which is provisional (#14 Q2). `imx-mkimage` was
+  read at release tag `lf-6.12.49_2.2.0`, which is not that release; matching
+  it is for #32.
+- **No vendor snapshot is attached.** Vendor source is never copied into this
+  repository, so the read-only trees reviewers asked for are not here. To read
+  the same trees (into a new, empty directory outside the clone):
+  `git init imx-atf && cd imx-atf && git fetch --depth 1
+  https://github.com/nxp-imx/imx-atf.git
+  af9eb2c1748ee3abc0ead7dc76e462f50c573036 && git checkout FETCH_HEAD`, and
+  the same with `https://github.com/nxp-imx/imx-sm.git` and
+  `eec232878ab7dd460f5a8f3767d39dc7e9412efa` (tag `lf-6.18.37-2.1.0`). The
+  files cited in section 2.2.1 are then at the paths given there
+  (`plat/imx/imx9/imx95/imx95_m7.c`, `configs/other/mx95frdm-pro.cfg`, and
+  so on); the configuration's SHA-256 must equal `sm_config_sha256` in
+  `system-manager/sm.lock`.
 
 ## Sources
 
