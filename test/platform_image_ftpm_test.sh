@@ -478,6 +478,8 @@ expect "checker: an empty deploy directory fails" test "$(sh "$chk" "$wt/empty-d
 # provisioned root leaves the old binding token. The image no longer emits one (IMAGE_FSTYPES:remove) and
 # the checker refuses any in the output, by name.
 expect "image: IMAGE_FSTYPES removes the standalone ext4" ncstr "$img" 'IMAGE_FSTYPES:remove = "ext2 ext3 ext4 '
+# The repro check compares xattrs, ACLs and capabilities, so the rootfs tar must keep them.
+expect "image: the rootfs tar keeps xattrs, ACLs and capabilities in pax format" ncstr "$img" "IMAGE_CMD_TAR = \"tar --format=posix --xattrs --xattrs-include='*' --acls\""
 mkdir "$wt/ext-root"
 truncate -s 4M "$wt/ext-root/unmarked.ext4"
 printf '\123\357' | dd of="$wt/ext-root/unmarked.ext4" bs=1 seek=1080 conv=notrunc 2>/dev/null

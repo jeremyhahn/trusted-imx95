@@ -45,6 +45,9 @@ IMAGE_FSTYPES += "wic"
 # MISSING: provisional. A rootfs archive, the file-by-file input of the reproducible-build check
 # (scripts/platform-image-repro-check.sh); the machine's own IMAGE_FSTYPES are unreadable without a build.
 IMAGE_FSTYPES += "tar"
+# The archive keeps extended attributes, ACLs and file capabilities (POSIX/pax SCHILY.* records), which the
+# repro check compares member by member. IMAGE_CMD_TAR is the tar command image_types.bbclass uses for IMAGE_CMD:tar.
+IMAGE_CMD_TAR = "tar --format=posix --xattrs --xattrs-include='*' --acls"
 # MISSING: provisional. No standalone root file-system image is a flash artefact (Codex round 5 P1, docs/plans/140.md entry 31):
 # a rootfs.ext4 starts with a zero sector, which a sparse writer skips, so the old token and NV would
 # survive. The marked .wic is the only supported flash artefact. wic builds its own ext4 from the rootfs

@@ -134,6 +134,7 @@ Unconfirmed until one is:
   `imx95-19x19-frdm-pro*.dtb` directly in the deploy directory (the machine's names; the checker fails if one is absent).
 - That the image emits one rootfs archive: the image adds `IMAGE_FSTYPES += "tar"` (provisional); the check refuses
   zero or several `*.rootfs*.tar*` files.
+- That the archive keeps xattrs, ACLs and capabilities: the image sets `IMAGE_CMD_TAR` with `--format=posix --xattrs --xattrs-include='*' --acls`, so the repro check compares them; not yet confirmed on a real build.
 - Whether wic draws the GPT GUIDs per build (they are not compared), and the disk GUID.
 - Whether the FAT `boot` partition is reproducible (volume ID and directory timestamps are the suspects); the check
   fails if it is not, which would show it.
