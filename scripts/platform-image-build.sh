@@ -21,6 +21,18 @@ die() {
 	exit 1
 }
 
+# The image suffixes (the same list as platform-image-verify.sh and
+# platform-image-repro-compare.sh; a test keeps them equal). Metadata
+# (.testdata.json, .manifest, .spdx.json, .wic.bmap) is never an image.
+IMAGE_SUFFIXES=".wic .wic.zst .wic.gz .wic.xz .wic.bz2 .ext4 .tar.zst .tar.gz .tar.xz .tar.bz2"
+is_image() {
+	local s
+	for s in $IMAGE_SUFFIXES; do
+		[[ $1 == *"$s" ]] && return 0
+	done
+	return 1
+}
+
 check=0
 repro=0
 dir=
@@ -280,12 +292,10 @@ for t in $targets; do
 		*.testdata.json | *.env | *.qemuboot.conf) continue ;;
 		*.spdx.json) t_spdx=1 ;;
 		*.manifest) ;;
-		# Yocto names the rootfs ".rootfs-<timestamp>.<ext>" (IMAGE_NAME with
-		# IMAGE_VERSION_SUFFIX); the older ".rootfs.<ext>" form matches too.
 		# A bmap alone is metadata, not an image: it does not count.
 		*.wic.bmap) ;;
-		*.wic* | *.rootfs*) t_img=1 ;;
-		*) continue ;;
+		# An image ends in one of IMAGE_SUFFIXES; anything else is not copied.
+		*) is_image "$f" || continue; t_img=1 ;;
 		esac
 		cp "$f" "$out/"
 		n=$((n + 1))

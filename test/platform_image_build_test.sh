@@ -70,6 +70,7 @@ for t in "$@"; do
 		echo bmap-$t >"$d/$b.wic.bmap"
 		echo mf-$t >"$d/$b.manifest"
 		echo spdx-$t >"$d/$b.spdx.json"
+		echo td-$t >"$d/$b.testdata.json"
 		continue
 	fi
 	echo wic-$t >"$d/$b.wic.zst"

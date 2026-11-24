@@ -159,7 +159,8 @@ check "testdata.json, manifest and SBOM but no image" 1 "$t: no wic or rootfs im
 sfx() { sed -n 's/^IMAGE_SUFFIXES=//p' "$1"; }
 v=$(sfx "$script")
 c=$(sfx "$ROOT/scripts/platform-image-repro-compare.sh")
-if [ -n "$v" ] && [ "$v" = "$c" ]; then pass "verify and compare share the image suffix list"; else fail "verify and compare share the image suffix list"; fi
+b=$(sfx "$ROOT/scripts/platform-image-build.sh")
+if [ -n "$v" ] && [ "$v" = "$c" ] && [ "$v" = "$b" ]; then pass "build, verify and compare share the image suffix list"; else fail "build, verify and compare share the image suffix list"; fi
 
 # The production manifest holds no debug package (named in the debug recipe).
 mf=$d/$t-$machine.rootfs-20261123000001.manifest
