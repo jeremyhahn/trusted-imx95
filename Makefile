@@ -43,6 +43,7 @@ SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/in
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
+PI_TESTS   := $(sort $(wildcard test/platform_image*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
@@ -51,7 +52,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools \
+	integration-test-platform-image
 
 help: ## List the targets
 	@echo "Targets:"
@@ -185,6 +187,12 @@ secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from se
 	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
 
 ## --- The platform image (docs/platform-image/build.md) ---
+
+integration-test-platform-image: ## The platform-image row's offline checks: every test/platform_image*_test.sh (no bitbake, no network)
+	@[ -n "$(PI_TESTS)" ] || { echo "integration-test-platform-image: no test/platform_image*_test.sh found"; exit 1; }
+	@fail=0; for t in $(PI_TESTS); do \
+		echo "--- $$t"; bash "$$t" || { echo "FAIL $$t"; fail=1; }; \
+	done; exit $$fail
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock

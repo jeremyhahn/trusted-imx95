@@ -12,9 +12,10 @@
 # does not cover, so it is MISSING and left at OE-core's default.
 #
 # firmware-ele-imx is not named: the machine adds it for the i.MX95
-# (hardening-survey section 7). xkmsd is MISSING: no go-xkms recipe exists yet,
-# and what xkmsd needs at run time is go-xkms's to say (hardening-survey
-# question 7). The enclave access policy recipe (a proposal, not installed here)
+# (hardening-survey section 7). xkmsd is installed from the xkmsd recipe
+# (recipes-security/xkmsd, a tagged go-xkms release; docs/SPEC.md,
+# `platform-image`: "It runs xkmsd from go-xkms on its Linux side"); its user,
+# unit and configuration are not in the image yet. The enclave access policy recipe (a proposal, not installed here)
 # would only restrict the enclave node to the xkmsd group; it is not xkmsd.
 
 # hardening-survey section 7 and question 7 (b): the project image is built from
@@ -29,7 +30,8 @@ SUMMARY = "trusted-imx95 production image (provisional default, pending #14)"
 IMAGE_FEATURES += "read-only-rootfs"
 
 # hardening-survey section 7: add only the boot packagegroup (kernel, systemd
-# through INIT_MANAGER); the machine adds firmware-ele-imx.
+# through INIT_MANAGER); the machine adds firmware-ele-imx. docs/SPEC.md,
+# `platform-image`: xkmsd runs on the Linux side.
 # R6 (xkmsd-node.md section 3) is proposed, pending owner approval: the access
 # policy recipe stays out of the image until the owner decides.
-IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"
+IMAGE_INSTALL = "packagegroup-core-boot xkmsd ${CORE_IMAGE_EXTRA_INSTALL}"
