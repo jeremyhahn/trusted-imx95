@@ -12,7 +12,9 @@
 #
 # ELE_ATTEST_CMD is run as: $ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT
 # and must write the signed region and the 96-byte signature there, exit 0.
-# EVIDENCE_PYTHON names the interpreter (standard library only), default python3.
+# No interpreter: the bundle is composed in shell with base64, tr, stat and od
+# (the production image has no python3). --ek-template matches
+# [A-Za-z0-9._-]{1,64}, refused with exit 2 before the enclave command runs.
 set -euo pipefail
 
 die() {
@@ -44,10 +46,12 @@ done
 [[ "$nonce" =~ ^[0-9a-fA-F]{32}$ ]] || die "--nonce must be 32 hex digits"
 [[ "$version" =~ ^[23]$ ]] || die "--response-version must be 2 or 3 (decimal)"
 [[ "$handle" =~ ^0x81[0-9a-fA-F]{6}$ ]] || die "--ek-handle must be in 0x81000000-0x81FFFFFF"
+# Shell cannot JSON-escape safely, so the template is restricted (proposed,
+# pending owner approval; B5 stays open).
+[[ "$template" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "--ek-template must match [A-Za-z0-9._-]{1,64}"
 
 [ ! -d "$out" ] || die "$out is a directory (or a link to one); -o names a file"
 
-py=${EVIDENCE_PYTHON:-python3}
 work=$(mktemp -d)
 tmp=
 trap 'rm -rf "$work"; [ -z "$tmp" ] || rm -f -- "$tmp"' EXIT
@@ -73,26 +77,20 @@ read -r b0 b1 < <(od -An -tu1 -N2 -- "$work/ek.bin")
 # 3. Compose into a temp file, publish only when everything passed. This only
 # arranges the collected bytes; it verifies nothing (verification belongs to
 # go-xkms and go-trusted-platform, docs/SPEC.md).
-"$py" -I -c '
-import base64, json, sys
-signed, sig, ek, out, nonce, version, template = sys.argv[1:8]
-def b64(p):
-    data = open(p, "rb").read() if p != nonce else bytes.fromhex(nonce)
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-bundle = {
-    "format": "trusted-imx95/endorse-evidence",
-    "version": 1,
-    "ele_attestation": {
-        "response_version": int(version),
-        "signed": b64(signed),
-        "signature": b64(sig),
-        "verifier_nonce": b64(nonce),
-    },
-    "ftpm_ek": {"public": b64(ek), "template": template},
-    "binding": "session",
+b64() { # unpadded base64url of a file (no -w flag: portable to busybox)
+	base64 <"$1" | tr -d '\n=' | tr '+/' '-_'
 }
-open(out, "wb").write((json.dumps(bundle, sort_keys=True, separators=(",", ":")) + "\n").encode())
-' "$work/signed.bin" "$work/sig.bin" "$work/ek.bin" "$work/bundle.json" "$nonce" "$version" "$template" ||
+nonce_bytes=
+for ((i = 0; i < 32; i += 2)); do nonce_bytes+="\\x${nonce:i:2}"; done
+# shellcheck disable=SC2059 # the format is the \xHH string built from validated hex
+printf "$nonce_bytes" >"$work/nonce.bin"
+# Compact JSON, keys in sorted order, as the fixture's build writes it. The
+# template matched [A-Za-z0-9._-]{1,64} above, so it needs no JSON escaping.
+b_sig=$(b64 "$work/sig.bin") && b_signed=$(b64 "$work/signed.bin") &&
+	b_nonce=$(b64 "$work/nonce.bin") && b_ek=$(b64 "$work/ek.bin") ||
+	die "bundle composition failed"
+printf '{"binding":"session","ele_attestation":{"response_version":%s,"signature":"%s","signed":"%s","verifier_nonce":"%s"},"format":"trusted-imx95/endorse-evidence","ftpm_ek":{"public":"%s","template":"%s"},"version":1}\n' \
+	"$version" "$b_sig" "$b_signed" "$b_nonce" "$b_ek" "$template" >"$work/bundle.json" ||
 	die "bundle composition failed"
 
 # 4. Publish. Each step fails the script on its own: a failed step in a

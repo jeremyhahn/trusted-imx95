@@ -73,7 +73,7 @@ chmod +x "$BIN"/*
 col() { # env and args pass through; the doubles come first on PATH
 	cat "$LOG" >>"$W/all.log" 2>/dev/null || true
 	: >"$LOG"
-	PATH="$BIN:$PATH" EVIDENCE_PYTHON="$PY" "$@"
+	PATH="$BIN:$PATH" "$@"
 }
 HANDLE=0x81010001
 args=(--nonce "$NONCE" --response-version 3 --ek-handle "$HANDLE" --ek-template test-template)
@@ -138,7 +138,10 @@ expect "planted symlinks: OUT is a regular file" test -f "$W/pub/out.json" -a ! 
 rm -rf "$W/pub"
 # a failed run leaves no temp file in OUT's parent
 mkdir -p "$W/pub"
-run col env ELE_ATTEST_CMD="$BIN/ele-attest" EVIDENCE_PYTHON=/bin/false "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
+mkdir -p "$W/failbin"
+printf '#!/bin/sh\nexit 1\n' >"$W/failbin/base64"
+chmod +x "$W/failbin/base64"
+run col env PATH="$W/failbin:$BIN:$PATH" ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
 check "failed run" nonzero
 expect "failed run: parent empty" test -z "$(ls -A "$W/pub")"
 rm -rf "$W/pub"
@@ -205,6 +208,41 @@ done
 rm -f "$W/out.json"
 run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
 check "positive case after the shape negatives" 0 "wrote"
+rm -f "$W/out.json"
+
+# The template is restricted: shell cannot JSON-escape it. Refused before any double runs.
+long=$(printf 'a%.0s' $(seq 65))
+i=0
+for t in "a b" 'a"b' 'a\b' $'a\nb' "$long" ""; do
+	i=$((i + 1))
+	refuse "template case $i" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" \
+		--response-version 3 --ek-handle "$HANDLE" --ek-template "$t" -o "$W/out.json"
+done
+expect "template refusals left no OUT" test ! -e "$W/out.json"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" --response-version 3 \
+	--ek-handle "$HANDLE" --ek-template "${long:0:64}" -o "$W/out.json"
+check "a 64-character template" 0 "wrote"
+rm -f "$W/out.json"
+
+# The composed bundle is byte-identical to the fixture's build on the same inputs.
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "bundle for the byte comparison" 0 "wrote"
+run "$PY" -I "$TOOL" build --signed "$W/fx_signed.bin" --signature "$W/fx_sig.bin" --nonce "$NONCE" \
+	--response-version 3 --ek-public "$W/fx_ek.bin" --ek-template test-template -o "$W/ref.json"
+check "fixture build" 0
+expect "the bundle is byte-identical to the fixture build" cmp -s "$W/out.json" "$W/ref.json"
+rm -f "$W/out.json" "$W/ref.json"
+
+# No interpreter: PATH holds only the doubles and coreutils, no python3.
+mkdir -p "$W/nopy"
+for c in bash env base64 tr stat od mktemp mv rm cat cp dirname basename; do
+	ln -sf "$(command -v "$c")" "$W/nopy/$c"
+done
+ln -sf "$BIN/tpm2_readpublic" "$W/nopy/tpm2_readpublic"
+expect "no python3 on the restricted PATH" test ! -e "$W/nopy/python3"
+run col env PATH="$W/nopy" ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "run without python3" 0 "wrote"
+expect "run without python3: OUT written" test -s "$W/out.json"
 rm -f "$W/out.json"
 
 cat "$LOG" >>"$W/all.log"
