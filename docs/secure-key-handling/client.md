@@ -365,6 +365,10 @@ scripts/ele-lib-build.sh --work <dir> --src-only
 source is then `<dir>/src`. `ELE_SRC=<dir>/src REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh` runs the backend tests
 against it.
 
+`make ele-client-test` does both steps: it fetches into `src-work` under the ele-lib cache directory (`ELE_BASE`,
+outside the checkout) and runs the backend tests with `REQUIRE_ELE_SRC=1`, so a missing source fails and is not
+skipped. It needs network and is not in CI; `make test` still skips the backend test when `ELE_SRC` is unset.
+
 A lane whose read tools only open paths inside the worktree cannot use `--work` for that, because the script refuses a
 work dir inside the checkout. The method that worked there is the same fetch done by hand into the git-ignored
 `out/ele162/src`: `git init` a scratch directory outside the clone, `git fetch --depth 1` the upstream URL for the

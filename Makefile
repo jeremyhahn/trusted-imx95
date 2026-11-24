@@ -51,7 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools \
-	ele-lib ele-lib-check
+	ele-lib ele-lib-check ele-client-test
 
 help: ## List the targets
 	@echo "Targets:"
@@ -194,6 +194,10 @@ ele-lib-check: ## Check secure-key-handling/ele-lib.lock and the toolchain pin i
 
 ele-lib: ## Fetch NXP's secure-enclave library at the pinned commit and SHA-256, cross-build it for aarch64 into ELE_OUT (needs network; not in CI)
 	@scripts/ele-lib-build.sh --work "$(ELE_BASE)/work" --out "$(ELE_OUT)" --cache "$(ELE_BASE)/cache"
+
+ele-client-test: ## Fetch the pinned secure-enclave source outside the checkout (commit and SHA-256 checked), then run test/ele_client_test.sh against it (needs network; not in CI)
+	@scripts/ele-lib-build.sh --work "$(ELE_BASE)/src-work" --src-only
+	@ELE_SRC="$(ELE_BASE)/src-work/src" REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
