@@ -59,7 +59,7 @@ problem named by file and JSON path (never the value); 2 not JSON. It refuses (s
 
 ## Pre-close mode
 
-> **Proposed, pending owner approval.** `scripts/okp/record-check.py --pre-close RECORD.json` reads one JSON
+> **Internal and test-only; no public target.** `scripts/okp/record-check.py --pre-close RECORD.json` reads one JSON
 > file and runs nothing against a device. It checks a record written before the irreversible step, against
 > [key-ceremony-survey.md](key-ceremony-survey.md) §6: `life_cycle_before` is OEM open (case and spacing
 > ignored), `ahab_events` is an empty list, and `srk_hash`, `srk_lock_states`, `enclave_fw_version`,
