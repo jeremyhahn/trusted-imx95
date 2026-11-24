@@ -210,7 +210,7 @@ directory is canonicalised the same way before that comparison, and one with a
 the script). Its stub test is `test/platform_image_build_test.sh`, in `make test`.
 It is not in CI.
 
-**Result: no image was built.** The build stopped on the NXP EULA, which is
+**Earlier result (before the EULA was accepted; see "Results of the first real build" below): no image was built.** The build stopped on the NXP EULA, which is
 the owner's to accept (#14) and which this lane did not accept. Run on a lane
 host (112 CPUs, 372 GB RAM, 866 GB free disk), `bitbake trusted-imx95-image`
 attempted 1661 tasks, with the first failure at
@@ -232,14 +232,49 @@ Gaps, all provisional:
 
 - **EULA.** Accepted on 2026-11-24 by the owner: `ACCEPT_FSL_EULA = "1"` is set
   in `local.conf.template` (#14 answered). The run above is the one before that.
-- No artefact was built, so there are no digests, and reproducibility is
-  untested on real artefacts: the check exists (see "Reproducibility check"
-  below) but no real two-build run has happened.
+- Reproducibility is untested on real artefacts: the check exists (see
+  "Reproducibility check" below) but no real two-build run has happened.
 - The debug image was not run on its own; its target shares every failing
   recipe.
 - The host-tool list in the script (gcc, g++, make, git, python3, tar, xz,
   bzip2, patch, perl, unzip, wget, diffstat, chrpath, gawk, cpio, file, socat,
   zstd, lz4c) is a working list from this run, not Yocto's full required list.
+
+## Results of the first real build
+
+Date: 2026-11-24. Target `trusted-imx95-image` (not the debug image), with the
+EULA accepted. Run on a 112-CPU lane build node with `BB_NUMBER_THREADS=16` and
+`PARALLEL_MAKE="-j 16"`, a build directory and OUT outside the clone, no
+changes to the script. bitbake attempted 4716 tasks, none was rerun from a
+cache, all succeeded (3 warnings). `do_rootfs`, `do_image_wic` and the SPDX
+tasks ran. Wall time: 7947 s for the build (`build_seconds`), about 8100 s with
+the fetch. Disk: the build tree 71 GB, the fetched layers 166 MB (the download
+cache is inside the tree). `rm_work` is not enabled; the tree is far under
+250 GB. `sha256sum -c SHA256SUMS` and `make platform-image-verify` both pass.
+
+Pins (from `build-info.txt`): machine `imx95-19x19-lpddr5-frdm-pro`, distro
+`trusted-imx95`, `SOURCE_DATE_EPOCH=1302044400`, manifest commit
+`0c44ab18abe471b4326037b61893f4e69b6fc182`, `platform_image_dirty=no`, and the
+layers: bitbake `acfe02fa`, openembedded-core `5d1aa5c8`, meta-yocto `24c24cef`,
+meta-clang `ef0d22f2`, meta-openembedded `6bf0d8ad`, fsl-community-bsp-base
+`1d8c41be`, meta-freescale `ca31f33c`, meta-freescale-3rdparty `26d8b36a`,
+meta-freescale-distro `4464f38b`, meta-freescale-ml `1330790b`, meta-arm
+`0979b804`, meta-qt6 `302c4fab`, meta-browser `407e3ac9`, meta-security
+`c0d1d620`, meta-timesys `bf4ff1bb`, meta-virtualization `30f1a9d7`, meta-imx
+`2eb758f4`, meta-nxp-connectivity `12e139aa`, meta-nxp-demo-experience
+`dd4e742a` (full hashes in `build-info.txt`).
+
+Artefacts (name prefix `trusted-imx95-image-imx95-19x19-lpddr5-frdm-pro.rootfs-20261124152713`):
+
+| Artefact | Bytes | SHA-256 |
+| --- | --- | --- |
+| `.wic.zst` | 39565817 | `e063e81f24053fb4eb00a00a31b7d7044264a7d37bf6da0847b65815ff972d11` |
+| `.wic.bmap` | 3825 | `6051c1a434ffd048cdbe502035670c97b75ea9629625c47b8d6d05eaf7a0670b` |
+| `.tar.zst` (rootfs) | 22452684 | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` |
+| `.manifest` | 3166 | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` |
+| `.spdx.json` (SBOM) | 3700404 | `541cd494c29b857540db3c298621bc2e3a58726752c34a118f4501a32a8fc9e1` |
+
+The image is unsigned. No `--repro` run has happened on real artefacts.
 
 ## Reproducibility check (provisional, not run)
 
