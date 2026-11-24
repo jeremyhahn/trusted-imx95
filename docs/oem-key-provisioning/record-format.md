@@ -68,5 +68,5 @@ problem named by file and JSON path (never the value); 2 not JSON. It refuses (s
 > secret checks still run. Same exit codes. `test/okp_pre_close_test.sh` ties each numbered §6 item to a
 > field, or says why it is not a record field.
 
-`make okp-record-check` runs it on the test fixture. Owner question (proposed, pending owner approval):
+`make test` runs it on the test fixture (test/okp_record_check_test.sh); there is no public target. Owner question (proposed, pending owner approval):
 whether the SPEC row should name this record; this lane does not edit SPEC.md.

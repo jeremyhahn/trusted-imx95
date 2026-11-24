@@ -219,9 +219,6 @@ okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
 
-okp-record-check: ## Check the proposed station record fixture for required fields and secrets (reads one JSON file; touches no device, no network, no fuse)
-	@python3 -I scripts/okp/record-check.py test/fixtures/okp-record/valid.json
-
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
 	@scripts/ahab/srk-hash-check.sh "$$SRK_EXPECTED" $$SRK_FILES
