@@ -641,8 +641,9 @@ expect "the recipe installs the TPM target" ncstr "$nv" 'trusted-imx95-tpm.targe
 expect "the recipe enables the TPM target from multi-user.target" ncstr "$nv" 'multi-user.target.wants/trusted-imx95-tpm.target'
 expect "the TPM target is wanted by multi-user.target" ncstr "$tpmt" 'WantedBy=multi-user.target'
 
-# SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
-expect "SPEC row ftpm keeps the approved NV erasure clause" ncstr "$ROOT/docs/SPEC.md" 'is wiped with the root file system'
+# SPEC row 34 (ftpm): the REE-FS NV is lost when the root file system is reflashed
+# (owner rulings 1243 and 1244, merged from main).
+expect "SPEC row ftpm keeps the approved NV erasure clause" ncstr "$ROOT/docs/SPEC.md" 'loses the NV when the root file system is reflashed'
 expect "SPEC row ftpm lets no root rewrite keep the NV" none 'root rewrite keeps the NV' "$ROOT/docs/SPEC.md"
 expect "README says the mechanism implements the SPEC requirement" has "$ROOT/docs/ftpm/README.md" 'it implements the SPEC row'
 expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
