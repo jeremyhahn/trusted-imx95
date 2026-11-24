@@ -195,9 +195,18 @@ mkdir -p "$tmp/d/sub" "$tmp/un"
 orun "$ROOT"
 check "OUT = the checkout: refused" nonzero "is this clone"
 expect "OUT = the checkout: Makefile survives" test -f "$ROOT/Makefile"
-orun "$(dirname "$ROOT")"
+# The ancestor case runs on a scratch clone, so it holds wherever the real
+# checkout lives (CI checks out directly under /, whose parent is the root).
+rm -rf "$tmp/p"
+mkdir -p "$tmp/p/clone"
+cp -a "$ROOT/scripts" "$ROOT/platform-image" "$ROOT/Makefile" "$tmp/p/clone/"
+real_script=$script
+script=$tmp/p/clone/scripts/platform-image-build.sh
+orun "$tmp/p"
 check "OUT = an ancestor of the checkout: refused" nonzero "contains this clone"
-expect "OUT = an ancestor: the checkout survives" test -f "$ROOT/Makefile"
+expect "OUT = an ancestor: the checkout survives" test -f "$tmp/p/clone/Makefile"
+script=$real_script
+rm -rf "$tmp/p"
 orun "$tmp/d"
 check "OUT = PLATFORM_IMAGE_DIR: refused" nonzero "platform-image directory"
 expect "OUT = PLATFORM_IMAGE_DIR: sentinel survives" test -f "$tmp/d/sentinel"
