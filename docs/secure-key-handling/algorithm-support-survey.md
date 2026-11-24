@@ -20,7 +20,7 @@ difference wherever it matters. The library's own test suite (S6) is a stronger 
 it chooses which tests to run on each SoC and silicon revision. It is still not a datasheet.
 
 The enclave reference manual that docs/SPEC.md cites (RM00284) and the i.MX 95 Security
-Reference Manual are not public, and this lane did not read them. Claims that would need
+Reference Manual are not public, and this survey did not read them. Claims that would need
 them are marked *not confirmed in public sources*.
 
 ## 2. Sources surveyed
@@ -92,7 +92,7 @@ the i.MX 95: *not confirmed in public sources*.
 
 ### 3.5 Random numbers
 
-S1 has a random-number service (`include/common/rng.h`). No public source this lane reached
+S1 has a random-number service (`include/common/rng.h`). No public source this survey reached
 says which DRBG construction or entropy source it uses, or how it is rated: *not confirmed
 in public sources*.
 
@@ -100,14 +100,14 @@ in public sources*.
 
 - **FIPS 140-3:** the CMVP search (S7) shows NXP certificates for the i.MX 8DXL SECO HSM
   (#4837), the i.MX 8DXL V2X (#4839) and the SE052F secure element (#5139). It shows none for
-  the i.MX 95, for any EdgeLock enclave, or for an i.MX 9 part. This lane found no NXP entry
-  in the modules-in-process list. The lane read that list automatically, so an entry might
+  the i.MX 95, for any EdgeLock enclave, or for an i.MX 9 part. This survey found no NXP entry
+  in the modules-in-process list. The survey read that list automatically, so an entry might
   have been missed: *not confirmed in public sources*.
 - README S2 describes a FIPS variant of the i.MX 8DXL and i.MX 8QXP that disables some
   services. It describes no such variant for the i.MX 95.
 - **Common Criteria:** the certified products list (S8) has no NXP i.MX or EdgeLock entry.
 - **Other schemes** (SESIP, PSA Certified): not searched. Any claim of this kind on NXP
-  product pages is *not confirmed in public sources* by this lane.
+  product pages is *not confirmed in public sources* by this survey.
 - Conclusion: no public source reached supports a certification claim for the i.MX 95
   enclave. The project should not claim one.
 
@@ -132,7 +132,7 @@ in public sources*.
 ### 5.2 ML-KEM (FIPS 203)
 
 The library has no ML-KEM, Kyber or other KEM identifier at tag `lf-6.18.37-2.1.0` (S1). No
-public source this lane reached says that ML-KEM is offered on the i.MX 95 enclave. Other
+public source this survey reached says that ML-KEM is offered on the i.MX 95 enclave. Other
 post-quantum schemes (SLH-DSA, LMS, XMSS) do not appear in S1 either.
 
 ### 5.3 Enclave firmware versions
@@ -232,6 +232,6 @@ needs Go Cryptographic Module v1.26.0 or later (S9). If device-side ML-KEM is ev
    i.MX 95 enclave (S7, S8).
    Options: (a) make no certification claim for the device; (b) require a certified module
    for the keys that need one (for example the board's SE051, whose role is still open in
-   docs/SPEC.md and whose certification this lane did not check, or an external HSM); (c) ask NXP about plans.
+   docs/SPEC.md and whose certification this survey did not check, or an external HSM); (c) ask NXP about plans.
    Recommendation: (a) now. Choose (b) if a customer requirement for certified key storage
    appears.
