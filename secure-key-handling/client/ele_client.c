@@ -125,7 +125,7 @@ int ele_delete_key(struct ele_client *c, uint32_t key_id, enum ele_commit *state
 	/* The library's delete offers the strict-operation flag only: there is no
 	 * monotonic-counter flag on a delete, so the enclave can never acknowledge
 	 * both flags for it. Send the strict flag alone and never report a delete
-	 * as rollback-protected (client.md; owner question open). */
+	 * as rollback-protected (client.md, "Fail-closed rule"). */
 	uint32_t flags = c ? (c->flags & ELE_REQ_STRICT_OPERATION) : 0;
 	int rc;
 

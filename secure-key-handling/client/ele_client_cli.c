@@ -19,7 +19,7 @@
 
 /* The fixed reason for a refused generate or delete (TENANT ASK 5, owner
  * question open): see docs/secure-key-handling/client.md. */
-#define CTR_REASON "the pinned library cannot prove the monotonic-counter acknowledgement (fail closed; owner question open)"
+#define CTR_REASON "the pinned library cannot prove the monotonic-counter acknowledgement (fail closed)"
 
 /* Read the whole wrapped blob: 1 to ELE_IMPORT_MAX_BLOB bytes, read in full.
  * Returns the length, or -1 for an unreadable, empty or over-long file. The
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
 			ele_commit_name(st), id, CTR_REASON);
 	else if (rc != 0 && cmd.op == ELE_CLI_DEL && st != ELE_NOT_COMMITTED)
 		/* Every key-store update fails closed: the counter acknowledgement
-		 * cannot be established for a delete (client.md, Q2). The delete may
+		 * cannot be established for a delete (client.md, "Fail-closed rule"). The delete may
 		 * have taken effect, but its old store blob may stay replayable. */
 		fprintf(stderr, "ele_client: update refused (%s); key %u delete is NOT rollback-protected: the old key-store state may be replayable; %s\\n",
 			ele_commit_name(st), cmd.key_id, CTR_REASON);

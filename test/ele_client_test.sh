@@ -229,7 +229,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 		fail "nm is not available here"
 	fi
 	printf '1234\n' >"$tmp/nonce"
-	# The shipped backend never reports the counter acknowledged (client.md, Q2),
+	# The shipped backend never reports the counter acknowledged (client.md, "Fail-closed rule"),
 	# so no generate or delete succeeds through it. The success path and the
 	# checks of its stdout writes run against a test-only backend double,
 	# linked with the same command line source; it is not part of the shipped build.
@@ -323,7 +323,7 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	# TENANT ASK 5, the fail-closed default: over the shipped backend plus the
 	# fake returning HSM_NO_ERROR, gen and del exit 1, stdout is empty, and
 	# stderr names the key, "NOT rollback-protected" and the fixed reason.
-	ctr_reason='the pinned library cannot prove the monotonic-counter acknowledgement (fail closed; owner question open)'
+	ctr_reason='the pinned library cannot prove the monotonic-counter acknowledgement (fail closed)'
 	for op in "gen" "del 7"; do
 		rc=0
 		# shellcheck disable=SC2086

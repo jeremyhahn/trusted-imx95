@@ -1,6 +1,6 @@
 # secure-key-handling: the enclave HSM API client
 
-> **Status: the Linux-side client is the chosen design (owner ruling 1234); other defaults below stay PROVISIONAL, awaiting the owner's answer** · Scope: trusted-imx95 · Last verified: 2026-11-23
+> **Status: the Linux-side client is the chosen design (owner ruling 1234); the fail-closed rule is decided (owner, 2026-11-24, Q2 option (c)); other defaults below stay PROVISIONAL, awaiting the owner's answer** · Scope: trusted-imx95 · Last verified: 2026-11-23
 
 A minimal key-store client over the EdgeLock enclave's HSM API, built from NXP's public secure-enclave user library
 at a pinned revision. It follows [architecture.md](architecture.md). The calling side is decided; every other default
@@ -10,8 +10,9 @@ marked provisional below can be reversed without losing the work.
 
 The client runs on the Cortex-A55 Linux side: owner ruling 1234 decided that the Cortex-A55 Linux side calls the HSM
 API. The policy code reaches the library through an ops table. The owner's counter-acknowledgement question (Q2) is
-not decided by that ruling and stays open; its default is (c), fail closed (provisional): no update is reported
-rollback-protected.
+decided (owner, 2026-11-24, option (c)): a generate or delete through the shipped ELE library is reported as failed
+with "NOT rollback-protected", because the library does not expose the counter acknowledgement. Options (a), patching
+the library, and (b), accepting `HSM_NO_ERROR`, are not taken.
 
 ## The library, pinned
 
@@ -61,7 +62,7 @@ returned and printed (`update refused (...)`), so the diagnostic is kept. A gene
 even when its update is refused (a counter warning): its identifier is returned with the failure and the command
 prints it (`key N was generated and is NOT rollback-protected`) so it can be reconciled or deleted, not presented as a
 protected key. A strict-only send (a delete) does **not** succeed:
-`ele_delete_key` returns failure unless the counter is acknowledged, which the binding never reports (owner Q2). The
+`ele_delete_key` returns failure unless the counter is acknowledged, which the binding never reports (the fail-closed rule). The
 delete may nevertheless have taken effect on the device while failing the rollback policy, so a caller must treat the
 key as possibly deleted; the commit state is returned for that.
 
@@ -146,11 +147,12 @@ same strict-hex rules and accumulates straight into the locked slot through a vo
 parser and shows the nonce path makes none. Stack residue in the optimized binary is minimised by this, not proven
 absent.
 
-## Fail-closed default (owner question open)
+## Fail-closed rule
 
-**Proposed, pending owner approval; the owner's to decide (TENANT ASK 5, Q2).** This policy is not in
-[SPEC.md](../SPEC.md): ruling 1234 approved only the Linux calling side. The code's conservative default keeps generate
-and delete failing closed until the owner answers. This section is the one statement of it; the other sections link here.
+**Decided by the owner (2026-11-24, Q2, option (c)).** A generate or delete through the shipped ELE library is reported
+as failed with "NOT rollback-protected", because the library does not expose the counter acknowledgement. Options (a),
+patching the library, and (b), accepting `HSM_NO_ERROR`, are not taken. The rule is not in [SPEC.md](../SPEC.md); this
+section is the one statement of it, and the other sections link here.
 
 **What the pinned library cannot show.** At the pinned commit, a success-tagged reply that carries a warning rating is
 mapped to `HSM_NO_ERROR`: `hsm_api/hsm_utils.c:24-48` logs the rating (counter-warning rating 0x10 included) and
@@ -164,7 +166,7 @@ the acknowledgement.
 
 - the strict flag acknowledged and the counter acknowledgement unprovable: exit 1, nothing on stdout, and on stderr the
   key id, `NOT rollback-protected` and the fixed reason `the pinned library cannot prove the monotonic-counter
-  acknowledgement (fail closed; owner question open)`;
+  acknowledgement (fail closed)`;
 - any other return code after the started marker (`HSM_KEY_STORE_COUNTER` included), a lost result or a dead child:
   exit 3, an unknown outcome (see above).
 
@@ -237,9 +239,9 @@ was applied. After the started marker it is an unknown outcome for generate and 
 changed; check it before retrying"), and generate never reports a key. Before the marker an error stays a plain failure.
 The result table above for a counter warning therefore applies only to a library that exposes it separately; the
 binding does not.
-**The counter flag is never reported acknowledged (fail closed, provisional).** The library cannot show the counter
+**The counter flag is never reported acknowledged (fail closed, decided).** The library cannot show the counter
 acknowledgement, so the backend reports no operation rollback-protected; see
-[Fail-closed default (owner question open)](#fail-closed-default-owner-question-open).
+[Fail-closed rule](#fail-closed-rule).
 The counter split cannot be read through these calls, so the backend reports it configured only when the caller sets
 `counter_split_confirmed` after confirming it on the device. It is false by default, so nothing is reported
 rollback-protected on an unconfirmed split.
@@ -309,7 +311,7 @@ crosses a process boundary: the session and key-store handles are created and cl
 **Every key-store update fails closed.** `ele_generate_key` and `ele_delete_key` both report success only with the
 counter acknowledgement established (counter acknowledged, no warning, split configured), which the binding never
 establishes. The reason, the outcomes and the tests are in
-[Fail-closed default (owner question open)](#fail-closed-default-owner-question-open). A delete exits 1 with
+[Fail-closed rule](#fail-closed-rule). A delete exits 1 with
 `update refused (...); key N delete is NOT rollback-protected`, exactly as a generate does; the delete may have taken
 effect and its old key-store blob may stay replayable. Memory-lock tests: the open is refused when the lock
 fails (a stub, and the real `mlockall` in a child with `RLIMIT_MEMLOCK` 0); `test/ele_client_test.sh` raises the soft
@@ -431,7 +433,7 @@ double (`ele_hsm_fake.c`) follows the same source: a sign leaves `signature_size
 
 ## What is left open
 
-- **Owner:** Q2, the counter acknowledgement (default (c), fail closed, provisional); the delete gap (above); the SE051's role. The calling side is decided (owner ruling 1234).
+- **Owner:** the delete gap (above); the SE051's role. The calling side is decided (owner ruling 1234), and so is Q2 (fail closed, option (c), 2026-11-24).
   From the second reading, for Q2 (no code change made on it): the counter-flag request is documented as completing
   only once the counter is updated, but the exhausted-counter warning reaches the caller as `HSM_NO_ERROR` on a
   success-tagged reply and is otherwise documented on the NVM export path, which the NVM manager handles, not the

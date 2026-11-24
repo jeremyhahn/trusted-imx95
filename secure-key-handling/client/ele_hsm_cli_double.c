@@ -1,6 +1,6 @@
 /* A test-only stand-in for ele_hsm_backend.c, linked with ele_client_cli.c by
  * test/ele_client_test.sh and never by the shipped build. The shipped backend
- * cannot report a counter acknowledgement (client.md, Q2), so a generate or a
+ * cannot report a counter acknowledgement (client.md, "Fail-closed rule"), so a generate or a
  * delete never succeeds through it; this double answers every update as
  * committed with both flags acknowledged, so the command line's success path,
  * and the checks of its stdout writes, can be run. No library, no nonce kept. */
