@@ -7,8 +7,16 @@ set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
+# make build runs pins-check, whose rule i reads .github/workflows.
+fixture_with_workflows() {
+	fixture_repo "$1"
+	mkdir -p "$1/.github"
+	cp -R "$ROOT/.github/workflows" "$1/.github/"
+	git -C "$1" add -A
+}
+
 repo="$TMP_ROOT/repo"
-fixture_repo "$repo"
+fixture_with_workflows "$repo"
 
 run make -s -C "$repo" build
 check "make build: every script parses and the base image matches the pin file" 0 "build: OK"
@@ -33,7 +41,7 @@ check "make cst-check: an extracted CST tree outside the repository passes" 0 "O
 
 # A Dockerfile base that drifts from the pin file fails the build stage.
 drift="$TMP_ROOT/drift"
-fixture_repo "$drift"
+fixture_with_workflows "$drift"
 # shellcheck disable=SC2016 # a literal Dockerfile line
 printf 'ARG ALPINE_IMAGE=alpine:3.0.0\nFROM ${ALPINE_IMAGE}\n' >"$drift/build/docker/devcontainer/Dockerfile"
 run make -s -C "$drift" build
