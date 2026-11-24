@@ -322,7 +322,7 @@ expect "the published build-info records the lock's platform" has_line "tfa: $(l
 
 # A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's
 # release directory, so publication shows the script stages from the matching path.
-edit_altplat() { [[ "$1" == TFA_PLAT=* ]] && echo TFA_PLAT=imx95x || edit_tcsum "$1"; }
+edit_altplat() { if [[ "$1" == TFA_PLAT=* ]]; then echo TFA_PLAT=imx95x; else edit_tcsum "$1"; fi; }
 altlock=$(lockcopy altplat edit_altplat)
 fullrun altplat "$altlock"
 check "a build with another TFA_PLAT reaches publication" 0 "secure-world-build: OK"
@@ -447,7 +447,7 @@ md_copy() { # <name> <from> <to>
 }
 off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}0")
 [ "${tfa_commit: -1}" != 0 ] || off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}1")
-branch_only=$(md_copy md-branch "\`$tfa_commit\`" '`lf_v2.14`')
+branch_only=$(md_copy md-branch "\`$tfa_commit\`" "\`lf_v2.14\`")
 pin_row_bad() { ! pin_row_ok "$@"; }
 expect "a build.md with the TF-A commit changed by one digit fails the pin row check" pin_row_bad "$off_by_one" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
 expect "a build.md naming a branch only fails the pin row check" pin_row_bad "$branch_only" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
