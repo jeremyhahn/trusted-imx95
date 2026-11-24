@@ -88,6 +88,13 @@ outcome unknown (the key store may have changed; check it before retrying). Test
 child-killed, exits-nonzero, short-result, status -1 and vendor-error-code cases into before-marker (plain failure) and
 after-marker (unknown) cases for generate and delete, and `test/ele_client_test.sh` drives exit 3 end to end.
 
+**A generate that returns `HSM_NO_ERROR` with the key id still at the zero sentinel is an unknown outcome too.** A
+success reply that names no key cannot be reconciled or deleted by id, so the child leaves status -1 (exit 3,
+`ele_hsm_backend.c`, `op_service`) and never reports a committed key. The only other result path that reads an
+identifier from a success reply is sign, which reads the signature and its size, not a key id (a size other than 64 is
+refused); delete takes the id from the caller. Tests: `ele_hsm_backend_test.c` and `test/ele_client_test.sh` use the
+fake's `ELE_FAKE_ID_ZERO` to return `HSM_NO_ERROR` with id 0 and assert the unknown outcome and exit 3.
+
 **Why every error after the marker is unknown.** The vendor may report a lost device reply as an error after the
 update was applied, so the error code does not tell applied from not applied. The classification therefore does not
 depend on the vendor's error mapping: after the marker, only a verified success (status 0 in a complete result of a
@@ -316,6 +323,30 @@ it, so they skip on a host without the image. `CI=true` alone does not require i
 against the built `libele_hsm`; the script checks the result is AArch64 and needs that library. `test/ele_client_test.sh` runs the same
 check when `ELE_SRC` names the fetched source, and shows that a wrong value fails it. No vendor header or text is
 copied into this repository.
+
+## Reproduce the vendor read
+
+Vendor source is never copied into this repository. A reviewer fetches the pinned tree outside the checkout:
+
+- upstream: `https://github.com/NXP/imx-secure-enclave.git`, commit `463845060a79dd9a6d39db3b3d8dff60225b9dfd`;
+- archive digest (SHA-256 of `git archive --format=tar` of that commit, `ELE_ARCHIVE_SHA256` in
+  [`ele-lib.lock`](../../secure-key-handling/ele-lib.lock)):
+  `31f7baedab12e5c5b1efe088d609243e63e5992bea9701082f0942fc4c90c079`;
+- the command, which fetches the commit, checks the commit and the digest, and fails closed on a mismatch:
+
+```
+scripts/ele-lib-build.sh --work <dir> --src-only
+```
+
+`<dir>` must be a new or empty directory outside the checkout (the script refuses one inside it or above it); the
+source is then `<dir>/src`. `ELE_SRC=<dir>/src REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh` runs the backend tests
+against it.
+
+**Status of the third reading (lane 162-skh-fix-r4).** The fetch above was repeated and matched the pinned digest. This
+lane could not read the fetched files: its read guard refuses any code path outside the worktree. So no new "read twice"
+mark was added here for the PSA argument semantics, the response decoding or the nonce-copy assumptions; the marks in the
+table below are those of lane 162-skh-next2, unchanged, and the rows that the guard blocked are still waiting for a
+reader who can open `<dir>/src`.
 
 ## The library contract the backend relies on
 
