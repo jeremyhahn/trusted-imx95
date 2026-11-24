@@ -18,10 +18,11 @@ fails=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fails=$((fails + 1)); }
 
+# shellcheck disable=SC2016  # the Python program is meant to be unexpanded
 PY='
 import os, re, sys
 
-docs, scripts = sys.argv[1], sys.argv[2]
+docs, scripts, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 SURVEY = os.path.join(docs, "provisioning-records-survey.md")
 FORMAT = os.path.join(docs, "record-format.md")
 CHECKER = os.path.join(scripts, "record-check.py")
@@ -48,7 +49,7 @@ def table(path, heading_re):
             continue
         if inside and text.startswith("|"):
             cells = [c.strip() for c in text.strip().strip("|").split("|")]
-            if all(re.fullmatch(r"-+", c) for c in cells) or cells[0] in ("Field", "JSON name"):
+            if all(re.fullmatch(r"-+", c) for c in cells) or cells[0] in ("Field", "JSON name", "Never in the record"):
                 continue
             rows.append((n, cells))
     return rows
@@ -136,13 +137,66 @@ for field in OTHER_FIELDS:
     if checker and field not in checker:
         err(CHECKER, 1, field, "other-fields table entry is not in FIELDS")
 
+# Slice 2: every survey section 4 "never in the record" row (first cell) -> the name of one
+# record field that holds that kind of content and a value for it. Values are built from
+# fragments here, so no key-shaped literal sits in this file.
+pre = "-----BEGIN "
+tail = "-----"
+short = "fake-value-%d" % os.getpid()
+ROW4 = {
+    "Private keys, symmetric keys, OEM master keys": ("private_key", pre + "RSA PRIV" + "ATE KEY" + tail + " body"),
+    "Key-exchange secrets and session keys": ("kex_shared_secret", short),
+    "Wrapped key blobs, where custody would weaken": ("wrapped_key_blob", short),
+    "EdgeLock 2GO secure objects": ("secure_object_contents", short),
+    "Credentials of the station itself": ("station_credential", short),
+    "Unredacted personal data of operators": ("operator_email", short),
+}
+# Rows the checker cannot refuse: row -> reason, "proposed, pending owner approval". Empty: every
+# row has a refused record today.
+ROW4_IGNORE = {}
+
+if mode == "refuse":
+    import json, subprocess, tempfile
+    rows4 = {}
+    for n, cells in table(SURVEY, r"## 4\."):
+        rows4[cells[0]] = n
+    if not rows4:
+        err(SURVEY, 1, "section 4", "no data rows found")
+    for row, n in rows4.items():
+        if row not in ROW4 and row not in ROW4_IGNORE:
+            err(SURVEY, n, row, "survey section 4 row has no record in the drift test table")
+    for row in list(ROW4) + list(ROW4_IGNORE):
+        if rows4 and row not in rows4:
+            err(SURVEY, 1, row, "table entry names no survey section 4 row")
+    with open(sys.argv[4], encoding="utf-8") as fh:
+        valid = json.load(fh)
+    with tempfile.TemporaryDirectory() as tmp:
+        for row, n in rows4.items():
+            if row not in ROW4:
+                continue
+            field, value = ROW4[row]
+            rec = dict(valid)
+            rec[field] = value
+            path = os.path.join(tmp, "rec.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(rec, fh)
+            run = subprocess.run([sys.executable, "-I", CHECKER, path], capture_output=True, text=True)
+            text = run.stdout + run.stderr
+            if run.returncode != 1:
+                err(SURVEY, n, row, "a record with field %s exits %d, want 1" % (field, run.returncode))
+            elif "$." + field not in text:
+                err(SURVEY, n, row, "the checker refuses the record but does not name $.%s" % field)
+            elif value in text:
+                err(SURVEY, n, row, "the checker prints the value of $.%s" % field)
+
 for e in errs:
     print(e)
 sys.exit(1 if errs else 0)
 '
+fixture="$here/test/fixtures/okp-record/valid.json"
 
-# drift DOCS SCRIPTS: run the check, output in $out, status in $rc
-drift() { out=$(python3 -I -c "$PY" "$1" "$2" 2>&1); rc=$?; }
+# drift DOCS SCRIPTS [MODE]: run the check, output in $out, status in $rc
+drift() { out=$(python3 -I -c "$PY" "$1" "$2" "${3:-drift}" "$fixture" 2>&1); rc=$?; }
 
 # expect_fail NAME WANT...: the last drift run failed and its output names every WANT
 expect_fail() {
@@ -188,9 +242,27 @@ drift "$work/renamed/docs" "$work/renamed/scripts"
 expect_fail "a renamed FIELDS name fails and is named" "srk_hash_algorithm" "srk_hash_alg" "record-check.py"
 
 mk nopage
+# shellcheck disable=SC2016  # backticks in the Python text are literal
 edit nopage docs/record-format.md 's = s.replace("| `outcome` |", "| `outcome_gone` |", 1).replace("| `outcome_gone` | string | yes | §3 outcome |\n", "", 1)'
 drift "$work/nopage/docs" "$work/nopage/scripts"
 expect_fail "a deleted format page field row fails and is named" "outcome" "record-format.md"
+
+# slice 2
+drift "$docs" "$scripts" refuse
+if [ "$rc" = 0 ]; then ok "every survey section 4 row has a record the checker refuses, naming the field"
+else bad "a section 4 row is not refused:"; echo "$out"; fi
+
+mk nodeny
+edit nodeny scripts/record-check.py 'import re
+s = re.sub(r"# --- deny list: begin.*?# --- deny list: end", "DENY_KEY_TERMS = ()", s, flags=re.S)'
+drift "$work/nodeny/docs" "$work/nodeny/scripts" refuse
+expect_fail "an emptied deny list fails the credential and key-exchange rows" \
+  "Credentials of the station itself" "Key-exchange secrets and session keys"
+
+mk newrow4
+edit newrow4 docs/provisioning-records-survey.md 's = s.replace("| Credentials of the station itself |", "| Fresh scratch never-row | why | src |\n| Credentials of the station itself |", 1)'
+drift "$work/newrow4/docs" "$work/newrow4/scripts" refuse
+expect_fail "a new section 4 row without a table entry fails and is named" "Fresh scratch never-row"
 
 [ "$fails" -eq 0 ] || { echo "$fails failure(s)"; exit 1; }
 echo "all passed"

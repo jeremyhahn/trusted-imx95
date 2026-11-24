@@ -52,7 +52,8 @@ problem named by file and JSON path (never the value); 2 not JSON. It refuses (s
 
 - a PEM or OpenSSH private-key header in any string or key name;
 - a key name on the deny list: private key, secret, session key, wrapped key, blob, token, password,
-  API key, secure-object contents, and names for a station credential;
+  API key, secure-object contents, names for a station credential, and names for an operator's
+  personal data (operator name, full name, email, phone; a value is never judged, so use a role);
 - a string of plain hex or base64 of 32 bytes or more outside the declared hash fields;
 - a hash field whose width is wrong (256-bit on A0/A1, 512-bit on B0).
 

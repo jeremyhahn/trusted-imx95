@@ -69,6 +69,8 @@ DENY_KEY_TERMS = (
     "secureobjectcontent", "securedobjectcontent",
     # a field named for a station credential
     "credential", "stationkey", "signingkey", "hsmpin", "bearer", "authkey",
+    # a field named for an operator's personal data (survey section 4); a value cannot be judged
+    "operatorname", "fullname", "email", "phone",
 )
 if OWNER_ANSWERS["Q3_blob_hash_only"]:
     DENY_KEY_TERMS += ("blob",)
