@@ -107,9 +107,9 @@ expect "corrupt archive: refused by name" has "$wt/out" "img.rootfs-20250101.tar
 
 # the checker writes nothing to either directory
 mk "$wt/b"
-before=$(cd "$wt/a" && find . | sort | xargs -d '\n' ls -ld --time-style=+ | md5sum)
+before=$(cd "$wt/a" && find . -exec stat -c '%n %a %s %Y' {} + | sort | md5sum)
 run "$wt/a" "$wt/b"
-after=$(cd "$wt/a" && find . | sort | xargs -d '\n' ls -ld --time-style=+ | md5sum)
+after=$(cd "$wt/a" && find . -exec stat -c '%n %a %s %Y' {} + | sort | md5sum)
 expect "the checker leaves the deploy directory untouched" test "$before" = "$after"
 
 # the make target

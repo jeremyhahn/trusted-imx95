@@ -53,7 +53,7 @@ c_sources() {
 		echo "missing Sources table header"
 	while read -r id; do
 		grep -q "^| $id |" "$f" || echo "cited $id has no Sources row"
-	done < <(section_body "$f" '^## [1-5]\. ' '^## [^1-5]' |
+	done < <(section_body "$f" '^## [1-5][.] ' '^## [^1-5]' |
 		grep -oE '\bS[0-9]+\b' | sort -u)
 	while read -r row; do
 		awk -F'|' '{ c = $(NF - 1); gsub(/^ +| +$/, "", c);
@@ -67,7 +67,7 @@ c_unconfirmed() {
 	grep -qF unconfirmed "$f" || echo "no unconfirmed mark in the file"
 	grep -qE '^#+ Sources not reached' "$f" ||
 		echo "missing 'Sources not reached' heading"
-	section_body "$f" '^## 5\. ' '^## [^5]' | grep -qF unconfirmed ||
+	section_body "$f" '^## 5[.] ' '^## [^5]' | grep -qF unconfirmed ||
 		echo "section 5 has no unconfirmed cell"
 }
 
