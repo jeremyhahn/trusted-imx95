@@ -83,6 +83,31 @@ printf 'layer_y_commit=zzz\n' >>"$b/build-info.txt"
 run bash "$script" "$a" "$b"
 check "build-info has an extra line" 1 "build-info.txt has"
 
+# Yocto's names carry the build timestamp (.rootfs-<14 digits>.<ext>): two
+# builds made at different times compare by the name without it.
+# mkts DIR TIMESTAMP [TAR-CONTENT]
+mkts() {
+	rm -rf "$1"
+	mkdir -p "$1"
+	echo wic >"$1/img-m.rootfs-$2.wic.zst"
+	echo "${3:-tar}" >"$1/img-m.rootfs-$2.tar.zst"
+	echo ext4 >"$1/img-m.rootfs-$2.ext4"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" >"$1/build-info.txt"
+}
+mkts "$a" 20261123000001
+mkts "$b" 20261123000002
+run bash "$script" "$a" "$b"
+check "identical bytes, different timestamps" 0 "3 artefacts identical"
+mkts "$b" 20261123000002 other
+run bash "$script" "$a" "$b"
+check "different bytes, different timestamps: names the member" 1 "img-m.rootfs.tar.zst differs"
+mkts "$b" 20261123000002
+rm "$b/img-m.rootfs-20261123000002.ext4"
+(cd "$b" && sha256sum -- img-m.* >SHA256SUMS)
+run bash "$script" "$a" "$b"
+check "a member missing from one build: named" 1 "img-m.rootfs.ext4: only in $a"
+
 run bash "$script" "$a"
 check "a missing argument" 2 "need exactly two output directories"
 run bash "$script"

@@ -56,6 +56,12 @@ for t in "$@"; do
 	# Yocto's real layout: <image>-<machine>.rootfs-<timestamp>.<ext>, plus
 	# unsuffixed symlinks. BB_TS sets the timestamp of this build.
 	ts=${BB_TS:-20261123000000}
+	if [ -n "${BB_TS_SEQ:-}" ]; then # a new timestamp on every target built
+		seq=$(cat "$BB_TS_SEQ" 2>/dev/null || echo 0)
+		seq=$((seq + 1))
+		echo "$seq" >"$BB_TS_SEQ"
+		ts=$((20261123000000 + seq))
+	fi
 	b="$t-$BB_MACHINE.rootfs-$ts"
 	echo wic-$t >"$d/$b.wic.zst"
 	echo tar-$t >"$d/$b.tar.zst"
@@ -287,7 +293,7 @@ expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_
 
 # --repro: two builds in separate directories, compared, published on a match.
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
-brun "$stub:$tools" --repro
+BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
 check "--repro: deterministic stub passes" 0 "OK, 4 artefacts" "two builds identical"
 expect "--repro: bitbake ran twice" test "$(wc -l <"$tmp/log")" -eq 4
 expect "--repro: SHA256SUMS published and verifies" bash -c "cd '$tmp/out' && sha256sum -c --quiet SHA256SUMS"
@@ -298,12 +304,12 @@ expect "--repro: build 2 had its own directory" test -d "$tmp/d.repro-b/build/co
 expect "--repro: staged outputs removed" test ! -e "$tmp/out.repro-a" -a ! -e "$tmp/out.repro-b"
 # A second run empties the two directories first.
 : >"$tmp/d.repro-a/stale"
-brun "$stub:$tools" --repro
+BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
 check "--repro: a second run passes" 0 "two builds identical"
 expect "--repro: the stale file in a build directory is gone" test ! -e "$tmp/d.repro-a/stale"
 
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
-BB_NONDET=1 brun "$stub:$tools" --repro
+BB_NONDET=1 BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
 check "--repro: a nondeterministic artefact fails" nonzero "tar.zst differs" "not reproducible" "nothing published"
 expect "--repro: nothing published" test ! -e "$tmp/out"
 
@@ -311,7 +317,7 @@ expect "--repro: nothing published" test ! -e "$tmp/out"
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
 mkdir -p "$tmp/d.repro-a"
 : >"$tmp/d.repro-a/sentinel"
-brun "$stub:$tools" --repro
+BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
 check "--repro: an unmarked directory is refused" nonzero "was not written by --repro"
 expect "--repro: the unmarked directory survives" test -f "$tmp/d.repro-a/sentinel"
 rm -rf "$tmp/d.repro-a"

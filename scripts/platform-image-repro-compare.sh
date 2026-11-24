@@ -54,12 +54,24 @@ is_allowed() {
 
 # load SUMS-ARRAY-PREFIX DIR LABEL: read DIR/SHA256SUMS into names_$p (order)
 # and a map hash_$p, verifying the files in DIR against it.
-declare -A hash_a hash_b
+declare -A hash_a hash_b listed_a listed_b
+# norm NAME: the artefact name without Yocto's build timestamp (IMAGE_VERSION_SUFFIX
+# in IMAGE_NAME: "<image>-<machine>.rootfs-<14 digits>.<ext>"), so two builds made
+# at different times compare member by member. A name without one stays as is.
+norm() {
+	if [[ $1 =~ ^(.*\.rootfs)-[0-9]{14}(\..*)$ ]]; then
+		printf '%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	elif [[ $1 =~ ^(.*)-[0-9]{14}(\..*)$ ]]; then
+		printf '%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	else
+		printf '%s\n' "$1"
+	fi
+}
 names_a=()
 names_b=()
 load() {
-	local p=$1 dir=$2 line h n f got
-	local -n names=names_$p hashes=hash_$p
+	local p=$1 dir=$2 line h n k f got
+	local -n names=names_$p hashes=hash_$p listed=listed_$p
 	if [ ! -f "$dir/SHA256SUMS" ]; then
 		fail "$dir has no SHA256SUMS"
 		return
@@ -69,8 +81,14 @@ load() {
 		h=${line%% *}
 		n=${line#*[ ]}
 		n=${n#[ *]}
-		names+=("$n")
-		hashes["$n"]=$h
+		k=$(norm "$n")
+		listed["$n"]=1
+		if [ -n "${hashes[$k]+x}" ]; then
+			fail "$k: two files in $dir normalise to the same name ($n)"
+		else
+			names+=("$k")
+			hashes["$k"]=$h
+		fi
 		if [ ! -f "$dir/$n" ]; then
 			fail "$n: listed in $dir/SHA256SUMS but missing from $dir"
 			continue
@@ -83,7 +101,7 @@ load() {
 		[ -e "$f" ] || [ -L "$f" ] || continue
 		n=${f##*/}
 		case $n in SHA256SUMS | build-info.txt) continue ;; esac
-		[ -n "${hashes[$n]+x}" ] || fail "$n: in $dir but not listed in its SHA256SUMS"
+		[ -n "${listed[$n]+x}" ] || fail "$n: in $dir but not listed in its SHA256SUMS"
 	done
 }
 load a "${dirs[0]}"
