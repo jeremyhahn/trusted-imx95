@@ -42,19 +42,51 @@ PATTERNS=(
 
 # scan <root>: print "<relative path>:<line>:<text>" for every hit, rc 0 when none.
 scan() {
-  local root=$1 rel hits=0 line
-  local re
+  local root=$1 rel hits=0 re f
   re=$(IFS='|'; echo "${PATTERNS[*]}")
   while IFS= read -r -d '' f; do
     rel=${f#"$root"/}
     case "$rel" in docs/* | *.md | .git/* | .serena/*) continue ;; esac
     if [[ $'\n'$ALLOW == *$'\n'"$rel"$'\t'* ]]; then continue; fi
-    while IFS= read -r line; do
-      echo "$rel:$line"
-      hits=1
-    done < <(grep -I -n -i -E -- "$re" "$f" | grep -v -E '^[0-9]+:[[:space:]]*(#|//)' || true)
+    # A file with a NUL byte is binary: skip it, as grep -I did.
+    if [ "$(tr -d '\000' <"$f" | wc -c)" != "$(wc -c <"$f")" ]; then continue; fi
+    scan_file "$f" "$rel" "$re" || hits=1
   done < <(find "$root" -type f -not -path '*/.git/*' -print0 | sort -z)
   return $hits
+}
+
+# scan_file <path> <relative path> <regex>: join each backslash-continued command
+# into one logical line, then match the regex case-insensitively on every logical
+# line that does not start with a comment. Prints "<rel>:<first line>:<text>" per
+# hit; rc 1 when there is any.
+scan_file() {
+  local f=$1 rel=$2 re=$3 line acc="" n=0 start=0 cont=0 rc=0
+  shopt -s nocasematch
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if ((cont == 0)); then
+      acc=""
+      start=$n
+      if [[ $line =~ ^[[:space:]]*(#|//) ]]; then continue; fi
+    fi
+    if [[ $line == *\\ ]]; then
+      acc+="${line%\\} "
+      cont=1
+      continue
+    fi
+    acc+=$line
+    cont=0
+    if [[ $acc =~ $re ]]; then
+      echo "$rel:$start:$acc"
+      rc=1
+    fi
+  done <"$f"
+  if ((cont == 1)) && [[ $acc =~ $re ]]; then
+    echo "$rel:$start:$acc"
+    rc=1
+  fi
+  shopt -u nocasematch
+  return $rc
 }
 
 fails=0
@@ -122,6 +154,30 @@ for fx in \
     bad "fixture $name failed but did not name the file: $out"
   fi
 done
+
+# A command split across physical lines by backslash continuations is one command.
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'nxpele -p x \' 'commit -i OEM_FW_FUSE' >"$scratch/scripts/split2.sh"
+if out=$(scan "$scratch" 2>&1); then
+  bad "two-line continued nxpele commit was not flagged"
+elif [[ $out == *scripts/split2.sh:1:* ]]; then
+  ok "two-line continued nxpele commit fails and names scripts/split2.sh:1"
+else
+  bad "two-line continued commit failed but did not name file and line: $out"
+fi
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'echo start' 'nxpele \' '    -p x \' '      --verbose \' '    commit \' '    -i OEM_FW_FUSE' >"$scratch/scripts/split5.sh"
+if out=$(scan "$scratch" 2>&1); then
+  bad "indented multi-line continued nxpele commit was not flagged"
+elif [[ $out == *scripts/split5.sh:2:* ]]; then
+  ok "indented multi-line continued nxpele commit fails and names scripts/split5.sh:2"
+else
+  bad "multi-line continued commit failed but did not name file and line: $out"
+fi
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'nxpele -p x \' 'info' >"$scratch/scripts/benign.sh"
+if scan "$scratch" >/dev/null 2>&1; then ok "a continued nxpele command without a fuse write passes"
+else bad "a continued benign nxpele command was flagged"; fi
 
 # Positive control: every command named only on comment lines passes.
 rm -f "$scratch"/scripts/*
