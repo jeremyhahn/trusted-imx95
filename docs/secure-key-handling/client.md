@@ -342,11 +342,41 @@ scripts/ele-lib-build.sh --work <dir> --src-only
 source is then `<dir>/src`. `ELE_SRC=<dir>/src REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh` runs the backend tests
 against it.
 
-**Status of the third reading (lane 162-skh-fix-r4).** The fetch above was repeated and matched the pinned digest. This
-lane could not read the fetched files: its read guard refuses any code path outside the worktree. So no new "read twice"
-mark was added here for the PSA argument semantics, the response decoding or the nonce-copy assumptions; the marks in the
-table below are those of lane 162-skh-next2, unchanged, and the rows that the guard blocked are still waiting for a
-reader who can open `<dir>/src`.
+A lane whose read tools only open paths inside the worktree cannot use `--work` for that, because the script refuses a
+work dir inside the checkout. The method that worked there is the same fetch done by hand into the git-ignored
+`out/ele162/src`: `git init` a scratch directory outside the clone, `git fetch --depth 1` the upstream URL for the
+commit above, check that `git rev-parse FETCH_HEAD` prints that commit, pipe `git archive --format=tar FETCH_HEAD`
+through `sha256sum` and stop unless it prints the digest above, then `tar -xf` it into `out/ele162/src`. Nothing under
+`out/` is committed. That tree passes `ELE_SRC=out/ele162/src REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh`. To read
+it there, `Read` and `find_symbol` refuse it; `search_for_pattern` with `skip_ignored_files` false and
+`relative_path` set to the file works, with context lines.
+
+**Third reading (lane 162-skh-fix-r4).** In the tree above (digest matched), the three items were read again; line
+numbers are 1-based at the pinned commit, paths as in the table below. "Twice" means two separate searches of the
+lines in this lane.
+
+- *PSA argument semantics.* The PSA build accepts a null `key_identifier` and checks only that `args` is set
+  (`hsm_api/hsm_key_generate.c:32-34`). The request copies `flags`, `key_type` and `key_group`
+  (`sab_msg/sab_key_generate.c:31-33`), and on the non-plaintext branch the identifier from `*key_identifier` when the
+  pointer is non-null (`:49-53`), then `key_lifetime`, `key_usage`, `bit_key_sz` and `permitted_algo` (`:56-59`). The
+  reply writes the identifier back only when the pointer is non-null (`:94-95`). The flag values are the PSA ones:
+  plaintext `1<<3`, monotonic counter `1<<5` (`include/hsm/internal/hsm_key_generate.h:23-31`); the group range is 0-99
+  (`:71-72`); an opaque key must not set the plaintext flag (`:58-60`). Twice for `sab_key_generate.c:31-59` and
+  `:94-95`; once for the header lines.
+- *Response decoding.* `sab_rating_to_hsm_err` takes the success path when the status tag is the success tag
+  (`hsm_api/hsm_utils.c:219-228`), whose rating map lookup is at `:26` and falls to `HSM_NO_ERROR` at `:48`; the
+  error path reaches `HSM_KEY_STORE_COUNTER` at `:118`. Generate decodes the call result at `hsm_key_generate.c:54`
+  and the response code at `:61`. A sign stores the size in `exp_signature_size` (`sab_msg/sab_sign_gen.c:172-178`;
+  declared at `include/hsm/internal/hsm_sign_gen.h:222`), not in `signature_size`. Twice for `hsm_utils.c:219-228`;
+  once for the others.
+- *Nonce-copy assumptions.* `process_sab_msg` keeps the command in a stack array (`sab_msg/sab_process_msg.c:170`),
+  zeroes it before use (`:174`), has the message builder fill it (`:216`; the key-store builder copies the nonce at
+  `sab_msg/sab_key_store.c:32`), and sends it (`:268`). A search for `memset` in the file finds no wipe after the
+  send; the function returns at `:368`, so the stack copy is left to be overwritten. Each line was read once in
+  this lane; the earlier "read twice" mark on the table row stands from lane 162-skh-next2. The backend therefore runs each call in a child process and
+  erases its own nonce (the table row below).
+
+Nothing in these three readings contradicts a row of the table below.
 
 ## The library contract the backend relies on
 
