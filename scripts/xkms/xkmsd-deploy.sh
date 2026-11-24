@@ -73,6 +73,32 @@ r_fs() { df -Pk "$1" | tail -n 1 | tr -s ' ' | cut -d' ' -f6; } # r_fs <path>: i
 
 r_free() { df -Pk "$1" | tail -n 1 | tr -s ' ' | cut -d' ' -f4; } # r_free <path>: KiB free there
 
+r_mounts() { # every mount point on the board, one per line
+	if command -v findmnt >/dev/null 2>&1; then
+		findmnt -rn -o TARGET
+	else
+		local _a _b _c _d mp _e
+		while read -r _a _b _c _d mp _e; do printf '%s\n' "$mp"; done </proc/self/mountinfo
+	fi
+}
+
+r_mounted() { # r_mounted <path>...: prints each mount point at or under a path; fails if none
+	local m p hit=1
+	while IFS= read -r m; do
+		for p in "$@"; do
+			case $m in "$p" | "$p"/*) echo "$m"; hit=0 ;; esac
+		done
+	done < <(r_mounts)
+	return "$hit"
+}
+
+r_mountcheck() { # r_mountcheck <who>: refuse when a path a rollback swaps is or holds a mount point
+	local m
+	m=$(r_mounted "$BIN" "$ETC" "$VAR") || return 0
+	echo "$1: ${m//$'\n'/, } is a mount point at or under $BIN, $ETC or $VAR. A rollback replaces those whole and cannot replace a mount point; move the state off the mount (or unmount it) first. xkmsd was not stopped."
+	return 1
+}
+
 r_stop() { # r_stop <who>: stop the unit, then prove nothing of it still runs
 	local p c
 	systemctl stop "$UNIT" || { echo "$1: systemctl stop $UNIT failed"; return 1; }
@@ -98,6 +124,7 @@ r_preflight() { # r_preflight <new binary KiB>
 	[ -x "$BIN" ] || { echo "board: $BIN is missing"; return 1; }
 	[ -d "$ETC" ] || { echo "board: $ETC is missing"; return 1; }
 	[ -d "$VAR" ] || { echo "board: $VAR is missing"; return 1; }
+	r_mountcheck "board: refusing to deploy" || return 1
 	mkdir -p "$BK" && chmod 700 "$BK" || { echo "board: cannot create $BK"; return 1; }
 	# What each filesystem must hold at once: the backup copy in $BK; the staged
 	# binary beside $BIN; and the copy of each tree that a rollback makes beside
@@ -134,7 +161,7 @@ r_stage() { # r_stage <sha256> <go-xkms commit>: the uploaded binary is what we 
 	echo "board: staged $NEWBIN sha256 $got"
 }
 
-r_unstage() { r_init; rm -f "$NEWBIN"; }
+r_unstage() { r_init; rm -f "$NEWBIN" || { echo "board: cannot remove the staged $NEWBIN"; return 1; }; }
 
 r_backup() { # r_backup <stamp>: with xkmsd stopped
 	r_init
@@ -241,30 +268,55 @@ r_health() { # r_health [<go-xkms commit>]
 
 r_restore() { # r_restore <stamp>
 	r_init
-	d="$BK/$1"
+	local d="$BK/$1" t done_="" u
 	[ -d "$d" ] || { echo "restore: no backup $d"; return 1; }
 	(cd "$d" && sha256sum -c --quiet SHA256SUMS) || { echo "restore: backup $d fails its SHA256SUMS; touching nothing"; return 1; }
+	# The swap below renames $ETC, $VAR and $BIN; a mount point cannot be
+	# renamed, and rm -rf would empty it and then fail. Refuse before stopping.
+	r_mountcheck "restore: refusing; live tree untouched, the backup is in $d" || return 1
+	rm -rf "$ETC.restore" "$VAR.restore" "$BIN.restore" "$ETC.old" "$VAR.old" "$BIN.old" || {
+		echo "restore: cannot clear leftovers beside $ETC, $VAR or $BIN; live tree untouched; the backup is in $d"
+		return 1
+	}
 	# Never replace live state under a running daemon: it would write into the
 	# restored tree or keep stale handles. Stop it and prove it is gone first.
 	r_stop restore || { echo "restore: refusing to touch $ETC, $VAR or $BIN while xkmsd may run; live tree untouched"; return 1; }
-	rm -rf "$ETC.restore" "$VAR.restore" "$BIN.restore"
 	cp -a "$d/etc-xkms" "$ETC.restore" && cp -a "$d/var-lib-xkms" "$VAR.restore" &&
 		cp -a "$d/xkmsd" "$BIN.restore" || {
 		rm -rf "$ETC.restore" "$VAR.restore" "$BIN.restore"
-		echo "restore: copy from $d failed (disk?); live data untouched"
+		echo "restore: copy from $d failed (disk?); live data untouched; the backup is in $d"
 		return 1
 	}
-	rm -rf "$ETC" "$VAR"
-	mv "$ETC.restore" "$ETC" && mv "$VAR.restore" "$VAR" && mv -f "$BIN.restore" "$BIN" ||
-		{ echo "restore: swap failed; the backup $d is intact"; return 1; }
+	# The swap: each live item is renamed aside before its restored copy takes
+	# its place, so nothing live is deleted until the restored tree verifies,
+	# and a failed step puts back what was already swapped.
+	for t in "$ETC" "$VAR" "$BIN"; do
+		if mv "$t" "$t.old"; then
+			if mv "$t.restore" "$t"; then
+				done_="$t $done_"
+				continue
+			fi
+			mv "$t.old" "$t" || echo "restore: cannot put $t.old back as $t"
+		fi
+		echo "restore: swapping $t failed; the backup is in $d"
+		for u in $done_; do
+			mv "$u" "$u.restore" && mv "$u.old" "$u" || echo "restore: cannot put $u.old back as $u"
+		done
+		echo "restore: stopped with xkmsd stopped; the backup $d is intact"
+		return 1
+	done
 	if [ "$(r_treesum "$ETC")" = "$(r_treesum "$d/etc-xkms")" ] &&
 		[ "$(r_treesum "$VAR")" = "$(r_treesum "$d/var-lib-xkms")" ] &&
 		[ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$(sha256sum "$d/xkmsd" | cut -d' ' -f1)" ]; then
 		echo "restore: $d restored, hashes match"
 	else
-		echo "restore: restored tree does not match $d"
+		echo "restore: restored tree does not match $d; the replaced state is in $ETC.old, $VAR.old and $BIN.old; the backup is in $d"
 		return 1
 	fi
+	rm -rf "$ETC.old" "$VAR.old" "$BIN.old" || {
+		echo "restore: restored and verified, but cannot remove $ETC.old, $VAR.old or $BIN.old; xkmsd left stopped; the backup is in $d"
+		return 1
+	}
 	if [ "$(cat "$d/WAS_ACTIVE")" = active ]; then
 		systemctl start "$UNIT" || { echo "restore: restart failed"; return 1; }
 	else
@@ -376,7 +428,7 @@ board() {
 	[ $# -eq 0 ] || args=$(printf '%q ' "$@")
 	{
 		printf 'R=%q; UNIT=xkmsd; KEEP=%q; WAIT=%q; SETTLE=%q; MINKB=%q; PORT=%q\n' "$fake" "$keep" "$wait_s" "$settle" "$minkb" "${XKMS_PORT:-}"
-		declare -f r_init r_sums r_treesum r_fs r_free r_stop r_preflight r_stage r_unstage r_backup r_install r_start \
+		declare -f r_init r_sums r_treesum r_fs r_free r_mounts r_mounted r_mountcheck r_stop r_preflight r_stage r_unstage r_backup r_install r_start \
 			r_listening r_health r_restore r_backup_commit r_prune
 		echo "r_$action $args"
 	} | ssh "${ssh_opts[@]}" "$target" "bash -s"
@@ -417,7 +469,7 @@ board stage "$have_sha" "$commit" || die "staging failed; the board still runs t
 # From here the daemon is stopped: every failure restores.
 rollback_now() {
 	echo "xkmsd-deploy: FAILED: $1; restoring backup $stamp" >&2
-	board unstage >/dev/null 2>&1
+	board unstage >/dev/null 2>&1 || echo "xkmsd-deploy: could not remove the staged binary; restoring anyway" >&2
 	if board restore "$stamp"; then
 		board health "$(board backup_commit "$stamp")" || echo "xkmsd-deploy: restored, but the old build is unhealthy too" >&2
 		echo "xkmsd-deploy: restored the previous state from $stamp" >&2

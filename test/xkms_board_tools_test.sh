@@ -39,6 +39,7 @@ EOF
 cat >"$fakebin/systemctl" <<'EOF'
 #!/bin/bash
 R=$XKMS_FAKE_ROOT
+echo "$*" >>"$R/run/systemctl.log"
 st=$R/run/state
 bin=$R/usr/local/bin/xkmsd
 body=$(cat "$bin")
@@ -147,6 +148,29 @@ verify) [ -e "$k/$id" ] && [ "$5" = "s-$id-$4" ] ;;
 *) exit 2 ;;
 esac
 EOF
+cat >"$fakebin/findmnt" <<'EOF'
+#!/bin/bash
+# Stub findmnt -rn -o TARGET: / plus the paths in FAKE_MOUNTS.
+echo /
+for m in ${FAKE_MOUNTS:-}; do echo "$m"; done
+EOF
+# Stub mv and rm: fail, touching nothing, when an argument matches the glob in
+# FAKE_MV_FAIL or FAKE_RM_FAIL; otherwise the host's tool.
+for tool in mv rm; do
+	cat >"$fakebin/$tool" <<'EOF'
+#!/bin/bash
+tool=${0##*/}
+var=FAKE_${tool^^}_FAIL
+pat=${!var:-}
+if [ -n "$pat" ]; then
+	for a; do
+		# shellcheck disable=SC2053 # $pat is a glob on purpose
+		[[ $a != $pat ]] || { echo "$tool: stub failure on $a" >&2; exit 1; }
+	done
+fi
+exec "${0%/*}/../hosttools/$tool" "$@"
+EOF
+done
 chmod +x "$fakebin"/*
 # The board has neither: the PATH is the fake bin plus symlinks to every host
 # tool except ss and netstat, so a host ss never shows through.
@@ -357,6 +381,70 @@ XKMS_STAMP=20260101T000004Z D "$tmp/s-deploy.log" board.invalid "$tmp/b-new"
 ok "stopfail: deploy refuses" [ "$RC" != 0 ]
 ok "stopfail: deploy leaves the board byte-identical" restored "$R" "$tmp/snapS"
 ok "stopfail: deploy leaves the unit active" [ "$(cat "$R/run/state")" = active ]
+
+# --- mount points: refused before xkmsd is stopped ------------------------------
+# A rollback renames the state directories; a mount point (or one inside them)
+# cannot be swapped, so deploy and --rollback refuse before stopping anything.
+for mnt in var/lib/xkms etc/xkms/tls usr/local/bin/xkmsd; do
+	R=$tmp/boardM
+	rm -rf "$R"
+	mkboard "$R"
+	export XKMS_FAKE_ROOT=$R
+	snap "$R" "$tmp/snapM"
+	FAKE_MOUNTS="$R/$mnt" XKMS_STAMP=20260101T000007Z D "$tmp/m.log" board.invalid "$tmp/b-new"
+	ok "mount $mnt: deploy refuses" [ "$RC" != 0 ]
+	ok "mount $mnt: says which mount point" out_has "$tmp/m.log" "$R/$mnt is a mount point"
+	ok "mount $mnt: xkmsd was never stopped" out_lacks "$R/run/systemctl.log" stop
+	ok "mount $mnt: unit still active" [ "$(cat "$R/run/state")" = active ]
+	ok "mount $mnt: board untouched" restored "$R" "$tmp/snapM"
+	ok "mount $mnt: no backup made" [ ! -e "$R/var/backups/xkms/20260101T000007Z" ]
+done
+R=$tmp/boardM2
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+XKMS_STAMP=20260101T000008Z D "$tmp/m2.log" board.invalid "$tmp/b-new"
+ok "mounted rollback setup: deployed" [ "$RC" = 0 ]
+echo "written after the deploy" >"$R/var/lib/xkms/later"
+snap "$R" "$tmp/snapM2"
+: >"$R/run/systemctl.log"
+FAKE_MOUNTS="$R/var/lib/xkms" D "$tmp/m2r.log" --rollback 20260101T000008Z board.invalid
+ok "mounted state: --rollback refuses" [ "$RC" != 0 ]
+ok "mounted state: --rollback says why" out_has "$tmp/m2r.log" "$R/var/lib/xkms is a mount point"
+ok "mounted state: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
+ok "mounted state: live state byte-identical" restored "$R" "$tmp/snapM2"
+ok "mounted state: the backup still verifies" bash -c "cd '$R/var/backups/xkms/20260101T000008Z' && sha256sum -c --quiet SHA256SUMS"
+
+# --- a failing mv or rm stops the restore with the backup intact ---------------
+R=$tmp/boardV
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+XKMS_STAMP=20260101T000009Z D "$tmp/v.log" board.invalid "$tmp/b-new"
+ok "mv/rm failure setup: deployed" [ "$RC" = 0 ]
+bk=$R/var/backups/xkms/20260101T000009Z
+echo "written after the deploy" >"$R/var/lib/xkms/later"
+snap "$R" "$tmp/snapV"
+FAKE_MV_FAIL="$R/var/lib/xkms.old" D "$tmp/vmv.log" --rollback 20260101T000009Z board.invalid
+ok "mv failure: --rollback exits nonzero" [ "$RC" != 0 ]
+ok "mv failure: says the swap failed" out_has "$tmp/vmv.log" "swapping $R/var/lib/xkms failed"
+ok "mv failure: names the backup" out_has "$tmp/vmv.log" "the backup $bk is intact"
+ok "mv failure: the backup still verifies" bash -c "cd '$bk' && sha256sum -c --quiet SHA256SUMS"
+ok "mv failure: the half-done swap is put back" restored "$R" "$tmp/snapV"
+FAKE_RM_FAIL="$R/var/lib/xkms.old" D "$tmp/vrm.log" --rollback 20260101T000009Z board.invalid
+ok "rm failure: --rollback exits nonzero" [ "$RC" != 0 ]
+ok "rm failure: names the backup" out_has "$tmp/vrm.log" "the backup is in $bk"
+ok "rm failure: the backup still verifies" bash -c "cd '$bk' && sha256sum -c --quiet SHA256SUMS"
+ok "rm failure: live state byte-identical" restored "$R" "$tmp/snapV"
+FAKE_RM_FAIL="$R/etc/xkms.old" D "$tmp/vrm2.log" --rollback 20260101T000009Z board.invalid
+ok "late rm failure: --rollback exits nonzero" [ "$RC" != 0 ]
+R=$tmp/boardV2
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+mkbuild "$tmp/b-fs" FSCOMMIT FAILSTART
+FAKE_MV_FAIL="$R/var/lib/xkms.old" XKMS_STAMP=20260101T000010Z D "$tmp/v2.log" board.invalid "$tmp/b-fs"
+ok "deploy, failing mv in rollback: exits nonzero" [ "$RC" != 0 ]
+ok "deploy, failing mv in rollback: says where the backup is" out_has "$tmp/v2.log" "RESTORE FAILED: the backup is in /var/backups/xkms/20260101T000010Z"
+ok "deploy, failing mv in rollback: the backup still verifies" bash -c "cd '$R/var/backups/xkms/20260101T000010Z' && sha256sum -c --quiet SHA256SUMS"
+ok "deploy, failing mv in rollback: the state is still there" [ -s "$R/var/lib/xkms/keys/k1" ]
 
 # --- preflight reserves room for the copies a rollback makes -------------------
 R=$tmp/boardF

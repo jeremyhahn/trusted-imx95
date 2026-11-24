@@ -29,7 +29,14 @@ health check: unit active, a listener owned by the daemon, the version names
 the build's commit, the unit stays up. Any failure restores the backup and
 exits nonzero. A restore first stops the unit and proves it stopped (the
 stop succeeded, the unit is inactive with no MainPID, no xkmsd process is
-left); otherwise it refuses and leaves the live tree untouched. Preflight
+left); otherwise it refuses and leaves the live tree untouched. A restore
+renames each live item aside before its restored copy takes its place and
+deletes nothing live until the restored tree matches the backup's hashes; a
+failed rename puts back what was already swapped and stops, naming the
+backup. Because a restore replaces `/usr/local/bin/xkmsd`, `/etc/xkms` and
+`/var/lib/xkms` whole, preflight (and `--rollback`) refuses, before stopping
+xkmsd, when any of them is or holds a mount point (`findmnt`, else
+`/proc/self/mountinfo`). Preflight
 reserves room on each filesystem for the backup, the staged binary and the
 copies a rollback makes beside the live trees. The newest 5 backups are kept. `--dry-run` contacts nothing.
 xkmsd has no config validate mode, so a bad config shows as a failed start.
