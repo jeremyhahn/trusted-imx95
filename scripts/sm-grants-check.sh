@@ -11,7 +11,11 @@
 # With --ap-s first, the same check runs on the AP-S agent's section instead: the
 # lines after the SCMI_AGENTn name="AP-S" line (inside the LM named "AP") up to
 # the next SCMI_AGENT line or LM header, against system-manager/ap-s-grants.txt.
-# The agent header line is not a grant and is not listed.
+# The agent header line is not a grant and is not listed. A define line (DFMT0:,
+# DFMT1:, OWNER:, ACCESS:, EXEC:, DATA:) is a grant of the agent it applies to:
+# the file puts an agent's defines before its SCMI_AGENT line, so the defines
+# met in the LM before the AP-S line are listed, and the defines that end the
+# section (the next agent's, AP-NS) are not.
 # Host side only.
 set -euo pipefail
 
@@ -22,12 +26,12 @@ die() {
 
 # grants <cfg>: the normalised grant lines of the M7 LM block, sorted.
 grants() {
-	local l acc="" in=0 lm=0 seen=0 out=() bs=$'\\'
+	local l acc="" in=0 lm=0 seen=0 out=() pre=() held=() bs=$'\\'
 	[ -r "$1" ] && [ -f "$1" ] || die "cannot read ${1##*/}"
 	while IFS= read -r l || [ -n "$l" ]; do
 		l=${l%%#*}
 		if [[ $l =~ ^LM[0-9]+[[:space:]] ]]; then
-			in=0 lm=0
+			in=0 lm=0 pre=() held=()
 			if [ "$mode" = m7 ] && [[ $l == *'name="M7"'* ]]; then in=1 seen=1; fi
 			if [ "$mode" = aps ] && [[ $l == *'name="AP"'* ]]; then lm=1; fi
 			acc=""
@@ -35,8 +39,27 @@ grants() {
 		fi
 		if [ "$mode" = aps ] && [ "$lm" = 1 ] && [[ $l =~ ^[[:space:]]*SCMI_AGENT[0-9]+[[:space:]] ]]; then
 			in=0 acc=""
-			if [[ $l == *'name="AP-S"'* ]]; then in=1 seen=1; fi
+			# Defines that closed the section above (see held) open this agent's.
+			[ "${#held[@]}" -eq 0 ] || pre+=("${held[@]}")
+			held=()
+			if [[ $l == *'name="AP-S"'* ]]; then
+				in=1 seen=1
+				[ "${#pre[@]}" -eq 0 ] || out+=("${pre[@]}")
+			fi
+			pre=()
 			continue # the agent header line itself is not a grant
+		fi
+		# A define line (DFMT0:, OWNER:, EXEC: ...) sets what the lines after it
+		# mean, and the file puts an agent's defines before its SCMI_AGENT line.
+		# Defines met before the AP-S header are its own (grants); defines that
+		# end the section, with no resource line after them, are the next
+		# agent's and are not. A define in the middle of the section stays in it.
+		if [ "$mode" = aps ] && [ "$lm" = 1 ] && [[ $l =~ ^[[:space:]]*[A-Za-z][A-Za-z0-9_]*:([[:space:]]|$) ]]; then
+			l=$(printf '%s' "$l" | tr -s '[:space:]' ' ')
+			l=${l# }
+			l=${l% }
+			if [ "$in" = 1 ]; then held+=("$l"); else pre+=("$l"); fi
+			continue
 		fi
 		[ "$in" = 1 ] || continue
 		l=$(printf '%s' "$l" | tr -s '[:space:]' ' ')
@@ -52,8 +75,14 @@ grants() {
 		l=$(printf '%s' "$l" | tr -s '[:space:]' ' ')
 		l=${l# }
 		l=${l% }
-		[ -z "$l" ] || out+=("$l")
+		if [ -n "$l" ]; then
+			[ "${#held[@]}" -eq 0 ] || out+=("${held[@]}")
+			held=()
+			out+=("$l")
+		fi
 	done <"$1"
+	# Defines at the very end of the file, with no agent after them, stay AP-S's.
+	[ "${#held[@]}" -eq 0 ] || out+=("${held[@]}")
 	if [ "$seen" != 1 ]; then
 		if [ "$mode" = aps ]; then die "no AP-S agent block in LM AP of ${1##*/}"; fi
 		die "no M7 LM block in ${1##*/}"
