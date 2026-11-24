@@ -129,6 +129,8 @@ edit_b31zero() { lockset "$1"; }
 edit_b31wrap() { lockset "$1"; }
 edit_b31outside() { lockset "$1"; }
 edit_b31missing() { [[ "$1" == BL31_BASE=* ]] || printf '%s\n' "$1"; }
+edit_b31moved() { lockset "$1"; }
+edit_b31size() { lockset "$1"; }
 edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
@@ -361,6 +363,13 @@ cat >"$fs/cp" <<'EOF'
 last=${!#}
 if [ -n "${STUB_CORRUPT_CP:-}" ] && [[ "$last" == */stage/bl31.bin ]]; then echo corrupt >>"$last"; fi
 EOF
+# bash: logs its arguments when STUB_BASH_LOG is set, then runs the real bash, so
+# the test can see how the driver starts its two --single children.
+cat >"$fs/bash" <<'EOF'
+#!/bin/bash
+[ -z "${STUB_BASH_LOG:-}" ] || echo "$*" >>"$STUB_BASH_LOG"
+exec /bin/bash "$@"
+EOF
 chmod +x "$fs"/*
 fp=$fs:$PATH
 
@@ -375,8 +384,10 @@ fullrun() {
 	shift 2
 	mkdir -p "$TMP_ROOT/$n"
 	: >"$TMP_ROOT/$n/make.log"
-	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" "$@" \
-		bash "$sw" --lock "$l" --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
+	: >"$TMP_ROOT/$n/bash.log"
+	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" \
+		STUB_BASH_LOG="$TMP_ROOT/$n/bash.log" "$@" \
+		bash "$sw" --lock "$l" ${FR_GRANTS:+--grants "$FR_GRANTS"} --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
 }
 nothing_published() { [ ! -e "$TMP_ROOT/$1/out/SHA256SUMS" ] && [ ! -e "$TMP_ROOT/$1/out/bl31.bin" ] && [ ! -e "$TMP_ROOT/$1/out/tee.bin" ]; }
 
@@ -505,6 +516,31 @@ expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
 expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A400000 "$bl32_size"
 expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
 expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
+
+# A non-default System Manager grant with a matching lock: the whole two-build
+# driver must pass --grants to both --single children, or the children check the
+# lock against the default grants file and refuse it.
+edit_altsm() { if [[ "$1" == SM_SECURE_END=* ]]; then echo SM_SECURE_END=0x8FFFFFFF; else edit_tcsum "$1"; fi; }
+altsmlock=$(lockcopy altsm edit_altsm)
+altsmgrants=$(grantscopy altsm "DDR EXEC, begin=0x08A000000, end=0x08FFFFFFF")
+FR_GRANTS=$altsmgrants fullrun altsm "$altsmlock"
+check "a build with a non-default grants file and the matching lock reaches publication" 0 "secure-world-build: OK"
+grants_passed() { # <bash.log> <grants>: two --single children, each given --grants <grants>
+	local l n=0
+	while IFS= read -r l; do
+		[[ "$l" == *" --single "* ]] || continue
+		n=$((n + 1))
+		[[ "$l" == *" --grants $2 "* ]] || return 1
+	done <"$1"
+	[ "$n" -eq 2 ]
+}
+expect "both --single children got the driver's grants file" grants_passed "$TMP_ROOT/altsm/bash.log" "$altsmgrants"
+grants_not_passed() { ! grants_passed "$@"; }
+expect "the default lock's driver run gives the children another grants file than the alternative" grants_not_passed "$TMP_ROOT/ok/bash.log" "$altsmgrants"
+# The lock alone, without the matching grants file, is refused by the driver.
+fullrun altsmnog "$altsmlock"
+check "the alternative lock against the default grants is refused" nonzero "differs from the System Manager's DDR EXEC grant"
+expect "that refusal publishes nothing" nothing_published altsmnog
 
 # A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's
 # release directory, so publication shows the script stages from the matching path.

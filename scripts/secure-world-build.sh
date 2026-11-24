@@ -193,7 +193,7 @@ cache=$(cd "$cache" && pwd -P)
 if [ "$single" = 0 ]; then
 	for i in 1 2; do
 		echo "secure-world-build: clean build $i of 2"
-		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --work "$work/build-$i" \
+		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --grants "$grants" --work "$work/build-$i" \
 			--out "$work/out-$i" --cache "$cache" --jobs "$jobs" || die "build $i of 2 failed; nothing published"
 	done
 	differ=0
