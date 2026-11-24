@@ -113,6 +113,31 @@ for flag in "" --pre-close; do
     ok "rejected revision is not echoed ($m)"
   else bad "rejected revision handling disclosed the value or did not fail ($m, rc=$rc)"; fi
 done
+# Nested evidence fails closed: every member is checked, and no value is printed.
+nested() { # name file-stem python-edit want
+  mut "$work/$2.json" "$3"
+  expect "$1" "$work/$2.json" 1 "$4"
+}
+nested "unknown lock state refused" lock-word "rec['srk_lock_states']['ELE_OEM_SRKH1_LOCK'] = 'maybe'" "\$.srk_lock_states.<lock#1>: must be a lock state"
+nested "null lock state refused" lock-null "rec['srk_lock_states']['ELE_OEM_SRKH0_LOCK'] = None" "\$.srk_lock_states.<lock#0>"
+nested "integer lock state refused" lock-int "rec['srk_lock_states']['ELE_OEM_SRKH0_LOCK'] = 1" "\$.srk_lock_states.<lock#0>"
+nested "nested-object lock state refused" lock-obj "rec['srk_lock_states']['ELE_OEM_SRKH0_LOCK'] = {'locked': True}" "\$.srk_lock_states.<lock#0>"
+nested "empty lock state object refused" lock-empty "rec['srk_lock_states'] = {}" "\$.srk_lock_states: must name at least one lock"
+nested "non-timestamp step time refused" time-word "rec['step_times']['key_import'] = 'yesterday'" "\$.step_times.<step#1>: must be an RFC 3339 timestamp"
+nested "null step time refused" time-null "rec['step_times']['key_exchange'] = None" "\$.step_times.<step#0>"
+nested "numeric step time refused" time-num "rec['step_times']['key_exchange'] = 1767225600" "\$.step_times.<step#0>"
+nested "step time without a zone refused" time-nozone "rec['step_times']['key_exchange'] = '2026-01-01T00:00:00'" "\$.step_times.<step#0>"
+nested "impossible step time refused" time-month "rec['step_times']['key_exchange'] = '2026-13-01T00:00:00Z'" "\$.step_times.<step#0>"
+nested "null payload hash refused" ph-null "rec['payload_hashes'] = [None]" "\$.payload_hashes[0]: must be a lowercase hex string"
+nested "non-hex payload hash refused" ph-nonhex "rec['payload_hashes'] = ['zz' * 32]" "\$.payload_hashes[0]"
+nested "integer payload hash refused" ph-int "rec['payload_hashes'] = [12345]" "\$.payload_hashes[0]"
+nested "uppercase payload hash refused" ph-upper "rec['payload_hashes'] = ['AB' * 32]" "\$.payload_hashes[0]"
+nested "short payload hash refused" ph-short "rec['payload_hashes'] = ['ab' * 8]" "\$.payload_hashes[0]"
+nested "payload hash object refused" ph-obj "rec['payload_hashes'] = ['ab' * 32, {'h': 'ab'}]" "\$.payload_hashes[1]"
+mut "$work/nested-ok.json" "rec['payload_hashes'] = ['ab' * 32, 'cd' * 64]; rec['step_times']['key_import'] = '2026-01-01T00:01:00.5+01:00'; rec['srk_lock_states']['ELE_OEM_SRKH1_LOCK'] = False"
+expect "well-formed nested evidence passes" "$work/nested-ok.json" 0 "ok"
+FLAG=--pre-close nested "null payload hash refused (pre-close)" ph-null-pc "rec['life_cycle_before'] = 'oem open'; rec['payload_hashes'] = [None]" "\$.payload_hashes[0]"
+FLAG=--pre-close nested "unknown lock state refused (pre-close)" lock-word-pc "rec['life_cycle_before'] = 'oem open'; rec['srk_lock_states']['ELE_OEM_SRKH0_LOCK'] = 'maybe'" "\$.srk_lock_states.<lock#0>"
 mut "$work/pk-hash.json" "rec['public_keys'][0]['public_key_hash'] = '11' * 20"
 expect "wrong public key hash width refused" "$work/pk-hash.json" 1 "\$.public_keys[0].public_key_hash"
 mut "$work/ids.json" "rec['secure_object_ids'] = ['fake-object-1']"

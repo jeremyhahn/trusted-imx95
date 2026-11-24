@@ -27,7 +27,7 @@ JSON object; every field cites the survey §3 row. "Optional" marks a field the 
 | `srk_hash_algorithm` | string | yes | §3 SRK hash row |
 | `srk_hash` | hex string, 64 characters on A0/A1, 128 on B0 | yes | §3 SRK hash row |
 | `pqc_srk_hash` | hex string, same width | optional (B0 only) | §3 SRK hash row |
-| `srk_lock_states` | object, lock name to boolean | yes (Q4 a) | §3 SRK fuse lock state |
+| `srk_lock_states` | non-empty object, lock name to boolean (true locked) | yes (Q4 a) | §3 SRK fuse lock state |
 | `life_cycle_before`, `life_cycle_after` | string | yes (Q4 a) | §3 life-cycle state |
 | `ahab_events` | list, expected empty | yes | §3 AHAB event status |
 | `enclave_fw_version` | string | yes | §3 enclave firmware version |
@@ -36,10 +36,10 @@ JSON object; every field cites the survey §3 row. "Optional" marks a field the 
 | `public_keys` | list of `{key_id, public_key_hash}` | yes | §3 public keys |
 | `key_policy` | list of `{key_id, algorithm, usage}` | optional (§7) | §3 key policy |
 | `monotonic_counter` | integer | yes | §3 monotonic counter |
-| `step_times` | object, step name to time string | yes | §3 time |
+| `step_times` | object, step name to RFC 3339 timestamp with a zone | yes | §3 time |
 | `station_id`, `operator_role` | string | yes | §3 station and operator |
 | `outcome` | string | yes | §3 outcome |
-| `payload_hashes` | list of hex strings | optional (Q3 a) | §4 wrapped blobs |
+| `payload_hashes` | list of lowercase hex strings, 64 or 128 characters | optional (Q3 a) | §4 wrapped blobs |
 | `secure_object_ids` | list of strings | optional | §4 EdgeLock 2GO objects |
 
 Public keys are carried as a key ID and a hash, not as key material. A device ID that looks like
@@ -59,7 +59,11 @@ path (never the value), or not JSON. It refuses (survey §4):
   API key, secure-object contents, names for a station credential, and names for an operator's
   personal data (operator name, full name, email, phone; a value is never judged, so use a role);
 - a string of plain hex or base64 of 32 bytes or more outside the declared hash fields;
-- a hash field whose width is wrong (256-bit on A0/A1, 512-bit on B0).
+- a hash field whose width is wrong (256-bit on A0/A1, 512-bit on B0);
+- malformed nested evidence: a lock state that is not true or false (or an empty lock object), a step
+  time that is not an RFC 3339 timestamp with a zone, and a payload hash that is null, not a string, or
+  not lowercase hex of 64 or 128 characters. Each is named by its path; the member's name and value are
+  not printed.
 
 ## Pre-close mode
 

@@ -14,6 +14,7 @@ the JSON path (never a value). Exit 2: usage error, or the file is not JSON.
 """
 import base64
 import binascii
+import datetime
 import json
 import re
 import sys
@@ -86,6 +87,8 @@ PEM_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----")
 HEX_RE = re.compile(r"(?:0x)?[0-9A-Fa-f]{64,}")
 B64_RE = re.compile(r"[A-Za-z0-9+/]{43,}={0,2}")
 SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,48}")
+LOWER_HEX_RE = re.compile(r"[0-9a-f]+")
+TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})")
 
 
 def usage():
@@ -143,6 +146,47 @@ def fields_errors(rec, fields=None):
                         errs.append("$.%s[%d].%s: required field is missing" % (name, i, sub))
                 elif not type_ok(item[sub], typ):
                     errs.append("$.%s[%d].%s: must be %s" % (name, i, sub, typ.__name__))
+    errs += nested_errors(rec)
+    return errs
+
+
+def is_timestamp(value):
+    """True for an RFC 3339 date-time with a zone (Z or +hh:mm) that names a real instant."""
+    if not isinstance(value, str) or not TIMESTAMP_RE.fullmatch(value):
+        return False
+    try:
+        datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return False
+    return True
+
+
+def nested_errors(rec):
+    """Fail closed on malformed members of the nested evidence fields; never print a value.
+
+    srk_lock_states: a non-empty object, each value a lock state (true locked, false not).
+    step_times: each value an RFC 3339 timestamp with a zone.
+    payload_hashes: each item a lowercase hex string of 64 or 128 characters (never null).
+    """
+    errs = []
+    locks = rec.get("srk_lock_states")
+    if isinstance(locks, dict):
+        if not locks:
+            errs.append("$.srk_lock_states: must name at least one lock")
+        for n, v in enumerate(locks.values()):
+            if not isinstance(v, bool):
+                errs.append("$.srk_lock_states.<lock#%d>: must be a lock state (true or false)" % n)
+    times = rec.get("step_times")
+    if isinstance(times, dict):
+        for n, v in enumerate(times.values()):
+            if not is_timestamp(v):
+                errs.append("$.step_times.<step#%d>: must be an RFC 3339 timestamp with a zone" % n)
+    hashes = rec.get("payload_hashes")
+    if isinstance(hashes, list):
+        widths = " or ".join(str(w) for w in OTHER_HASH_WIDTHS)
+        for i, v in enumerate(hashes):
+            if not (isinstance(v, str) and LOWER_HEX_RE.fullmatch(v) and len(v) in OTHER_HASH_WIDTHS):
+                errs.append("$.payload_hashes[%d]: must be a lowercase hex string of %s characters" % (i, widths))
     return errs
 
 
@@ -190,6 +234,8 @@ def secret_errors(rec):
     declared = {}
     for path, value, widths in hash_slots(rec):
         declared[path] = None
+        if path.startswith("$.payload_hashes["):
+            continue  # nested_errors checks these, lowercase included
         if not (re.fullmatch(r"[0-9A-Fa-f]+", value) and len(value) in widths):
             errs.append("%s: hash must be hex of exactly %s characters" % (
                 path, " or ".join(str(w) for w in widths)))
