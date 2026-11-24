@@ -45,9 +45,12 @@ done
 [[ "$version" =~ ^[0-9]+$ ]] || die "--response-version must be a number"
 [[ "$handle" =~ ^0x81[0-9a-fA-F]{6}$ ]] || die "--ek-handle must be in 0x81000000-0x81FFFFFF"
 
+[ ! -d "$out" ] || die "$out is a directory (or a link to one); -o names a file"
+
 py=${EVIDENCE_PYTHON:-python3}
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+tmp=
+trap 'rm -rf "$work"; [ -z "$tmp" ] || rm -f -- "$tmp"' EXIT
 
 # 1. Enclave attestation first (ruling 1234).
 # shellcheck disable=SC2086 # the command may carry its own arguments
@@ -86,12 +89,16 @@ open(out, "wb").write((json.dumps(bundle, sort_keys=True, separators=(",", ":"))
 
 # 4. Publish. Each step fails the script on its own: a failed step in a
 # non-final `&&` position would not trip errexit.
-if ! cp "$work/bundle.json" "$out.tmp.$$"; then
-	rm -f "$out.tmp.$$"
+# The temp file is created exclusively (mktemp, O_EXCL) in OUT's parent, so no
+# pre-created name or symlink is ever written through; the trap removes it on
+# every exit path. mv -T never moves into a directory.
+tmp=$(mktemp "$(dirname -- "$out")/.$(basename -- "$out").XXXXXX") ||
+	die "cannot create a temp file next to $out; nothing was published"
+if ! cat "$work/bundle.json" >"$tmp"; then
 	die "cannot write $out; nothing was published"
 fi
-if ! mv "$out.tmp.$$" "$out"; then
-	rm -f "$out.tmp.$$"
+if ! mv -T -- "$tmp" "$out"; then
 	die "cannot move the bundle to $out; nothing was published"
 fi
+tmp=
 echo "collect-evidence: wrote $out"

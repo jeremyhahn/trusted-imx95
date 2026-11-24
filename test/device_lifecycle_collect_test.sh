@@ -122,6 +122,36 @@ else
 fi
 expect "missing OUT parent: nothing written" test ! -e "$W/nodir"
 
+# The publication temp file is exclusive: planted symlinks are never written through.
+printf 'victim\n' >"$W/victim"
+cp "$W/victim" "$W/victim.ref"
+mkdir -p "$W/pub"
+ln -s "$W/victim" "$W/pub/out.json.tmp.1"
+ln -s "$W/victim" "$W/pub/.out.json.XXXXXX"
+ln -s "$W/victim" "$W/pub/.out.json.tmp"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
+check "planted symlinks" 0 "wrote"
+expect "planted symlinks: victim unchanged" cmp -s "$W/victim" "$W/victim.ref"
+expect "planted symlinks: OUT is a regular file" test -f "$W/pub/out.json" -a ! -L "$W/pub/out.json"
+rm -rf "$W/pub"
+# a failed run leaves no temp file in OUT's parent
+mkdir -p "$W/pub"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" EVIDENCE_PYTHON=/bin/false "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
+check "failed run" nonzero
+expect "failed run: parent empty" test -z "$(ls -A "$W/pub")"
+rm -rf "$W/pub"
+
+# OUT must be a file path: a directory, or a link to one, is refused.
+mkdir -p "$W/adir"
+ln -sfn "$W/adir" "$W/alink"
+for d in adir alink; do
+	run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/$d"
+	check "OUT is $d" nonzero
+	if [[ "$OUT" != *"collect-evidence: wrote"* ]]; then pass "OUT is $d: no success line"; else fail "OUT is $d: success line printed" "$OUT"; fi
+	expect "OUT is $d: nothing inside" test -z "$(ls -A "$W/adir")"
+done
+rm -rf "$W/adir" "$W/alink"
+
 # Refusals happen before any double runs.
 refuse() { # name, then env assignments and collector arguments
 	local name=$1
