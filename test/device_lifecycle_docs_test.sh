@@ -42,7 +42,12 @@ count_questions() {
 		END { print n + 0 }' "$1"
 }
 
-# check_readme FILE: prints the problems found, one per line; empty means clean.
+# count_owner_questions FILE: lines that start an owner question held outside the surveys.
+count_owner_questions() {
+	grep -c '^Owner question, proposed, pending owner approval' "$1" || true
+}
+
+# check_readme FILE [ARCH]: prints the problems found, one per line; empty means clean.
 # Relative links resolve against $DIR, where the README lives.
 check_readme() {
 	local f=$1 h link target anchor
@@ -71,13 +76,15 @@ check_readme() {
 		grep -qF "]($t" "$f" || echo "no link to $t"
 	done
 	local rows want=0 s
-	rows=$(grep -cE '^\| [A-F][0-9]+ \|' "$f" || true)
+	rows=$(grep -cE '^\| [A-G][0-9]+ \|' "$f" || true)
 	for s in $SURVEYS; do
 		want=$((want + $(count_questions "$DIR/$s" '^## .*[Qq]uestions for the owner')))
 	done
 	want=$((want + $(count_questions "$DIR/../ftpm/README.md" '^## Open questions for the owner')))
+	want=$((want + $(count_owner_questions "${2:-$DIR/architecture.md}")))
 	[ "$rows" -eq "$want" ] || echo "question rows $rows, sources $want"
-	grep -E '^\| [A-F][0-9]+ \|' "$f" | grep -vqE '\]\([^)]*\.md#[^)]+\)' && echo "a row has no anchored source link"
+	grep -E '^\| G1 \|' "$f" | grep -qF '](architecture.md#where-the-life-cycle-closes)' || echo "G1 row does not link architecture.md#where-the-life-cycle-closes"
+	grep -E '^\| [A-G][0-9]+ \|' "$f" | grep -vqE '\]\([^)]*\.md#[^)]+\)' && echo "a row has no anchored source link"
 	return 0
 }
 
@@ -106,6 +113,14 @@ neg "dead relative link" 's|\(attestation-survey\.md\)|(no-such-file.md)|'
 neg "dropped question row" '/^\| B3 \|/d'
 neg "no architecture.md link" '/architecture\.md/d'
 neg "status line without #177" '/^> \*\*Status:/s/#177//g'
+neg "G1 row deleted" '/^\| G1 \|/d'
+neg "G1 source link to a missing anchor" '/^\| G1 \|/s/#where-the-life-cycle-closes/#no-such-anchor/'
+# a second owner question in architecture.md that the README does not list
+tmpa=$(mktemp "$TMP_ROOT/arch.XXXXXX")
+cp "$DIR/architecture.md" "$tmpa"
+printf '\nOwner question, proposed, pending owner approval: a second question.\n' >>"$tmpa"
+out=$(check_readme "$README" "$tmpa")
+if printf '%s' "$out" | grep -qF 'question rows 31, sources 32'; then pass "negative: a second architecture.md owner question"; else fail "negative: a second owner question was not caught" "$out"; fi
 
 # check_page FILE: architecture.md and evidence-bundle.md. Relative links resolve against
 # $DIR; a link with only an anchor resolves against FILE itself.
