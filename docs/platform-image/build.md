@@ -45,6 +45,15 @@ section 11), written down so the owner can read a working proposal.
   against `platform-image/kernel-required.txt`, the one table
   `test/platform_image_kernel_test.sh` also checks the fragment against.
   A required `n` holds when the symbol is "is not set" or absent.
+- `scripts/platform-image-layer-check.sh`, `make platform-image-layer-check`:
+  the layer check, run on a host with the fetched tree (`make platform-image-fetch`;
+  no bitbake). It reads the BBLAYERS paths of `platform-image/conf/bblayers.conf.template`
+  and fails when a listed layer has no `conf/layer.conf`, when a `LAYERDEPENDS`
+  entry names a collection no listed layer provides, or when a layer's
+  `LAYERSERIES_COMPAT` lacks a series openembedded-core's `LAYERSERIES_CORENAMES`
+  gives. Version constraints (`name:N`) are reported, not enforced. It parses the
+  files as text, so it is weaker than bitbake's own parse. Its stub-tree test is
+  `test/platform_image_layer_check_test.sh`.
 
 - `scripts/platform-image-hosttools.sh`, `make platform-image-hosttools`: sets
   up a non-root build host in a cache directory: Yocto buildtools-extended 6.0.1

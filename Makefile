@@ -50,7 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools
 
 help: ## List the targets
 	@echo "Targets:"
@@ -199,6 +199,9 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS layer has a conf/layer.conf, its LAYERDEPENDS are provided and its LAYERSERIES_COMPAT has the oe-core series (needs a fetched tree, no bitbake; not in CI)
+	@scripts/platform-image-layer-check.sh
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
