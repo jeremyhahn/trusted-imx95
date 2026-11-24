@@ -172,7 +172,8 @@ hsm_err_t hsm_generate_key(hsm_hdl_t key_management_hdl, op_generate_key_args_t 
 	fake.gen_flags = args->flags;
 	fake.gen_key_type = args->key_type;
 	fake.gen_calls++;
-	*args->key_identifier = 7;
+	/* ELE_FAKE_ID_ZERO=1: a success reply that leaves the identifier at 0. */
+	*args->key_identifier = getenv("ELE_FAKE_ID_ZERO") ? 0 : 7;
 	note("generate flags=0x%x", (unsigned)args->flags);
 	return env_err();
 }

@@ -306,7 +306,9 @@ static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *
 			a.bit_key_sz = HSM_KEY_SIZE_ECC_NIST_256;
 			mark_started(wfd);
 			err = hsm_generate_key(svc, &a);
-			if (fill_ack(err, rq->flags, rq->split, &ack)) {
+			/* A success reply that leaves the identifier at the zero
+			 * sentinel names no key: status stays -1 (unknown outcome). */
+			if (err == HSM_NO_ERROR && id != 0 && fill_ack(err, rq->flags, rq->split, &ack)) {
 				res_ack(res, &ack);
 				res->key_id = id;
 				res->status = 0;

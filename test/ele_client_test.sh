@@ -313,6 +313,10 @@ open(sys.argv[2],"w").write(s)' "$d/ele_hsm_consts_check.c" "$tmp/bad_consts.c"
 	check "counter warning (0x10) after the marker on delete: exit 3, unknown outcome" 3 "the key store may have changed"
 	cli 0xfe --split-confirmed 5 3 gen
 	check "other HSM error after the started marker: exit 3, unknown outcome" 3 "outcome unknown"
+	# HSM_NO_ERROR with the key id left at zero names no key: unknown outcome, never a committed key.
+	ELE_FAKE_ID_ZERO=1 cli 0 --split-confirmed 5 3 gen
+	check "generate, HSM_NO_ERROR with key id zero: exit 3, unknown outcome" 3 "outcome unknown"
+	case $OUT in *"was generated"* | *"key 0"*) fail "key id zero on generate claimed a key" ;; esac
 	cli 0 --split-confirmed 5 3 del 7
 	check "delete with HSM_NO_ERROR (a hidden counter warning looks the same) fails closed" 1 "update refused (committed-not-rollback-protected); key 7 delete is NOT rollback-protected"
 	case $OUT in *"deleted "*) fail "del claimed success without a counter acknowledgement" ;; esac

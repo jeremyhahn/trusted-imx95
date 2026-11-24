@@ -163,6 +163,16 @@ static void isolation(void)
 	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_OUTCOME_UNKNOWN && id == 0,
 	      "other code on generate after the started marker: unknown outcome");
 	ele_hsm_close(&x);
+	/* HSM_NO_ERROR with the key id left at the zero sentinel names no key. */
+	begin(&x, &c, &nonce, true);
+	fake.err = HSM_NO_ERROR;
+	setenv("ELE_FAKE_ID_ZERO", "1", 1);
+	st = ELE_NOT_COMMITTED;
+	id = 0;
+	CHECK(ele_generate_key(&c, &id, &st) != 0 && st == ELE_OUTCOME_UNKNOWN && id == 0,
+	      "HSM_NO_ERROR with key id zero on generate: unknown outcome, no key id claimed");
+	unsetenv("ELE_FAKE_ID_ZERO");
+	ele_hsm_close(&x);
 
 	/* Split unconfirmed: refused before any fork, so before any library call. */
 	begin(&x, &c, &nonce, false);
