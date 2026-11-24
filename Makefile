@@ -49,7 +49,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
-	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
+	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
@@ -213,6 +213,21 @@ ahab-policy-test: ## Check a test-PKI container against a policy file written fr
 
 ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
 	@test/ahab_tamper_test.sh
+
+ahab-hsm-test: ## Sign the Cortex-M7 container through SPSDK's proxy signer with the key held by a test HSM, never by the build (AN14471 custody model; test PKI, no board, no fuse)
+	@scripts/ahab/hsm-sign-test.sh
+
+# The boot-container row end to end through its make targets (SPEC.md,
+# `boot-container`): sign and verify, the Cortex-M7 container, HSM custody,
+# the policy and anti-rollback floor, tampering, the assembled boot image.
+# It needs the pinned SPSDK (SPSDK_VENV, as in the toolchain image, or the
+# network to install it), so it is not in the integration image's suite.
+integration-test-boot-container: ## The boot-container row end to end: ahab-sign-test, ahab-m7-test, ahab-hsm-test, ahab-policy-test, ahab-tamper-test, boot-image-test (pinned SPSDK; test PKI, no board, no fuse)
+	@for t in ahab-sign-test ahab-m7-test ahab-hsm-test ahab-policy-test ahab-tamper-test boot-image-test; do \
+		echo "--- make $$t"; \
+		$(MAKE) --no-print-directory "$$t" || { echo "integration-test-boot-container: FAIL $$t"; exit 1; }; \
+	done
+	@echo "integration-test-boot-container: OK"
 
 ## --- The test-PKI boot image (docs/boot-container/boot-image.md; no board, no flash) ---
 

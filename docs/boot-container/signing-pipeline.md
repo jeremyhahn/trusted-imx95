@@ -78,6 +78,40 @@ entry (survey U1, needs IMX95RM); the numeric AHAB core id and image type codes 
 (U1); the TCM sizes and ITCM/DTCM split (U2); the container version, `fuse_version` and SRK hash fuse
 values for a real device (U3, as above).
 
+## HSM custody test
+
+The `boot-container` row of [SPEC.md](../SPEC.md) signs containers with keys held in an HSM, after
+AN14471's model for the custody of the signing keys (AN14471 §3.1, §3.6). `make ahab-hsm-test`
+(`scripts/ahab/hsm-sign-test.sh`) tests that model with the test PKI, before any real HSM:
+
+1. Four test SRKs are generated in an "HSM" directory (`mktemp -d`, outside the clone). Only the four
+   public keys move to the build directory, a second `mktemp -d`.
+2. [scripts/ahab/test-hsm.py](../../scripts/ahab/test-hsm.py), a test stand-in for the HSM, holds
+   SRK 0's private key and serves SPSDK 3.13.0's `proxy` signature provider (REST API 2.0) on
+   `127.0.0.1`, on an ephemeral port. It signs only a pre-hashed SHA-384 digest: it never sees the
+   container.
+3. The M7 configuration ([m7-container.yaml](../../scripts/ahab/m7-container.yaml)) has its `signer`
+   set to `type=proxy;host=127.0.0.1;port=<port>;url_prefix=api;prehash=sha384`.
+   `nxpimage ahab export` signs through the HSM, and `nxpimage ahab verify` checks the container.
+4. The run fails when the build directory holds a private key, before or after the export, or when
+   the HSM logged no SHA-384 sign request.
+
+`test/ahab_hsm_test.sh` (in `make test`) also checks that a flipped payload byte is rejected, that an
+HSM holding a key other than the used SRK (`--hsm-key 1`) and no HSM at all (`--no-hsm`) both fail the
+export (there is no fallback to a key file), that the test HSM refuses raw data and a digest that is
+not 48 bytes, and that the runs write nothing in the clone. The real custody, its PKCS#11 or KMS back
+end and its access control, is go-xkms's and out of this row's scope; `test-hsm.py` is never a
+production signer.
+
+## Row end to end
+
+`make integration-test-boot-container` runs the row's targets in order: `ahab-sign-test`,
+`ahab-m7-test`, `ahab-hsm-test`, `ahab-policy-test` (with the `fuse_version` floor of the
+anti-rollback check), `ahab-tamper-test` and `boot-image-test`. It needs the pinned SPSDK, as the
+toolchain image has it (`make docker-run CMD='make integration-test-boot-container'`) or as a host
+installs it on the first run; the integration image has no SPSDK and checks only that the target
+names those steps (`test/integration/make_targets_test.sh`).
+
 ## Policy check
 
 ```sh
