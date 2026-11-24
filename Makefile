@@ -194,7 +194,7 @@ SW_LOCK  ?= $(CURDIR)/secure-world/bsp.lock
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
 	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
 
-secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>): its pins and owner ruling 771's sources; no fetch, no build
+secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>): its pins and owner ruling 1234's sources (imx-atf or upstream TF-A); no fetch, no build
 	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --check-lock
 
 integration-test-secure-world: ## The secure-world integration test (test/integration/secure_world_test.sh), offline
