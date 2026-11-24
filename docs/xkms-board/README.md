@@ -26,7 +26,9 @@ health check: unit active, a listener owned by the daemon, the version names
 the build's commit, the unit stays up. Any failure restores the backup and
 exits nonzero. The newest 5 backups are kept. `--dry-run` contacts nothing.
 xkmsd has no config validate mode, so a bad config shows as a failed start.
+The board needs systemctl and one of `ss`, `netstat` or `/proc/net/tcp` (tried
+in that order) to find the listener; `XKMS_PORT` pins the port.
 
 `bash test/xkms_board_tools_test.sh` runs the deploy against a fake board
-(stub ssh, systemctl and ss) and every burn-in `--help` and `--dry-run`.
+(stub ssh, systemctl and, per case, ss, netstat or /proc/net/tcp) and every burn-in `--help` and `--dry-run`.
 It does not touch a real board.

@@ -43,7 +43,7 @@ body=$(cat "$bin")
 case $1 in
 cat) [ -f "$R/etc/systemd/xkmsd.service" ] ;;
 is-active) [ "$(cat "$st")" = active ] ;;
-stop) echo inactive >"$st" ;;
+stop) echo inactive >"$st"; rm -rf "$R/proc" ;;
 start)
 	case $body in *FAILSTART*) echo inactive >"$st"; exit 1 ;; esac
 	case $body in *CORRUPT*)
@@ -52,18 +52,39 @@ start)
 		;;
 	esac
 	echo active >"$st"
+	case $body in *NOLISTEN*) ;; *)
+		# the /proc view of a daemon listening on 8443 (0x20FB), plus a
+		# connected socket on port 80 that is not a listener (state 01)
+		mkdir -p "$R/proc/net" "$R/proc/4242/fd"
+		printf '%s\n' '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode' \
+			'   0: 00000000:20FB 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0 0' \
+			'   1: 0100007F:0050 0100007F:9999 01 00000000:00000000 00:00000000 00000000     0        0 12346 1 0 0' >"$R/proc/net/tcp"
+		printf '%s\n' '  sl  local_address rem_address   st' >"$R/proc/net/tcp6"
+		ln -sfn 'socket:[12345]' "$R/proc/4242/fd/3"
+		;;
+	esac
 	;;
 show) if [ "$(cat "$st")" = active ]; then echo 4242; else echo 0; fi ;;
 esac
 EOF
-cat >"$fakebin/ss" <<'EOF'
+# ss and netstat exist only when FAKE_TOOLS names them (default: neither, as on
+# the board's ss-less image; a stub that exits 127 makes the probe fall through).
+for tool in ss netstat; do
+	cat >"$fakebin/$tool" <<'EOF'
 #!/bin/bash
 R=$XKMS_FAKE_ROOT
+tool=${0##*/}
+case " ${FAKE_TOOLS:-} " in *" $tool "*) ;; *) exit 127 ;; esac
 body=$(cat "$R/usr/local/bin/xkmsd")
 [ "$(cat "$R/run/state")" = active ] || exit 0
 case $body in *NOLISTEN*) exit 0 ;; esac
-echo 'LISTEN 0 4096 0.0.0.0:8443 0.0.0.0:* users:(("xkmsd",pid=4242,fd=3))'
+if [ "$tool" = ss ]; then
+	echo 'LISTEN 0 4096 0.0.0.0:8443 0.0.0.0:* users:(("xkmsd",pid=4242,fd=3))'
+else
+	echo 'tcp 0 0 0.0.0.0:8443 0.0.0.0:* LISTEN 4242/xkmsd'
+fi
 EOF
+done
 chmod +x "$fakebin"/*
 export PATH=$fakebin:$PATH
 
@@ -150,6 +171,25 @@ ok "success: backup holds the old data" diff -r "$R/var/backups/xkms/20260101T00
 ok "success: no staged binary left" [ ! -e "$R/usr/local/bin/.xkmsd.new" ]
 ok "success: secrets are not printed" out_lacks "$tmp/ok.log" SECRETMATERIAL
 ok "success: backup dir is private" [ "$(stat -c %a "$R/var/backups/xkms")" = 700 ]
+
+# --- the listener probe: ss, netstat, or /proc/net/tcp only ----------------------
+for probe in "ss" "netstat"; do
+	R=$tmp/board-$probe
+	mkboard "$R"
+	export XKMS_FAKE_ROOT=$R
+	FAKE_TOOLS=$probe XKMS_STAMP=20260101T000010Z D "$tmp/probe-$probe.log" board.invalid "$tmp/b-new"
+	ok "probe $probe: deploy succeeds" [ "$RC" = 0 ]
+done
+R=$tmp/board-proc-port
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+XKMS_PORT=8443 XKMS_STAMP=20260101T000011Z D "$tmp/probe-port.log" board.invalid "$tmp/b-new"
+ok "probe /proc only: listener on the port is found" [ "$RC" = 0 ]
+R=$tmp/board-proc-noport
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+XKMS_PORT=9999 XKMS_HEALTH_WAIT=1 XKMS_STAMP=20260101T000012Z D "$tmp/probe-noport.log" board.invalid "$tmp/b-new"
+ok "probe /proc only: no 0A line for the port fails the deploy" [ "$RC" != 0 ]
 
 # --- health check failure rolls back, byte for byte ---------------------------
 for mode in "NOLISTEN" "CORRUPT NOLISTEN" "FAILSTART" "CORRUPT FAILSTART"; do

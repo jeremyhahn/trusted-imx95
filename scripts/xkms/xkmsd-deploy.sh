@@ -17,6 +17,8 @@
 #   XKMS_HEALTH_WAIT  seconds to wait for the unit and its listener (30)
 #   XKMS_SETTLE       seconds the unit must stay up after the check (3)
 #   XKMS_MIN_FREE_KB  free space to leave after the backup, in KiB (51200)
+#   XKMS_PORT         TCP port the listener must be on (any port if unset); the
+#                     board needs one of ss, netstat or /proc/net/tcp
 #   XKMS_STAMP        backup name (default: the UTC time now); tests set it
 #   XKMS_FAKE_ROOT    prefix for every board path; tests only, empty on a board
 set -uo pipefail
@@ -70,7 +72,8 @@ r_treesum() { r_sums "$1" | sha256sum | cut -d' ' -f1; }
 r_preflight() { # r_preflight <new binary KiB>
 	r_init
 	command -v systemctl >/dev/null || { echo "board: no systemctl"; return 1; }
-	command -v ss >/dev/null || { echo "board: no ss, cannot check the listener"; return 1; }
+	type ss >/dev/null 2>&1 || type netstat >/dev/null 2>&1 || [ -r "$R/proc/net/tcp" ] ||
+		{ echo "board: none of ss, netstat or /proc/net/tcp, cannot check the listener"; return 1; }
 	systemctl cat "$UNIT" >/dev/null 2>&1 || { echo "board: unit $UNIT does not exist"; return 1; }
 	[ -x "$BIN" ] || { echo "board: $BIN is missing"; return 1; }
 	[ -d "$ETC" ] || { echo "board: $ETC is missing"; return 1; }
@@ -141,6 +144,37 @@ r_install() {
 
 r_start() { systemctl start "$UNIT" || { echo "board: systemctl start $UNIT failed"; return 1; }; }
 
+r_listening() { # r_listening <pid>: a LISTEN socket owned by pid (on port $PORT when set)
+	local p=$1 line t la st ino f hp
+	if type ss >/dev/null 2>&1; then
+		while read -r line; do
+			[[ $line == *"pid=$p,"* ]] || continue
+			[ -z "${PORT:-}" ] || [[ $line == *":$PORT "* ]] || continue
+			return 0
+		done < <(ss -ltnp 2>/dev/null)
+	fi
+	if type netstat >/dev/null 2>&1; then
+		while read -r line; do
+			[[ $line == *" $p/"* ]] || continue
+			[ -z "${PORT:-}" ] || [[ $line == *":$PORT "* ]] || continue
+			return 0
+		done < <(netstat -ltnp 2>/dev/null)
+	fi
+	hp=""
+	[ -z "${PORT:-}" ] || hp=$(printf '%04X' "$PORT")
+	for t in tcp tcp6; do
+		[ -r "$R/proc/net/$t" ] || continue
+		while read -r _ la _ st _ _ _ _ _ ino _; do
+			[ "$st" = 0A ] || continue
+			[ -z "$hp" ] || [ "${la##*:}" = "$hp" ] || continue
+			for f in "$R/proc/$p/fd/"*; do
+				[ "$(readlink "$f" 2>/dev/null)" = "socket:[$ino]" ] && return 0
+			done
+		done <"$R/proc/net/$t"
+	done
+	return 1
+}
+
 r_health() { # r_health [<go-xkms commit>]
 	r_init
 	i=0
@@ -149,8 +183,7 @@ r_health() { # r_health [<go-xkms commit>]
 		if systemctl is-active --quiet "$UNIT"; then
 			pid=$(systemctl show -p MainPID --value "$UNIT" 2>/dev/null)
 			if [ "${pid:-0}" != 0 ]; then
-				socks=$(ss -ltnp 2>/dev/null)
-				case $socks in *"pid=$pid,"*) break ;; esac
+				r_listening "$pid" && break
 			fi
 		fi
 		pid=0
@@ -313,9 +346,9 @@ board() {
 	shift
 	[ $# -eq 0 ] || args=$(printf '%q ' "$@")
 	{
-		printf 'R=%q; UNIT=xkmsd; KEEP=%q; WAIT=%q; SETTLE=%q; MINKB=%q\n' "$fake" "$keep" "$wait_s" "$settle" "$minkb"
+		printf 'R=%q; UNIT=xkmsd; KEEP=%q; WAIT=%q; SETTLE=%q; MINKB=%q; PORT=%q\n' "$fake" "$keep" "$wait_s" "$settle" "$minkb" "${XKMS_PORT:-}"
 		declare -f r_init r_sums r_treesum r_preflight r_stage r_unstage r_backup r_install r_start \
-			r_health r_restore r_backup_commit r_prune
+			r_listening r_health r_restore r_backup_commit r_prune
 		echo "r_$action $args"
 	} | ssh "${ssh_opts[@]}" "$target" "bash -s"
 }
