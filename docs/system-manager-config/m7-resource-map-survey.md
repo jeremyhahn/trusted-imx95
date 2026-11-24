@@ -258,12 +258,14 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
 
 1. **S10's grants beyond what is recorded.** The board file is settled: this device uses
    `configs/other/mx95frdm-pro.cfg` (S10), not the 15x15 `mx95frdm.cfg` (S1). This lane did not read S10 itself.
-   Its M7 ownership of `M7P`, `PERF_M7` and `MU_ELE5`, its `SYS` grant, the owners of `PD_NETC`, `NETC_EMDIO0` and
+   Its M7 ownership of `M7P`, `PERF_M7` and `MU_ELE5` is **unconfirmed** for `MU_ELE5`; for `M7P` and `PERF_M7` it is
+   provisional, see scmi-permissions-survey.md section 8 (#167). Its `SYS` grant, the owners of `PD_NETC`, `NETC_EMDIO0` and
    the ENET pins, and what GPIO_IO36/37 are wired to on the PRO are **unconfirmed** until S10 is read for them.
 2. **Ethernet PHYs.** Part numbers, which NETC port each serves, their reset and supply-enable pins, and whether a
    supply is SM-controlled. Needs UM12527 §1.2 Table 1 and §2.18 (S9, unreachable from this lane).
 3. **Numeric identifiers.** The SCMI power-domain, clock, performance-domain and reset-domain IDs (for example the
-   number behind `PD_NETC` or `PERF_M7`). They are in imx-sm's generated `configs/mx95frdm-pro/config_*.h` (generated from S10) and device
+   number behind `PD_NETC` or `PERF_M7`; scmi-permissions-survey.md section 8 (#167) settles the `PERF_M7` grant, not its
+   numeric ID, which stays open here). They are in imx-sm's generated `configs/mx95frdm-pro/config_*.h` (generated from S10) and device
    headers, and in Linux's `imx95-power.h` and `imx95-clock.h` (S8). This lane's read guard does not allow reading
    C headers outside the repository, so they were not read.
 4. **Reset domains.** Whether the M7 needs any SCMI reset domain, and which. Needs the device headers (item 3) and
