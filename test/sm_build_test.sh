@@ -24,7 +24,7 @@ tc_sha=$(sha256sum "$TMP_ROOT/tc.tar.xz" | cut -d' ' -f1)
 # FAKE_FAIL fails the build.
 repo="$TMP_ROOT/imx-sm"
 mkdir -p "$repo/configs/other"
-printf 'LM1 name="M7"\nboard=fake\n' >"$repo/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake\nLM2 name="AP"\nSCMI_AGENT1 name="AP-S"\nSYS ALL\n' >"$repo/configs/other/fakepro.cfg"
 # shellcheck disable=SC2016 # make's $(...), not the shell's
 printf '%s\n' 'cfg:' \
 	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h' \
@@ -44,8 +44,8 @@ cfg_sha=$(sha256sum "$repo/configs/other/fakepro.cfg" | cut -d' ' -f1)
 # The repository's patch, faked: one patch beside the lock, changing the fake
 # configuration. patched_sha is the configuration after it applies.
 mkdir -p "$TMP_ROOT/patches" "$TMP_ROOT/pa/configs/other" "$TMP_ROOT/pb/configs/other"
-printf 'LM1 name="M7"\nboard=fake\n' >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
-printf 'LM1 name="M7"\nboard=fake-closed\n' >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake\nLM2 name="AP"\nSCMI_AGENT1 name="AP-S"\nSYS ALL\n' >"$TMP_ROOT/pa/configs/other/fakepro.cfg"
+printf 'LM1 name="M7"\nboard=fake-closed\nLM2 name="AP"\nSCMI_AGENT1 name="AP-S"\nSYS ALL\n' >"$TMP_ROOT/pb/configs/other/fakepro.cfg"
 (cd "$TMP_ROOT" && diff -u pa/configs/other/fakepro.cfg pb/configs/other/fakepro.cfg |
 	{ read -r _; read -r _; echo "--- a/configs/other/fakepro.cfg"; echo "+++ b/configs/other/fakepro.cfg"; cat; }) \
 	>"$TMP_ROOT/patches/0001-fake.patch" || true
@@ -87,6 +87,7 @@ has_line() {
 
 # The M7 grants allowlist sits beside the lock; the fake patched block is one line.
 printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
+printf '# fake\nSYS ALL\n' >"$TMP_ROOT/ap-s-grants.txt"
 lock
 out="$TMP_ROOT/out"
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
@@ -117,6 +118,12 @@ lock
 run env SM_OUT="$TMP_ROOT/out4" bash "$sm" "$TMP_ROOT/lock"
 check "sm-build.sh stops a build whose patched file widens the M7 block" nonzero "grants: UNLISTED board=fake-closed" "differ from system-manager/m7-grants.txt"
 printf '# fake\nboard=fake-closed\n' >"$TMP_ROOT/m7-grants.txt"
+# The same for the AP-S agent: an allowlist that lacks a granted line stops the build.
+printf '# fake\nPERF_A55 ALL\n' >"$TMP_ROOT/ap-s-grants.txt"
+lock
+run env SM_OUT="$TMP_ROOT/out4b" bash "$sm" "$TMP_ROOT/lock"
+check "sm-build.sh stops a build whose AP-S block is not on the allowlist" nonzero "grants: UNLISTED SYS ALL" "the AP-S grants differ from system-manager/ap-s-grants.txt"
+printf '# fake\nSYS ALL\n' >"$TMP_ROOT/ap-s-grants.txt"
 
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
@@ -255,6 +262,37 @@ expect "grants: --print output is the allowlist's lines" \
 	bash -c '[ "$("$1" --print "$2")" = "$(tail -n 3 "$3")" ]' _ "$gc" "$g/cfg" "$g/ok.txt"
 expect "grants: the committed allowlist is non-empty" \
 	[ -s "$ROOT/system-manager/m7-grants.txt" ]
+
+# --ap-s: the AP-S agent's section of LM "AP" equals the reviewed list.
+printf 'LM1 name="M7"\nSCMI_AGENT0 name="M7"\nLMM_2 ALL\nLM2 name="AP"\nSCMI_AGENT1 name="AP-S", secure\n# c\nSYS ALL\nPERF_A55 ALL, \\\n  x=1\nSCMI_AGENT2 name="AP-NS"\nLMM_1 NOTIFY\n' >"$g/aps.cfg"
+printf '# list\nSYS ALL\nPERF_A55 ALL, x=1\n' >"$g/aps-ok.txt"
+printf 'SYS ALL\n' >"$g/aps-stale.txt"
+printf 'SYS ALL\nPERF_A55 ALL, x=1\nCPU_M7P ALL\n' >"$g/aps-stale2.txt"
+printf 'LM2 name="AP"\nSCMI_AGENT1 name="AP-S", secure\nSYS ALL\nPERF_A55 ALL, x=1\nLMM_M7 ALL\n' >"$g/aps-lmm.cfg"
+printf 'LM2 name="AP"\nSCMI_AGENT1 name="AP-S", secure\nSYS ALL\nPERF_A55 ALL, x=1\nCPU_M7P ALL\nPD_M7 ALL\n' >"$g/aps-cpu.cfg"
+printf 'LM2 name="AP"\nSCMI_AGENT2 name="AP-NS"\nSYS ALL\n' >"$g/aps-none.cfg"
+printf 'LM1 name="M7"\nSCMI_AGENT1 name="AP-S"\nSYS ALL\nLM2 name="AP"\nSCMI_AGENT2 name="AP-NS"\n' >"$g/aps-wronglm.cfg"
+run "$gc" --ap-s "$g/aps.cfg" "$g/aps-ok.txt"
+check "grants --ap-s: a block matching the allowlist passes (other agents and LMs ignored)" 0 "grants: OK (2 lines)"
+run "$gc" --ap-s "$g/aps-lmm.cfg" "$g/aps-ok.txt"
+check "grants --ap-s: an extra LMM_M7 line is UNLISTED" 1 "grants: UNLISTED LMM_M7 ALL" "grants: FAILED"
+run "$gc" --ap-s "$g/aps-cpu.cfg" "$g/aps-ok.txt"
+check "grants --ap-s: extra CPU_M7P and PD_M7 lines are UNLISTED" 1 "grants: UNLISTED CPU_M7P ALL" "grants: UNLISTED PD_M7 ALL"
+run "$gc" --ap-s "$g/aps.cfg" "$g/aps-stale2.txt"
+check "grants --ap-s: a listed line the file lacks is STALE" 1 "grants: STALE CPU_M7P ALL" "grants: FAILED"
+run "$gc" --ap-s "$g/aps.cfg" "$g/aps-stale.txt"
+check "grants --ap-s: a removed listed line is UNLISTED the other way" 1 "grants: UNLISTED PERF_A55 ALL, x=1"
+run "$gc" --ap-s "$g/aps-none.cfg" "$g/aps-ok.txt"
+check "grants --ap-s: an absent AP-S block fails by name" 1 "no AP-S agent block in LM AP"
+run "$gc" --ap-s "$g/aps-wronglm.cfg" "$g/aps-ok.txt"
+check "grants --ap-s: an AP-S agent outside LM AP is not taken" 1 "no AP-S agent block in LM AP"
+printf 'SCMI_AGENT0 name="M7"\nLMM_2 ALL\n' >"$g/aps-m7.txt"
+run "$gc" "$g/aps.cfg" "$g/aps-m7.txt"
+check "grants: the M7 mode ignores the AP-S block" 0 "grants: OK (2 lines)"
+run "$gc" --ap-s --print "$g/aps.cfg"
+check "grants --ap-s --print shows the AP-S grants" 0 "PERF_A55 ALL, x=1"
+expect "grants: the committed AP-S allowlist is non-empty and lists no M7 right" \
+	bash -c '[ -s "$1" ] && ! grep -Eq "^(LMM_|CPU_M7P|PD_M7)" "$1"' _ "$ROOT/system-manager/ap-s-grants.txt"
 
 lock toolchain_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$TMP_ROOT/out2" bash "$sm" "$TMP_ROOT/lock"

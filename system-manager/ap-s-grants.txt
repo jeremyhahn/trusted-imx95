@@ -1,0 +1,8 @@
+# AP-S agent (secure, LM2 "AP") grants of the pinned mx95frdm-pro.cfg: pinned imx-sm, patches 0001 and 0002 applied (they do not touch AP-S).
+# Proposed, pending owner approval. Checked by scripts/sm-grants-check.sh --ap-s in every scripts/sm-build.sh build.
+# It holds no LMM_*, CPU_M7P or PD_M7 line: that absence is what makes the TF-A SiP calls for the M7 refuse (docs/secure-world/tfa-scmi-survey.md, 2.2.1).
+# SYS ALL is listed on purpose (survey item (d)).
+# UNVERIFIED: written from the survey, not from the real file (no vendor cache in the lane that wrote it). The first `make system-manager`
+# build may report UNLISTED or STALE lines; fix this file from `scripts/sm-grants-check.sh --ap-s --print <patched cfg>` after review of
+# each line, and never add an LMM_*, CPU_M7P or PD_M7 line.
+SYS ALL

@@ -177,6 +177,8 @@ build() {
 	m7_clean "$tree/${pin[sm_config_file]}"
 	"$root/scripts/sm-grants-check.sh" "$tree/${pin[sm_config_file]}" "$patches_dir/../m7-grants.txt" >&2 ||
 		die "the M7 LM's grants differ from system-manager/m7-grants.txt"
+	"$root/scripts/sm-grants-check.sh" --ap-s "$tree/${pin[sm_config_file]}" "$patches_dir/../ap-s-grants.txt" >&2 ||
+		die "the AP-S grants differ from system-manager/ap-s-grants.txt"
 	if ! (cd "$tree" && export SOURCE_DATE_EPOCH="$epoch" SM_CROSS_COMPILE="$cross" PATH="$out/shim:$PATH" &&
 		make config="${pin[sm_config]}" cfg &&
 		make -j"$jobs" config="${pin[sm_config]}" M="${pin[sm_monitor_mode]}" all) >"$log" 2>&1; then
