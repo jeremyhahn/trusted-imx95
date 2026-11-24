@@ -12,7 +12,7 @@
 #
 # ELE_ATTEST_CMD is run as: $ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT
 # and must write the signed region and the 96-byte signature there, exit 0.
-# EVIDENCE_PYTHON names the interpreter (needs `cryptography`), default python3.
+# EVIDENCE_PYTHON names the interpreter (standard library only), default python3.
 set -euo pipefail
 
 die() {
@@ -42,7 +42,7 @@ done
 	die "usage: collect-evidence.sh --nonce HEX --response-version N --ek-handle 0xHHHHHHHH --ek-template S -o OUT"
 [ -n "${ELE_ATTEST_CMD:-}" ] || die "ELE_ATTEST_CMD is not set (no default)"
 [[ "$nonce" =~ ^[0-9a-fA-F]{32}$ ]] || die "--nonce must be 32 hex digits"
-[[ "$version" =~ ^[0-9]+$ ]] || die "--response-version must be a number"
+[[ "$version" =~ ^[23]$ ]] || die "--response-version must be 2 or 3 (decimal)"
 [[ "$handle" =~ ^0x81[0-9a-fA-F]{6}$ ]] || die "--ek-handle must be in 0x81000000-0x81FFFFFF"
 
 [ ! -d "$out" ] || die "$out is a directory (or a link to one); -o names a file"
