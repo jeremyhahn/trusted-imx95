@@ -143,3 +143,22 @@ Any other code returns an invalid-argument error (`se_ctrl.c:2352-2357`). Beside
   (e; R11); no upper bound seen on the ioctl buffer lengths (d); blob files under a root-owned directory (f). Each is
   proposed input, pending owner approval.
 - It names no wire-protocol detail; go-xkms owns it (go-xkms #1521, ruling 1243).
+
+## Open vendor checks
+
+**Status: proposed, pending owner approval.** A checklist, not a finding. It adds no requirement and changes none.
+
+The four cells below stay **unconfirmed**. Reason for each: the lane read guard blocked every read of vendor code files
+(2026-11-24, lanes s4 and s5), and no slice reads vendor trees. Action for each: read at the tag and cite file:line, or
+ask NXP. The tag is lf-6.18.37-2.1.0 of the repository named; the peeled commits are in the Sources table (S1, S2).
+
+| Id | Cell | Requirement | Repository | Tag or commit | Path to check | Action |
+|----|------|-------------|------------|---------------|---------------|--------|
+| V1 | Messaging-unit message length (section d) | R3 | NXP linux-imx, S1 (https://github.com/nxp-imx/linux-imx) | tag lf-6.18.37-2.1.0, commit 6e694eda40aabd6671fca82b5416dbd76beeebb9 | the messaging-unit mailbox driver in linux-imx | read at the tag and cite file:line, or ask NXP |
+| V2 | Reset handling outside the secure-enclave driver (section e) | R11 | NXP linux-imx, S1 (https://github.com/nxp-imx/linux-imx) | tag lf-6.18.37-2.1.0, commit 6e694eda40aabd6671fca82b5416dbd76beeebb9 | the messaging-unit mailbox driver in linux-imx, and drivers/firmware/imx | read at the tag and cite file:line, or ask NXP |
+| V3 | Meaning of session flag 0x80 (section f) | R4 | NXP imx-secure-enclave, S2 (https://github.com/nxp-imx/imx-secure-enclave) | tag lf-6.18.37-2.1.0, commit 463845060a79dd9a6d39db3b3d8dff60225b9dfd | src/common/nvm/nvmd.conf and src/common/nvm/nvm_daemon.c, as cited in section f | read at the tag and cite file:line, or ask NXP |
+| V4 | Sequence-control file (section c) | R3 | NXP linux-imx, S1 (https://github.com/nxp-imx/linux-imx) | tag lf-6.18.37-2.1.0, commit 6e694eda40aabd6671fca82b5416dbd76beeebb9 | se_msg_sqfl_ctrl.c, under drivers/firmware/imx | read at the tag and cite file:line, or ask NXP |
+
+The requirement column names the proposed requirement of [xkmsd-node.md](xkmsd-node.md) each cell bears on: R3 (the image
+carries the enclave driver), R4 (the user-space library is pinned with the kernel) and R11 (fail closed on reset or loss
+of the interface). Each is proposed, pending owner approval.
