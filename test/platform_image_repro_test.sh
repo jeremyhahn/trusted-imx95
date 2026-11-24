@@ -28,7 +28,7 @@ has() { grep -qF -- "$2" "$1"; }
 mk() {
 	local d=$1 k v
 	shift
-	local TEE=tee TA=ta IMG=img DTB=dtb BOOT=boot DATA=data MEMBER=hello MODE=644 ID=id-A ROOT=root-A WICZ=plain NOTEE=0
+	local TEE=tee TA=ta IMG=img DTB=dtb BOOT=boot DATA=data MEMBER=hello MODE=644 ID=id-A ROOT=root-A WICZ=plain TARZ=gz NOTEE=0
 	for kv in "$@"; do k=${kv%%=*}; v=${kv#*=}; printf -v "$k" '%s' "$v"; done
 	rm -rf "$d"
 	mkdir -p "$d/optee-ftpm" "$wt/stage"
@@ -43,13 +43,15 @@ mk() {
 	printf '%s' "$ROOT" | dd of="$w" bs=1 seek=$((4096 * 512)) conv=notrunc 2>/dev/null
 	printf '%s' "$DATA" | dd of="$w" bs=1 seek=$((6144 * 512)) conv=notrunc 2>/dev/null
 	if [ "$WICZ" = gz ]; then gzip -n "$w"; fi
+	if [ "$WICZ" = both ]; then gzip -nk "$w"; fi
 	rm -rf "$wt/stage"
 	mkdir -p "$wt/stage/etc" "$wt/stage/usr/bin"
 	printf '%s' "$ID" >"$wt/stage/etc/trusted-imx95-rootfs-id"
 	printf '%s' "$MEMBER" >"$wt/stage/usr/bin/tool"
 	chmod "$MODE" "$wt/stage/usr/bin/tool"
 	ln -s tool "$wt/stage/usr/bin/link"
-	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$wt/stage" -cf - . | gzip -n >"$d/img.rootfs-20250101.tar.gz"
+	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$wt/stage" -cf "$d/img.rootfs-20250101.tar" .
+	if [ "$TARZ" = both ]; then gzip -nk "$d/img.rootfs-20250101.tar"; elif [ "$TARZ" = gz ]; then gzip -n "$d/img.rootfs-20250101.tar"; fi
 }
 # run DIR_A DIR_B: sets rc and the output file
 run() { rc=0; PATH="$wt/bin:$PATH" bash "$chk" "$1" "$2" >"$wt/out" 2>&1 || rc=$?; [ -z "${REPRO_TEST_DEBUG:-}" ] || cp "$wt/out" "/tmp/repro-out.$((++nrun))"; }
@@ -104,6 +106,49 @@ printf '\377\377\377\377' | dd of="$f" bs=1 seek=$((sz - 8)) conv=notrunc 2>/dev
 run "$wt/a" "$wt/b"
 expect "corrupt archive: exit nonzero" test "$rc" -ne 0
 expect "corrupt archive: refused by name" has "$wt/out" "img.rootfs-20250101.tar.gz) cannot be decompressed"
+
+# several formats of one build are one build; two builds in one directory are not
+fmtcase() { # fmtcase NAME "mk knob for A" "mk knob for B" EXPECT (match, or text the output must hold)
+	mk "$wt/a" "$2"
+	mk "$wt/b" "$3"
+	run "$wt/a" "$wt/b"
+	if [ "$4" = match ]; then
+		expect "$1: exit 0" test "$rc" -eq 0
+	else
+		expect "$1: exit nonzero" test "$rc" -ne 0
+		expect "$1: says why" has "$wt/out" "$4"
+	fi
+}
+fmtcase "wic and wic.gz of equal content" "WICZ=both" "WICZ=plain" match
+fmtcase "wic and wic.gz on both sides" "WICZ=both" "WICZ=both" match
+fmtcase "rootfs tar and tar.gz of equal content" "TARZ=both" "TARZ=gz" match
+fmtcase "rootfs tar and tar.gz on both sides" "TARZ=both" "TARZ=both" match
+mk "$wt/a" WICZ=both
+mk "$wt/b"
+printf 'X' | dd of="$wt/a/img.rootfs-20250101.wic" bs=1 seek=100 conv=notrunc 2>/dev/null
+run "$wt/a" "$wt/b"
+expect "wic and wic.gz of different content: exit nonzero" test "$rc" -ne 0
+expect "wic and wic.gz of different content: names the files" has "$wt/out" "img.rootfs-20250101.wic.gz"
+expect "wic and wic.gz of different content: says they differ" has "$wt/out" "differ after decompression"
+mk "$wt/a"
+mk "$wt/b"
+cp "$wt/a/img.rootfs-20250101.wic" "$wt/a/other.rootfs-20250102.wic"
+run "$wt/a" "$wt/b"
+expect "two wic builds in one directory: exit nonzero" test "$rc" -ne 0
+expect "two wic builds in one directory: not exactly one" has "$wt/out" "wic: not exactly one image in"
+mk "$wt/a" TARZ=both
+mk "$wt/b"
+printf 'X' | dd of="$wt/a/img.rootfs-20250101.tar" bs=1 seek=100 conv=notrunc 2>/dev/null
+run "$wt/a" "$wt/b"
+expect "tar and tar.gz of different content: exit nonzero" test "$rc" -ne 0
+expect "tar and tar.gz of different content: says they differ" has "$wt/out" "differ after decompression"
+mk "$wt/a" TARZ=plain
+mk "$wt/b"
+cp "$wt/a/img.rootfs-20250101.tar" "$wt/a/other.rootfs-20250102.tar"
+run "$wt/a" "$wt/b"
+expect "two rootfs archives in one directory: exit nonzero" test "$rc" -ne 0
+expect "two rootfs archives in one directory: not exactly one" has "$wt/out" "rootfs archive: not exactly one in"
+mk "$wt/a"
 
 # PAX metadata and device numbers (python tarfile fixtures): identical but for one attribute
 fx=$ROOT/test/repro_tar_fixture.py

@@ -141,30 +141,48 @@ else
 fi
 
 # one_file DIR GLOB...: the one distinct regular file the globs name (links followed), else fail.
+# why: the reason pick last gave, as a suffix (empty when none).
+why() { if [ -s "$tmp/why" ]; then printf ' (%s)' "$(<"$tmp/why")"; fi; }
+
 pick() {
-	local dir=$1 f r seen="" cnt=0 first=""
+	local dir=$1 g f r seen=" " stem fstem="" files=() i pa pb
 	shift
+	: >"$tmp/why"
 	for g in "$@"; do
 		for f in "$dir"/$g; do
 			case $f in *.bmap) continue ;; esac
 			[ -e "$f" ] || continue
 			r=$(readlink -f "$f")
-			case " $seen " in *" $r "*) continue ;; esac
-			seen="$seen $r"
-			cnt=$((cnt + 1))
-			first=$r
+			case "$seen" in *" $r "*) continue ;; esac
+			seen="$seen$r "
+			# one build may emit several formats of one image: group by stem
+			stem=$r
+			case $stem in *.gz) stem=${stem%.gz} ;; *.bz2) stem=${stem%.bz2} ;; *.xz) stem=${stem%.xz} ;; *.zst) stem=${stem%.zst} ;; esac
+			if [ -z "$fstem" ]; then fstem=$stem; elif [ "$fstem" != "$stem" ]; then return 1; fi
+			files+=("$r")
 		done
 	done
-	[ "$cnt" -eq 1 ] || return 1
-	printf '%s\n' "$first"
+	[ "${#files[@]}" -ge 1 ] || return 1
+	# the plain file comes first in the callers' pattern order, then gz bz2 xz zst
+	for ((i = 1; i < ${#files[@]}; i++)); do
+		pa=$(deco "${files[0]}" "$tmp/pk.0") && pb=$(deco "${files[i]}" "$tmp/pk.1") || {
+			printf 'cannot decompress %s or %s' "${files[0]}" "${files[i]}" >"$tmp/why"; rm -f "$tmp/pk.0" "$tmp/pk.1"; return 1; }
+		if ! cmp -s "$pa" "$pb"; then
+			printf 'formats of one image differ after decompression: %s and %s' "${files[0]}" "${files[i]}" >"$tmp/why"
+			rm -f "$tmp/pk.0" "$tmp/pk.1"
+			return 1
+		fi
+		rm -f "$tmp/pk.0" "$tmp/pk.1"
+	done
+	printf '%s\n' "${files[0]}"
 }
 
 # --- the .wic ---
 wa=
 wb=
 wic_ok=1
-wa=$(pick "$A" '*.wic' '*.wic.gz' '*.wic.bz2' '*.wic.xz' '*.wic.zst') || { bad "wic: not exactly one image in $A"; wic_ok=0; }
-wb=$(pick "$B" '*.wic' '*.wic.gz' '*.wic.bz2' '*.wic.xz' '*.wic.zst') || { bad "wic: not exactly one image in $B"; wic_ok=0; }
+wa=$(pick "$A" '*.wic' '*.wic.gz' '*.wic.bz2' '*.wic.xz' '*.wic.zst') || { bad "wic: not exactly one image in $A$(why)"; wic_ok=0; }
+wb=$(pick "$B" '*.wic' '*.wic.gz' '*.wic.bz2' '*.wic.xz' '*.wic.zst') || { bad "wic: not exactly one image in $B$(why)"; wic_ok=0; }
 if [ "$wic_ok" -eq 1 ]; then
 	pa=$(deco "$wa" "$tmp/a.wic") || { bad "wic: A ($wa) cannot be decompressed (corrupt or truncated)"; wic_ok=0; }
 fi
@@ -203,8 +221,8 @@ fi
 ra=
 rb=
 rt_ok=1
-ra=$(pick "$A" '*.rootfs*.tar' '*.rootfs*.tar.gz' '*.rootfs*.tar.bz2' '*.rootfs*.tar.xz' '*.rootfs*.tar.zst') || { bad "rootfs archive: not exactly one in $A"; rt_ok=0; }
-rb=$(pick "$B" '*.rootfs*.tar' '*.rootfs*.tar.gz' '*.rootfs*.tar.bz2' '*.rootfs*.tar.xz' '*.rootfs*.tar.zst') || { bad "rootfs archive: not exactly one in $B"; rt_ok=0; }
+ra=$(pick "$A" '*.rootfs*.tar' '*.rootfs*.tar.gz' '*.rootfs*.tar.bz2' '*.rootfs*.tar.xz' '*.rootfs*.tar.zst') || { bad "rootfs archive: not exactly one in $A$(why)"; rt_ok=0; }
+rb=$(pick "$B" '*.rootfs*.tar' '*.rootfs*.tar.gz' '*.rootfs*.tar.bz2' '*.rootfs*.tar.xz' '*.rootfs*.tar.zst') || { bad "rootfs archive: not exactly one in $B$(why)"; rt_ok=0; }
 if [ "$rt_ok" -eq 1 ]; then
 	ta=$(deco "$ra" "$tmp/a.tar") || { bad "rootfs archive: A ($ra) cannot be decompressed (corrupt or truncated)"; rt_ok=0; }
 fi
