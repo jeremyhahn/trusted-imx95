@@ -41,7 +41,7 @@ marked **unconfirmed**.
 | U1 | NXP Code Signing Tool download page (`colCode=IMX_CST_TOOL_NEW`) | It redirects to an NXP account login. The latest CST version, its release notes and its licence text could not be read from a public page. |
 | U2 | CST 3.1.0 user guides (CST_UG, CST-HSM_UG, HSM-CST_UG) | They ship inside the CST archive (S11) and are not public pages. Their content is not used here. |
 | U3 | IMX95RM and the i.MX 95 Security Reference Manual | Listed as missing in S11. Not public. |
-| U4 | Issue #30 itself | The lane has no forge credentials (`gh` is unauthenticated). This record works from the SPEC row and the lane brief. |
+| U4 | Issue #30 itself | The survey has no forge credentials (`gh` is unauthenticated). This record works from the SPEC row and the survey brief. |
 | U5 | The FRDM-IMX95 board's silicon revision (A0, A1 or B0) and orderable part number | No public source read here names it. It matters; see question 5. |
 
 ## What the sources say

@@ -29,7 +29,7 @@ EVK board port, and that file lacks the NoC fault entries
 configuration" value below is **reference only**; the PRO value is
 unconfirmed unless that survey states it. The same holds for the FRDM board
 port (S10, S11): the PRO builds with the EVK board port `mcimx95evk`
-(`sm-build-survey.md` §3), which this lane did not read. What the repository
+(`sm-build-survey.md` §3), which this survey did not read. What the repository
 records of the PRO file (S12) is: LM0 "SM", LM1 "M7" with SCMI agent "M7"
 on MU 9 over CRC32-checked channels, LM2 "AP" (the default LM) with agents
 "AP-S" on MU 1 and "AP-NS" on MU 3; M7 fault entries for M7 lockup, M7
@@ -50,7 +50,7 @@ inside that tag.
 | S4 | SM implementation notes, `sm/doc/imp.md` (in S1), section "Example Fault Flow" | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/imp.md | yes |
 | S5 | SM debug guide, `sm/doc/debug.md` (in S1), reset records and i.MX 95 fault table | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md | yes |
 | S6 | **15x15** i.MX 95 FRDM board configuration, `configs/mx95frdm.cfg` (in S1); **reference only**, not this device's file | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/mx95frdm.cfg | yes |
-| S12 | FRDM-IMX95-PRO configuration, `configs/other/mx95frdm-pro.cfg` (in S1), **this device's file**; not read line by line in this lane, its content is taken from `public-source-survey.md` items 12-16 and `sm-build-survey.md` §3 | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/other/mx95frdm-pro.cfg | through those surveys |
+| S12 | FRDM-IMX95-PRO configuration, `configs/other/mx95frdm-pro.cfg` (in S1), **this device's file**; not read line by line in this survey, its content is taken from `public-source-survey.md` items 12-16 and `sm-build-survey.md` §3 | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/configs/other/mx95frdm-pro.cfg | through those surveys |
 | S7 | LMM reaction definitions, `sm/lmm/lmm_sys.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/lmm/lmm_sys.h | yes |
 | S8 | i.MX 95 reset reasons, `devices/MIMX95/sm/dev_sm_system.h` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/devices/MIMX95/sm/dev_sm_system.h | yes |
 | S9 | SM SCMI protocol reference, `sm/rpc/scmi/proto.md` (in S1) | same tag | https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/rpc/scmi/proto.md | yes |
@@ -353,7 +353,7 @@ whether it already calls the FuSa protocol; that repository was not read.
   behaviour, the watchdog-to-FCCU routing and the tamper pins. SPEC already
   lists them as missing.
 - **NXP *System Manager User Guide* PDF** published with each Linux BSP
-  release: not reached from this lane; the in-tree `sm/doc` files (S2 to S5)
+  release: not reached from this survey; the in-tree `sm/doc` files (S2 to S5)
   were used instead. Whether they match the PDF for the BSP the board ships
   with is not confirmed.
 - **Which imx-sm tag the board's BSP ships.** The survey read

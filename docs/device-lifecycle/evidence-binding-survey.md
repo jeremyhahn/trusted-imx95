@@ -6,7 +6,7 @@
 
 ## Question
 
-Owner ruling 927 has the device attest through its firmware TPM with go-xkms's `device-attest-01` in the `tpm` format ([ftpm](../ftpm/README.md)). The enclave's own attestation is a second, independent evidence source ([attestation-survey.md](attestation-survey.md)). The firmware TPM's EK is created in OP-TEE storage and has no maker certificate; nothing on the board vouches for it ([EK lifecycle](../ftpm/README.md#ek-lifecycle)). No document says how a verifier could tie the TPM's EK or attestation key (AK) to the chip, or what each binding still leaves open. This survey sets that out. It does not repeat the enclave evidence ([attestation-survey.md](attestation-survey.md)), enrollment fit ([enrollment-survey.md](enrollment-survey.md)) or decommissioning ([decommission-survey.md](decommission-survey.md)).
+docs/SPEC.md has the device attest through its firmware TPM with go-xkms's `device-attest-01` in the `tpm` format ([ftpm](../ftpm/README.md)). The enclave's own attestation is a second, independent evidence source ([attestation-survey.md](attestation-survey.md)). The firmware TPM's EK is created in OP-TEE storage and has no maker certificate; nothing on the board vouches for it ([EK lifecycle](../ftpm/README.md#ek-lifecycle)). No document says how a verifier could tie the TPM's EK or attestation key (AK) to the chip, or what each binding still leaves open. This survey sets that out. It does not repeat the enclave evidence ([attestation-survey.md](attestation-survey.md)), enrollment fit ([enrollment-survey.md](enrollment-survey.md)) or decommissioning ([decommission-survey.md](decommission-survey.md)).
 
 ## 1. What the `tpm` attestation format carries and what a verifier checks
 
@@ -104,7 +104,7 @@ Which option the owner picks; any go-xkms or go-trusted-platform code; the wire 
 
 ### Proposed, pending owner approval (text only)
 
-A possible addition to the device-lifecycle row of SPEC.md, not made by this lane: "The device's TPM identity is tied to the chip by a factory record of the EK next to the chip UID, until a bound alternative is decided. Evidence of the TPM and of the enclave are carried together." This edits neither SPEC.md nor ROADMAP.md.
+A possible addition to the device-lifecycle row of SPEC.md, not made by this survey: "The device's TPM identity is tied to the chip by a factory record of the EK next to the chip UID, until a bound alternative is decided. Evidence of the TPM and of the enclave are carried together." This edits neither SPEC.md nor ROADMAP.md.
 
 ## Sources
 
@@ -127,7 +127,7 @@ A possible addition to the device-lifecycle row of SPEC.md, not made by this lan
 - TCG TPM 2.0 library specifications (Part 1 credential activation, Part 3 `TPM2_Certify`, `TPM2_ActivateCredential`): not read; the credential-activation and certify behaviour above rests on the tpm2-tools manuals (S5, S6) and on the WebAuthn text (S1).
 - TCG DICE specifications: not read; option (e) rests on the absence of a chain in sources S7 and attestation-survey.
 - The `ms-tpm-20-ref` manufacture code (how the other seeds are generated), `optee_os` i.MX 95 die-ID and HUK code, and the `tee_otp_get_die_id` implementation for this platform: not read.
-- RFC 9334 body, RFC 8555 text, tpm2-tss documentation: not read in this lane.
+- RFC 9334 body, RFC 8555 text, tpm2-tss documentation: not read in this survey.
 - The enclave response's nonce handling in the library source (only the header was read): see option (b).
 - The Linux driver text (S10) says only that the driver is a thin pipe to the TrustZone TPM; it says nothing about seeds or identity.
 
@@ -142,7 +142,7 @@ A possible addition to the device-lifecycle row of SPEC.md, not made by this lan
 
    *Provisional default:* (a) now, with (d) as the carried evidence, and (b) re-examined once the library's nonce handling and the attestation root ([attestation-survey question 2](attestation-survey.md#questions-for-the-owner)) are known. (a) and (d) need nothing from the enclave API beyond what is already surveyed, and both are reversible.
 
-2. **How is a re-created EK re-registered after an NV wipe?** ([ftpm question 4](../ftpm/README.md#open-questions-for-the-owner).) (a) A factory or service procedure re-reads the EK and the chip UID; (b) endorse-01 reissues with a fresh enclave statement; (c) the device is retired and re-enrolled. *Provisional default:* (b), pending go-xkms's endorse-01 checks, which this lane did not read.
+2. **How is a re-created EK re-registered after an NV wipe?** ([ftpm question 4](../ftpm/README.md#open-questions-for-the-owner).) (a) A factory or service procedure re-reads the EK and the chip UID; (b) endorse-01 reissues with a fresh enclave statement; (c) the device is retired and re-enrolled. *Provisional default:* (b), pending go-xkms's endorse-01 checks, which this survey did not read.
 
 3. **Is a device-chosen value in the enclave nonce field acceptable at all?** (a) Yes, with the hash construction in 3(b); (b) No: the nonce stays the verifier's, and binding uses (d). *Provisional default:* (b) until NXP or the library source confirms the nonce is opaque and the verifier side supports the construction.
 

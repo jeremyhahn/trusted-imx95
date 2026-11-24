@@ -310,7 +310,7 @@ rate is not set here, so the budget is **not confirmed**.
 1. JEDEC JESD84-B51 (eMMC 5.1), the RPMB standard itself: a JEDEC document,
    not read. §2 rests on OP-TEE's summary of it [S1].
 2. NXP's FRDM-IMX95 public product pages: the URLs tried returned 404 from
-   the lane. The eMMC part, its version and its RPMB size are unconfirmed.
+   the survey. The eMMC part, its version and its RPMB size are unconfirmed.
 3. Whether the enclave-derived HUK differs between the OEM open and OEM
    closed life cycles. OP-TEE says secure SoCs generally do this [S1]; no
    public NXP source read here says so for the i.MX 95 enclave.
