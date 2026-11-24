@@ -299,9 +299,9 @@ i=0
 for fx in \
   'hsm_lc_update call|err = hsm_lc_update(hdl, &args);' \
   'hsm_lc_update.h include|cc -include hsm/internal/hsm_lc_update.h -c x.c' \
-  'HsmLcUpdate python wrapper|HsmLcUpdate(session, new_lc=OEM_CLOSED)' \
+  'HsmLcUpdate python wrapper|HsmLcUpdate(session, new_lc=3)' \
   'lc_update go binding|err := enclave.lc_update(ctx, target)' \
-  'hsm_lc_new_state_t|hsm_lc_new_state_t target = HSM_LC_OEM_CLOSED;'; do
+  'hsm_lc_new_state_t|hsm_lc_new_state_t target = 3;'; do
   name=${fx%%|*}
   cmd=${fx#*|}
   i=$((i + 1))
