@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# scripts/okp-policy-check.py: the oem-key-provisioning row of docs/SPEC.md as
+# a fail-closed check of the trace of one provisioning run. Each vector is one
+# run; the vendor's order (key exchange, then the wrapped-key import), the
+# two-flag commit of the import, and the once-only, owner-approved fuse write
+# and life-cycle close are checked one by one.
+set -uo pipefail
+# shellcheck source=test/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+CHK="$ROOT/scripts/okp-policy-check.py"
+
+# vec <name> <record...>: write the records, one per line, to $TMP_ROOT/<name>.jsonl.
+vec() {
+	local name=$1
+	shift
+	printf '%s\n' "$@" >"$TMP_ROOT/$name.jsonl"
+}
+
+both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
+kx='{"step":"key_exchange","status":"ok"}'
+imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
+fuse='{"step":"counter_fuse_config","owner_approval":"OD-test"}'
+close='{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
+
+vec good "$kx" "$imp" "$fuse" "$close"
+run python3 "$CHK" "$TMP_ROOT/good.jsonl"
+check "a run that keeps the row passes" 0 \
+	"ok 1 key_exchange: ok" "ok 2 key_import: committed" "ok 3 counter_fuse_config: ok" \
+	"ok 4 lifecycle_close: ok" "okp-policy-check: OK (4 records"
+
+vec import-first "$imp" "$kx"
+run python3 "$CHK" "$TMP_ROOT/import-first.jsonl"
+check "an import before the key exchange fails" 1 "FAIL 1 key_import" "no successful key exchange before the import"
+
+vec failed-kx '{"step":"key_exchange","status":"error"}' "$imp"
+run python3 "$CHK" "$TMP_ROOT/failed-kx.jsonl"
+check "a failed key exchange does not admit the import" 1 \
+	"FAIL 1 key_exchange: refused" "FAIL 2 key_import" "no successful key exchange"
+
+vec unwrapped "$kx" "{\"step\":\"key_import\",\"wrapped\":false,$both}"
+run python3 "$CHK" "$TMP_ROOT/unwrapped.jsonl"
+check "an import of a key that is not wrapped fails" 1 "the imported key is not wrapped"
+
+for flag in strict monotonic; do
+	vec "import-$flag-only" "$kx" "{\"step\":\"key_import\",\"wrapped\":true,\"request_flags\":[\"$flag\"],\"ack_flags\":[\"$flag\"],\"warnings\":[],\"counter_split\":true}"
+	run python3 "$CHK" "$TMP_ROOT/import-$flag-only.jsonl"
+	check "an import acknowledged with $flag alone is not committed" 1 "FAIL 2 key_import: not committed"
+done
+
+vec half-acked "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict"],"warnings":[],"counter_split":true}'
+run python3 "$CHK" "$TMP_ROOT/half-acked.jsonl"
+check "both flags sent, one acknowledged: not committed" 1 "monotonic flag not acknowledged"
+
+vec warning "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":["HSM_KEY_STORE_COUNTER"],"counter_split":true}'
+run python3 "$CHK" "$TMP_ROOT/warning.jsonl"
+check "a counter warning makes the import not committed" 1 "enclave warning HSM_KEY_STORE_COUNTER"
+
+vec no-split "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[]}'
+run python3 "$CHK" "$TMP_ROOT/no-split.jsonl"
+check "no counter split: the import is not committed" 1 "counter split not configured"
+
+vec fuse-unapproved '{"step":"counter_fuse_config"}'
+run python3 "$CHK" "$TMP_ROOT/fuse-unapproved.jsonl"
+check "a fuse write without the owner's approval fails" 1 "FAIL 1 counter_fuse_config: refused" "no owner_approval recorded"
+
+vec fuse-blank '{"step":"counter_fuse_config","owner_approval":"  "}'
+run python3 "$CHK" "$TMP_ROOT/fuse-blank.jsonl"
+check "a blank approval is no approval" 1 "no owner_approval recorded"
+
+vec fuse-twice "$fuse" "$fuse"
+run python3 "$CHK" "$TMP_ROOT/fuse-twice.jsonl"
+check "the counter fuses are configured once" 1 "ok 1 counter_fuse_config: ok" "FAIL 2 counter_fuse_config" "runs at most once"
+
+vec fuse-again '{"step":"counter_fuse_config","owner_approval":"OD-test","already_configured":true}'
+run python3 "$CHK" "$TMP_ROOT/fuse-again.jsonl"
+check "fuses already configured are not configured again" 1 "already configured"
+
+vec close-unapproved '{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave"}'
+run python3 "$CHK" "$TMP_ROOT/close-unapproved.jsonl"
+check "a life-cycle close without the owner's approval fails" 1 "FAIL 1 lifecycle_close: refused" "no owner_approval recorded"
+
+vec close-twice "$close" "$close"
+run python3 "$CHK" "$TMP_ROOT/close-twice.jsonl"
+check "the life cycle closes once" 1 "FAIL 2 lifecycle_close" "runs at most once"
+
+vec close-wrong '{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"fuse_tool","owner_approval":"OD-test"}'
+run python3 "$CHK" "$TMP_ROOT/close-wrong.jsonl"
+check "a close not through the enclave fails" 1 "via 'fuse_tool', want 'enclave'"
+
+vec close-state '{"step":"lifecycle_close","from":"oem_closed","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
+run python3 "$CHK" "$TMP_ROOT/close-state.jsonl"
+check "a close that does not start from OEM open fails" 1 "from 'oem_closed', want 'oem_open'"
+
+vec clear-key "$kx" "{\"step\":\"key_import\",\"wrapped\":true,\"plaintext_key\":\"00\",$both}"
+run python3 "$CHK" "$TMP_ROOT/clear-key.jsonl"
+check "a key in the clear fails" 1 "key material in the clear"
+
+vec unknown '{"step":"key_export"}'
+run python3 "$CHK" "$TMP_ROOT/unknown.jsonl"
+check "a step the flow does not have fails closed" 1 "step 'key_export' is not a step of the vendor's flow"
+
+vec bad-json '{"step":'
+run python3 "$CHK" "$TMP_ROOT/bad-json.jsonl"
+check "a record that is not JSON stops the check" 2 "bad-json.jsonl:1:"
+
+vec bad-flags "$kx" '{"step":"key_import","wrapped":true,"request_flags":"strict"}'
+run python3 "$CHK" "$TMP_ROOT/bad-flags.jsonl"
+check "flags that are not a list stop the check" 2 "request_flags must be a list of strings"
+
+vec not-object '[1]'
+run python3 "$CHK" "$TMP_ROOT/not-object.jsonl"
+check "a record that is not an object stops the check" 2 "a record must be a JSON object"
+
+: >"$TMP_ROOT/empty.jsonl"
+run python3 "$CHK" "$TMP_ROOT/empty.jsonl"
+check "an empty trace stops the check" 2 "no record"
+
+run python3 "$CHK" "$TMP_ROOT/missing.jsonl"
+check "a missing trace stops the check" 2 "okp-policy-check:"
+
+run python3 "$CHK"
+check "no argument prints the usage" 2 "usage: okp-policy-check.py"
+
+finish

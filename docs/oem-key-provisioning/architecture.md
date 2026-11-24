@@ -1,6 +1,6 @@
 # oem-key-provisioning — architecture
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-12
+> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-24
 > The detail of the `oem-key-provisioning` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Every statement below cites a document and section listed in [references/README.md](../references/README.md).
@@ -70,6 +70,26 @@ A host-side check compares the SRK table hash of a public SRK set with an expect
 
 A host-side test builds and verifies a key-exchange signed message on a test SRK set; it sends nothing to a device
 ([key-exchange-msg.md](key-exchange-msg.md); wrapped-key blob format on test keys: [key-import-tlv.md](key-import-tlv.md), provisional).
+
+## Host-side policy check of a provisioning run
+
+`make okp-policy-check OKP_TRACE=<file.jsonl>` runs `scripts/okp-policy-check.py` on the trace of one provisioning
+run, one JSON record per step in the order the steps ran. It talks to no enclave, writes no fuse and closes no life
+cycle; it decides, failing closed, whether a recorded run kept this row:
+
+- a `key_import` counts only after a `key_exchange` that succeeded earlier in the same run, the vendor's order
+  (AN14861 §2, §5.2, §5.3; RM00284 §3.20, §3.2.6.3), and only of a wrapped key;
+- the import is committed only when the enclave acknowledged both the strict-operation flag and the
+  monotonic-counter flag, returned no warning and the counter split is configured (RM00284 §2.4.2; owner
+  decision 241);
+- `counter_fuse_config` (RM00284 §3.24) and `lifecycle_close` from OEM open to OEM closed through the enclave
+  (RM00284 §3.23) each carry a recorded owner approval and run at most once; fuses already configured are not
+  configured again;
+- no record carries a key in the clear, and a step the flow does not have fails.
+
+The relative order of the fuse write, the import and the close is not checked: the row's citations do not give it
+(see [Missing](#missing)). `make integration-test-oem-key-provisioning` drives the check through make on runs that
+keep and break the row.
 
 ## Order of the steps
 
