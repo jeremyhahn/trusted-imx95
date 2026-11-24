@@ -471,6 +471,36 @@ expect "negative (a): a truncated image fails verify or the policy check" \
 	[ "$v_rc" -ne 0 -o "$RC" -ne 0 ]
 check "negative (a): the policy check on the truncated image prints policy: FAILED" nonzero "policy: FAILED"
 
+# (v) fuse_version and sw_version of each container, from the parse of the built image, equal
+# the values boot-image.yaml sets for that container (the yaml is read in file order)
+yaml_vals() { # yaml_vals <key>: the values of <key>: in boot-image.yaml, space separated
+	local l out=
+	while IFS= read -r l; do
+		case "$l" in *"$1:"*) l=${l#*"$1:"}; out="$out ${l//[ \'\"]/}" ;; esac
+	done <"$ROOT/scripts/ahab/boot-image.yaml"
+	echo "${out# }"
+}
+parsed_vals=$("$spsdk_venv/bin/python" -I - "$img_out/boot-image.bin" <<'PY'
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+img = AHABImage.parse(open(sys.argv[1], "rb").read(), FamilyRevision("mimx9596", "b0"))
+print(" ".join(str(int(str(c.fuse_version), 0)) for c in img.ahab_containers))
+print(" ".join(str(int(str(c.sw_version), 0)) for c in img.ahab_containers))
+PY
+)
+mapfile -t pv_lines <<<"$parsed_vals"
+read -r -a p_fuse <<<"${pv_lines[0]}"
+read -r -a p_sw <<<"${pv_lines[1]}"
+read -r -a y_fuse <<<"$(yaml_vals fuse_version)"
+read -r -a y_sw <<<"$(yaml_vals sw_version)"
+expect "version: boot-image.yaml sets both fields for three containers" [ "${#y_fuse[@]}" -eq 3 -a "${#y_sw[@]}" -eq 3 ]
+for ci in 0 1 2; do
+	echo "# container $ci: parsed fuse_version ${p_fuse[$ci]:-?} sw_version ${p_sw[$ci]:-?}, yaml ${y_fuse[$ci]:-?} ${y_sw[$ci]:-?}"
+	expect "version: container $ci fuse_version and sw_version equal boot-image.yaml" \
+		[ -n "${p_fuse[$ci]:-}" -a "${p_fuse[$ci]:-}" = "${y_fuse[$ci]:-x}" -a "${p_sw[$ci]:-}" = "${y_sw[$ci]:-x}" ]
+done
+
 # (b) one non-zero byte in a gap no header, signature block or payload covers: the first
 # zero byte outside every span, read from the parse (not from the bytes)
 gap=$("$spsdk_venv/bin/python" -I - "$img_out/boot-image.bin" <<'PY'
@@ -508,5 +538,13 @@ pol=$(<"$TMP_ROOT/img.policy")
 printf '%s\n' "${pol/USED_SRK_ID=0/USED_SRK_ID=1}" >"$TMP_ROOT/srk1.policy"
 run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/srk1.policy" "$BIM"
 check "negative (d): a policy file with USED_SRK_ID 1 is refused" nonzero "policy: FAILED" "used_srk_id"
+
+# (e) a floor above the image's fuse_version is refused; the same file at 0 is the control
+printf '%s\n' "${pol/FUSE_VERSION_MIN=0/FUSE_VERSION_MIN=1}" >"$TMP_ROOT/fv1.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/fv1.policy" "$BIM"
+check "negative (e): a policy file with FUSE_VERSION_MIN 1 is refused" nonzero "policy: FAILED" "fuse_version"
+printf '%s\n' "${pol/FUSE_VERSION_MIN=0/FUSE_VERSION_MIN=0}" >"$TMP_ROOT/fv0.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/fv0.policy" "$BIM"
+check "negative (e) control: the same policy file with FUSE_VERSION_MIN 0 passes" 0 "policy: OK"
 
 finish
