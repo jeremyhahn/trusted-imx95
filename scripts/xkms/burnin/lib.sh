@@ -16,6 +16,7 @@
 #   XKMS_WORK       scratch directory (default: a new temp dir; never inside the repo)
 #
 # Nothing here prints key material: only key ids, hashes and verdicts.
+# shellcheck disable=SC2034
 
 BI_CTL=${XKMS_CTL:-xkmsctl}
 BI_SERVER=${XKMS_SERVER:-}

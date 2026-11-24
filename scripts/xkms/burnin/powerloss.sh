@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # (d) Power-loss simulation: acknowledged writes survive a hard reboot.
+# shellcheck disable=SC1091,SC2034
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
 . "$here/lib.sh"
 
 usage() {

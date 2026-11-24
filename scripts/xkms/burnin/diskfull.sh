@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # (e) Disk full: xkmsd refuses writes cleanly and loses nothing it had acknowledged.
+# shellcheck disable=SC1091,SC2034
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
 . "$here/lib.sh"
 
 usage() {

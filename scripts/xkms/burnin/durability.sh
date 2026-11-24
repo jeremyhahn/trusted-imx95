@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # (c) Durability: every acknowledged write survives a graceful restart and a kill -9.
+# shellcheck disable=SC1091,SC2034
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
 . "$here/lib.sh"
 
 usage() {

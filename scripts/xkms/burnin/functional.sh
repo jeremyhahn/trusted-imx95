@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # (a) Functional sweep: every xkmsd operation xkmsctl documents for keys and
 # certificates, each result checked, including the refusals that must refuse.
+# shellcheck disable=SC1091,SC2034
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
 . "$here/lib.sh"
 
 usage() {

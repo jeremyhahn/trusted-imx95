@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # (b) Soak: a steady mixed load for hours, with latency percentiles, error
 # counts, and the daemon's RSS and descriptor growth sampled from the board.
+# shellcheck disable=SC1091,SC2034
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
 . "$here/lib.sh"
 
 usage() {
@@ -97,8 +97,8 @@ worker() {
 		i=$((i + 1))
 		case $((i % 5)) in
 		0)
+			sig=""
 			j=$(bi_ctl -o json key sign "$sk" "soak-$w-$i" 2>/dev/null) && sig=$(bi_jget "$j" signature)
-			echo "sign $? 0" >/dev/null
 			timed "$w" sign bi_ctl -o json key sign "$sk" "soak-$w-$i"
 			[ -z "${sig:-}" ] || timed "$w" verify bi_ctl key verify "$sk" "soak-$w-$i" "$sig"
 			;;
@@ -136,7 +136,7 @@ bi_check "xkmsd did not restart during the soak (pid $pid0 -> $pid1)" [ "$pid0" 
 total=0
 errs=0
 for op in sign verify encrypt decrypt get list generate delete; do
-	cat "$BI_WORK"/lat."$op".none "$BI_WORK"/lat.* 2>/dev/null | while read -r o ms rc; do [ "$o" = "$op" ] && echo "$ms $rc"; done >"$BI_WORK/op.$op"
+	cat "$BI_WORK"/lat.* 2>/dev/null | while read -r o ms rc; do [ "$o" = "$op" ] && echo "$ms $rc"; done >"$BI_WORK/op.$op"
 	c=$(wc -l <"$BI_WORK/op.$op")
 	[ "$c" -gt 0 ] || continue
 	e=0
