@@ -65,7 +65,7 @@ check_readme() {
 			echo "dead anchor: $link"
 		fi
 	done < <(grep -oE '\]\([^)#][^)]*\)' "$f" | sed -E 's/^\]\((.*)\)$/\1/' | grep -vE '^[a-z]+://' | sort -u)
-	for t in $SURVEYS ../ftpm/README.md; do
+	for t in $SURVEYS ../ftpm/README.md architecture.md evidence-bundle.md; do
 		grep -qF "]($t" "$f" || echo "no link to $t"
 	done
 	local rows want=0 s
@@ -102,5 +102,49 @@ neg() { # name sed-expression
 neg "dropped heading" '/^## What is blocked on what$/d'
 neg "dead relative link" 's|\(attestation-survey\.md\)|(no-such-file.md)|'
 neg "dropped question row" '/^\| B3 \|/d'
+neg "no architecture.md link" '/architecture\.md/d'
+
+# check_page FILE: architecture.md and evidence-bundle.md. Relative links resolve against
+# $DIR; a link with only an anchor resolves against FILE itself.
+check_page() {
+	local f=$1 link target anchor
+	[ -f "$f" ] || { echo "missing page"; return; }
+	grep -qE '^> \*\*Status:' "$f" || echo "no status line"
+	grep -qi 'ruling 1234' "$f" || echo "no ruling 1234"
+	# the issue-closing keyword; the word alone is ordinary prose (life cycle "closes")
+	if grep -qiE '(closes|fixes|resolves):? +#[0-9]' "$f"; then echo "contains closes"; fi
+	while IFS= read -r link; do
+		target=${link%%#*}
+		anchor=""
+		[ "$target" = "$link" ] || anchor=${link#*#}
+		if [ -z "$target" ]; then
+			anchor_exists "$f" "$anchor" || echo "dead anchor: $link"
+		elif [ ! -f "$DIR/$target" ]; then
+			echo "dead link: $link"
+		elif [ -n "$anchor" ] && ! anchor_exists "$DIR/$target" "$anchor"; then
+			echo "dead anchor: $link"
+		fi
+	done < <(grep -oE '\]\([^)]+\)' "$f" | sed -E 's/^\]\((.*)\)$/\1/' | grep -vE '^[a-z]+://' | sort -u)
+}
+
+for page in architecture.md evidence-bundle.md; do
+	problems=$(check_page "$DIR/$page")
+	if [ -z "$problems" ]; then
+		pass "$page passes every check"
+	else
+		fail "$page checks" "$problems"
+	fi
+done
+
+neg_page() { # name page sed-expression
+	local tmp out
+	tmp=$(mktemp "$TMP_ROOT/page.XXXXXX")
+	sed -E "$3" "$DIR/$2" >"$tmp"
+	out=$(check_page "$tmp")
+	if [ -n "$out" ]; then pass "negative: $1"; else fail "negative: $1 was not caught"; fi
+}
+neg_page "dead anchor in architecture.md" architecture.md 's/#what-the-public-references-give-about-the-root/#no-such-anchor/'
+neg_page "no ruling 1234 in evidence-bundle.md" evidence-bundle.md 's/[Rr]uling 1234/ruling 0000/g'
+neg_page "no status line in architecture.md" architecture.md '/^> \*\*Status:/d'
 
 finish
