@@ -14,7 +14,8 @@
 # firmware-ele-imx is not named: the machine adds it for the i.MX95
 # (hardening-survey section 7). xkmsd is MISSING: no go-xkms recipe exists yet,
 # and what xkmsd needs at run time is go-xkms's to say (hardening-survey
-# question 7).
+# question 7). enclave-access (below) only restricts the enclave node to the
+# xkmsd group; it is not xkmsd.
 
 # hardening-survey section 7 and question 7 (b): the project image is built from
 # OE-core's core-image-minimal pattern, not an fsl-image-* or imx-image-* one.
@@ -29,4 +30,6 @@ IMAGE_FEATURES += "read-only-rootfs"
 
 # hardening-survey section 7: add only the boot packagegroup (kernel, systemd
 # through INIT_MANAGER); the machine adds firmware-ele-imx.
-IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"
+# R6 (xkmsd-node.md section 3, proposed, pending owner approval): enclave-access
+# installs the udev rule and the xkmsd group that restrict the enclave node.
+IMAGE_INSTALL = "packagegroup-core-boot enclave-access ${CORE_IMAGE_EXTRA_INSTALL}"
