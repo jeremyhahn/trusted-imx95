@@ -162,7 +162,11 @@ It also checks `policy: OK`, refuses two mutated manifests (atf and tee swapped,
 runs four negative cases on scratch copies: (a) the image cut short by 1 KiB fails verify or the policy
 check; (b) one non-zero byte planted in a gap that no header, signature block or payload covers fails the
 policy check, naming the offset; (c) a second image on a fresh test PKI verifies, but fails the first
-image's policy file on the SRK table hash; (d) a policy file with `USED_SRK_ID` 1 fails.
+image's policy file on the SRK table hash; (d) a policy file with `USED_SRK_ID` 1 fails; (e) a policy file
+with `FUSE_VERSION_MIN` 1 fails, naming `fuse_version` (the same file at 0 prints `policy: OK`, as the control).
+The test also reads `fuse_version` and `sw_version` of each of the three containers from the parse of the
+built image and requires each to equal 0, the value `boot-image.yaml` sets (the test holds the constants, so
+a yaml change must be made in the test too). The test checks this host side only.
 
 ## What step (c) on the board would check
 
@@ -181,5 +185,6 @@ Security Reference Manual are read.
 - Whether the container order, the grouping and the M7 addresses above are what the ROM expects.
 - trusted-firmware's Cortex-M7 image in place of the stand-in, and the TCM size and ECC.
 - Real inputs for the two stand-ins (U-Boot, ELE), and a pin that ties a built U-Boot to its source.
-- `container_version` is SPSDK's default; `fuse_version` and `sw_version` are 0 for this test image only.
+- `container_version` is SPSDK's default; `fuse_version` and `sw_version` are 0 for this test image only. The real anti-rollback floor and the fuse capacity for it are open
+  (`anti-rollback-survey.md`); this test decides neither.
 - The relation to `scripts/ahab/container-manifest.yaml` (a different split) is for #12 to settle.
