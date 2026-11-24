@@ -62,6 +62,16 @@ check "work is a dangling symlink into the checkout" 1 "outside the checkout"
 [ ! -e "$ROOT/.fresh-ele3" ] || { rm -rf "$ROOT/.fresh-ele3"; fail "a dangling symlink work directory was created in the checkout"; }
 run bash "$script" --work "$ROOT/.." --out "$tmp/out"
 check "work that contains the checkout" 1 "must not contain the checkout"
+# The same ancestor, derived the physical way on both sides: the checkout root
+# as git and realpath see it, its parent, and every ancestor up to "/" (CI may
+# check out at /name, whose parent resolves to "/", or under a symlinked path).
+phys_root=$(realpath "$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$ROOT")")
+anc=$phys_root
+while [ "$anc" != / ]; do
+	anc=$(dirname "$anc")
+	run bash "$script" --work "$anc" --out "$tmp/out"
+	check "work that is an ancestor of the checkout ($anc)" 1 "must not contain the checkout"
+done
 
 # A reused --out is refused before anything is fetched: a stale, lexically
 # earlier libele_hsm.so.* in it can never be selected or listed. (The build

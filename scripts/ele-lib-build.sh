@@ -128,7 +128,9 @@ resolve_phys() {
 		if [ -e "$p" ]; then
 			d=$(cd "$p" 2>/dev/null && pwd -P) || return 1
 			[ "$d" = / ] && d=
-			printf '%s%s\n' "$d" "$rest"
+			# The filesystem root (an ancestor of a checkout placed at /name)
+			# is "/", not an empty string.
+			if [ -z "$d$rest" ]; then printf '/\n'; else printf '%s%s\n' "$d" "$rest"; fi
 			return 0
 		fi
 		base=${p##*/}
@@ -143,11 +145,15 @@ resolve_phys() {
 # and must be outside the checkout and not contain it.
 work_phys=$(resolve_phys "$work") || die "cannot resolve --work $work"
 [ -n "$work_phys" ] || die "cannot resolve --work $work"
-case $work_phys/ in
-"$root"/*) die "--work must be outside the checkout" ;;
+# Compare with a trailing slash on both sides; the root "/" becomes the empty
+# prefix, so "/" contains every checkout (a checkout at /name has "/" as its parent).
+wp=${work_phys%/}
+rp=${root%/}
+case $wp/ in
+"$rp"/*) die "--work must be outside the checkout" ;;
 esac
-case $root/ in
-"$work_phys"/*) die "--work must not contain the checkout" ;;
+case $rp/ in
+"$wp"/*) die "--work must not contain the checkout" ;;
 esac
 work=$work_phys
 [ -n "$cache" ] || cache=$work/cache
