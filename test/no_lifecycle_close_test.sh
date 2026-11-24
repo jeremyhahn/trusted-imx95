@@ -31,6 +31,11 @@ PATTERNS=(
   'ahab_close'
   'close[-_ ]?life[-_ ]?cycle'
   'lc[-_ ]?(close|forward|change|transition)'
+  # The enclave library's life-cycle-changing call and its types, as named in the
+  # decommission and failure surveys: hsm_lc_update, hsm_lc_update.h, HsmLcUpdate,
+  # hsm_lc_new_state_t, and a wrapper's lc_update (not "calc update").
+  'hsm[-_ ]?lc[-_ ]?(update|new[-_ ]?state|change)'
+  '(^|[^[:alpha:]])lc[-_ ]?update'
   'life[-_ ]?cycle[-_ ](close|change|forward|set|write|advance)'
   'efuse-program-once'
   "blhost[^#]*[[:space:]]${Q}efuse"
@@ -286,6 +291,41 @@ for fx in \
   printf '%s\n' "$cmd" >"$scratch/scripts/benign3.sh"
   if scan "$scratch" >/dev/null 2>&1; then ok "benign fixture passes: $name"
   else bad "benign fixture was flagged: $name"; fi
+done
+
+# Slice 176-okp-s5 fixtures: the enclave library's life-cycle-changing call in its
+# documented spellings, each alone in its own scratch tree, command on line 2.
+i=0
+for fx in \
+  'hsm_lc_update call|err = hsm_lc_update(hdl, &args);' \
+  'hsm_lc_update.h include|cc -include hsm/internal/hsm_lc_update.h -c x.c' \
+  'HsmLcUpdate python wrapper|HsmLcUpdate(session, new_lc=OEM_CLOSED)' \
+  'lc_update go binding|err := enclave.lc_update(ctx, target)' \
+  'hsm_lc_new_state_t|hsm_lc_new_state_t target = HSM_LC_OEM_CLOSED;'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  i=$((i + 1))
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' 'echo start' "$cmd" >"$scratch/scripts/s5fx$i.sh"
+  if out=$(scan "$scratch" 2>&1); then
+    bad "enclave fixture $name was not flagged"
+  elif [[ $out == *scripts/s5fx$i.sh:2:* ]]; then
+    ok "enclave fixture $name fails and names scripts/s5fx$i.sh:2"
+  else
+    bad "enclave fixture $name failed but did not name file and line: $out"
+  fi
+done
+# Benign: read-only enclave calls and a lookalike word stay allowed.
+for fx in \
+  'hsm_get_info read-only|err = hsm_get_info(hdl, &info);' \
+  'read life cycle state|state = read_lifecycle_state(hdl)' \
+  'calc update lookalike|calc_update_total 3'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' "$cmd" >"$scratch/scripts/benign4.sh"
+  if scan "$scratch" >/dev/null 2>&1; then ok "benign enclave fixture passes: $name"
+  else bad "benign enclave fixture was flagged: $name"; fi
 done
 
 # Positive control: every command named only on comment lines passes.
