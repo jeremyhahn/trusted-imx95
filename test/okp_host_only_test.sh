@@ -9,7 +9,8 @@
 #     assignment of the tool's path), or spsdk.apps.<tool> run with python -m;
 #   - a /dev/ path other than /dev/null and /dev/urandom;
 #   - a Python import of spsdk.apps.nxpele, libuuu or serial.
-# Comment lines are skipped and backslash continuations are joined, as
+# Comment lines are skipped; backslash continuations and lines that end inside an
+# open ( or [ (a multi-line Python argument list) are joined, as
 # test/no_lifecycle_close_test.sh does. The Makefile is read only in the
 # recipes of okp-keyexchange-test, okp-import-tlv-test and srk-hash-check.
 # OKP_HOST_ONLY_ROOT names another tree to scan (used by the self-checks).
@@ -52,7 +53,7 @@ RE_QUOTED="[\"'][[:space:]]*${WRAP}([^[:space:]]*/)?(${TOOLS})[[:space:]]"
 RE_ASSIGN="[A-Za-z_][A-Za-z0-9_]*=[\"']?([^[:space:]]*/)?(${TOOLS})[\"']?([[:space:]]|\$)"
 # subprocess.run(["fastboot", "flash", ...]) and ['/usr/bin/uuu', x]: the tool is the
 # first element of a Python or JSON argument list.
-RE_LIST="\\[[[:space:]]*[\"'][[:space:]]*([^[:space:]\"']*/)?(${TOOLS})[\"']"
+RE_LIST="[[(][[:space:]]*[\"'][[:space:]]*([^[:space:]\"']*/)?(${TOOLS})[\"']"
 RE_MODULE="spsdk\\.apps\\.(${TOOLS}|el2go_host)"
 RE_IMPORT="^[[:space:]]*(import|from)[[:space:]]+(spsdk\\.apps\\.nxpele|libuuu|serial)([[:space:].,]|\$)"
 RE_IMPORT2="^[[:space:]]*from[[:space:]]+spsdk\\.apps[[:space:]]+import[[:space:]]+[^#]*nxpele"
@@ -73,7 +74,7 @@ hit() {
 # scan_file <path> <label>: join backslash continuations, skip comment lines, print
 # "<label>:<first line>:<text>" per hit; rc 1 when there is any.
 scan_file() {
-  local f=$1 label=$2 line acc="" n=0 start=0 cont=0 rc=0
+  local f=$1 label=$2 line acc="" n=0 start=0 cont=0 rc=0 depth=0 o c
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     if ((cont == 0)); then
@@ -81,12 +82,26 @@ scan_file() {
       start=$n
       if [[ $line =~ ^[[:space:]]*(#|//) ]]; then continue; fi
     fi
+    # Bracket depth: a line that ends inside an open ( or [ continues onto the next
+    # line (Python and JSON argument lists, shell arrays). A simple count, not a
+    # parser: brackets inside strings are counted too, depth never goes below 0, and
+    # a join stops after 40 lines so an unbalanced bracket cannot swallow the file.
+    if ((cont == 0)); then depth=0; fi
+    o=${line//[^(\[]/}
+    c=${line//[^)\]]/}
+    depth=$((depth + ${#o} - ${#c}))
+    if ((depth < 0)); then depth=0; fi
     if [[ $line == *\\ ]]; then
       acc+="${line%\\} "
       cont=1
       continue
     fi
     acc+=$line
+    if ((depth > 0 && n - start < 40)); then
+      acc+=" "
+      cont=1
+      continue
+    fi
     cont=0
     if hit "$acc"; then
       echo "$label:$start:$acc"
@@ -209,6 +224,11 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
   fixture "list form nxpele" hit scripts/ahab/key-import-check.py "subprocess.check_call(['nxpele', '-p', 'usb', 'commit'])"
   fixture "list form uuu path" hit scripts/ahab/key-import-check.py 'Popen(["/usr/bin/uuu", x])'
   fixture "list form sdpshost spaced" hit scripts/ahab/key-import-check.py 'run([ "sdpshost" , "-p", "usb"])'
+  fixture "multi-line subprocess.run list" hit scripts/ahab/key-import-check.py 'subprocess.run([' '    "nxpele",' '    "commit", "-i", "OEM_FW_FUSE"' '])'
+  fixture "multi-line Popen with uuu path" hit scripts/ahab/key-import-check.py 'Popen(' '    "/usr/bin/uuu",' '    x)'
+  fixture "multi-line fastboot list" hit scripts/ahab/key-import-check.py '["fastboot",' '  "flash", "boot", image]'
+  fixture "multi-line list of plain strings" pass scripts/ahab/key-import-check.py 'names = [' '    "alpha",' '    "beta",' ']'
+  fixture "multi-line print of prose naming fastboot" pass scripts/ahab/key-import-check.py 'print(' '    "use fastboot later,"' '    "then stop")'
   fixture "list naming fastboot-docs" pass scripts/ahab/key-import-check.py 'names = ["fastboot-docs"]'
   fixture "prose naming fastboot" pass scripts/ahab/key-import-check.py 'print("use fastboot later")'
   fixture "keyword word in prose" pass $ks 'echo "if you want, do not run it"'

@@ -10,7 +10,8 @@
 # write-fuse verbs, fuse prog/override, blhost efuse); any nxpfuses use (SPSDK
 # whole-configuration fuse programming); a write (>, >>, tee, dd of=) to an nvmem or
 # ocotp node under /sys. A subcommand may be wrapped in single or double quotes.
-# Commands split by backslash continuations are joined before matching.
+# Commands split by backslash continuations, or by a line ending inside an open ( or
+# [ (a multi-line Python or JSON argument list), are joined before matching.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -95,7 +96,7 @@ scan() {
 # line that does not start with a comment. Prints "<rel>:<first line>:<text>" per
 # hit; rc 1 when there is any.
 scan_file() {
-  local f=$1 rel=$2 re=$3 line acc="" n=0 start=0 cont=0 rc=0
+  local f=$1 rel=$2 re=$3 line acc="" n=0 start=0 cont=0 rc=0 depth=0 o c
   shopt -s nocasematch
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
@@ -104,12 +105,26 @@ scan_file() {
       start=$n
       if [[ $line =~ ^[[:space:]]*(#|//) ]]; then continue; fi
     fi
+    # Bracket depth: a line that ends inside an open ( or [ continues onto the next
+    # line (Python and JSON argument lists, shell arrays). A simple count, not a
+    # parser: brackets inside strings are counted too, depth never goes below 0, and
+    # a join stops after 40 lines so an unbalanced bracket cannot swallow the file.
+    if ((cont == 0)); then depth=0; fi
+    o=${line//[^(\[]/}
+    c=${line//[^)\]]/}
+    depth=$((depth + ${#o} - ${#c}))
+    if ((depth < 0)); then depth=0; fi
     if [[ $line == *\\ ]]; then
       acc+="${line%\\} "
       cont=1
       continue
     fi
     acc+=$line
+    if ((depth > 0 && n - start < 40)); then
+      acc+=" "
+      cont=1
+      continue
+    fi
     cont=0
     if [[ $acc =~ $re ]]; then
       echo "$rel:$start:$acc"
@@ -368,6 +383,36 @@ rm -f "$scratch"/scripts/*
 printf '%s\n' 'cat /usr/share/ele_message.py.txt' >"$scratch/scripts/benign5.sh"
 if scan "$scratch" >/dev/null 2>&1; then ok "ele_message inside a file name passes"
 else bad "ele_message inside a file name was flagged"; fi
+
+# Argument lists split over lines (bracket-depth join); the report names the first line.
+i=0
+for fx in \
+  'multi-line subprocess.run list|subprocess.run([@    "nxpele",@    "commit", "-i", "OEM_FW_FUSE"@])' \
+  'multi-line Popen fastboot path|Popen(@    "/usr/bin/fastboot",@    "flash", "boot", x)' \
+  'multi-line fastboot list|["fastboot",@  "erase", "userdata"]'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  i=$((i + 1))
+  rm -f "$scratch"/scripts/*
+  { echo 'echo start'; printf '%s\n' "${cmd//@/$'\n'}"; } >"$scratch/scripts/ml$i.py"
+  if out=$(scan "$scratch" 2>&1); then
+    bad "fixture $name was not flagged"
+  elif [[ $out == *scripts/ml$i.py:2:* ]]; then
+    ok "fixture $name fails and names scripts/ml$i.py:2"
+  else
+    bad "fixture $name failed but did not name file and line: $out"
+  fi
+done
+for fx in \
+  'multi-line list of plain strings|names = [@    "alpha",@    "beta",@]' \
+  'multi-line print of prose naming fastboot|print(@    "use fastboot later,"@    "then stop")'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' "${cmd//@/$'\n'}" >"$scratch/scripts/mlb.py"
+  if scan "$scratch" >/dev/null 2>&1; then ok "benign fixture passes: $name"
+  else bad "benign fixture was flagged: $name"; fi
+done
 
 # Positive control: every command named only on comment lines passes.
 rm -f "$scratch"/scripts/*
