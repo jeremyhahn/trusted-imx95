@@ -232,6 +232,21 @@ Rules:
 - It **cannot**, on the evidence read, observe an ELE tamper event as such (a55 F1), so the
   event is the only sign it gets.
 
+## Code
+
+Status: **proposed, pending owner approval**. Portable C99, host-tested, no enclave call
+and no device (issue #26):
+
+- `hsm-self-defence/a55/tamper_event.c` and `.h`: the parser. It returns the reject names
+  of checks 1 to 10; an unknown event code passes it; the replay check (11) needs the last
+  sequence, so the state machine makes it.
+- `hsm-self-defence/a55/quarantine.c` and `.h`: the state machine of the table above. It
+  returns actions (log, refuse key operations, close sessions, await reset) and the caller
+  performs them.
+- `hsm-self-defence/a55/tamper_event_test.c`, `quarantine_test.c`, run by
+  `test/hsd_a55_test.sh`, which also checks that every vector of this note is in the
+  parser test.
+
 ## Board validation list
 
 Every item is to be validated on the board.
