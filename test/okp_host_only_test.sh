@@ -24,6 +24,7 @@ FILES=(
   scripts/ahab/msg-sig-check.py
   scripts/ahab/srk-hash-check.sh
   scripts/ahab/srk-hash.py
+  scripts/okp/station-preflight.sh
   test/key_exchange_test.sh
   test/key_import_test.sh
   test/srk_hash_check_test.sh
@@ -152,7 +153,7 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
     local name=$1 expect=$2 f=$3 o
     shift 3
     rm -rf "${scratch:?}/t"
-    mkdir -p "$scratch/t/scripts/ahab" "$scratch/t/test"
+    mkdir -p "$scratch/t/scripts/ahab" "$scratch/t/scripts/okp" "$scratch/t/test"
     local g
     for g in "${FILES[@]}"; do : >"$scratch/t/$g"; done
     : >"$scratch/t/Makefile"

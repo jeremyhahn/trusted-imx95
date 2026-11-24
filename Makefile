@@ -39,7 +39,7 @@ export PATH := $(TOOLS_DIR):$(PATH)
 NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
 
 # Every shell script git tracks, and every Python script under scripts/.
-SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/integration/*.sh))
+SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh scripts/okp/*.sh test/*.sh test/integration/*.sh))
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
@@ -49,7 +49,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
-	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
+	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test okp-station-preflight \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -218,6 +218,9 @@ okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a
 
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
+
+okp-station-preflight: ## Check SPSDK_VENV and the SPSDK pin for the provisioning station and list its steps (--dry-run only; touches no device, runs no step, no fuse)
+	@scripts/okp/station-preflight.sh --dry-run
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }

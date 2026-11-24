@@ -168,7 +168,7 @@ blocked until one is confirmed from vendor documents ([key-ceremony-survey.md](k
 
 The model is the CST rule in [references/README.md](../references/README.md) (S11): the build never reads the tool from
 this tree, takes its location from an environment variable, stops and names the variable when it is unset, and
-`.gitignore` keeps the archive out. Applied to the provisioning host tools (a proposal, not built in this lane):
+`.gitignore` keeps the archive out. Applied to the provisioning host tools (`scripts/okp/station-preflight.sh` checks `SPSDK_VENV` and the version pin and runs no step; the rest is a proposal, not built):
 
 - **Where.** `SPSDK_VENV` names a Python virtual environment outside the repository; `UUU_PATH` names a standalone uuu
   binary only if the owner chooses the binary over `libuuu` (Q2). A step that needs a tool and finds its variable unset
