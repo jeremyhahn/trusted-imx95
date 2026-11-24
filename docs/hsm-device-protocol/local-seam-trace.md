@@ -3,7 +3,7 @@
 > **Status: TRACE, facts only; no requirement (R6 and R8 of xkmsd-node.md are proposed, pending owner approval)** · Row: hsm-device-protocol · Issue: #24 · Read: 2026-11-24
 
 This record answers four questions behind R6 and R8 of [xkmsd-node.md](xkmsd-node.md) that the
-[survey](on-device-transport-survey.md) §4 left "details unconfirmed". It reads six public man pages and summarises them
+[survey](on-device-transport-survey.md) §4 left "details unconfirmed". It reads seven public man pages and summarises them
 in its own words; it copies no page text. Section names are cited from the pages. It names no socket path, port, message
 or timeout, and no go-xkms code was read.
 
@@ -17,6 +17,7 @@ or timeout, and no go-xkms code was read.
 | 4 | sd_listen_fds(3) | man7.org copy, stamped systemd 262~devel | https://man7.org/linux/man-pages/man3/sd_listen_fds.3.html |
 | 5 | systemd.exec(5) | systemd 262 (latest page, fetched 2026-11-24) | https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html |
 | 6 | udev(7) | man7.org copy; version stamp not read | https://man7.org/linux/man-pages/man7/udev.7.html |
+| 7 | systemd.resource-control(5) | systemd 262 (latest page, fetched 2026-11-24) | https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html |
 
 In the text, "S1" is source 1, and so on. The "latest" pages move; a later read can differ from this one.
 
@@ -67,13 +68,27 @@ In the text, "S1" is source 1, and so on. The "latest" pages move; a later read 
   Its mode and owner on the image are **unconfirmed** there; the driver sets none, so the device manager decides.
 - udev rules can set the node's owner, group and mode with the OWNER, GROUP and MODE keys; each value given replaces the
   compiled-in default (S6, rules "Fields" for OWNER, GROUP, MODE). A rule matches by kernel name, so one rule could name
-  that node. This record writes no rule.
+  that node. The image's rule is in the enclave-access recipe (R6, proposed, pending owner approval).
 - systemd.exec limits what a service can see. User and Group set the account the service runs as; DynamicUser allocates
   a transient account (S5). PrivateDevices gives the service a private `/dev` with only pseudo devices, so a service
   that needs the enclave node cannot turn it on (S5). To allow named nodes, the pages point to the DeviceAllow and
-  DevicePolicy options of systemd.resource-control(5) (S5, PrivateDevices and sandboxing text).
-- **Unconfirmed:** the exact DeviceAllow syntax and its interaction with a udev-set mode: systemd.resource-control(5) was
-  not fetched. Whether a dynamic account can own a udev-set node was not read.
+  DevicePolicy options of systemd.resource-control(5) (S5, PrivateDevices and sandboxing text), summarised below.
+- DeviceAllow (S7, "Device Access") takes two words per line: a node specifier, then some of r, w, m (read, write,
+  create). The specifier is either a path that starts with `/dev/` (no wildcards in a path), or `char-` or `block-`
+  plus a device group name from `/proc/devices` (wildcards allowed there). Matching by major and minor number is
+  possible through the `/dev/char/` and `/dev/block/` paths, but the page advises against it, since the numbers are not
+  stable between systems or kernels. A group name is resolved when the unit starts; one not resolvable then is not
+  allowed. The page says the setting applies to the whole control group, so a `+` prefix on the command does not get
+  around it. Whether `hsm0_ch0` appears in `/proc/devices` under a name usable here was not read: a path entry
+  (`/dev/hsm0_ch0`) needs no such name.
+- DevicePolicy (S7) has three values: `strict` allows only what DeviceAllow lists; `closed` also allows the standard
+  pseudo devices (null, zero, full, random, urandom); `auto`, the default, also allows every device when the unit has no
+  DeviceAllow line. So without DeviceAllow or a stricter policy a service is not restricted by this mechanism; with
+  `strict` and no line it reaches no device. S7 points to PrivateDevices (S5) for the case where no physical device is
+  wanted.
+- The DeviceAllow cell is closed by S7. **Unconfirmed:** the page does not say how DeviceAllow interacts with a
+  udev-set mode (the two are separate, as the next bullet says), and whether a dynamic account can own a udev-set node
+  was not read.
 - The two mechanisms are independent: udev sets who the file system allows, the unit sets what the service may reach.
 
 ## What this trace does not decide
@@ -81,8 +96,8 @@ In the text, "S1" is source 1, and so on. The "latest" pages move; a later read 
 - Whether xkmsd is one process or two is go-xkms's question ([xkmsd-node.md](xkmsd-node.md) §4 question 2). Nothing here
   needs a second process; it only describes the seam if there is one.
 - R6 and R8 stay proposed, pending owner approval. This trace adds, changes and removes no requirement.
-- It names no socket path, port, message or timeout. It writes no udev rule or unit file into the image; that is later row
-  work, after the owner approves R6 and R8.
+- It names no socket path, port, message or timeout. It writes no unit file. The image's udev rule for the node (the
+  enclave-access recipe) is the proposed default for R6, pending owner approval; a unit is later row work.
 - Findings that may bear on their wording, listed for the owner, each proposed input: peer credentials are fixed at
   connect time (a); a path socket's access follows file modes while an abstract one has none (b); the default socket mode
   is wide open (c); the node's mode comes from the device manager, and a private `/dev` hides it (d).
