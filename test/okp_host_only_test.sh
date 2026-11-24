@@ -30,6 +30,7 @@ FILES=(
   test/okp_record_check_test.sh
   test/okp_record_drift_test.sh
   test/okp_pre_close_test.sh
+  test/okp_spsdk_lock_test.sh
   test/key_exchange_test.sh
   test/key_import_test.sh
   test/srk_hash_check_test.sh
