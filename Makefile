@@ -45,7 +45,7 @@ UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
+	deps-check pins-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
@@ -75,6 +75,7 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 		'ARG SW_DEBIAN_SNAPSHOT=$(SW_DEBIAN_SNAPSHOT)' 'ARG SW_UV_VERSION=$(SW_UV_VERSION)' 'ARG SW_UV_SHA256=$(SW_UV_SHA256)'; do \
 		found=0; while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
 		[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }; done
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
 	@echo "build: OK ($(words $(SH_SCRIPTS)) shell and $(words $(PY_SCRIPTS)) Python scripts parse)"
 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
@@ -112,6 +113,9 @@ integration-test-local: ## Integration tests in the current environment (in the 
 	done; exit $$fail
 
 security: check-tracked-cst secret-scan-tree secret-scan-history ## Security stage: CST guard and secret scans of the tree and the history
+
+pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
 
 deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs the network)
 	@scripts/deps-check.sh scripts/tool-pins.sh
