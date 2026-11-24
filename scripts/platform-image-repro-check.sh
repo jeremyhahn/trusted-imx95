@@ -62,6 +62,20 @@ if cmd == "gpt":      # gpt DUMP.json -> name start size sectorsize
 elif cmd == "range":  # range IMG START SIZE SECTORSIZE -> sha256
     with open(sys.argv[2], "rb") as f:
         print(sha(f, int(sys.argv[3]) * int(sys.argv[5]), int(sys.argv[4]) * int(sys.argv[5])))
+elif cmd == "firstdiff":  # firstdiff A.members B.members -> first member name whose line differs
+    def load(p):
+        d = {}
+        for l in open(p, encoding="utf-8", errors="surrogateescape"):
+            l = l.rstrip("\n")
+            d.setdefault(l.split("\t", 1)[0], l)
+        return d
+    a, b = load(sys.argv[2]), load(sys.argv[3])
+    for n in list(a) + [k for k in b if k not in a]:
+        if a.get(n) != b.get(n):
+            print(n)
+            break
+    else:
+        sys.exit(1)
 elif cmd == "tar":    # tar ARCHIVE IDFILE -> one line per member
     with tarfile.open(sys.argv[2], "r:") as t:
         for m in t:
@@ -200,13 +214,9 @@ if [ "$rt_ok" -eq 1 ]; then
 	if cmp -s "$tmp/a.members" "$tmp/b.members"; then
 		ok "rootfs members (less /$ID_FILE) $(sha_of "$tmp/a.members")"
 	else
-		diff "$tmp/a.members" "$tmp/b.members" >"$tmp/members.diff" || true
-		first=
-		while IFS= read -r l; do
-			case $l in '<'*|'>'*) first=$l; break ;; esac
-		done <"$tmp/members.diff"
-		first=${first%%$'\t'*}
-		bad "rootfs members differ; first differing member: ${first#[<>] }"
+		# not diff(1): its output format differs (BusyBox, in the Alpine CI image, prints unified)
+		first=$(python3 -I "$tmp/h.py" firstdiff "$tmp/a.members" "$tmp/b.members") || first="(unknown)"
+		bad "rootfs members differ; first differing member: $first"
 	fi
 fi
 
