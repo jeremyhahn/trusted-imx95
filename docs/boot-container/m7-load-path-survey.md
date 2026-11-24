@@ -244,8 +244,8 @@ What it must **take from** trusted-firmware:
 - **U5** That Linux's `imx_rproc` does no ELE authentication of the firmware it loads. Based on the
   commit messages in S6, not on the code.
 - **Not reached:** NXP's *i.MX Linux User's Guide* PDF (`IMX_LINUX_USERS_GUIDE.pdf` on nxp.com)
-  returned an error from the lane, so its M7 boot and remoteproc chapters were not read. The Linux
-  device-tree binding `fsl,imx-rproc.yaml` was downloaded but not read in this lane.
+  returned an error from the survey, so its M7 boot and remoteproc chapters were not read. The Linux
+  device-tree binding `fsl,imx-rproc.yaml` was downloaded but not read in this survey.
 
 ## 10. Questions for the owner
 

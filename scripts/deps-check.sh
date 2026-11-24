@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
-# deps-check.sh [pin-file]
-# deps-check.sh --fetch <dir> [pin-file]
-#
-# The latest-version check (handbook ci-standard.md §1, devops.md §9): each
-# pinned tool of scripts/tool-pins.sh against its latest GitHub release, and
-# the Alpine base against the newest Alpine release tag. A pin behind a
-# release older than 7 days fails, unless the pin carries <TOOL>_HOLD, the
-# documented reason, which is reported. A release younger than 7 days is
-# reported, not failed. A release that cannot be read fails: no answer is
-# never a pass. Needs the network (CI runs it with IN_IMAGE_NETWORK=bridge).
-#
-# deps-check.sh --fetch <dir> [pin-file] only looks up each tool's latest
-# GitHub release and writes "<tag> <published_at>" to <dir>/<TOOL>. CI runs it
-# on the runner with the job's token, outside the toolchain container, which no
-# token enters. With DEPS_RELEASES_DIR set, the check reads the tools' releases
-# from that directory instead of the API, as data only: a value that is not a
-# version tag and a UTC timestamp fails. The Alpine lookup needs no token.
+# deps-check.sh [pin-file] | --fetch <dir> [pin-file]: fails when a pinned tool or the Alpine base is behind a release older than 7 days, unless <TOOL>_HOLD gives a reason; --fetch writes each tool's latest release to <dir>.
 set -euo pipefail
 
 fetch=
@@ -33,12 +17,7 @@ readonly WEEK=$((7 * 24 * 3600))
 now=$(date -u +%s)
 bad=0
 
-# latest_github <owner/repo>: prints "<tag> <published_at>". On failure it
-# prints the reason (the HTTP status, or curl's exit code) and returns 1.
-# With GITHUB_TOKEN or GH_TOKEN set, the request is authenticated, so CI is
-# not held to the unauthenticated rate limit. The token goes to curl on stdin
-# through --config, never on its command line, and xtrace is off while it is
-# in a command, so neither ps nor `set -x` shows it.
+# latest_github <owner/repo> prints "<tag> <published_at>"; a token goes to curl on stdin, never on its command line.
 latest_github() {
 	local body code rc=0 xt=
 	body=$(mktemp)

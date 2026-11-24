@@ -66,7 +66,7 @@ Together, the two calls could give:
 
 ## 2. Key and certificate chain
 
-- **Root of the device attestation signature: unconfirmed.** The sources read here do not say which key signs the device attestation response. They do not say whether that key is per device or per product, how its public key or certificate is published, or whether NXP runs a CA for it. NXP's HSM API reference (RM00284 §3.12, cited in [SPEC](../SPEC.md)) is a vendor document; this lane did not read it, and it may answer these questions.
+- **Root of the device attestation signature: unconfirmed.** The sources read here do not say which key signs the device attestation response. They do not say whether that key is per device or per product, how its public key or certificate is published, or whether NXP runs a CA for it. NXP's HSM API reference (RM00284 §3.12, cited in [SPEC](../SPEC.md)) is a vendor document; this survey did not read it, and it may answer these questions.
 - **Public key attestation.** The chain behind it is also unconfirmed. Its root is whatever key the caller names as the attesting key [S1], so the trust in it depends on how that key was put in place.
 - **OEM import route.** SPEC's `oem-key-provisioning` row describes the vendor's key-exchange-and-import flow (AN14861, RM00284 §3.20). That flow could install an OEM-owned attesting key. Whether such an imported key may be used to attest other keys is **unconfirmed**.
 - **EdgeLock 2GO.** NXP's provisioning service is documented in SPSDK's `el2go-host` tool [S5]. That tool talks to "EdgeLock 2GO NXP Provisioning Firmware" on MCU-class devices: it creates device groups and secure objects and provisions them, and it names MCX N parts for per-product provisioning. Two things are **unconfirmed**:
@@ -102,7 +102,7 @@ Together, the two calls could give:
   - the verifier is go-trusted-platform's control plane;
   - the relying party is go-xkms or the fleet policy.
 
-  Raw enclave evidence could be carried as-is, or wrapped in an Entity Attestation Token. The EAT specification (RFC 9711) and the PSA token RFC were **not read in this lane**, so how well they fit is unconfirmed.
+  Raw enclave evidence could be carried as-is, or wrapped in an Entity Attestation Token. The EAT specification (RFC 9711) and the PSA token RFC were **not read in this survey**, so how well they fit is unconfirmed.
 - **Verifier side [S8].** go-trusted-platform (v0.1.0-alpha) lists `hsm-device-lifecycle` as a future feature that has not started (its issue #884). Its public specification shows no verifier for ELE evidence.
 
 ## Sources
@@ -115,7 +115,7 @@ Together, the two calls could give:
 | S4 | OP-TEE `optee_os`: `core/drivers/crypto/ele/ele.c`, `core/arch/arm/plat-imx/conf.mk`, `core/pta/attestation.c`, `core/pta/veraison_attestation/README.md` | `master`, commit 3a19c71 (2026-11-11); latest tag 4.9.0-rc1 | https://github.com/OP-TEE/optee_os |
 | S5 | NXP SPSDK: `spsdk/ele/ele_message.py`, `ele_constants.py`, `docs/apps/el2go-host.rst` | `master`, commit e104adf (2026-11-03); latest tag v3.9.0 | https://github.com/nxp-mcuxpresso/spsdk |
 | S6 | Linux mainline: `drivers/firmware/imx/` | v7.4-rc2, commit 9d66f26 (2026-11-11) | https://github.com/torvalds/linux |
-| S7 | RFC 9334, Remote ATtestation procedureS (RATS) Architecture, as cited by S4's Veraison README | RFC 9334 (not re-read in this lane) | https://datatracker.ietf.org/doc/rfc9334 |
+| S7 | RFC 9334, Remote ATtestation procedureS (RATS) Architecture, as cited by S4's Veraison README | RFC 9334 (not re-read in this survey) | https://datatracker.ietf.org/doc/rfc9334 |
 | S8 | go-trusted-platform: `docs/SPEC.md` (row `hsm-device-lifecycle`), `ROADMAP.md` | `main`, commit 641fd51 (2026-11-11), VERSION 0.1.0-alpha | https://github.com/jeremyhahn/go-trusted-platform |
 
 ### Sources not reached or not read (unconfirmed)

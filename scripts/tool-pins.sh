@@ -1,13 +1,6 @@
 # shellcheck shell=sh disable=SC2034
-# The one pin file (handbook devcontainer.md §2). Read by the Dockerfile's
-# fetch stage (scripts/fetch-tools.sh), by the Makefile (`include`) and by
-# scripts/deps-check.sh. Plain NAME=value lines only: make and sh read both.
-#
-# Each tool: <TOOL>_VERSION, <TOOL>_REPO (its GitHub releases), <TOOL>_URL
-# (the linux amd64 release asset) and <TOOL>_SHA256 (that asset's digest).
-# A pin held behind the latest release carries <TOOL>_HOLD, the documented
-# reason (handbook devops.md §9), single-quoted; deps-check then reports it,
-# not fails it.
+# The one pin file, read by fetch-tools.sh, the Makefile and deps-check.sh: plain NAME=value lines.
+# Per tool: <TOOL>_VERSION, _REPO, _URL (linux amd64 asset), _SHA256, and optional single-quoted _HOLD reason for a pin held behind the latest release.
 
 ALPINE_VERSION=3.24.4
 ALPINE_DIGEST=sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf

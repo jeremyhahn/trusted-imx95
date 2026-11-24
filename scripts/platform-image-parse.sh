@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-# platform-image-parse.sh [DIR]: the metadata check of platform-image/. Fetch the
-# layers platform-image/manifest.lock pins into DIR (scripts/platform-image-fetch.sh),
-# write the build directory's conf from the templates (refusing to overwrite a
-# conf that differs, unless PLATFORM_IMAGE_PARSE_FORCE=1), run `bitbake -p`,
-# then `bitbake -e <target>` for both image targets and check the effective
-# MACHINE (the lock's), DISTRO (local.conf.template's), INIT_MANAGER (the
-# distro's) and that IMAGE_FEATURES holds no root-login relaxation. No image is
-# built. Needs the network and a Yocto build host; it is not in CI.
-# Provisional default, pending the owner's answer on #14.
+# platform-image-parse.sh [DIR]: fetches the pinned layers, writes the build conf, runs bitbake -p and -e and checks MACHINE, DISTRO, INIT_MANAGER and IMAGE_FEATURES; needs a Yocto build host, not in CI.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -45,11 +37,7 @@ done
 phys=$(cd "$anc" && pwd -P)$rest
 case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
 
-# bitbake writes this generated, git-ignored file into its own tree on a run; the
-# fetch refuses a layer with ignored files, so a repeat run would fail on it.
-# Remove it only when git reports exactly that path as an ignored, untracked file
-# of the bitbake checkout; any other state (tracked, edited, untracked and not
-# ignored, no checkout) fails closed and nothing is deleted.
+# Remove bitbake's generated ignored file only when git reports exactly that path as ignored and untracked; anything else fails closed.
 bb=$phys/sources/bitbake
 pysh=lib/bb/pysh/pyshtables.py
 if [ -e "$bb/$pysh" ] || [ -L "$bb/$pysh" ]; then

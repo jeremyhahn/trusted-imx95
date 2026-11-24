@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Offline checks of scripts/platform-image-parse.sh (provisional default,
-# pending the owner's answer on #14): a stub fetcher and a stub bitbake on
-# PATH, in a mktemp dir outside the clone. No network, no Yocto.
+# Offline checks of scripts/platform-image-parse.sh with a stub fetcher and bitbake.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
