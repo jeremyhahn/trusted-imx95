@@ -13,6 +13,7 @@ SRC_URI = "file://tee-data-mount \
            file://tee-supplicant \
            file://tee-nv-wipe \
            file://tee-nv-wipe.service \
+           file://trusted-imx95-tpm.target \
           "
 
 inherit systemd
@@ -44,6 +45,11 @@ do_install() {
     install -d ${D}${sysconfdir}/systemd/system/basic.target.wants
     ln -sf ${systemd_system_unitdir}/tee-supplicant@.service \
         ${D}${sysconfdir}/systemd/system/basic.target.wants/tee-supplicant@teepriv0.service
+    # The ordering point for TPM users: waits for dev-tpmrm0.device, after the supplicant.
+    install -m 0644 ${UNPACKDIR}/trusted-imx95-tpm.target ${D}${systemd_system_unitdir}/trusted-imx95-tpm.target
+    install -d ${D}${sysconfdir}/systemd/system/multi-user.target.wants
+    ln -sf ${systemd_system_unitdir}/trusted-imx95-tpm.target \
+        ${D}${sysconfdir}/systemd/system/multi-user.target.wants/trusted-imx95-tpm.target
 }
 
 FILES:${PN} += "/data ${sbindir}/tee-nv-wipe ${sbindir}/tee-data-mount ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"

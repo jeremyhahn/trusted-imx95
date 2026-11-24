@@ -50,8 +50,10 @@ hands the A55 its first image is in the `boot-container` row and the missing IMX
    opens `/dev/teepriv0`, and the driver's probe then opens the TA and registers the chip
    ([trace, item 6](../secure-world/ta-options-survey.md#unconfirmed-items), read at the pinned kernel,
    OP-TEE and systemd commits). "`/dev/tpmrm0` present at boot" therefore means present once the supplicant has
-   started. The pinned systemd's udev rules already provide `dev-tpmrm0.device`; a TPM user must name a unit that
-   waits for it.
+   started. The pinned systemd's udev rules already provide `dev-tpmrm0.device`, but its `tpm2.target` is not held for
+   a unit that does not name it, so the image carries `trusted-imx95-tpm.target` (`Requires=` and `After=`
+   `dev-tpmrm0.device`, `After=tee-supplicant@teepriv0.service`, wanted by `multi-user.target`). A TPM user
+   puts `Wants=` and `After=trusted-imx95-tpm.target` in its unit. The target sends no TPM command.
 8. **Users.** go-xkms's TPM 2.0 workflows and go-trusted-platform reach the TPM through `/dev/tpmrm0`.
 
 ## NV storage

@@ -630,6 +630,16 @@ expect "README describes the root binding token" has "$ROOT/docs/ftpm/README.md"
 expect "README no longer carries the byte-identical open item" none 'Open item (a gap' "$ROOT/docs/ftpm/README.md"
 expect "README makes no claim that every root-only rewrite is caught" none 'catches that on boot' "$ROOT/docs/ftpm/README.md"
 
+# The boot ordering point for TPM users (docs/secure-world/ta-options-survey.md item 6).
+tpmt=$nvf/trusted-imx95-tpm.target
+expect "the TPM target requires dev-tpmrm0.device" ncstr "$tpmt" 'Requires=dev-tpmrm0.device'
+expect "the TPM target is ordered after dev-tpmrm0.device" ncstr "$tpmt" 'After=dev-tpmrm0.device'
+expect "the TPM target is ordered after the supplicant" ncstr "$tpmt" 'After=tee-supplicant@teepriv0.service'
+expect "the recipe fetches the TPM target" ncstr "$nv" 'file://trusted-imx95-tpm.target'
+expect "the recipe installs the TPM target" ncstr "$nv" 'trusted-imx95-tpm.target ${D}${systemd_system_unitdir}/trusted-imx95-tpm.target'
+expect "the recipe enables the TPM target from multi-user.target" ncstr "$nv" 'multi-user.target.wants/trusted-imx95-tpm.target'
+expect "the TPM target is wanted by multi-user.target" ncstr "$tpmt" 'WantedBy=multi-user.target'
+
 # SPEC row 34 (ftpm): the REE-FS NV is wiped with the root file system.
 expect "SPEC row ftpm keeps the approved NV erasure clause" ncstr "$ROOT/docs/SPEC.md" 'is wiped with the root file system'
 expect "SPEC row ftpm lets no root rewrite keep the NV" none 'root rewrite keeps the NV' "$ROOT/docs/SPEC.md"
