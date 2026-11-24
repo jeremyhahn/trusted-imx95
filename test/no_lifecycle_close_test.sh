@@ -6,7 +6,9 @@
 # write. It reads files only; it runs none of them and touches no device.
 # Families: forward-lifecycle and OEM close/lock messages; ahab_close,
 # ahab_return_lifecycle, ahab_lock; fuse burns (nxpele commit -i <fuse group>,
-# ahab_commit, ahab_sec_fuse_prog, write-fuse verbs, fuse prog/override, blhost efuse).
+# ahab_commit, ahab_sec_fuse_prog, nxpele signed-message (the signed secure-fuse path),
+# write-fuse verbs, fuse prog/override, blhost efuse). Commands split by backslash
+# continuations are joined before matching.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -33,6 +35,7 @@ PATTERNS=(
   'write[-_]fuse'
   'fuse[-_]burn'
   'nxpele[^#]*[[:space:]]commit([[:space:]]|$)'
+  'nxpele[^#]*[[:space:]]signed[-_ ]?message([[:space:]]|$)'
   'ahab_commit'
   'ahab_sec_fuse_prog'
   'ahab_lock'
@@ -178,6 +181,30 @@ rm -f "$scratch"/scripts/*
 printf '%s\n' 'nxpele -p x \' 'info' >"$scratch/scripts/benign.sh"
 if scan "$scratch" >/dev/null 2>&1; then ok "a continued nxpele command without a fuse write passes"
 else bad "a continued benign nxpele command was flagged"; fi
+
+# Signed-message submission is a device-bound secure-fuse path.
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'nxpele -p x signed-message -i fuse.bin' >"$scratch/scripts/sm1.sh"
+if out=$(scan "$scratch" 2>&1); then
+  bad "nxpele signed-message was not flagged"
+elif [[ $out == *scripts/sm1.sh:1:* ]]; then
+  ok "nxpele signed-message fails and names scripts/sm1.sh:1"
+else
+  bad "nxpele signed-message failed but did not name file and line: $out"
+fi
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'nxpele -p x \' '  signed-message \' '  -i fuse.bin' >"$scratch/scripts/sm3.sh"
+if out=$(scan "$scratch" 2>&1); then
+  bad "continued nxpele signed-message was not flagged"
+elif [[ $out == *scripts/sm3.sh:1:* ]]; then
+  ok "continued nxpele signed-message fails and names scripts/sm3.sh:1"
+else
+  bad "continued signed-message failed but did not name file and line: $out"
+fi
+rm -f "$scratch"/scripts/*
+printf '%s\n' '# nxpele -p x signed-message -i fuse.bin' 'echo "signed-message is documented elsewhere"' >"$scratch/scripts/sm-note.sh"
+if scan "$scratch" >/dev/null 2>&1; then ok "signed-message named only in a comment or an echo passes"
+else bad "signed-message named only in a comment or an echo was flagged"; fi
 
 # Positive control: every command named only on comment lines passes.
 rm -f "$scratch"/scripts/*
