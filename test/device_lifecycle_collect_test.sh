@@ -126,10 +126,11 @@ expect "missing OUT parent: nothing written" test ! -e "$W/nodir"
 printf 'victim\n' >"$W/victim"
 cp "$W/victim" "$W/victim.ref"
 mkdir -p "$W/pub"
-ln -s "$W/victim" "$W/pub/out.json.tmp.1"
 ln -s "$W/victim" "$W/pub/.out.json.XXXXXX"
-ln -s "$W/victim" "$W/pub/.out.json.tmp"
-run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
+# The wrapper plants a link at the exact path the old publish wrote (OUT.tmp.<PID>), then
+# execs the collector: exec keeps the PID, so $$ here is the collector's own PID.
+run col bash -c 'ln -s "$1" "$2.tmp.$$"; shift 2; exec "$@"' _ "$W/victim" "$W/pub/out.json" \
+	env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
 check "planted symlinks" 0 "wrote"
 expect "planted symlinks: victim unchanged" cmp -s "$W/victim" "$W/victim.ref"
 expect "planted symlinks: OUT is a regular file" test -f "$W/pub/out.json" -a ! -L "$W/pub/out.json"
