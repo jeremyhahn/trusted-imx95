@@ -416,4 +416,41 @@ while IFS= read -r l; do
 done <"$sw"
 expect "a changed fTPM flag in the script fails the digest guard" not_tied_with "$good" "$ftpm_script"
 
+# --- build.md's pin rows follow bsp.lock ----------------------------------------
+# The pin table of build.md states each source's repository and commit as prose.
+# pin_row_ok <md> <row-prefix> <REPO name> <COMMIT name>: the one row starting with
+# the prefix names the repository path of the lock's REPO (github.com/<path>.git)
+# and the lock's whole 40-hex commit. The lock is read with the script's rule.
+pin_row_ok() {
+	local md=$1 pre=$2 repo commit path l n=0 row=
+	repo=$(lock_value "$good" "$3") commit=$(lock_value "$good" "$4") || return 1
+	path=${repo#https://github.com/}
+	path=${path%.git}
+	[[ -n "$path" && "$path" != "$repo" && "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == "$pre"* ]] && { n=$((n + 1)); row=$l; }
+	done <"$md"
+	[ "$n" -eq 1 ] || return 1
+	[[ "$row" == *"\`$path\`"* && "$row" == *"\`$commit\`"* ]]
+}
+md=$ROOT/docs/secure-world/build.md
+expect "build.md's TF-A BL31 row names TFA_REPO's path and TFA_COMMIT" pin_row_ok "$md" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "build.md's OP-TEE OS row names OPTEE_REPO's path and OPTEE_COMMIT" pin_row_ok "$md" "| OP-TEE OS" OPTEE_REPO OPTEE_COMMIT
+expect "build.md's fTPM TA row names FTPM_REPO's path and FTPM_COMMIT" pin_row_ok "$md" "| fTPM TA |" FTPM_REPO FTPM_COMMIT
+# scratch copies of build.md: the TF-A commit changed by one digit; a branch named instead
+tfa_commit=$(lock_value "$good" TFA_COMMIT)
+md_copy() { # <name> <from> <to>
+	local f=$TMP_ROOT/$1.md l
+	: >"$f"
+	while IFS= read -r l || [ -n "$l" ]; do printf '%s\n' "${l//"$2"/"$3"}" >>"$f"; done <"$md"
+	printf '%s\n' "$f"
+}
+off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}0")
+[ "${tfa_commit: -1}" != 0 ] || off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}1")
+branch_only=$(md_copy md-branch "\`$tfa_commit\`" '`lf_v2.14`')
+pin_row_bad() { ! pin_row_ok "$@"; }
+expect "a build.md with the TF-A commit changed by one digit fails the pin row check" pin_row_bad "$off_by_one" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "a build.md naming a branch only fails the pin row check" pin_row_bad "$branch_only" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "a build.md without the TF-A row fails the pin row check" pin_row_bad "$md" "| TF-A BL31X |" TFA_REPO TFA_COMMIT
+
 finish
