@@ -95,7 +95,10 @@ which the pinned configuration gives to agent `AP-S`, secure, in LM 2 "AP"
 `:503-519`) grants no `LMM_*`, `CPU_M7P` or `PD_M7` right, and the
 configuration tool's output for that file (`configtool.pl`, run outside the
 repo) gives the `AP-S` entry no `lmmPerms` and no `cpuPerms[DEV_SM_CPU_M7P]`,
-so both are `SM_SCMI_PERM_NONE`. This repository's patches 0001 and 0002
+so both are `SM_SCMI_PERM_NONE`. Every `scripts/sm-build.sh` build now checks
+that API list against `system-manager/ap-s-grants.txt` (a grant that opens the
+M7 or an LM fails the build until the list is changed in a reviewed diff); the
+refusal itself is read from source, not observed on a board. This repository's patches 0001 and 0002
 (`system-manager/patches/`) change only lines of the M7 LM, not `AP-S`. The
 configuration has three LMs (generated `SM_NUM_LM 3U`), so `imx95_m7.c` takes
 its LMM path, not its core path, for start, stop and prepare.
@@ -320,11 +323,17 @@ sources above:
   no right over the M7 agent's base protocol (section 2.2.1). Not traced:
   the LMM handler `imx95_lmm.c` and `imx_sip_svc.c` beyond the single call each
   makes, and how the returned SCMI status maps to the SMC result seen by
-  Linux; (c) no offline test pins the `AP-S` API list, because `test/secure_world_build_test.sh`
-  runs without network and the configuration is vendor source outside the
-  repo; it is pinned only by `sm_config_sha256` and `sm_patched_config_sha256`
-  in `system-manager/sm.lock`, which `scripts/sm-build.sh` checks when it
-  fetches; (d) `AP-S` holds `SYS ALL` (`mx95frdm-pro.cfg:519`), so the secure
+  Linux; (c) the `AP-S` API list is pinned by `system-manager/ap-s-grants.txt`
+  (proposed, pending owner approval) in every `scripts/sm-build.sh` build, so a
+  grant that opens the M7 or an LM to Linux becomes a reviewed diff; the
+  refusal itself is still read from source, not observed on a board.
+  `test/secure_world_build_test.sh` runs without network, so the list is
+  checked by the `system-manager` build and by `test/sm_build_test.sh` on
+  invented configurations, not against the real file offline; the list was
+  written from this survey and is to be confirmed with
+  `scripts/sm-grants-check.sh --ap-s --print` on the first real build. The
+  configuration is also pinned by `sm_config_sha256` and
+  `sm_patched_config_sha256` in `system-manager/sm.lock`; (d) `AP-S` holds `SYS ALL` (`mx95frdm-pro.cfg:519`), so the secure
   side can reset the whole system, M7 included; that is reached by PSCI system
   reset, not by a SiP call, and is not an M7-only control; (e) the two
   read-only queries leak the M7's run state and reset vector to Linux, judged
