@@ -636,6 +636,7 @@ expect "the TPM target requires dev-tpmrm0.device" ncstr "$tpmt" 'Requires=dev-t
 expect "the TPM target is ordered after dev-tpmrm0.device" ncstr "$tpmt" 'After=dev-tpmrm0.device'
 expect "the TPM target is ordered after the supplicant" ncstr "$tpmt" 'After=tee-supplicant@teepriv0.service'
 expect "the recipe fetches the TPM target" ncstr "$nv" 'file://trusted-imx95-tpm.target'
+# shellcheck disable=SC2016 # bitbake variables, literal
 expect "the recipe installs the TPM target" ncstr "$nv" 'trusted-imx95-tpm.target ${D}${systemd_system_unitdir}/trusted-imx95-tpm.target'
 expect "the recipe enables the TPM target from multi-user.target" ncstr "$nv" 'multi-user.target.wants/trusted-imx95-tpm.target'
 expect "the TPM target is wanted by multi-user.target" ncstr "$tpmt" 'WantedBy=multi-user.target'
