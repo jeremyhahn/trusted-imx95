@@ -160,7 +160,8 @@ done
 
 # A command split across physical lines by backslash continuations is one command.
 rm -f "$scratch"/scripts/*
-printf '%s\n' 'nxpele -p x \' 'commit -i OEM_FW_FUSE' >"$scratch/scripts/split2.sh"
+bs=$'\\'
+printf '%s\n' "nxpele -p x $bs" 'commit -i OEM_FW_FUSE' >"$scratch/scripts/split2.sh"
 if out=$(scan "$scratch" 2>&1); then
   bad "two-line continued nxpele commit was not flagged"
 elif [[ $out == *scripts/split2.sh:1:* ]]; then
@@ -169,7 +170,7 @@ else
   bad "two-line continued commit failed but did not name file and line: $out"
 fi
 rm -f "$scratch"/scripts/*
-printf '%s\n' 'echo start' 'nxpele \' '    -p x \' '      --verbose \' '    commit \' '    -i OEM_FW_FUSE' >"$scratch/scripts/split5.sh"
+printf '%s\n' 'echo start' "nxpele $bs" "    -p x $bs" "      --verbose $bs" "    commit $bs" '    -i OEM_FW_FUSE' >"$scratch/scripts/split5.sh"
 if out=$(scan "$scratch" 2>&1); then
   bad "indented multi-line continued nxpele commit was not flagged"
 elif [[ $out == *scripts/split5.sh:2:* ]]; then
@@ -178,7 +179,7 @@ else
   bad "multi-line continued commit failed but did not name file and line: $out"
 fi
 rm -f "$scratch"/scripts/*
-printf '%s\n' 'nxpele -p x \' 'info' >"$scratch/scripts/benign.sh"
+printf '%s\n' "nxpele -p x $bs" 'info' >"$scratch/scripts/benign.sh"
 if scan "$scratch" >/dev/null 2>&1; then ok "a continued nxpele command without a fuse write passes"
 else bad "a continued benign nxpele command was flagged"; fi
 
@@ -193,7 +194,7 @@ else
   bad "nxpele signed-message failed but did not name file and line: $out"
 fi
 rm -f "$scratch"/scripts/*
-printf '%s\n' 'nxpele -p x \' '  signed-message \' '  -i fuse.bin' >"$scratch/scripts/sm3.sh"
+printf '%s\n' "nxpele -p x $bs" "  signed-message $bs" '  -i fuse.bin' >"$scratch/scripts/sm3.sh"
 if out=$(scan "$scratch" 2>&1); then
   bad "continued nxpele signed-message was not flagged"
 elif [[ $out == *scripts/sm3.sh:1:* ]]; then
