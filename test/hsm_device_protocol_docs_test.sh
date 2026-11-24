@@ -168,4 +168,46 @@ negative "provisional default dropped" c_questions \
 	'/^1\. \*\*/s/\*Provisional default:\*//'
 negative "cited source row removed" c_sources '/^| S3 |/d'
 
+# The enclave interface trace: a record of facts read from NXP's driver and
+# library sources. Same word and link checks, its own status line, and one
+# citation or "unconfirmed" mark in each of its six question sections.
+TRACE="$ROOT/docs/hsm-device-protocol/enclave-interface-trace.md"
+
+c_trace_status() {
+	local first
+	first=$(awk 'NR > 1 && NF { print; exit }' "$1")
+	[[ "$first" == '> **Status: TRACE'* ]] ||
+		echo "line after the title is not the TRACE Status blockquote"
+}
+
+c_trace_sections() {
+	local f=$1 q
+	for q in a b c d e f; do
+		section_body "$f" "^## [(]${q}[)] " '^## ' |
+			grep -qE '[A-Za-z_.]+:[0-9]|unconfirmed' ||
+			echo "section ($q) has neither a file:line citation nor an unconfirmed mark"
+	done
+}
+
+expect "enclave-interface-trace.md exists" test -f "$TRACE"
+for c in c_words c_links c_trace_status c_trace_sections; do
+	out=$("$c" "$TRACE")
+	if [ -z "$out" ]; then pass "$c on enclave-interface-trace.md"; else fail "$c on enclave-interface-trace.md" "$out"; fi
+done
+
+negative_trace() {
+	local name=$1 c=$2 copy
+	copy=$(mktemp "$TMP_ROOT/trace.XXXXXX") || { fail "negative: $name" "mktemp failed"; return; }
+	LC_ALL=C sed -e "$3" "$TRACE" >"$copy"
+	if cmp -s "$TRACE" "$copy"; then
+		fail "negative: $name" "the edit changed nothing"
+	elif [ -n "$("$c" "$copy")" ]; then
+		pass "negative: $name"
+	else
+		fail "negative: $name" "$c did not detect it"
+	fi
+}
+negative_trace "trace status line dropped" c_trace_status '/^> \*\*Status:/d'
+negative_trace "trace section (c) emptied" c_trace_sections '/^## [(]c[)] /,/^## [(]d[)] /{/^## /!d;}'
+
 finish

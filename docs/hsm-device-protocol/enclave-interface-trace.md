@@ -134,7 +134,7 @@ Any other code returns an invalid-argument error (`se_ctrl.c:2352-2357`). Beside
 - R6, R8 and R11 of [xkmsd-node.md](xkmsd-node.md) stay proposed, pending owner approval. Nothing here adds, changes or
   removes a requirement.
 - Findings that may bear on their wording, listed for the owner: the node's mode and owner come from the image's device
-  manager, not the driver (a); one command in flight per interface (c); no upper bound seen on the ioctl buffer lengths
-  (d); no reset handling found in the driver (e); blob files under a root-owned directory (f). Each is proposed input,
-  pending owner approval.
+  manager, not the driver (a; R6); one command in flight per interface (c; R8); no reset handling found in the driver
+  (e; R11); no upper bound seen on the ioctl buffer lengths (d); blob files under a root-owned directory (f). Each is
+  proposed input, pending owner approval.
 - It names no wire-protocol detail; go-xkms owns it (go-xkms #1521, ruling 1243).
