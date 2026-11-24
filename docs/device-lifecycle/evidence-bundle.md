@@ -54,8 +54,11 @@ Proposed, pending owner approval. `scripts/device-lifecycle/collect-evidence.sh 
 
 1. It validates the nonce (32 hex digits), the response version (the decimal digit 2 or 3, as the Fields table allows) and the handle (persistent range 0x81000000 to 0x81FFFFFF) and refuses before running anything else.
 2. It runs the enclave attestation: `$ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT`. The command is named by the environment variable, has no default, and must write the signed region and the signature to the two given paths and exit 0. The collector refuses to run without it.
-3. Only if that succeeded, it reads the EK public area with `tpm2_readpublic -c HANDLE -f tss -o FILE`, a read-only command.
+   Proposed, pending owner approval: it then refuses (exit 2, no OUT, the TPM not read) when the signature file is not exactly 96 bytes.
+3. Only if that succeeded, it reads the EK public area with `tpm2_readpublic -c HANDLE -f tss -o FILE`, a read-only command. Proposed, pending owner approval: it refuses (exit 2, no OUT) when the EK file is shorter than 4 bytes or its first two bytes, big-endian, do not equal the remaining length.
 4. It composes the JSON bundle into a temporary file, without verifying anything, and copies it to OUT. OUT is written only when every step passed; a failed copy or move fails the collector.
+
+The length checks look at the device's own collected output before it publishes; they are not verification of the evidence (no signature check, no nonce search, no type check), which stays with go-xkms and go-trusted-platform.
 
 The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). `EVIDENCE_PYTHON` names the interpreter (default `python3`, standard library only).
 

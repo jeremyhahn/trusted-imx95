@@ -57,10 +57,18 @@ trap 'rm -rf "$work"; [ -z "$tmp" ] || rm -f -- "$tmp"' EXIT
 $ELE_ATTEST_CMD "$nonce" "$work/signed.bin" "$work/sig.bin" ||
 	die "enclave attestation failed; the TPM was not read"
 [ -s "$work/signed.bin" ] && [ -s "$work/sig.bin" ] || die "enclave attestation wrote no output"
+# Shape check on the device's own output, a length check only (not verification).
+[ "$(stat -c %s -- "$work/sig.bin")" -eq 96 ] || die "enclave signature is not 96 bytes; the TPM was not read"
 
 # 2. The EK public area, read-only.
 tpm2_readpublic -c "$handle" -f tss -o "$work/ek.bin" >/dev/null ||
 	die "tpm2_readpublic failed"
+# Shape check on the device's own output: a TPM2B_PUBLIC whose 2-byte big-endian
+# size equals the remaining length. No type or content check.
+eklen=$(stat -c %s -- "$work/ek.bin")
+[ "$eklen" -ge 4 ] || die "EK file is shorter than 4 bytes"
+read -r b0 b1 < <(od -An -tu1 -N2 -- "$work/ek.bin")
+[ $((b0 * 256 + b1)) -eq $((eklen - 2)) ] || die "EK size field does not match the EK file length"
 
 # 3. Compose into a temp file, publish only when everything passed. This only
 # arranges the collected bytes; it verifies nothing (verification belongs to

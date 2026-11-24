@@ -52,7 +52,7 @@ cat >"$BIN/ele-attest" <<EOF
 echo "ele-attest \$*" >>"$LOG"
 [ -z "\${FAIL_ELE:-}" ] || exit 1
 cp "$W/fx_signed.bin" "\$2"
-cp "$W/fx_sig.bin" "\$3"
+cp "\${SIG_FX:-$W/fx_sig.bin}" "\$3"
 EOF
 cat >"$BIN/tpm2_readpublic" <<EOF
 #!/usr/bin/env bash
@@ -63,7 +63,7 @@ while [ \$# -gt 0 ]; do
 	[ "\$1" != -o ] || out=\$2
 	shift
 done
-cp "$W/fx_ek.bin" "\$out"
+cp "\${EK_FX:-$W/fx_ek.bin}" "\$out"
 EOF
 for n in tpm2_createek tpm2_clear tpm2_evictcontrol tpm2_nvwrite tpm2_nvdefine; do
 	printf '#!/usr/bin/env bash\necho "FORBIDDEN %s $*" >>"%s"\nexit 1\n' "$n" "$LOG" >"$BIN/$n"
@@ -179,6 +179,33 @@ for v in 1 4 0x3 0 03; do
 		--response-version "$v" --ek-handle "$HANDLE" --ek-template t -o "$W/out.json"
 done
 expect "refusals left no OUT" test ! -e "$W/out.json"
+
+# Shape checks on the collected bytes: exit 2, no OUT. Variant files feed the doubles.
+head -c 95 "$W/fx_sig.bin" >"$W/sig95.bin"
+{ cat "$W/fx_sig.bin"; printf '\0'; } >"$W/sig97.bin"
+printf '\x00\x40%s' "$(head -c 10 /dev/zero | tr '\0' x)" >"$W/ek_badsize.bin"
+printf '\x00\x01\x00' >"$W/ek_3bytes.bin"
+for s in sig95 sig97; do
+	rm -f "$W/out.json"
+	run col env SIG_FX="$W/$s.bin" ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+	check "$s signature" 2
+	expect "$s signature: no OUT" test ! -e "$W/out.json"
+	if [[ "$(<"$LOG")" != *tpm2_readpublic* && "$(<"$LOG")" == ele-attest* ]]; then
+		pass "$s signature: tpm2_readpublic not called"
+	else
+		fail "$s signature: tpm2_readpublic was called" "$(<"$LOG")"
+	fi
+done
+for e in ek_badsize ek_3bytes; do
+	rm -f "$W/out.json"
+	run col env EK_FX="$W/$e.bin" ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+	check "$e" 2
+	expect "$e: no OUT" test ! -e "$W/out.json"
+done
+rm -f "$W/out.json"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
+check "positive case after the shape negatives" 0 "wrote"
+rm -f "$W/out.json"
 
 cat "$LOG" >>"$W/all.log"
 if [[ "$(<"$W/all.log")" != *FORBIDDEN* ]]; then
