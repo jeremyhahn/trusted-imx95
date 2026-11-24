@@ -291,6 +291,7 @@ run "$gc" "$g/aps.cfg" "$g/aps-m7.txt"
 check "grants: the M7 mode ignores the AP-S block" 0 "grants: OK (2 lines)"
 run "$gc" --ap-s --print "$g/aps.cfg"
 check "grants --ap-s --print shows the AP-S grants" 0 "PERF_A55 ALL, x=1"
+# shellcheck disable=SC2016 # expands in the child shell
 expect "grants: the committed AP-S allowlist is non-empty and lists no M7 right" \
 	bash -c '[ -s "$1" ] && ! grep -Eq "^(LMM_|CPU_M7P|PD_M7)" "$1"' _ "$ROOT/system-manager/ap-s-grants.txt"
 
