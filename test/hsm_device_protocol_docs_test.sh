@@ -304,4 +304,34 @@ for c in c_words c_links c_trace_status; do
 done
 negative_file "local-seam trace status line dropped" c_trace_status "$SEAM" '/^> \*\*Status:/d'
 
+# The "Open vendor checks" section: one row (V1..V4) for each of the four cells
+# the trace leaves unconfirmed (message length, reset handling, session flag,
+# sequence-control file); each row has seven filled columns, a repository URL,
+# a tag or a 40-hex commit, a requirement id and an action.
+c_vendor_checks() {
+	awk -F'|' '
+		/^## Open vendor checks/ { in_s = 1; next }
+		/^## / { in_s = 0 }
+		in_s && /^\| V[0-9]+ / {
+			n++
+			id = $2; gsub(/ /, "", id); seen[id] = 1
+			if (NF != 9) { print id ": want 7 columns"; next }
+			for (i = 2; i <= 8; i++) { c = $i; gsub(/^ +| +$/, "", c); if (c == "") print id ": empty column " i - 1 }
+			if ($5 !~ /https:\/\/github\.com\//) print id ": no repository URL"
+			if ($6 !~ /lf-6\.18\.37-2\.1\.0|[0-9a-f]{40}/) print id ": no tag or commit"
+			if ($4 !~ /R(3|4|11)/) print id ": no requirement id"
+			if ($8 !~ /read at the tag|ask NXP/) print id ": no action"
+		}
+		END {
+			if (n != 4) print "want 4 rows, have " n + 0
+			for (k = 1; k <= 4; k++) if (!(("V" k) in seen)) print "row V" k " missing"
+		}
+	' "$1"
+}
+expect "vendor checks section present" grep -q '^## Open vendor checks' "$TRACE"
+out=$(c_vendor_checks "$TRACE")
+if [ -z "$out" ]; then pass "c_vendor_checks on enclave-interface-trace.md"; else fail "c_vendor_checks on enclave-interface-trace.md" "$out"; fi
+negative_file "vendor check row without its action" c_vendor_checks "$TRACE" '/^| V2 /s/| read at the tag and cite file:line, or ask NXP |$/| |/'
+negative_file "vendor check row deleted" c_vendor_checks "$TRACE" '/^| V4 /d'
+
 finish
