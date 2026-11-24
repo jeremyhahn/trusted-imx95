@@ -18,6 +18,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Allow-list: path<TAB>reason. A listed file is not scanned.
 ALLOW=$'scripts/ahab/key-exchange-test.sh\tfixture: builds a key-exchange message on test keys, sends nothing
 scripts/ahab/key-import-test.sh\tfixture: builds a wrapped-key blob on test keys, sends nothing
+test/okp_host_only_test.sh\tthe host-only guard: its tool list and fixtures name the device tools it rejects
 test/no_lifecycle_close_test.sh\tthis guard: it holds the patterns it searches for'
 
 # Commands that change the life cycle or write a fuse. Matched per line, case
@@ -50,6 +51,11 @@ PATTERNS=(
   # subcommand that cannot write, so any use is flagged (sudo, path, env prefix,
   # python -m spsdk.apps.nxpfuses, continuations all contain the word).
   'nxpfuses'
+  # Device transports: fastboot flashing and the SDPS and EdgeLock 2GO host tools
+  # (matched anywhere on the line, so after if/while/then/do/&&/$( too).
+  "fastboot[^#]*[[:space:]]${Q}(flash|flashall|flashing|erase|format|oem|boot|update|stage)${Q}([[:space:]]|\\$)"
+  'sdpshost'
+  'el2go[-_]host'
   # A write (redirect, tee, dd of=) to an nvmem or ocotp node under /sys.
   "(>|tee[[:space:]]+(-[[:alnum:]-]+[[:space:]]+)*|of=)[[:space:]]*${Q}[^[:space:]]*/sys/[^[:space:]]*(nvmem|ocotp)"
 )
@@ -231,6 +237,13 @@ for fx in \
   'nxpele single-quoted commit|nxpele -p x '"'commit'"' -i OEM_FW_FUSE' \
   'nxpele quoted fuse-write|nxpele -p x "fuse-write" -i f' \
   'quoted fuse prog|"fuse" prog 0 1' \
+  'fastboot flash|fastboot flash boot image.bin' \
+  'fastboot flash after if|if fastboot flash boot image.bin; then :; fi' \
+  'fastboot flash after while|while ! fastboot flash boot x.bin; do :; done' \
+  'fastboot flash in substitution|x=$(fastboot erase userdata)' \
+  'sdpshost direct|sdpshost -p usb write-file 0x0 x.bin' \
+  'el2go-host direct|el2go-host dev -h' \
+  'el2go-host module|python3 -m spsdk.apps.el2go_host dev' \
   'nxpele write-shadow-fuse|nxpele -p x write-shadow-fuse --index 1 --data 0' \
   'nvmem redirect|echo 1 > /sys/bus/nvmem/devices/imx-ocotp0/nvmem' \
   'nvmem append quoted|printf x >> "/sys/devices/platform/ocotp/nvmem"' \

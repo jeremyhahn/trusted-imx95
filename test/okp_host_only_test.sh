@@ -3,8 +3,9 @@
 # owner ruling 1234: key exchange, key import, counter fuses and the life-cycle
 # close run only at the provisioning station). This test reads, and never runs,
 # a fixed list of files and fails on any device-transport use:
-#   - nxpele, blhost, sdphost, nxpuuu, uuu, fastboot, nxpdevhsm as a command
-#     (also after sudo/env/VAR=, behind a path, in a quoted bash -c, or as an
+#   - nxpele, blhost, sdphost, sdpshost, nxpuuu, uuu, fastboot, nxpdevhsm, el2go-host
+#     as a command (also after sudo/env/VAR=, after a shell keyword such as if,
+#     while, then or do, after ! && || or $(, behind a path, in a quoted bash -c, or as an
 #     assignment of the tool's path), or spsdk.apps.<tool> run with python -m;
 #   - a /dev/ path other than /dev/null and /dev/urandom;
 #   - a Python import of spsdk.apps.nxpele, libuuu or serial.
@@ -31,9 +32,12 @@ FILES=(
 )
 TARGETS=(okp-keyexchange-test okp-import-tlv-test srk-hash-check)
 
-TOOLS='nxpele|blhost|sdphost|nxpuuu|uuu|fastboot|nxpdevhsm'
+TOOLS='nxpele|blhost|sdphost|sdpshost|nxpuuu|uuu|fastboot|nxpdevhsm|el2go-host'
 BT='`'
-PRE="(^|[;&|(@${BT}]|\\\$\\()[[:space:]]*"
+# A command starts at a line start, after a separator, after "$(" or "{" or "!", or
+# after a shell keyword (if, elif, while, until, then, do, else).
+KW='(if|elif|while|until|then|do|else)'
+PRE="(^|[;&|(@{!${BT}]|\\\$\\(|(^|[[:space:]])${KW}[[:space:]])[[:space:]]*"
 WRAP="((sudo|env|exec|command|time|nohup|xargs)[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+|-[-[:alnum:]=]+[[:space:]]+)*"
 CMD="[\"']?([^[:space:]]*/)?(${TOOLS})[\"']?([[:space:]]|\$)"
 RE_CMD="${PRE}${WRAP}${CMD}"
@@ -41,7 +45,7 @@ RE_CMD="${PRE}${WRAP}${CMD}"
 RE_QUOTED="[\"'][[:space:]]*${WRAP}([^[:space:]]*/)?(${TOOLS})[[:space:]]"
 # NXPELE=$venv/bin/nxpele (the tool's path held in a variable).
 RE_ASSIGN="[A-Za-z_][A-Za-z0-9_]*=[\"']?([^[:space:]]*/)?(${TOOLS})[\"']?([[:space:]]|\$)"
-RE_MODULE="spsdk\\.apps\\.(${TOOLS})"
+RE_MODULE="spsdk\\.apps\\.(${TOOLS}|el2go_host)"
 RE_IMPORT="^[[:space:]]*(import|from)[[:space:]]+(spsdk\\.apps\\.nxpele|libuuu|serial)([[:space:].,]|\$)"
 RE_IMPORT2="^[[:space:]]*from[[:space:]]+spsdk\\.apps[[:space:]]+import[[:space:]]+[^#]*nxpele"
 
@@ -177,6 +181,23 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
   fixture "bash -c uuu" hit $ks "bash -c 'uuu -b x'"
   fixture "a block device" hit $ks 'dd if=x of=/dev/mmcblk0'
   fixture "spsdk.apps module" hit $ks 'python -m spsdk.apps.nxpdevhsm -h'
+  fixture "if fastboot flash" hit $ks 'if fastboot flash boot image.bin; then :; fi'
+  fixture "elif fastboot" hit $ks 'elif fastboot devices; then :'
+  fixture "while fastboot" hit $ks 'while fastboot devices; do :; done'
+  fixture "until fastboot" hit $ks 'until fastboot devices; do :; done'
+  fixture "bang fastboot" hit $ks '! fastboot getvar all'
+  fixture "then fastboot" hit $ks 'then fastboot reboot'
+  fixture "do fastboot" hit $ks 'do fastboot reboot'
+  fixture "else fastboot" hit $ks 'else fastboot reboot'
+  fixture "and-and fastboot" hit $ks 'true && fastboot reboot'
+  fixture "or-or fastboot" hit $ks 'false || fastboot reboot'
+  fixture "command substitution fastboot" hit $ks 'x=$(fastboot getvar all)'
+  fixture "sdpshost direct" hit $ks 'sdpshost -p usb write-file 0x0 x.bin'
+  fixture "el2go-host direct" hit $ks 'el2go-host dev -h'
+  fixture "sdpshost after if" hit $ks 'if sdpshost -h; then :; fi'
+  fixture "el2go-host module" hit $ks 'python -m spsdk.apps.el2go_host dev'
+  fixture "sdpshost module" hit $ks 'python -m spsdk.apps.sdpshost -h'
+  fixture "keyword word in prose" pass $ks 'echo "if you want, do not run it"'
   fixture "comment naming the tools" pass scripts/ahab/srk-hash-check.sh '# no nxpele, no uuu, no /dev/sda'
   fixture "dev null and urandom" pass $ks 'head -c 4 /dev/urandom >/dev/null'
   fixture "serialization import" pass scripts/ahab/msg-sig-check.py 'from cryptography.hazmat.primitives import serialization'
