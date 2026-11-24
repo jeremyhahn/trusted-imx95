@@ -66,7 +66,7 @@ check_readme() {
 			echo "dead anchor: $link"
 		fi
 	done < <(grep -oE '\]\([^)#][^)]*\)' "$f" | sed -E 's/^\]\((.*)\)$/\1/' | grep -vE '^[a-z]+://' | sort -u)
-	for t in $SURVEYS ../ftpm/README.md architecture.md evidence-bundle.md; do
+	for t in $SURVEYS ../ftpm/README.md architecture.md evidence-bundle.md decommission-runbook.md; do
 		grep -qF "]($t" "$f" || echo "no link to $t"
 	done
 	local rows want=0 s
@@ -148,5 +148,61 @@ neg_page() { # name page sed-expression
 neg_page "dead anchor in architecture.md" architecture.md 's/#what-the-public-references-give-about-the-root/#no-such-anchor/'
 neg_page "no ruling 1234 in evidence-bundle.md" evidence-bundle.md 's/[Rr]uling 1234/ruling 0000/g'
 neg_page "no status line in architecture.md" architecture.md '/^> \*\*Status:/d'
+
+# check_runbook FILE: decommission-runbook.md. Same link rules as the pages, plus the
+# proposed status, the section headings, every step label, no life-cycle imperative,
+# no closing keyword, no /home path.
+RUNBOOK_HEADINGS=(
+	"## Scope and defaults"
+	"## Order of steps"
+	"## Board-side wipe"
+	"## Control-plane steps"
+	"## Not in this runbook"
+	"## Evidence of completion"
+)
+check_runbook() {
+	local f=$1 h n
+	[ -f "$f" ] || { echo "missing runbook"; return; }
+	check_page "$f"
+	grep -E '^> \*\*Status:' "$f" | grep -qF 'PROPOSED' || echo "status line lacks PROPOSED"
+	grep -E '^> \*\*Status:' "$f" | grep -qF 'pending owner approval' || echo "status line lacks pending owner approval"
+	for h in "${RUNBOOK_HEADINGS[@]}"; do
+		grep -qxF "$h" "$f" || echo "missing heading: $h"
+	done
+	for n in 1 2 3 4 5 6a 6b 6c 7; do
+		grep -qE "^\| $n \|" "$f" || echo "missing step $n"
+	done
+	# a step row (table row starting with a step number) must not move the life cycle
+	if grep -E '^\| [0-9][abc]? \|' "$f" | grep -qiE 'life[ -]cycle'; then echo "life cycle in a step row"; fi
+	grep -qF 'verb: none yet' -i "$f" || echo "no 'verb: none yet'"
+	grep -qE '/home/' "$f" && echo "contains a /home path"
+	return 0
+}
+
+problems=$(check_runbook "$DIR/decommission-runbook.md")
+if [ -z "$problems" ]; then
+	pass "decommission-runbook.md passes every check"
+else
+	fail "decommission-runbook.md checks" "$problems"
+fi
+
+neg_runbook() { # name sed-expression
+	local tmp out
+	tmp=$(mktemp "$TMP_ROOT/runbook.XXXXXX")
+	sed -E "$2" "$DIR/decommission-runbook.md" >"$tmp"
+	out=$(check_runbook "$tmp")
+	if [ -n "$out" ]; then pass "negative: $1"; else fail "negative: $1 was not caught"; fi
+}
+neg_runbook "runbook status line removed" '/^> \*\*Status:/d'
+neg_runbook "runbook 6b label removed" '/^\| 6b \|/d'
+neg_runbook "runbook closing keyword" 's/^## Scope and defaults$/Closes #177\n&/'
+neg_runbook "runbook life cycle in a step" 's/^(\| 3 \|.*) \|/\1 life cycle |/'
+
+# the README link to the runbook, and that the file is really needed
+if grep -qF '](decommission-runbook.md' "$README"; then pass "README links the runbook"; else fail "README links the runbook"; fi
+neg "README link to the runbook removed" 's|\(decommission-runbook\.md\)|(no-such-file.md)|g'
+# runbook absent from a copy of the docs: the check reports it
+out=$(check_runbook "$TMP_ROOT/absent-runbook.md")
+if [ -n "$out" ]; then pass "negative: runbook file missing"; else fail "negative: runbook file missing was not caught"; fi
 
 finish
