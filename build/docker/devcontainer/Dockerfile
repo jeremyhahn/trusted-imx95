@@ -45,7 +45,9 @@ FROM base AS toolchain
 # imx-sm's build requires perl. test/sm_build_test.sh runs it here.
 # gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
 # is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
-RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat
+# build-base: a native C compiler (cc), musl-dev's libc headers and binutils, which
+# test/hsd_a55_test.sh compiles the A55 host tests with (it fails without cc).
+RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat build-base
 COPY --from=fetch /out/bin/ /usr/local/bin/
 # SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
 # scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
