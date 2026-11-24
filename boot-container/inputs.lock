@@ -1,0 +1,31 @@
+# boot-container/inputs.lock: the pins of the boot image inputs that the
+# repository does not build itself (scripts/boot-image-inputs.sh;
+# docs/boot-container/boot-image.md).
+#
+# PROVISIONAL: the same BSP release system-manager/sm.lock and
+# secure-world/bsp.lock pin (NXP lf-6.18.37-2.1.0; #14 Q2 is open). key=value
+# lines; the script parses this file, it never sources it. Every value was read
+# on 2026-11-23 from the meta-imx recipes at the commit below, and each SHA-256
+# was also computed from the downloaded file; none is typed by hand. A value
+# that could not be read would be the word UNREAD, which the script refuses.
+
+# meta-imx at the tag rel_imx_6.18.37_2.1.0 (peeled); must equal META_IMX_COMMIT
+# of secure-world/bsp.lock.
+meta_imx_commit=2eb758f42cfb96042344815b7dd7755b06ba1e3b
+
+# U-Boot: recipes-bsp/u-boot/u-boot-imx-common_2026.04.inc (SRCREV, branch
+# lf_v2026.04). The archive is GitHub's tar.gz of that commit; its SHA-256 was
+# the same from codeload.github.com and from github.com/.../archive/.
+uboot_repo=https://github.com/nxp-imx/uboot-imx
+uboot_branch=lf_v2026.04
+uboot_commit=bb41975aeb4cbd153b49c9fd62da1d64cd65968d
+uboot_archive_url=https://codeload.github.com/nxp-imx/uboot-imx/tar.gz/bb41975aeb4cbd153b49c9fd62da1d64cd65968d
+uboot_archive_sha256=9d060f32c84b15c1ae2e9903c300d51b3088898b3ad80b95bca74c67ef6a4a52
+
+# ELE firmware: recipes-bsp/firmware-imx/firmware-ele-imx_2.0.7.bb. The file is
+# NXP's self-extracting installer; unpacking it needs the NXP licence
+# agreement accepted by a person, so the script verifies the installer's
+# SHA-256 and never unpacks it.
+ele_version=2.0.7
+ele_installer_url=https://www.nxp.com/lgfiles/NMG/MAD/YOCTO/firmware-ele-imx-2.0.7-0265375.bin
+ele_installer_sha256=a24f0e6be783a09281d44b0c2fb26ed719038387441e7ef325b9d4c514592b1d
