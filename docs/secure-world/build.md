@@ -51,6 +51,7 @@ every value below from the new release's manifest and recipes and editing the lo
 | meta-imx | `rel_imx_6.18.37_2.1.0`, commit `2eb758f42cfb96042344815b7dd7755b06ba1e3b` | `imx-6.18.37-2.1.0.xml` in that manifest |
 | TF-A BL31 | `nxp-imx/imx-atf`, commit `af9eb2c1748ee3abc0ead7dc76e462f50c573036` (branch `lf_v2.14`; the pin is the commit) | `meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb` in meta-imx: its `SRCREV`. The release manifest itself lists no imx-atf entry. Its tree has `plat/imx/imx9/imx95` |
 | OP-TEE OS 4.10 | `nxp-imx/imx-optee-os`, branch `lf-6.18.37_2.1.0`, commit `99f40897dd1fc28b4c792773b167e3db629db2ff` | `optee-os_4.10.0.imx.bb` in meta-imx |
+| `SM_SECURE_BASE` `0x8A000000`, `SM_SECURE_END` `0x8DFFFFFF` (inclusive; the A55 secure window) | Proposed, pending owner approval; unverified against the SM configuration (vendor source absent here) | [Survey](memory-protection-survey.md) sections 4 and 6. TF-A assumes the SM made the window secure-only and does not check it (section 5). The script refuses a `BL32_BASE`/`BL32_SIZE` window that is not inside this one, so a BL32 move outside it is an offline error. Whether the real SM configuration still has this window is checked only at the first `make system-manager` |
 | fTPM TA | `OP-TEE/optee_ftpm`, tag `4.10.0`, commit `a09269b15de635e1816fe832e26adfbfb44c5455` | The tag, peeled |
 | TPM 2.0 reference | `microsoft/ms-tpm-20-ref`, commit `98b60a44aba79b15fcce1c0d1e46cf5918400f6a` | The commit `optee_ftpm`'s README names |
 | Toolchain | Arm GNU Toolchain 15.2.Rel1 (GCC 15.2.1), `aarch64-none-linux-gnu`, tarball SHA-256 `9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43` | Arm's published `.sha256asc`. GCC 15 matches the release's Yocto (`GCCVERSION 15.%`) |
@@ -172,7 +173,7 @@ The test fails when any pin, toolchain or wheel line of the lock, or any build a
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `a6b7e5887c9cb291f0e28fc22c0de7edf5cb4386cfc7ab5013b0d4ac63c56a9e`
+Build configuration digest: `441425bbcec5355554e522151b9f9f1b512b05ffdea5e667555596dfec381444`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
