@@ -11,3 +11,7 @@ it-image.tar
 .secure-world/
 # make system-manager's downloads, build trees and image (scripts/sm-build.sh)
 /out/
+
+# xkmsd build tree and output (scripts/xkms/xkmsd-build.sh)
+/build/go-xkms/
+/build/xkms/
