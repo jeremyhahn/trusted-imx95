@@ -21,6 +21,7 @@ None yet.
 
 - **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — issue #12 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — pinned, reproducible System Manager build exists (`make system-manager`, [build record](docs/system-manager-config/build.md)); imx-sm revision provisional until #14 Q2; board configuration unchanged, not flashed or signed — blocked: owner approval
+- **maintenance** — the standing row for dependency updates and CI-configuration changes, worked on `row/178-maintenance`; it never closes and gates no release, so it sits outside every release-gating milestone (owner ruling 1234) — issue #178 — standing; the next `ci.yml` template adoption lands from it
 
 ## Next
 
