@@ -14,7 +14,7 @@ This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` r
 | [enrollment-survey.md](enrollment-survey.md) | Which enrollment protocol carries the evidence, and what authorises the first request | survey, input to the owner's choice | 5 (C1 to C5) |
 | [decommission-survey.md](decommission-survey.md) | What end of life, RMA and decommissioning mean for a board | draft survey for the owner | 7 (E1 to E7) |
 | [evidence-binding-survey.md](evidence-binding-survey.md) | How the firmware TPM's identity could be bound to the chip's own attestation | SURVEY, PROVISIONAL, pending go-trusted-platform's hsm-device-lifecycle row and the owner (#25) | 4 (B1 to B4) |
-| [architecture.md](architecture.md) | The device-side order under ruling 1234, and the open items for go-xkms | PROVISIONAL, pending go-xkms and go-trusted-platform | none (points at A2, B1, B3, C2, F2) |
+| [architecture.md](architecture.md) | The device-side order under ruling 1234, the open items for go-xkms, and where the life cycle closes | PROVISIONAL, pending go-xkms and go-trusted-platform | none (points at A2, B1, B3, C2, F2) |
 | [evidence-bundle.md](evidence-bundle.md) | What the device hands to endorse-01 under ruling 1234 | PROPOSED, pending owner approval, go-xkms and go-trusted-platform | none (points at A2, B1, B3, B5, C2, F2) |
 | [decommission-runbook.md](decommission-runbook.md) | The ordered decommission steps, who acts, and what is not described | PROPOSED, pending owner approval, documentation only; nothing here is scripted, and no step is run on a development board | none (points at E1 to E7) |
 | [../ftpm/README.md](../ftpm/README.md) | The firmware TPM design: components, NV storage, EK lifecycle, measured boot | NORMATIVE | 7 (B5 to B10, D2) |

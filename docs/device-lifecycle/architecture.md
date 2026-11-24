@@ -17,6 +17,20 @@ A device-side proposal for what step 3 hands over is in [evidence-bundle.md](evi
 
 Which channel carries step 3 (F2) stays with go-xkms's `hsm-device-protocol` and go-trusted-platform's enrollment API.
 
+Where the device-side steps stop, and where the life cycle closes: [Where the life cycle closes](#where-the-life-cycle-closes).
+
+## Where the life cycle closes
+
+> Status: ruling 1234, cited; anything beyond the ruling is proposed, pending owner approval.
+
+- Steps 1 to 4 above run on a board in any life-cycle state and move none.
+- Ruling 1234 puts the closing of the life cycle only at the provisioning station, never on a development board. The station is described in [key-ceremony-survey.md](../oem-key-provisioning/key-ceremony-survey.md), cited only (in the OEM key provisioning folder).
+- Development boards stay open, and their firmware TPM keeps its state in the root file system (ruling 1244; see [docs/ftpm/](../ftpm/README.md)). Nothing more about that is said here.
+- The collector and everything in `scripts/device-lifecycle/` read and compose only: they write no fuse, no life-cycle state and no RPMB, and `test/device_lifecycle_docs_test.sh` checks the folder's scripts against a named deny list.
+- The life-cycle steps of decommissioning stay not described here; see [Not in this runbook](decommission-runbook.md#not-in-this-runbook).
+
+Owner question, proposed, pending owner approval: should the station's checklist record the enclave attestation as a precondition for closing? Default: no; that is a verifier's concern (A2). This question is in this file only and is not yet in the [README](README.md) index.
+
 ## What the public references give about the root
 
 This section fixes no root. A2 stays open for go-xkms. It records only what [attestation-survey.md](attestation-survey.md) says.
