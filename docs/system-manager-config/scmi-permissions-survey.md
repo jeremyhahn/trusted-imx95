@@ -713,8 +713,19 @@ under the cite-only rule (the placement outcome of item 7 is checked by
   one request per LM and applies the highest across LMs
   (`sm/lmm/lmm_perf.c:139-153`). The M7 can raise the domain but cannot
   hold it below a level another LM requests. Whether any other LM
-  requests `PERF_M7` is **unconfirmed**; this `.cfg` gives the domain
-  only to the M7's LM.
+  requests `PERF_M7`: no external LM can. Another LM's level set is
+  refused by item 3 unless it holds `PERF_M7` at PRIV or above, and this
+  `.cfg` gives the domain only to the M7's LM; the build fails if any other
+  agent holds it (`scripts/sm-perf-check.sh:72-79`, cited by
+  `scripts/sm-build.sh:189-190`). SM-internal callers of `LMM_PerfLevelSet`
+  (cited only, listed in 8.0): the LM start and stop lists
+  (`sm/lmm/lmm_sys.c:1161`, `:1272`) and the monitor write command
+  (`sm/utilities/monitor/monitor_cmds.c:1809`). The PRO `.cfg` carries
+  start-list `PERF` entries only for `PERF_A55`
+  (`mx95frdm-pro.cfg:461,475,489`), none for `PERF_M7`, so no boot-time
+  request on the M7 domain was found. The M7 cannot hold the domain below
+  a request an internal caller makes; the monitor is a debug path, and
+  whether it is built into the image is **unconfirmed** (not read).
 - Read the level, the limits, the described levels and the domain
   attributes: these handlers check no permission
   (`rpc_scmi_perf.c:691-763`, `:810-900`, `:990-1055`, `:1134-1161`).
