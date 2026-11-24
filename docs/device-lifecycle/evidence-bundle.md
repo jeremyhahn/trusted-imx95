@@ -60,7 +60,15 @@ Proposed, pending owner approval. `scripts/device-lifecycle/collect-evidence.sh 
 
 The length checks look at the device's own collected output before it publishes; they are not verification of the evidence (no signature check, no nonce search, no type check), which stays with go-xkms and go-trusted-platform.
 
-The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). `EVIDENCE_PYTHON` names the interpreter (default `python3`, standard library only).
+The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). The collector composes the bundle in shell and needs no interpreter. Because shell cannot JSON-escape safely, `--ek-template` must match `^[A-Za-z0-9._-]{1,64}$`; anything else is refused with exit 2 before `ELE_ATTEST_CMD` runs (proposed, pending owner approval; B5 stays open).
+
+Run-time needs on the A55 (proposed, pending owner approval):
+
+- `bash`, and coreutils: `base64`, `tr`, `stat`, `od`, `mktemp`, `mv -T`.
+- tpm2-tools, for `tpm2_readpublic`, and the TPM resource manager device `/dev/tpmrm0`.
+- The enclave client behind `ELE_ATTEST_CMD` (row 162).
+
+The production image installs none of tpm2-tools or the collector today: its package list is `packagegroup-core-boot` only (`platform-image/recipes-core/images/trusted-imx95-image.bb:32`). Packaging waits for the ftpm image work (#140) and row 162 (proposed, pending owner approval).
 
 It waits on two things: the enclave client's attestation command (row 162, `secure-key-handling`, has none yet, so `ELE_ATTEST_CMD` is a contract, not a binding) and the answer to B5. It is tested only against doubles for both commands (`test/device_lifecycle_collect_test.sh`); nothing here touches life cycle, which closes only at the provisioning station.
 
