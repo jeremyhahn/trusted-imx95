@@ -117,4 +117,27 @@ bad_wf "action without a tag comment" signatures.yml "$co # v6.1.0" "$co" "rule 
 bad_wf "two workflows, two checkout commits" releasability.yml "$co" \
 	"actions/checkout@0000000000000000000000000000000000000001" "rule i" "actions/checkout" "is pinned to"
 
+# doc_names <file>: the update procedure names every PINNED_TOOLS tool and the
+# files and targets an update touches; each missing one is printed.
+DOC=$ROOT/docs/maintenance/dependency-updates.md
+doc_names() {
+	local w text missing=0 tools
+	[ -f "$1" ] || { echo "no such file: $1"; return 1; }
+	text=$(<"$1")
+	tools=$(bash -c '. "$1"; echo "$PINNED_TOOLS"' _ "$PINS")
+	IFS=',' read -r -a want <<<"$tools,scripts/tool-pins.sh,scripts/ahab/requirements.txt,scripts/ahab/build-requirements.txt,make pins-check,make deps-check"
+	for w in "${want[@]}"; do
+		[[ "$text" == *"$w"* ]] || { echo "the procedure does not name $w"; missing=1; }
+	done
+	return "$missing"
+}
+run doc_names "$DOC"
+check "update procedure names every tool, file and target" 0
+if [ -f "$DOC" ]; then
+	DOC_TEXT=$(<"$DOC")
+	printf '%s\n' "${DOC_TEXT//TRIVY/}" >"$TMP_ROOT/doc.md"
+	run doc_names "$TMP_ROOT/doc.md"
+	check "procedure without TRIVY fails" 1 "does not name TRIVY"
+fi
+
 finish

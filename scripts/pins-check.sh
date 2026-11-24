@@ -100,8 +100,7 @@ done <"$pins"
 nreq=0
 req_re='^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9._!+-]+)((  *--hash=sha256:[0-9a-f]{64})+)$'
 check_req() {
-	local file=$1 lineno=$2 r=$3 key hs
-	local -n vers=$4 hashes=$5
+	local file=$1 lineno=$2 r=$3 tag=$4 key hs
 	r=${r//$'\t'/ }
 	while [[ "$r" == *"  "* ]]; do r=${r//  / }; done
 	r=${r# }
@@ -113,16 +112,16 @@ check_req() {
 	fi
 	key=${BASH_REMATCH[1],,}
 	key=${key//[_.]/-}
-	if [ -n "${vers[$key]:-}" ]; then
+	if [ -n "${req_ver["$tag/$key"]:-}" ]; then
 		bad "$file" "line $lineno: duplicate requirement '${BASH_REMATCH[1]}' (rule g)"
 	fi
-	vers[$key]=${BASH_REMATCH[2]}
+	req_ver["$tag/$key"]=${BASH_REMATCH[2]}
 	hs=${BASH_REMATCH[3]//--hash=sha256:/}
-	hashes[$key]=$(printf '%s\n' $hs | sort -u | tr '\n' ' ')
+	req_hash["$tag/$key"]=$(printf '%s\n' "$hs" | tr ' ' '\n' | sort -u | tr '\n' ' ')
 }
 check_reqfile() {
-	local file=$1 line acc= lineno=0 start=0 bs=$'\\'
-	local before=$nreq
+	local path=$1 tag=$2 line acc='' lineno=0 start=0 bs=$'\\'
+	local before=$nreq label=$1
 	while IFS= read -r line || [ -n "$line" ]; do
 		lineno=$((lineno + 1))
 		line=${line%%#*}
@@ -133,24 +132,26 @@ check_reqfile() {
 			acc+="${line%\\} "
 			continue
 		fi
-		check_req "$file" "$start" "$acc$line" "$2" "$3"
-		acc=
-	done <"$file"
-	[ -z "$acc" ] || check_req "$file" "$start" "$acc" "$2" "$3"
-	[ "$nreq" -gt "$before" ] || bad "$file" "no requirement found (rule g)"
+		check_req "$label" "$start" "$acc$line" "$tag"
+		acc=''
+	done <"$path"
+	[ -z "$acc" ] || check_req "$label" "$start" "$acc" "$tag"
+	[ "$nreq" -gt "$before" ] || bad "$label" "no requirement found (rule g)"
 }
-declare -A main_ver=() main_hash=() build_ver=() build_hash=()
-check_reqfile "$reqs" main_ver main_hash
-check_reqfile "$buildreqs" build_ver build_hash
+declare -A req_ver=() req_hash=()
+check_reqfile "$reqs" main
+check_reqfile "$buildreqs" build
 
 # Rule h: a name pinned in both requirements files has one version and one
 # hash set (the header of build-requirements.txt says so).
-for k in "${!build_ver[@]}"; do
-	[ -n "${main_ver[$k]:-}" ] || continue
-	[ "${main_ver[$k]}" = "${build_ver[$k]}" ] ||
-		bad "$buildreqs" "rule h: '$k' is ${build_ver[$k]} here and ${main_ver[$k]} in $reqs"
-	[ "${main_hash[$k]}" = "${build_hash[$k]}" ] ||
-		bad "$buildreqs" "rule h: '$k' has a different hash set here than in $reqs"
+for k in "${!req_ver[@]}"; do
+	[[ "$k" == build/* ]] || continue
+	n=${k#build/}
+	[ -n "${req_ver[main/$n]:-}" ] || continue
+	[ "${req_ver[main/$n]}" = "${req_ver[$k]}" ] ||
+		bad "$buildreqs" "rule h: '$n' is ${req_ver[$k]} here and ${req_ver[main/$n]} in $reqs"
+	[ "${req_hash[main/$n]}" = "${req_hash[$k]}" ] ||
+		bad "$buildreqs" "rule h: '$n' has a different hash set here than in $reqs"
 done
 
 # Rule i: workflow actions. Every remote `uses:` ends in @<40 lowercase hex>
@@ -163,6 +164,7 @@ if [ -d "$wfdir" ]; then
 	for wf in "$wfdir"/*.yml "$wfdir"/*.yaml; do
 		[ -f "$wf" ] || continue
 		lineno=0
+		wfname=$wf
 		while IFS= read -r line || [ -n "$line" ]; do
 			lineno=$((lineno + 1))
 			[[ "$line" =~ $uses_re ]] || continue
@@ -171,11 +173,11 @@ if [ -d "$wfdir" ]; then
 			[[ "$target" == ./* || "$target" == docker://* ]] && continue
 			nuses=$((nuses + 1))
 			if [[ ! "$target" =~ ^([^@]+)@([0-9a-f]{40})$ ]]; then
-				bad "$wf" "line $lineno: rule i: 'uses: $target' does not end in @ plus a 40-hex commit"
+				bad "$wfname" "line $lineno: rule i: 'uses: $target' does not end in @ plus a 40-hex commit"
 				continue
 			fi
 			if [ -z "${tagc//[[:space:]]/}" ]; then
-				bad "$wf" "line $lineno: rule i: 'uses: ${BASH_REMATCH[1]}' has no '# <tag>' comment"
+				bad "$wfname" "line $lineno: rule i: 'uses: ${BASH_REMATCH[1]}' has no '# <tag>' comment"
 			fi
 			repo=${BASH_REMATCH[1]}
 			repo=${repo%%/*}/$(
@@ -187,7 +189,7 @@ if [ -d "$wfdir" ]; then
 				act_commit[$repo]=$commit
 				act_where[$repo]="$wf:$lineno"
 			elif [ "${act_commit[$repo]}" != "$commit" ]; then
-				bad "$wf" "line $lineno: rule i: $repo is pinned to $commit here but ${act_commit[$repo]} at ${act_where[$repo]}"
+				bad "$wfname" "line $lineno: rule i: $repo is pinned to $commit here but ${act_commit[$repo]} at ${act_where[$repo]}"
 			fi
 		done <"$wf"
 	done
