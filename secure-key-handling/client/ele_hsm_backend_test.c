@@ -469,32 +469,32 @@ static void fail_closed_default(void)
 				CHECK(rc != 0 && st != ELE_ROLLBACK_PROTECTED, msg);
 				/* The backend's own acknowledgement is never set. */
 				{
-\t\t\t\t\tstruct ele_ack ack = { .strict_acked = false, .counter_acked = true };
-\t\t\t\t\tuint32_t kid = 0, n2;
-\t\t\t\t\tint orc;
-\t\t\t\t\t/* Only a delete that the key store accepts reports success. */
-\t\t\t\t\tbool expect_ok = o == 1 && codes[k] == HSM_NO_ERROR && modes[m] == 0;
+					struct ele_ack ack = { .strict_acked = false, .counter_acked = true };
+					uint32_t kid = 0, n2;
+					int orc;
+					/* Only a delete that the key store accepts reports success. */
+					bool expect_ok = o == 1 && codes[k] == HSM_NO_ERROR && modes[m] == 0;
 
-\t\t\t\t\t/* The client operation above consumed the context (one
-\t\t\t\t\t * operation per open): open a fresh one so the direct
-\t\t\t\t\t * backend call reaches the fake. begin() resets the fake,
-\t\t\t\t\t * so set its code and mode after it. */
-\t\t\t\t\tele_hsm_close(&x);
-\t\t\t\t\tbegin(&x, &c, &n2, true);
-\t\t\t\t\tfake.err = codes[k];
-\t\t\t\t\tfake.ks_mode = modes[m];
-\t\t\t\t\t/* ack starts "true": a path that reports success must
-\t\t\t\t\t * overwrite it with false. */
-\t\t\t\t\tif (o == 0)
-\t\t\t\t\t\torc = ele_hsm_ops.generate(&x, c.flags, &kid, &ack);
-\t\t\t\t\telse
-\t\t\t\t\t\torc = ele_hsm_ops.del(&x, c.flags, 7, &ack);
-\t\t\t\t\tsnprintf(msg, sizeof(msg), "%s code 0x%x mode %u: backend result",
-\t\t\t\t\t\t o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
-\t\t\t\t\tCHECK((orc == 0) == expect_ok, msg);
-\t\t\t\t\tsnprintf(msg, sizeof(msg), "%s code 0x%x mode %u: counter_acked stays false",
-\t\t\t\t\t\t o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
-\t\t\t\t\tCHECK(expect_ok ? !ack.counter_acked : ack.counter_acked, msg);
+					/* The client operation above consumed the context (one
+					 * operation per open): open a fresh one so the direct
+					 * backend call reaches the fake. begin() resets the fake,
+					 * so set its code and mode after it. */
+					ele_hsm_close(&x);
+					begin(&x, &c, &n2, true);
+					fake.err = codes[k];
+					fake.ks_mode = modes[m];
+					/* ack starts "true": a path that reports success must
+					 * overwrite it with false. */
+					if (o == 0)
+						orc = ele_hsm_ops.generate(&x, c.flags, &kid, &ack);
+					else
+						orc = ele_hsm_ops.del(&x, c.flags, 7, &ack);
+					snprintf(msg, sizeof(msg), "%s code 0x%x mode %u: backend result",
+						 o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
+					CHECK((orc == 0) == expect_ok, msg);
+					snprintf(msg, sizeof(msg), "%s code 0x%x mode %u: counter_acked stays false",
+						 o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
+					CHECK(expect_ok ? !ack.counter_acked : ack.counter_acked, msg);
 				}
 				ele_hsm_close(&x);
 			}
