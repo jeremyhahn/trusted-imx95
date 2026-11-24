@@ -499,7 +499,7 @@ the commit differs) and open the cited line.
 (i) **Checked by this repository on every build.** Item 2 of 8.2: the
 generated PRO `config_scmi.h` gives the M7 agent ALL on `PERF_M7`, and no
 other agent holds it. `scripts/sm-perf-check.sh` (expected value at line
-21, checks at lines 64-71) reads the file that `make cfg` writes in each of
+21, checks at lines 72-79) reads the file that `make cfg` writes in each of
 the two build trees, and `scripts/sm-build.sh` (lines 189-190) fails the
 build when it does not hold. It prints `sm-perf-check: M7 PERF_M7=ALL, no
 other agent` and the manifest gets the line `m7_perf_m7=ALL` (line 208).
@@ -509,8 +509,15 @@ through `scripts/sm-toolchain-check.sh`, the script behind
 coordinator records it after the PR's run. `bash test/sm_build_test.sh`
 covers the check offline, on synthetic tables written in the test.
 
+Also checked by this repository: item 7 of 8.2, where a `PERF_M7  PRIV`
+line must go. `scripts/sm-perf-placement-check.sh`, called by
+`scripts/sm-toolchain-check.sh` after `make system-manager`, regenerates
+the table for two scratch variants of the built tree (the tree and
+`m33_image.bin` are untouched) and reads the M7 grant back.
+
 (ii) **Cited, not confirmable by review under the cite-only rule.** Items 1
-and 3-7 of 8.2 and the citations of 8.3 and 8.4: the `rpc_scmi_perf.c`,
+and 3-6 of 8.2 (item 7's outcome is checked, its reading of `configtool.pl`
+is not) and the citations of 8.3 and 8.4: the `rpc_scmi_perf.c`,
 `lmm_perf.c`, `configtool.pl`, `m7mix.cfg`, `mx95frdm-pro.cfg` and
 `mx95evk.cfg` lines. They were read once by the lane and have not been
 reviewed independently; they stay provisional and open.
@@ -541,7 +548,8 @@ It stays provisional and open for (ii): why the table says ALL
 (ownership of `M7P`, item 1), that `PERFORMANCE_LEVEL_SET` needs only
 PRIV (item 3), and that an explicit line would not lower the grant
 (item 7) are cited at the pinned revision, not confirmable by review
-under the cite-only rule.
+under the cite-only rule (the placement outcome of item 7 is checked in
+CI, 8.0).
 
 ### 8.2 Evidence
 
@@ -561,7 +569,7 @@ under the cite-only rule.
    `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
    the only line naming `PERF_M7` in the file, so no other agent holds
    it. This is checked by this repository on every build:
-   `scripts/sm-perf-check.sh` (lines 21 and 64-71), called from
+   `scripts/sm-perf-check.sh` (lines 21 and 72-79), called from
    `scripts/sm-build.sh` (lines 189-190), fails unless the M7 record
    holds the one line at ALL; CI runs it through the job named in 8.0;
    the manifest line is `m7_perf_m7=ALL`. The rest of this item is
@@ -599,9 +607,17 @@ under the cite-only rule.
    API list (`:377-392`) comes before the Resources list (`:394`) and
    `M7P  OWNER` (`:396`), whose `perf=all` is therefore read later and
    wins. So a `PERF_M7  PRIV` line in the API list would change nothing;
-   only a line after `M7P  OWNER` could lower the grant. This is from
-   reading the tool; it was not tested by generating a changed file.
-   These `.cfg` line numbers are the upstream file's; the patches shift
+   only a line after `M7P  OWNER` could lower the grant. This is
+   checked by this repository: `scripts/sm-perf-placement-check.sh`
+   (`variant`, line 46; `run_one`, lines 83-95), called from
+   `scripts/sm-toolchain-check.sh` (line 25), generates the table for two
+   scratch copies of the built tree. A `PERF_M7  PRIV` line at the end of
+   the M7 API list must still leave ALL, and the same line right after
+   `M7P  OWNER` must give PRIV, read back with `scripts/sm-perf-check.sh
+   --want` (line 30). The anchors are found by content in the M7 block, and
+   a missing one fails the check. The variants are not patches and are
+   never committed; the CI result is recorded by the coordinator after the
+   PR's run. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
    later lines by two (0002 removes two test grants from the API list),
    which does not alter any entry cited here.
 
@@ -635,8 +651,9 @@ file.
 ### 8.5 Follow-ups (proposed, pending owner approval)
 
 - Text only, no patch: if the owner wants the grant lower than ALL, a
-  `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM
-  (item 7); in the API list it changes nothing. Proposed, pending owner
+  `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM; in the
+  API list it changes nothing. Both placements are tested in CI by
+  `scripts/sm-perf-placement-check.sh` (item 7). Proposed, pending owner
   approval, and not needed for the M7 to set its level.
 - Check for the image build: done by #167 (`scripts/sm-perf-check.sh`,
   run by `scripts/sm-build.sh` on every build, 8.0 (i)). It asserts that
