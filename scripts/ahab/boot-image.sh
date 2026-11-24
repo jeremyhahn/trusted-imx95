@@ -3,7 +3,7 @@
 # verify every container and tamper-test every signed payload
 # (docs/boot-container/boot-image.md; PROVISIONAL).
 #
-#   boot-image.sh [--inputs DIR] [--out DIR]
+#   boot-image.sh [--inputs DIR] [--out DIR] [--policy-out FILE]
 #       --inputs  a directory written by scripts/boot-image-inputs.sh --collect
 #                 (m33_image.bin, m7_image.bin, bl31.bin, tee.bin, u-boot.bin,
 #                 ele.bin, inputs.txt). Default: collect one into the work
@@ -11,6 +11,8 @@
 #                 input is not built).
 #       --out     where boot-image.bin, inputs.txt and SHA256SUMS go (default
 #                 out/boot-image, git-ignored). Never a key.
+#       --policy-out  also copy the policy file the whole-image check used (the
+#                 test-PKI SRK table hash and values read from the image) to FILE.
 #   boot-image.sh verify <image>
 #       nxpimage ahab verify of <image>: "verify: OK" and exit 0, or
 #       "verify: FAILED" and exit 1.
@@ -19,7 +21,9 @@
 # outside the clone, signs three OEM containers (boot-image.yaml), runs
 # nxpimage ahab verify on the image and checks that each of the three
 # containers authenticates, that the payloads nxpimage ahab parse extracts are
-# the inputs byte for byte, then flips one byte in each signed payload and
+# the inputs byte for byte, runs scripts/ahab/policy-check.sh on the whole image
+# against boot-image-manifest.yaml (it must print policy: OK), then flips one byte
+# in each signed payload, each container header and each signature block and
 # requires verification to fail every time. The work directory is deleted on
 # exit. The .bcf fuse script nxpimage writes is deleted unread and never run.
 # No board, no fuse, no life cycle, no block device.
@@ -77,6 +81,7 @@ if [ "${1:-}" = verify ]; then
 fi
 
 inputs=
+policy_out=
 out=$root/out/boot-image
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -90,7 +95,12 @@ while [ $# -gt 0 ]; do
 		out=$2
 		shift
 		;;
-	*) die "usage: boot-image.sh [--inputs DIR] [--out DIR] | verify <image>" ;;
+	--policy-out)
+		[ $# -ge 2 ] || die "--policy-out needs a file"
+		policy_out=$2
+		shift
+		;;
+	*) die "usage: boot-image.sh [--inputs DIR] [--out DIR] [--policy-out FILE] | verify <image>" ;;
 	esac
 	shift
 done
@@ -172,6 +182,74 @@ PY
 done
 echo "parse: OK, 6 payloads equal their inputs"
 
+# The SRK table hash belongs to this test PKI only.
+hash_file=$work/ahab_oem_srk0_hash.txt
+[ -s "$hash_file" ] || die "nxpimage ahab export wrote no $(basename "$hash_file")"
+
+# 2b. The whole image against its own manifest (scripts/ahab/policy-check.sh,
+# scripts/ahab/boot-image-manifest.yaml). The policy file holds the test-PKI
+# hash and values read from the image: each _IMAGE_SHA256 is the sha256 of the
+# payload as parsed (SPSDK pads it, so it is not the inputs.txt digest; step 2
+# tied the parse to the input). The ele, M7 and tee addresses are boot-image.yaml's;
+# the System Manager, BL31 and U-Boot entries are SPSDK shorthands that carry no
+# address in boot-image.yaml, so theirs are read from the parse. layout.txt
+# holds one "C <k> <header offset> <header length> <signature offset>
+# <signature length>" line per container, from the parse, for the tamper step.
+policy=$work/policy.txt
+"$py" -I - "$image" "$work/boot-image.yaml" "$hash_file" "$policy" "$work/layout.txt" <<'PY' ||
+import hashlib
+import sys
+
+import yaml
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+
+image, cfg, hash_file, policy, layout = sys.argv[1:6]
+data = open(image, "rb").read()
+off = AHABImage.find_offset_of_ahab(data, True)
+img = AHABImage.parse(data[off:], FamilyRevision("mimx9596", "b0"))
+conf = yaml.safe_load(open(cfg))["containers"]
+# (policy name, container, image, "yaml" or "parse")
+entries = [("ELE", 0, 0, "yaml"), ("SYSMGR", 1, 0, "parse"), ("M7", 1, 1, "yaml"),
+           ("ATF", 2, 0, "parse"), ("UBOOT", 2, 1, "parse"), ("TEE", 2, 2, "yaml")]
+lines = [
+    "SRK_TABLE_HASH=" + "".join(open(hash_file).read().split()),
+    "USED_SRK_ID=0",
+    "SRK_REVOKE_MASK=0",
+    "FUSE_VERSION_MIN=0",
+]
+for name, k, j, src in entries:
+    c = img.ahab_containers[k]
+    i = c.image_array[j]
+    seg = data[off + i.image_offset:off + i.image_offset + i.image_size]
+    if src == "yaml":
+        y = conf[k]["container"]["images"][j]
+        load, entry = int(str(y["load_address"]), 16), int(str(y["entry_point"]), 16)
+    else:
+        load, entry = int(i.load_address), int(i.entry_point)
+    lines.append("%s_IMAGE_SHA256=%s" % (name, hashlib.sha256(seg).hexdigest()))
+    lines.append("%s_LOAD_ADDRESS=0x%x" % (name, load))
+    lines.append("%s_ENTRY_POINT=0x%x" % (name, entry))
+# policy-check.sh needs the vendor record too: the image has no nxp container,
+# so these keys are inert placeholders of the right shape, not a value for any device.
+lines += ["NXP_SRK_TABLE_HASH=00", "NXP_USED_SRK_ID=0", "NXP_SRK_REVOKE_MASK=0", "NXP_FUSE_VERSION=0"]
+open(policy, "w").write("\n".join(lines) + "\n")
+out = []
+for k, c in enumerate(img.ahab_containers):
+    h = off + c.get_container_offset(k)
+    hl = c._signature_block_offset
+    out.append("C %d %d %d %d %d" % (k, h, hl, h + hl, c.signature_block.length))
+open(layout, "w").write("\n".join(out) + "\n")
+PY
+	die "cannot write the policy file from the image"
+"$here/policy-check.sh" "$image" "$policy" "$here/boot-image-manifest.yaml" >"$work/policy.log" 2>&1 ||
+	{ tail -n 5 "$work/policy.log" >&2; die "policy-check FAILED for the assembled image"; }
+[ "$(tail -n 1 "$work/policy.log")" = "policy: OK" ] || die "policy-check did not end with policy: OK"
+echo "policy: OK"
+if [ -n "$policy_out" ]; then
+	cp "$policy" "$policy_out"
+fi
+
 # 3. Tamper test: one flipped byte in each signed payload must fail verify.
 for f in $PAYLOADS; do
 	"$py" -I - "$image" "$work/$f" "$work/tampered.bin" <<'PY' || die "cannot place $f in the image"
@@ -191,9 +269,27 @@ PY
 	echo "tamper: $f, one flipped byte: verify FAILED as required"
 done
 
+# One flipped byte in each container header (past the 4-byte tag word) and in
+# each signature block: offsets from the parse (layout.txt), not a byte scan.
+while read -r tag k hoff hlen soff slen; do
+	[ "$tag" = C ] || continue
+	for spec in "header:$((hoff + 20))" "signature block:$((soff + slen / 2))"; do
+		what=${spec%%:*}
+		at=${spec##*:}
+		"$py" -I - "$image" "$work/tampered.bin" "$at" <<'PY' || die "cannot flip byte $at"
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+d[int(sys.argv[3])] ^= 0xFF
+open(sys.argv[2], "wb").write(d)
+PY
+		if verify "$work/tampered.bin" "$work/tamper.log"; then
+			die "tamper: verify ACCEPTED an image with one flipped byte in the $what of container $k"
+		fi
+		echo "tamper: container $k $what, one flipped byte: verify FAILED as required"
+	done
+done <"$work/layout.txt"
+
 # The SRK table hash belongs to this test PKI only.
-hash_file=$work/ahab_oem_srk0_hash.txt
-[ -s "$hash_file" ] || die "nxpimage ahab export wrote no $(basename "$hash_file")"
 echo "SRK table hash (test PKI only): $(tr -d '[:space:]' <"$hash_file")"
 echo "  This hash belongs to a throwaway test PKI. It is not a value for any device's fuses."
 

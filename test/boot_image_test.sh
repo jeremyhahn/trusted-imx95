@@ -187,11 +187,14 @@ check "image: a missing inputs directory is refused" nonzero "has no ele.bin"
 
 run "$SCRIPT" --collect "$TMP_ROOT/in3"
 expect "image: stand-in inputs collected" [ -s "$TMP_ROOT/in3/inputs.txt" ]
-run "$BI" --inputs "$TMP_ROOT/in3" --out "$img_out"
-check "image: assemble, verify every container, tamper every payload" 0 \
-	"3 of 3 containers authenticate" "6 payloads equal their inputs" \
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$img_out" --policy-out "$TMP_ROOT/img.policy"
+check "image: assemble, verify every container, check the whole image, tamper payloads, headers, signature blocks" 0 \
+	"3 of 3 containers authenticate" "6 payloads equal their inputs" "policy: OK" \
 	"tamper: ele.bin" "tamper: m33_image.bin" "tamper: m7_image.bin" \
 	"tamper: bl31.bin" "tamper: u-boot.bin" "tamper: tee.bin" \
+	"tamper: container 0 header" "tamper: container 0 signature block" \
+	"tamper: container 1 header" "tamper: container 1 signature block" \
+	"tamper: container 2 header" "tamper: container 2 signature block" \
 	"STAND-IN payloads in this image: 6" "boot-image-test: OK"
 expect "image: boot-image.bin and SHA256SUMS written" [ -s "$img_out/boot-image.bin" ] && [ -s "$img_out/SHA256SUMS" ]
 if (cd "$img_out" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
@@ -230,6 +233,23 @@ check "image: an inputs.txt without an entry for a payload is refused" nonzero "
 
 run "$BI" verify "$img_out/boot-image.bin"
 check "verify: the written image verifies" 0 "verify: OK"
+
+# The whole-image policy check, and two mutations of its manifest (each in the temp dir).
+PC=$ROOT/scripts/ahab/policy-check.sh
+BIM=$ROOT/scripts/ahab/boot-image-manifest.yaml
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "policy: the whole image passes against boot-image-manifest.yaml" 0 "policy: OK"
+man=$(<"$BIM")
+swapped=${man//ATF_/@@_}
+swapped=${swapped//TEE_/ATF_}
+swapped=${swapped//@@_/TEE_}
+printf '%s\n' "$swapped" >"$TMP_ROOT/man-swap.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-swap.yaml"
+check "policy: a manifest with the atf and tee entries swapped is refused" nonzero "policy: FAILED"
+mapfile -t man_lines <"$BIM"
+printf '%s\n' "${man_lines[@]:0:$((${#man_lines[@]} - 4))}" >"$TMP_ROOT/man-drop.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-drop.yaml"
+check "policy: a manifest with one entry dropped is refused" nonzero "policy: FAILED"
 
 # The M7 execution metadata of the built image, read back with nxpimage ahab parse.
 # The constants are docs/boot-container/boot-image.md:31 (container 2, entry "executable"):
@@ -393,5 +413,54 @@ open(sys.argv[2], "wb").write(d)
 PY
 run "$BI" verify "$TMP_ROOT/bad.bin"
 check "verify: an image with one changed payload byte is rejected" 1 "verify: FAILED"
+
+# --- negatives beyond payload bytes, on scratch copies of the image ---
+# (a) the image cut short by the last 1 KiB
+cp "$img_out/boot-image.bin" "$TMP_ROOT/cut.bin"
+truncate -s -1024 "$TMP_ROOT/cut.bin"
+run "$BI" verify "$TMP_ROOT/cut.bin"
+v_rc=$RC
+run "$PC" "$TMP_ROOT/cut.bin" "$TMP_ROOT/img.policy" "$BIM"
+expect "negative (a): a truncated image fails verify or the policy check" \
+	[ "$v_rc" -ne 0 -o "$RC" -ne 0 ]
+check "negative (a): the policy check on the truncated image prints policy: FAILED" nonzero "policy: FAILED"
+
+# (b) one non-zero byte in a gap no header, signature block or payload covers: the first
+# zero byte outside every span, read from the parse (not from the bytes)
+gap=$("$spsdk_venv/bin/python" -I - "$img_out/boot-image.bin" <<'PY'
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+d = open(sys.argv[1], "rb").read()
+img = AHABImage.parse(d, FamilyRevision("mimx9596", "b0"))
+ok = bytearray(len(d))
+for k, c in enumerate(img.ahab_containers):
+    s = c.get_container_offset(k)
+    ok[s:s + c.length] = b"\x01" * c.length
+    for i in c.image_array:
+        ok[i.image_offset:i.image_offset + i.image_size] = b"\x01" * i.image_size
+print(next(o for o in range(len(d)) if not ok[o] and not d[o]))
+PY
+)
+expect "negative (b): a gap offset was found in the parse (got '$gap')" [ -n "$gap" -a -z "${gap//[0-9]/}" ]
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/gap.bin" "$gap" "01"
+run "$PC" "$TMP_ROOT/gap.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "negative (b): a non-zero byte in a gap is refused, naming its offset" nonzero \
+	"policy: FAILED" "$(printf 'non-zero byte at offset 0x%x' "$gap")"
+
+# (c) a second image on a fresh test PKI: verify OK, policy FAILED on the SRK table hash
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$TMP_ROOT/img2" --policy-out "$TMP_ROOT/img2.policy"
+check "negative (c): a second image is built on a fresh test PKI" 0 "policy: OK"
+run "$BI" verify "$TMP_ROOT/img2/boot-image.bin"
+check "negative (c): the second image verifies on its own PKI" 0 "verify: OK"
+run "$PC" "$TMP_ROOT/img2/boot-image.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "negative (c): the second image against the first policy file is refused on the SRK table hash" nonzero \
+	"policy: FAILED" "srk_table_hash"
+
+# (d) a policy file with USED_SRK_ID 1
+pol=$(<"$TMP_ROOT/img.policy")
+printf '%s\n' "${pol/USED_SRK_ID=0/USED_SRK_ID=1}" >"$TMP_ROOT/srk1.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/srk1.policy" "$BIM"
+check "negative (d): a policy file with USED_SRK_ID 1 is refused" nonzero "policy: FAILED" "used_srk_id"
 
 finish
