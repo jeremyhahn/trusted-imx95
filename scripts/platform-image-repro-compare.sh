@@ -54,6 +54,7 @@ is_allowed() {
 
 # load SUMS-ARRAY-PREFIX DIR LABEL: read DIR/SHA256SUMS into names_$p (order)
 # and a map hash_$p, verifying the files in DIR against it.
+# shellcheck disable=SC2034 # read through namerefs in load
 declare -A hash_a hash_b listed_a listed_b
 # norm NAME: the artefact name without Yocto's build timestamp (IMAGE_VERSION_SUFFIX
 # in IMAGE_NAME: "<image>-<machine>.rootfs-<14 digits>.<ext>"), so two builds made
