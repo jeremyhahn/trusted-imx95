@@ -7,6 +7,8 @@ How a pin moves on `row/178-maintenance` (the standing maintenance row, plan in 
 - `make pins-check` (`scripts/pins-check.sh`, also run by `make build`) says whether a pin is **well formed**: the tool entries of `scripts/tool-pins.sh`, the two requirements files, and the workflow action pins. It needs no network and no pip.
 - `make deps-check` (`scripts/deps-check.sh`) says whether a pin is **behind** the latest release. It needs the network, so it is not part of `make build` or `make test`. A pin with a `<TOOL>_HOLD` reason is reported, not failed.
 
+Read `make pins-report` (`scripts/pins-report.sh`) before the network `make deps-check`: it prints, from the files in the tree only, every tool with its version, repo, release tag and `_HOLD` reason, the Alpine, Python, uv and Debian snapshot pins, the requirement count of each requirements file, and every workflow action as `owner/repo@<12 hex> # <tag>`. It reports and does not judge; it exits 1 only when a file is missing.
+
 A bump is done when `make pins-check` passes and `make deps-check` no longer lists the pin (or the pin carries a `_HOLD` reason).
 
 ## A tool in `scripts/tool-pins.sh`

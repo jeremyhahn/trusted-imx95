@@ -45,7 +45,7 @@ UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check pins-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
+	deps-check pins-check pins-report lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
@@ -116,6 +116,9 @@ security: check-tracked-cst secret-scan-tree secret-scan-history ## Security sta
 
 pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent
 	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+
+pins-report: ## Offline: print every pin (tools, images, requirements, workflow actions) from the files in the tree
+	@scripts/pins-report.sh scripts/tool-pins.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt .github/workflows
 
 deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs the network)
 	@scripts/deps-check.sh scripts/tool-pins.sh
