@@ -293,9 +293,25 @@ printf '%s\n' "$swapped" >"$TMP_ROOT/man-swap.yaml"
 run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-swap.yaml"
 check "policy: a manifest with the atf and tee entries swapped is refused" nonzero "policy: FAILED"
 mapfile -t man_lines <"$BIM"
-printf '%s\n' "${man_lines[@]:0:$((${#man_lines[@]} - 4))}" >"$TMP_ROOT/man-drop.yaml"
+# The last image entry starts at the last "- core_id:" line and runs to the end of the file;
+# cutting from there removes one whole, well formed entry (so the manifest still validates and
+# only the entry-count comparison can refuse it). The first container starts at the first
+# "- role:" line and ends before the second one.
+last_entry=-1 role_first=-1 role_second=-1
+for i in "${!man_lines[@]}"; do
+	case ${man_lines[$i]} in
+	*"- core_id:"*) last_entry=$i ;;
+	*"- role:"*)
+		if [ "$role_first" -lt 0 ]; then role_first=$i; elif [ "$role_second" -lt 0 ]; then role_second=$i; fi
+		;;
+	esac
+done
+printf '%s\n' "${man_lines[@]:0:$last_entry}" >"$TMP_ROOT/man-drop.yaml"
 run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-drop.yaml"
-check "policy: a manifest with one entry dropped is refused" nonzero "policy: FAILED"
+check "policy: a manifest with one entry dropped is refused" nonzero "policy: FAILED" "image entries, the manifest lists 2"
+printf '%s\n' "${man_lines[@]:0:$role_first}" "${man_lines[@]:$role_second}" >"$TMP_ROOT/man-dropc.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-dropc.yaml"
+check "policy: a manifest with one container dropped is refused" nonzero "policy: FAILED" "the image holds"
 
 # The M7 execution metadata of the built image, read back with nxpimage ahab parse.
 # The constants are docs/boot-container/boot-image.md:31 (container 2, entry "executable"):
