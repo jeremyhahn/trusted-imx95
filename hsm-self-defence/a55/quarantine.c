@@ -92,11 +92,12 @@ unsigned quarantine_step(struct quarantine *q, const struct tamper_event *ev)
 		q->reason = reason;
 	q->state = to;
 
+	/* Refuse and close once, on leaving normal; escalating from quarantined
+	 * to terminal asks AWAIT_RESET only: no second close, no retry. */
 	if (to != QUARANTINE_NORMAL && from == QUARANTINE_NORMAL)
 		act |= QUARANTINE_ACT_REFUSE_KEY_OPS | QUARANTINE_ACT_CLOSE_SESSIONS;
 	if (to == QUARANTINE_TERMINAL && from != QUARANTINE_TERMINAL)
-		act |= QUARANTINE_ACT_REFUSE_KEY_OPS | QUARANTINE_ACT_CLOSE_SESSIONS |
-		       QUARANTINE_ACT_AWAIT_RESET;
+		act |= QUARANTINE_ACT_AWAIT_RESET;
 	return act;
 }
 

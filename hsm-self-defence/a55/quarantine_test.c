@@ -296,6 +296,32 @@ static void test_per_sender(void)
 	}
 }
 
+/* Close the sessions once: leaving normal asks refuse + close; escalating to
+ * terminal asks AWAIT_RESET with no second close (note: no retry). */
+static void test_escalation_actions(void)
+{
+	static const uint16_t second[] = { TAMPER_ZEROISATION_DONE, TAMPER_SHUTDOWN_IMMINENT };
+	const unsigned first_want = QUARANTINE_ACT_LOG | QUARANTINE_ACT_REFUSE_KEY_OPS |
+				    QUARANTINE_ACT_CLOSE_SESSIONS;
+	const unsigned second_want = QUARANTINE_ACT_LOG | QUARANTINE_ACT_AWAIT_RESET;
+	size_t i;
+
+	for (i = 0; i < sizeof(second) / sizeof(second[0]); i++) {
+		struct quarantine q;
+		struct tamper_event a = mk(TAMPER_ASSERTED, 1), b = mk(second[i], 2);
+		unsigned act1, act2;
+
+		quarantine_init(&q);
+		act1 = quarantine_step(&q, &a);
+		act2 = quarantine_step(&q, &b);
+		CHECK(act1 == first_want, "asserted then code %u: first actions %#x, want %#x",
+		      (unsigned)second[i], act1, first_want);
+		CHECK(act2 == second_want, "asserted then code %u: second actions %#x, want %#x",
+		      (unsigned)second[i], act2, second_want);
+		CHECK(q.state == QUARANTINE_TERMINAL, "asserted then code %u: terminal", (unsigned)second[i]);
+	}
+}
+
 int main(void)
 {
 	test_init();
@@ -304,6 +330,7 @@ int main(void)
 	test_sequence();
 	test_no_return();
 	test_per_sender();
+	test_escalation_actions();
 	if (fails != 0) {
 		printf("quarantine_test: %d failed\n", fails);
 		return 1;
