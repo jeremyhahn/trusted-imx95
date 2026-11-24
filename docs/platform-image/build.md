@@ -263,7 +263,8 @@ commits and `SOURCE_DATE_EPOCH` included. The one ignored key is
 both hashes, or the build-info key and both values. A `build-info.txt` that is
 missing, unreadable, empty, or without `SOURCE_DATE_EPOCH` or a layer commit
 fails the compare, naming the file. Any differing or missing artefact fails;
-the compare script has no exception option.
+the compare script has no exception option. An empty comparison fails too: two
+`SHA256SUMS` that list no artefact never print OK.
 
 The SBOM (`.spdx.json`) and the package manifest (`.manifest`) are artefacts
 like the rest: they are listed in `SHA256SUMS`, paired across the two builds by
