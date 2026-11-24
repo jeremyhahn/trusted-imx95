@@ -129,6 +129,7 @@ mkdir -p "$W/pub"
 ln -s "$W/victim" "$W/pub/.out.json.XXXXXX"
 # The wrapper plants a link at the exact path the old publish wrote (OUT.tmp.<PID>), then
 # execs the collector: exec keeps the PID, so $$ here is the collector's own PID.
+# shellcheck disable=SC2016 # the inner shell expands $1, $2 and $$
 run col bash -c 'ln -s "$1" "$2.tmp.$$"; shift 2; exec "$@"' _ "$W/victim" "$W/pub/out.json" \
 	env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/pub/out.json"
 check "planted symlinks" 0 "wrote"
