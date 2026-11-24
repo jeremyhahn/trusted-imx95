@@ -14,7 +14,7 @@ This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` r
 | [enrollment-survey.md](enrollment-survey.md) | Which enrollment protocol carries the evidence, and what authorises the first request | survey, input to the owner's choice | 5 (C1 to C5) |
 | [decommission-survey.md](decommission-survey.md) | What end of life, RMA and decommissioning mean for a board | draft survey for the owner | 7 (E1 to E7) |
 | [evidence-binding-survey.md](evidence-binding-survey.md) | How the firmware TPM's identity could be bound to the chip's own attestation | SURVEY, PROVISIONAL, pending go-trusted-platform's hsm-device-lifecycle row and the owner (#25) | 4 (B1 to B4) |
-| [architecture.md](architecture.md) | The device-side order under ruling 1234, the open items for go-xkms, and where the life cycle closes | PROVISIONAL, pending go-xkms and go-trusted-platform | none (points at A2, B1, B3, C2, F2) |
+| [architecture.md](architecture.md) | The device-side order under ruling 1234, the open items for go-xkms, and where the life cycle closes | PROVISIONAL, pending go-xkms and go-trusted-platform | 1 (G1; points at A2, B1, B3, C2, F2) |
 | [evidence-bundle.md](evidence-bundle.md) | What the device hands to endorse-01 under ruling 1234 | PROPOSED, pending owner approval, go-xkms and go-trusted-platform | none (points at A2, B1, B3, B5, C2, F2) |
 | [decommission-runbook.md](decommission-runbook.md) | The ordered decommission steps, who acts, and what is not described | PROPOSED, pending owner approval, documentation only; nothing here is scripted, and no step is run on a development board | none (points at E1 to E7) |
 | [../ftpm/README.md](../ftpm/README.md) | The firmware TPM design: components, NV storage, EK lifecycle, measured boot | NORMATIVE | 7 (B5 to B10, D2) |
@@ -32,7 +32,7 @@ Each survey states its own claims and sources; this index links to them and does
 
 ## Open questions for the owner, consolidated
 
-Thirty questions in all: every numbered question of the four surveys and of the ftpm "Open questions for the owner" appears once. The source's own text wins over this index wherever they differ. The source links go to the section that holds the question; "Rec." repeats the source's recommendation or provisional default and nothing more.
+Thirty-one questions in all: every numbered question of the four surveys and of the ftpm "Open questions for the owner" appears once, and so does the one owner question held by [architecture.md](architecture.md#where-the-life-cycle-closes). The source's own text wins over this index wherever they differ. The source links go to the section that holds the question; "Rec." repeats the source's recommendation or provisional default and nothing more.
 
 The NXP root is the one answer that matters most. A2 (attestation Q2), C3 (enrollment Q3, first-request authority) and B1 (evidence-binding Q1) all turn on whether the enclave evidence chains to a root that go-trusted-platform will trust. A2 is the single answer that unblocks the others: C3 says it depends on it, and B1 says to re-examine (b) once it is known.
 
@@ -96,6 +96,12 @@ The NXP root is the one answer that matters most. A2 (attestation Q2), C3 (enrol
 | F1 | Which side calls the attestation API: Cortex-A55 Linux or Cortex-M7? | [attestation Q5](attestation-survey.md#questions-for-the-owner) | answered: ruling 1234, see [architecture.md](architecture.md#decision) | none |
 | F2 | Over which channel is the evidence carried: go-xkms's `hsm-device-protocol` or go-trusted-platform's enrollment and attestation API? | [attestation Q7](attestation-survey.md#questions-for-the-owner) | no recommendation here | C1 |
 
+### Provisioning station
+
+| Label | Question | Source | Rec. | Overlap |
+|---|---|---|---|---|
+| G1 | Should the provisioning station's checklist record the enclave attestation as a precondition for closing the life cycle? | [architecture.md](architecture.md#where-the-life-cycle-closes) | default: no; a verifier's concern (A2); proposed, pending owner approval | A2 |
+
 ## What is blocked on what
 
 This list is a reading of the sources, not a ruling. Where it is uncertain, the survey wins.
@@ -103,7 +109,7 @@ This list is a reading of the sources, not a ruling. Where it is uncertain, the 
 - Blocked on go-trusted-platform: C1, C2 and F2 (enrollment and attestation API, issue #884 per the attestation survey), and E7 (a control-plane verb).
 - Blocked on go-xkms (#24 territory, itself blocked): B2 and B6 (endorse-01 checks), F2 (`hsm-device-protocol`).
 - Blocked on NXP answers: A2, A4 and C4 (root and EdgeLock 2GO support), A3 (silicon revision), B3 (nonce handling), E5 (what OEM locked does), E1 and E6 through E5's facts. C3 and B1 follow A2.
-- Decidable by the owner alone now, on what the surveys say: B4, B5, B7, B8, B9, B10, C5, E2, E3, E4, and D2 as a scoping choice. D1 stays unresolved, because the sources do not support a pick.
+- Decidable by the owner alone now, on what the surveys say: B4, B5, B7, B8, B9, B10, C5, E2, E3, E4, G1, and D2 as a scoping choice. D1 stays unresolved, because the sources do not support a pick.
 - Answered by ruling 1234: A1 and F1 ([architecture.md](architecture.md#decision)).
 
 ## Proposed SPEC changes (proposed, pending owner approval)

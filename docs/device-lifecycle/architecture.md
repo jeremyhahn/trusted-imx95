@@ -29,7 +29,7 @@ Where the device-side steps stop, and where the life cycle closes: [Where the li
 - The collector and everything in `scripts/device-lifecycle/` read and compose only: they write no fuse, no life-cycle state and no RPMB, and `test/device_lifecycle_docs_test.sh` checks the folder's scripts against a named deny list.
 - The life-cycle steps of decommissioning stay not described here; see [Not in this runbook](decommission-runbook.md#not-in-this-runbook).
 
-Owner question, proposed, pending owner approval: should the station's checklist record the enclave attestation as a precondition for closing? Default: no; that is a verifier's concern (A2). This question is in this file only and is not yet in the [README](README.md) index.
+Owner question, proposed, pending owner approval: should the station's checklist record the enclave attestation as a precondition for closing? Default: no; that is a verifier's concern (A2). This question is listed as G1 in the [README](README.md#provisioning-station) index.
 
 ## What the public references give about the root
 
