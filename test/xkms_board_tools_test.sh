@@ -32,6 +32,8 @@ cat >"$fakebin/ssh" <<'EOF'
 echo "ssh $*" >>"${FAKE_SSH_LOG:-/dev/null}"
 while [ "$1" = -o ]; do shift 2; done
 shift
+for t in ${FAKE_TOOLS:-}; do PATH=$FAKE_OPT/$t:$PATH; done
+export PATH
 exec sh -c "$*"
 EOF
 cat >"$fakebin/systemctl" <<'EOF'
@@ -43,7 +45,7 @@ body=$(cat "$bin")
 case $1 in
 cat) [ -f "$R/etc/systemd/xkmsd.service" ] ;;
 is-active) [ "$(cat "$st")" = active ] ;;
-stop) echo inactive >"$st"; rm -rf "$R/proc" ;;
+stop) echo inactive >"$st"; rm -rf "$R/proc/4242"; echo '  sl  local_address' >"$R/proc/net/tcp" ;;
 start)
 	case $body in *FAILSTART*) echo inactive >"$st"; exit 1 ;; esac
 	case $body in *CORRUPT*)
@@ -69,8 +71,10 @@ esac
 EOF
 # ss and netstat exist only when FAKE_TOOLS names them (default: neither, as on
 # the board's ss-less image; a stub that exits 127 makes the probe fall through).
+export FAKE_OPT=$tmp/opt
 for tool in ss netstat; do
-	cat >"$fakebin/$tool" <<'EOF'
+	mkdir -p "$FAKE_OPT/$tool"
+	cat >"$FAKE_OPT/$tool/$tool" <<'EOF'
 #!/bin/bash
 R=$XKMS_FAKE_ROOT
 tool=${0##*/}
@@ -84,9 +88,21 @@ else
 	echo 'tcp 0 0 0.0.0.0:8443 0.0.0.0:* LISTEN 4242/xkmsd'
 fi
 EOF
+	chmod +x "$FAKE_OPT/$tool/$tool"
 done
 chmod +x "$fakebin"/*
-export PATH=$fakebin:$PATH
+# The board has neither: the PATH is the fake bin plus symlinks to every host
+# tool except ss and netstat, so a host ss never shows through.
+mkdir -p "$tmp/hosttools"
+IFS=: read -ra pdirs <<<"$PATH"
+for d in "${pdirs[@]}"; do
+	for f in "$d"/*; do
+		[ -x "$f" ] && [ -f "$f" ] || continue
+		case ${f##*/} in ss | netstat) continue ;; esac
+		[ -e "$tmp/hosttools/${f##*/}" ] || ln -s "$f" "$tmp/hosttools/${f##*/}"
+	done
+done
+export PATH=$fakebin:$tmp/hosttools
 
 mkbin() { # mkbin <file> <commit> [marker...]: a fake xkmsd
 	local f=$1 c=$2
@@ -106,7 +122,8 @@ mkbuild() { # mkbuild <dir> <commit> [marker...]
 
 mkboard() { # mkboard <root>: the old build, a config, keys and storage
 	local r=$1
-	mkdir -p "$r/usr/local/bin" "$r/etc/xkms" "$r/etc/systemd" "$r/var/lib/xkms/keys" "$r/run"
+	mkdir -p "$r/usr/local/bin" "$r/etc/xkms" "$r/etc/systemd" "$r/var/lib/xkms/keys" "$r/run" "$r/proc/net"
+	echo '  sl  local_address' >"$r/proc/net/tcp" # a Linux board always has it
 	mkbin "$r/usr/local/bin/xkmsd" OLDCOMMIT
 	echo "listen: fake" >"$r/etc/xkms/xkmsd.yaml"
 	echo SECRETMATERIAL-0001 >"$r/var/lib/xkms/keys/k1"
@@ -173,6 +190,8 @@ ok "success: secrets are not printed" out_lacks "$tmp/ok.log" SECRETMATERIAL
 ok "success: backup dir is private" [ "$(stat -c %a "$R/var/backups/xkms")" = 700 ]
 
 # --- the listener probe: ss, netstat, or /proc/net/tcp only ----------------------
+ok "default fake board has no ss" bash -c '! type ss >/dev/null 2>&1'
+ok "default fake board has no netstat" bash -c '! type netstat >/dev/null 2>&1'
 for probe in "ss" "netstat"; do
 	R=$tmp/board-$probe
 	mkboard "$R"
