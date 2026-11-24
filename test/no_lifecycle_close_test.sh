@@ -47,7 +47,7 @@ PATTERNS=(
   'write[-_]fuse'
   'fuse[-_]burn'
   "nxpele[^#]*[[:space:],[]${Q}commit${Q}([],)[:space:]]|\$)"
-  "nxpele[^#]*[[:space:]]${Q}signed[-_ ]?message${Q}([[:space:]]|\$)"
+  "nxpele[^#]*[[:space:],[]${Q}signed[-_ ]?message${Q}([],)[:space:]]|\$)"
   'ahab_commit'
   'ahab_sec_fuse_prog'
   'ahab_lock'
@@ -275,6 +275,9 @@ for fx in \
   'fastboot list form tight|run(["fastboot","erase","userdata"])' \
   'fastboot list form single quotes|subprocess.call(['"'fastboot', 'oem', 'unlock'"'])' \
   'nxpele list form commit|subprocess.check_call(['"'nxpele', '-p', 'usb', 'commit'"'])' \
+  'nxpele list form signed-message|subprocess.run(["nxpele", "signed-message", "-i", "r.bin"])' \
+  'nxpele list form signed-message tight|run(["nxpele","signed-message"])' \
+  'nxpele list form signed-message single quotes|subprocess.call(['"'nxpele', 'signed-message'"'])' \
   'sdpshost direct|sdpshost -p usb write-file 0x0 x.bin' \
   'el2go-host direct|el2go-host dev -h' \
   'el2go-host module|python3 -m spsdk.apps.el2go_host dev' \
@@ -388,6 +391,7 @@ else bad "ele_message inside a file name was flagged"; fi
 i=0
 for fx in \
   'multi-line subprocess.run list|subprocess.run([@    "nxpele",@    "commit", "-i", "OEM_FW_FUSE"@])' \
+  'multi-line subprocess.run signed-message|subprocess.run([@    "nxpele",@    "signed-message", "-i", "r.bin"@])' \
   'multi-line Popen fastboot path|Popen(@    "/usr/bin/fastboot",@    "flash", "boot", x)' \
   'multi-line fastboot list|["fastboot",@  "erase", "userdata"]'; do
   name=${fx%%|*}
