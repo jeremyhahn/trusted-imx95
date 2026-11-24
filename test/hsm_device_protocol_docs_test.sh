@@ -210,4 +210,62 @@ negative_trace() {
 negative_trace "trace status line dropped" c_trace_status '/^> \*\*Status:/d'
 negative_trace "trace section (c) emptied" c_trace_sections '/^## [(]c[)] /,/^## [(]d[)] /{/^## /!d;}'
 
+# The requirement table of xkmsd-node.md: header, R1..Rn in order, an exact Status
+# vocabulary, and a ruling number in the Source cell of every decided row.
+trim() {
+	local s=$1
+	s=${s#"${s%%[![:space:]]*}"}
+	printf '%s' "${s%"${s##*[![:space:]]}"}"
+}
+
+c_reqs() {
+	local f=$1 hdr line id status src n=0 re='ruling[s]? [0-9]+'
+	hdr=$(awk '/^## 3[.] /{s=1;next} /^## /{s=0} s && /^[|] #/{print; exit}' "$f")
+	[ "$hdr" = '| # | Requirement | Status | Source |' ] ||
+		echo "the section 3 table header is not '| # | Requirement | Status | Source |'"
+	while IFS= read -r line; do
+		n=$((n + 1))
+		IFS='|' read -r _ id _ status src _ <<<"$line"
+		id=$(trim "$id")
+		status=$(trim "$status")
+		src=$(trim "$src")
+		[ "$id" = "R$n" ] || echo "row $n is $id: a gap or a duplicate"
+		case "$status" in
+		decided)
+			[[ "$src" =~ $re ]] || echo "$id is decided but its Source names no ruling number"
+			;;
+		'proposed, pending owner approval') ;;
+		*) echo "$id has the Status '$status'" ;;
+		esac
+	done < <(awk '/^## 3[.] /{s=1;next} /^## /{s=0} s && /^[|] R[0-9]+ /{print}' "$f")
+	[ "$n" -gt 0 ] || echo "no R rows found"
+}
+
+out=$(c_reqs "$NODE")
+if [ -z "$out" ]; then pass "c_reqs on xkmsd-node.md"; else fail "c_reqs on xkmsd-node.md" "$out"; fi
+
+negative_file() {
+	local name=$1 c=$2 src=$3 copy
+	copy=$(mktemp "$TMP_ROOT/neg2.XXXXXX") || { fail "negative: $name" "mktemp failed"; return; }
+	LC_ALL=C sed -e "$4" "$src" >"$copy"
+	if cmp -s "$src" "$copy"; then
+		fail "negative: $name" "the edit changed nothing"
+	elif [ -n "$("$c" "$copy")" ]; then
+		pass "negative: $name"
+	else
+		fail "negative: $name" "$c did not detect it"
+	fi
+}
+negative_file "R5 status changed to decided" c_reqs "$NODE" '/^| R5 /s/proposed, pending owner approval/decided/'
+negative_file "R7 row deleted" c_reqs "$NODE" '/^| R7 /d'
+negative_file "R1 source names no ruling" c_reqs "$NODE" '/^| R1 /s/rulings 1243, 1244/SPEC row platform-image/'
+
+SEAM="$ROOT/docs/hsm-device-protocol/local-seam-trace.md"
+expect "local-seam-trace.md exists" test -f "$SEAM"
+for c in c_words c_links c_trace_status; do
+	out=$("$c" "$SEAM")
+	if [ -z "$out" ]; then pass "$c on local-seam-trace.md"; else fail "$c on local-seam-trace.md" "$out"; fi
+done
+negative_file "local-seam trace status line dropped" c_trace_status "$SEAM" '/^> \*\*Status:/d'
+
 finish

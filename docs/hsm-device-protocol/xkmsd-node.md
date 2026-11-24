@@ -55,7 +55,7 @@ R6 to R11 carry no number or protocol detail on purpose: sizes, message formats 
 For go-xkms, which has to define them first (go-xkms #1521, owner-queue item 160):
 
 1. The wire protocol and the network transport security the device has to offer.
-2. Whether xkmsd is one process or two (a network listener and a key holder).
+2. Whether xkmsd is one process or two (a network listener and a key holder); the [local seam trace](local-seam-trace.md) summarises what public man pages say about a Unix socket between the two.
 3. How xkmsd asks for device attestation, and which evidence it expects beyond the fTPM's `tpm` format (SPEC row `device-lifecycle`).
 4. The tagged release the image pins, and the Go toolchain and build inputs that release needs.
 
