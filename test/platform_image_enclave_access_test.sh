@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# The recipe text holds a literal ${PN}; the single quotes are meant.
+# shellcheck disable=SC2016
 # Static check of the enclave-access recipe (R6, proposed, pending owner approval):
 # the udev rule, the group-only recipe and the image's install line. No bitbake.
 set -u
