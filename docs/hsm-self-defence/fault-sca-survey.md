@@ -145,11 +145,11 @@ Criteria AVA_VAN level).
 | S11 | PSA Certified product list | page fetched 2026-11-12 | https://products.psacertified.org/ | yes, but script-rendered; no i.MX 95 entry in the static page |
 | S12 | SESIP site | page fetched 2026-11-12 | https://www.sesip.org/ | yes; no i.MX 95 or EdgeLock entry found |
 | S13 | Common Criteria certified products | n/a | https://www.commoncriteriaportal.org/products/ | **no**: HTTP 403 |
-| S20 | NXP i.MX 95 Applications Processor Reference Manual (IMX95RM) | n/a | https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf | **no**: HTTP 404 (NXP answers 404 to this lane for every page) |
+| S20 | NXP i.MX 95 Applications Processor Reference Manual (IMX95RM) | n/a | https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf | **no**: HTTP 404 (NXP answers 404 to this survey for every page) |
 | S21 | NXP i.MX 95 Security Reference Manual | n/a | no public URL found | **no** |
 | S22 | NXP i.MX 95 data sheet and fact sheet | n/a | https://www.nxp.com/docs/en/data-sheet/IMX95AEC.pdf, https://www.nxp.com/docs/en/fact-sheet/IMX95FS.pdf | **no**: HTTP 404 |
 | S23 | NXP i.MX 95 and EdgeLock secure enclave product pages | n/a | https://www.nxp.com/products/i.MX95 | **no**: HTTP 404 |
-| S24 | Issue #67 text on the forge | n/a | (forge issue #67) | **no**: the lane has no forge credentials; I worked from the brief and SPEC.md |
+| S24 | Issue #67 text on the forge | n/a | (forge issue #67) | **no**: the survey has no forge credentials; I worked from the brief and SPEC.md |
 
 ## What could not be confirmed
 

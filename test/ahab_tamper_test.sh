@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
-# Tamper matrix for a signed AHAB container (docs/boot-container/secure-boot-test-plan.md
-# section 4: C2b, C5b, C6, plus a changed SRK table). One good container is built
-# with the test PKI (scripts/ahab/sign-test.sh, AHAB_OUT_DIR in TMP_ROOT); each case
-# is a copy with a minimal change, checked with `sign-test.sh verify`
-# (nxpimage ahab verify, SPSDK 3.13.0). C1 and the payload byte are in
-# test/ahab_sign_test.sh. No key, container or policy is written inside the clone.
-#
-# Offsets come from the container itself: the signature block offset is the u16
-# at byte 12; the SRK table array starts at that offset + 16 and holds a table
-# (length u16 at +1) followed by the SRK data record whose first body byte is
-# the used SRK index; the image entry starts at byte 16 (payload offset u32 at
-# +0, size u32 at +4) and its SHA-384 hash is found by searching for the hash of
-# the payload (sha384sum), then cross-checked against the parse output layout.
+# Tamper matrix for a signed AHAB container (C2b, C5b, C6, changed SRK table): each case is a minimal change to one good container, checked with `sign-test.sh verify`.
+# Offsets come from the container: signature block offset u16 at byte 12, SRK table at +16, image entry at byte 16, the hash found by searching for the payload's SHA-384.
 set -euo pipefail
 
 # shellcheck source=test/lib.sh
@@ -113,9 +102,7 @@ else
 	rejects "C5b-ii (payload and hash both changed)" "$t"
 fi
 
-# parsed_srk_id FILE: used_srk_id as SPSDK parses it (AHABImage.parse, as the policy
-# check does; nxpimage's config export crashes on a header with another selector). On
-# a parse failure the parser's last lines are printed and the case records a failure.
+# parsed_srk_id FILE: used_srk_id as AHABImage.parse reads it; a parse failure prints the parser's last lines and records a failure.
 parsed_srk_id() {
 	local v
 	v=$("$ROOT/scripts/ahab/spsdk-venv.sh")
@@ -138,18 +125,7 @@ nxpout() {
 	(cd "$TMP_ROOT/t" && "$v/bin/nxpimage" ahab verify -f mimx9596 -r b0 -b "$1" 2>&1) || true
 }
 
-# C2b (header selector): the container header's key selector, flags bits 4-5 (byte 4
-# of the little-endian flags word at byte 4), set to a different SRK index. The SRK
-# data record is left as built (index 0). The signature is NOT redone: the test PKI
-# is removed when sign-test.sh exits, and nxpimage cannot re-sign an existing binary.
-# So the rejection is isolated by the verifier's own path instead:
-#  - control: the same header rewritten with the ORIGINAL selector is accepted, so
-#    the byte write itself breaks nothing;
-#  - the changed container fails inside the SRK table check (SPSDK indexes the SRK
-#    record the header selects and finds no SRK data: "TypeError: object of type
-#    'NoneType' has no len()"), and the verifier's output holds no signature result
-#    at all: the signature check is never reached, so it is not a signature mismatch.
-# It is asserted parsed first, so the case cannot pass on a header that never changed.
+# C2b: change the header's SRK selector without re-signing; a control rewrite with the original selector passes, and the changed one fails in the SRK table check before any signature result.
 oldflags=$(u8 "$good" 4)
 oldsel=$(((oldflags >> 4) & 3))
 newsel=$(((oldsel + 1) & 3))

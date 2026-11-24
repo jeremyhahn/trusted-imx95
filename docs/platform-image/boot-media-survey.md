@@ -21,7 +21,7 @@ provisioning step is run or scripted.
 
 ## 1. Sources
 
-"Reached" means the lane fetched the source and read it.
+"Reached" means the survey fetched the source and read it.
 
 | # | Source | Version / ref | URL | Reached |
 |---|--------|---------------|-----|---------|
@@ -36,13 +36,13 @@ provisioning step is run or scripted.
 | S9 | Linux device tree `arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts` | tag `v7.3` | https://github.com/torvalds/linux/blob/v7.3/arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts | yes |
 | S10 | NXP Linux fork (`linux-imx`), same device tree file | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/linux-imx/blob/lf-6.18.37-2.1.0/arch/arm64/boot/dts/freescale/imx95-19x19-frdm-pro.dts | yes |
 | S11 | Sibling record `docs/platform-image/build-system-options.md`, not yet on `main` (`meta-imx` and the `imx-6.18.37-2.1.0` manifest) | this repository, issue #31 | — | yes |
-| U1 | UM12527, FRDM-IMX95-PRO board user manual (SW4 boot switch table, boot device list) | n/a | https://www.nxp.com/docs/en/user-manual/UM12527.pdf | **no** (HTTP 404 from the lane) |
-| U2 | NXP FRDM-IMX95-PRO product page | n/a | https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-IMX95-PRO | **no** (HTTP 404 from the lane) |
-| U3 | i.MX Linux User's Guide (flashing and boot-switch chapters) | n/a | https://www.nxp.com/docs/en/user-guide/IMX_LINUX_USERS_GUIDE.pdf | **no** (HTTP 404 from the lane) |
-| U4 | IMX95RM, i.MX 95 Reference Manual (boot ROM, boot media offsets, fallback) | n/a | https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf | **no** (HTTP 404 from the lane) |
+| U1 | UM12527, FRDM-IMX95-PRO board user manual (SW4 boot switch table, boot device list) | n/a | https://www.nxp.com/docs/en/user-manual/UM12527.pdf | **no** (HTTP 404 from the survey) |
+| U2 | NXP FRDM-IMX95-PRO product page | n/a | https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-IMX95-PRO | **no** (HTTP 404 from the survey) |
+| U3 | i.MX Linux User's Guide (flashing and boot-switch chapters) | n/a | https://www.nxp.com/docs/en/user-guide/IMX_LINUX_USERS_GUIDE.pdf | **no** (HTTP 404 from the survey) |
+| U4 | IMX95RM, i.MX 95 Reference Manual (boot ROM, boot media offsets, fallback) | n/a | https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf | **no** (HTTP 404 from the survey) |
 | U5 | i.MX 95 Security Reference Manual | n/a | not public (NXP secure-files access) | **no** |
 
-The NXP web pages (U1 to U4) answered every request from the lane with the
+The NXP web pages (U1 to U4) answered every request from the survey with the
 same short 404 page. That may be bot filtering and not a missing document.
 Everything that depends on the board manual or the reference manual is
 therefore **Unconfirmed** below.
