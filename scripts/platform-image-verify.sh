@@ -133,6 +133,16 @@ else
 
 	# An SBOM for each target, listed in SHA256SUMS.
 	if [ -f "$out/SHA256SUMS" ] && [ -n "${bi[targets]+x}" ]; then
+		# targets= must name the production target, and only known targets.
+		tprod=0
+		for t in ${bi[targets]}; do
+			case $t in
+			trusted-imx95-image) tprod=1 ;;
+			trusted-imx95-image-debug) ;;
+			*) fail "build-info.txt: unknown target $t" ;;
+			esac
+		done
+		[ "$tprod" -eq 1 ] || fail "build-info.txt: targets= is empty or lacks trusted-imx95-image"
 		for t in ${bi[targets]}; do
 			found=0
 			while IFS= read -r line || [ -n "$line" ]; do
@@ -141,6 +151,18 @@ else
 				case $n in "$t-${lk[machine]:-${bi[machine]:-}}"*.spdx.json) found=1 ;; esac
 			done <"$out/SHA256SUMS"
 			[ "$found" -eq 1 ] || fail "$t: no .spdx.json listed in SHA256SUMS"
+
+			# A real wic or rootfs image, not a bmap, manifest or SBOM alone.
+			ifound=0
+			while IFS= read -r line || [ -n "$line" ]; do
+				n=${line#*[ ]}
+				n=${n#[ *]}
+				case $n in
+				"$t-${lk[machine]:-${bi[machine]:-}}"*.wic.bmap | "$t-${lk[machine]:-${bi[machine]:-}}"*.manifest | "$t-${lk[machine]:-${bi[machine]:-}}"*.spdx.json) ;;
+				"$t-${lk[machine]:-${bi[machine]:-}}"*.wic* | "$t-${lk[machine]:-${bi[machine]:-}}"*.rootfs*) ifound=1 ;;
+				esac
+			done <"$out/SHA256SUMS"
+			[ "$ifound" -eq 1 ] || fail "$t: no wic or rootfs image listed in SHA256SUMS"
 
 			# The production target's package manifest holds no debug package.
 			[ "$t" = trusted-imx95-image ] || continue

@@ -109,6 +109,34 @@ rm "$d/$t-$machine.rootfs-20261123000001.spdx.json"
 run bash "$script" "$d"
 check "a missing SBOM" 1 "$t: no .spdx.json listed"
 
+# settargets VALUE: rewrite targets= in $d/build-info.txt.
+settargets() {
+	local line
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in targets=*) line="targets=$1" ;; esac
+		printf '%s\n' "$line"
+	done <"$d/build-info.txt" >"$d/build-info.new"
+	mv "$d/build-info.new" "$d/build-info.txt"
+}
+mk "$d"
+settargets ""
+run bash "$script" "$d"
+check "targets= empty" 1 "targets= is empty or lacks trusted-imx95-image"
+mk "$d"
+settargets "$t bogus-image"
+run bash "$script" "$d"
+check "an unknown target" 1 "unknown target bogus-image"
+mk "$d"
+settargets "$t-debug"
+run bash "$script" "$d"
+check "no production target" 1 "targets= is empty or lacks trusted-imx95-image"
+mk "$d"
+rm "$d/$t-$machine.rootfs-20261123000001.wic.zst"
+echo bmap >"$d/$t-$machine.rootfs-20261123000001.wic.bmap"
+(cd "$d" && sha256sum -- $t-* >SHA256SUMS)
+run bash "$script" "$d"
+check "a bmap and no image" 1 "$t: no wic or rootfs image listed"
+
 # The production manifest holds no debug package (named in the debug recipe).
 mf=$d/$t-$machine.rootfs-20261123000001.manifest
 rehash() {
@@ -155,10 +183,11 @@ mk "$d"
 dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
 printf 'busybox cortexa55 1.36\ngdb cortexa55 14.2\n' >"$dm.manifest"
 echo spdx >"$dm.spdx.json"
+echo wic >"$dm.wic.zst"
 rehash
 sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
 run bash "$script" "$d"
-check "debug package in the debug target's manifest" 0 "OK, 5 artefacts"
+check "debug package in the debug target's manifest" 0 "OK, 6 artefacts"
 
 # A package manager in the production manifest fails; the name is matched whole.
 mk "$d"
@@ -183,10 +212,11 @@ mk "$d"
 dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
 printf 'busybox cortexa55 1.36\nrpm cortexa55 4\n' >"$dm.manifest"
 echo spdx >"$dm.spdx.json"
+echo wic >"$dm.wic.zst"
 rehash
 sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
 run bash "$script" "$d"
-check "rpm in the debug target's manifest" 0 "OK, 5 artefacts"
+check "rpm in the debug target's manifest" 0 "OK, 6 artefacts"
 
 # Several problems are all named.
 mk "$d" yes
