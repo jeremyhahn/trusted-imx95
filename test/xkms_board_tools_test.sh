@@ -107,6 +107,33 @@ cat >"$fakebin/df" <<'EOF'
 echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
 echo "fake 99999999 0 $FAKE_DF_FREE 0% /"
 EOF
+cat >"$fakebin/xkmsctl" <<'EOF'
+#!/bin/bash
+# Stub xkmsctl: keys are files in $FAKE_KMS. FAKE_CTL_FAIL lists the verbs
+# that fail (generate, encrypt, sign, get, list, verify); "badsig" makes sign
+# answer without a signature.
+k=$FAKE_KMS
+a=()
+while [ $# -gt 0 ]; do case $1 in -o | --server) shift 2 ;; *) a+=("$1"); shift ;; esac; done
+set -- "${a[@]}"
+[ "$1" = key ] || exit 2
+v=$2 id=${3:-}
+case " ${FAKE_CTL_FAIL:-} " in *" $v "*) echo "error: $v failed" >&2; exit 1 ;; esac
+case $v in
+generate) : >"$k/$id" ;;
+list) ls "$k" ;;
+get) [ -e "$k/$id" ] && echo "{\"id\":\"$id\"}" ;;
+delete) [ -e "$k/$id" ] && rm -f "$k/$id" ;;
+encrypt) [ -e "$k/$id" ] && echo "{\"ciphertext\":\"c-$4\",\"nonce\":\"n\",\"tag\":\"t\"}" ;;
+decrypt) [ -e "$k/$id" ] && echo "${4#c-}" ;;
+sign)
+	[ -e "$k/$id" ] || exit 1
+	case " ${FAKE_CTL_FAIL:-} " in *" badsig "*) echo '{"error":"none"}' ;; *) echo "{\"signature\":\"s-$id-$4\"}" ;; esac
+	;;
+verify) [ -e "$k/$id" ] && [ "$5" = "s-$id-$4" ] ;;
+*) exit 2 ;;
+esac
+EOF
 chmod +x "$fakebin"/*
 # The board has neither: the PATH is the fake bin plus symlinks to every host
 # tool except ss and netstat, so a host ss never shows through.
@@ -348,6 +375,29 @@ ok "prune: the second oldest is gone" [ ! -e "$R/var/backups/xkms/20260102T00000
 ok "prune: the newest remains" [ -d "$R/var/backups/xkms/20260107T000000Z" ]
 XKMS_KEEP=2 XKMS_STAMP=20260108T000000Z D "$tmp/p8.log" board.invalid "$tmp/b-new"
 ok "prune: XKMS_KEEP=2 keeps 2" [ "$(ls "$R/var/backups/xkms" | wc -l)" = 2 ]
+
+# --- burn-in lib against the fake xkmsctl --------------------------------------
+lib=$here/scripts/xkms/burnin/lib.sh
+LB() { # LB <log> <code>: run <code> with lib.sh sourced, against the fake xkmsctl; set RC
+	rm -rf "$tmp/kms" "$tmp/bi"
+	mkdir -p "$tmp/kms" "$tmp/bi"
+	set +e
+	FAKE_KMS=$tmp/kms XKMS_CTL=xkmsctl XKMS_WORK=$tmp/bi XKMS_BOARD=board.invalid BI_WRITE_CERT=0 \
+		bash -c 'source "$1"; eval "$2"' _ "$lib" "$2" >"$1" 2>&1
+	RC=$?
+	set -e
+}
+# generate is acknowledged, every follow-up call fails, and refused writes are
+# notes only (BI_WRITE_FAIL_OK=1): the ids must still be owed
+# shellcheck disable=SC2016 # the code runs in LB's shell, with lib.sh sourced
+ackset='BI_WRITE_FAIL_OK=1; export FAKE_CTL_FAIL="encrypt sign get"; bi_write_set s 2 bi-x; unset FAKE_CTL_FAIL; cat "$(bi_ledger s)"'
+LB "$tmp/l1.log" "$ackset; bi_verify_set s; bi_summary t"
+ok "acknowledged create, failed follow-up: the id is in the ledger" out_has "$tmp/l1.log" "ack|bi-x-0|"
+ok "acknowledged create, failed follow-up: so is the signing key" out_has "$tmp/l1.log" "ack|bi-x-1|"
+ok "acknowledged create, failed follow-up: verify passes while the keys exist" [ "$RC" = 0 ]
+LB "$tmp/l2.log" "$ackset; rm -f \"\$FAKE_KMS/bi-x-0\"; bi_verify_set s; bi_summary t"
+ok "acknowledged key missing: verify FAILs" [ "$RC" != 0 ]
+ok "acknowledged key missing: CRITICAL names it" out_has "$tmp/l2.log" "CRITICAL: acknowledged key bi-x-0 does not exist"
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do

@@ -66,7 +66,8 @@ for ((r = 1; r <= rounds; r++)); do
 			# unique id: owed once acknowledged
 			u="bi-cc-$stamp-u-$r-$c"
 			if bi_ctl key generate "$u" --key-type symmetric --algorithm aes-256-gcm --key-size 256 >/dev/null 2>&1; then
-				j=$(bi_ctl -o json key get "$u" 2>/dev/null) && echo "meta|$u|$(printf '%s' "$j" | bi_sha)|||" >"$BI_WORK/cc.uniq.$c"
+				bi_ack "$BI_WORK/cc.uniq.$c" "$u"
+				j=$(bi_ctl -o json key get "$u" 2>/dev/null) && echo "meta|$u|$(printf '%s' "$j" | bi_sha)|||" >>"$BI_WORK/cc.uniq.$c"
 			fi
 		) &
 	done

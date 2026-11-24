@@ -185,6 +185,11 @@ bi_restart() {
 
 bi_ledger() { echo "$BI_WORK/ledger.${1:-main}"; }
 
+# bi_ack <ledger> <id>: xkmsd acknowledged the create of <id>; from now the key
+# is owed. Record it before any follow-up call, so a failed or skipped read
+# (BI_WRITE_FAIL_OK included) can never drop it from the verification.
+bi_ack() { echo "ack|$2||||" >>"$1"; }
+
 # bi_write_set <name> <count> <prefix>: write count keys, a signature or ciphertext each, and a certificate.
 bi_write_set() {
 	local name=$1 n=$2 pfx=$3 i id j ct nonce tag sig L
@@ -196,7 +201,8 @@ bi_write_set() {
 				bi_wfail "write $id: generate"
 				continue
 			}
-			j=$(bi_ctl -o json key encrypt "$id" "plain-$id" 2>/dev/null) || { bi_wfail "write $id: encrypt"; continue; }
+			bi_ack "$L" "$id"
+			j=$(bi_ctl -o json key encrypt "$id" "plain-$id" 2>/dev/null) || { bi_wfail "write $id: encrypt after an acknowledged create"; continue; }
 			ct=$(bi_jget "$j" ciphertext) nonce=$(bi_jget "$j" nonce) tag=$(bi_jget "$j" tag)
 			echo "sym|$id|$ct|$nonce|$tag|plain-$id" >>"$L"
 		else
@@ -204,11 +210,12 @@ bi_write_set() {
 				bi_wfail "write $id: generate"
 				continue
 			}
-			j=$(bi_ctl -o json key sign "$id" "msg-$id" 2>/dev/null) || { bi_wfail "write $id: sign"; continue; }
+			bi_ack "$L" "$id"
+			j=$(bi_ctl -o json key sign "$id" "msg-$id" 2>/dev/null) || { bi_wfail "write $id: sign after an acknowledged create"; continue; }
 			sig=$(bi_jget "$j" signature)
 			echo "sig|$id|$sig|msg-$id||" >>"$L"
 		fi
-		j=$(bi_ctl -o json key get "$id" 2>/dev/null) || { bi_wfail "write $id: get"; continue; }
+		j=$(bi_ctl -o json key get "$id" 2>/dev/null) || { bi_wfail "write $id: get after an acknowledged create"; continue; }
 		echo "meta|$id|$(printf '%s' "$j" | bi_sha)|||" >>"$L"
 	done
 	[ "${BI_WRITE_CERT:-1}" = 1 ] || return 0
@@ -232,6 +239,12 @@ bi_verify_set() {
 	while IFS='|' read -r kind id a b c d; do
 		n=$((n + 1))
 		case $kind in
+		ack)
+			if ! bi_ctl key get "$id" >/dev/null 2>&1; then
+				bi_crit "acknowledged key $id does not exist"
+				bad=$((bad + 1))
+			fi
+			;;
 		meta)
 			if ! j=$(bi_ctl -o json key get "$id" 2>/dev/null); then
 				bi_crit "acknowledged key $id is gone"

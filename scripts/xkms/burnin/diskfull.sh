@@ -92,6 +92,7 @@ for ((i = 0; i < attempts; i++)); do
 	else
 		# acknowledged: from now it is owed
 		BI_REFUSED=0
+		bi_ack "$(bi_ledger full)" "bi-df-$stamp-full-$i"
 		j=$(bi_ctl -o json key get "bi-df-$stamp-full-$i" 2>/dev/null) && echo "meta|bi-df-$stamp-full-$i|$(printf '%s' "$j" | bi_sha)|||" >>"$(bi_ledger full)"
 	fi
 done
@@ -105,12 +106,16 @@ free_disk
 bi_check "filler removed" [ "$freed" -eq 1 ]
 n_after=0
 for ((i = 0; i < 5; i++)); do
-	if bi_ctl key generate "bi-df-$stamp-after-$i" --key-type symmetric --algorithm aes-256-gcm --key-size 256 >/dev/null 2>&1; then n_after=$((n_after + 1)); fi
+	if bi_ctl key generate "bi-df-$stamp-after-$i" --key-type symmetric --algorithm aes-256-gcm --key-size 256 >/dev/null 2>&1; then
+		n_after=$((n_after + 1))
+		bi_ack "$(bi_ledger after)" "bi-df-$stamp-after-$i"
+	fi
 done
 bi_check "writes work again once space is free (5 of 5)" [ "$n_after" -eq 5 ]
 bi_check "graceful restart" bi_restart graceful
 bi_verify_set base
 [ ! -s "$(bi_ledger full)" ] || bi_verify_set full
+[ ! -s "$(bi_ledger after)" ] || bi_verify_set after
 
 echo "work dir (ledgers, no key material): $BI_WORK"
 bi_summary diskfull

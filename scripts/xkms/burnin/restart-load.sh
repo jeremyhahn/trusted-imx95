@@ -81,7 +81,7 @@ acked=0
 for ((w = 1; w <= writers; w++)); do
 	L=$(bi_ledger "w$w")
 	[ -s "$L" ] || continue
-	acked=$((acked + $(grep -c '^meta|' "$L")))
+	acked=$((acked + $(grep -c '^ack|' "$L")))
 	bi_verify_set "w$w"
 done
 echo "acknowledged writes recorded: $acked"
