@@ -13,7 +13,7 @@
 # ELE_ATTEST_CMD is run as: $ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT
 # and must write the signed region and the 96-byte signature there, exit 0.
 # No interpreter: the bundle is composed in shell with base64, tr, stat and od
-# (the production image has no python3). --ek-template matches
+# (the production image has no script interpreter beyond the shell). --ek-template matches
 # [A-Za-z0-9._-]{1,64}, refused with exit 2 before the enclave command runs.
 set -euo pipefail
 
