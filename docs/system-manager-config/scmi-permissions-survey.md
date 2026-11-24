@@ -468,8 +468,12 @@ Status: provisional and open. The PRO generated table gives ALL
 `make system-manager` now checks that on every build
 (`scripts/sm-perf-check.sh`); the other vendor-cited items (1 and 3-7 of
 8.2) stay cited and open, because reviewers cannot confirm them under the
-cite-only rule (8.0). No `.cfg` patch is made. The #13 delta is still
-pending owner approval.
+cite-only rule (8.0). No `.cfg` patch is made. Rulings 1243 and 1244 approved row 167 after
+this survey; whatever they do not decide (the rest of the #13 delta, TENANT
+ASK 1) stays proposed, pending owner approval. This section's status word
+is "provisional and open" throughout: it states what the repository checks
+(8.0 (i)) and what is cited only (8.0 (ii)), and decides neither the
+cited items nor the numeric ID of `PERF_M7`.
 
 Source: NXP `imx-sm` at the revision pinned in `system-manager/sm.lock`
 (tag `lf-6.18.37-2.1.0`, commit `eec232878ab7`). It was fetched as
@@ -503,10 +507,14 @@ other agent holds it. `scripts/sm-perf-check.sh` (expected value at line
 the two build trees, and `scripts/sm-build.sh` (lines 189-190) fails the
 build when it does not hold. It prints `sm-perf-check: M7 PERF_M7=ALL, no
 other agent` and the manifest gets the line `m7_perf_m7=ALL` (line 208).
-The CI job "System Manager build with the pinned Arm toolchain" runs it
-through `scripts/sm-toolchain-check.sh`, the script behind
-`make sm-toolchain-check`, which builds with `make system-manager`. The CI result is not recorded yet; the
-coordinator records it after the PR's run. `bash test/sm_build_test.sh`
+The CI job "System Manager build with the pinned Arm toolchain"
+(`system-manager-build` in `.github/workflows/ci.yml`) runs it through
+`scripts/sm-toolchain-check.sh`, the script behind `make sm-toolchain-check`,
+which builds with `make system-manager`. That job runs only when the PR is
+not a draft; no CI run on the head that carries this text has run it yet,
+so no CI result is claimed. What was run is the lane run recorded in
+`docs/plans/167.md` ("Recorded run, 2026-11-24"), on the real pinned source
+and not in CI. `bash test/sm_build_test.sh`
 covers the check offline, on synthetic tables written in the test.
 
 Also checked by this repository: item 7 of 8.2, where a `PERF_M7  PRIV`
@@ -519,8 +527,41 @@ the table for two scratch variants of the built tree (the tree and
 and 3-6 of 8.2 (item 7's outcome is checked, its reading of `configtool.pl`
 is not) and the citations of 8.3 and 8.4: the `rpc_scmi_perf.c`,
 `lmm_perf.c`, `configtool.pl`, `m7mix.cfg`, `mx95frdm-pro.cfg` and
-`mx95evk.cfg` lines. They were read once by the lane and have not been
-reviewed independently; they stay provisional and open.
+`mx95evk.cfg` lines. They were read by the lane twice (8.2, then the note below) and have not
+been reviewed independently; they stay provisional and open. The note
+below lists each runtime claim with its file and line.
+
+**Reproduce the vendor read.** Upstream: `https://github.com/nxp-imx/imx-sm`,
+tag `lf-6.18.37-2.1.0`, commit `eec232878ab7dd460f5a8f3767d39dc7e9412efa`.
+Fetch it as `scripts/sm-build.sh` does (lines 139-143, 164-165), into the
+git-ignored `out/` (create the parent first), never into a tracked path:
+
+```
+mkdir -p out/cache
+git init -q --bare out/cache/imx-sm.git
+git -C out/cache/imx-sm.git fetch -q --depth 1 https://github.com/nxp-imx/imx-sm \
+    +refs/tags/lf-6.18.37-2.1.0:refs/tags/lf-6.18.37-2.1.0
+git -C out/cache/imx-sm.git rev-parse 'refs/tags/lf-6.18.37-2.1.0^{commit}'
+git -c advice.detachedHead=false clone -q --no-checkout out/cache/imx-sm.git out/tree
+git -C out/tree checkout -q --detach eec232878ab7dd460f5a8f3767d39dc7e9412efa
+```
+
+The `rev-parse` must print the commit above. Runtime claims, re-read against
+that tree on 2026-11-24 (**read twice**: the first reading is the one
+8.2 records; the second is this one, by line number, and agreed):
+
+- Level set needs PRIV, else `SM_ERR_DENIED`, then `LMM_PerfLevelSet`:
+  `sm/rpc/scmi/rpc_scmi_perf.c:1098-1111` (compare at `:1101`, call at `:1109`).
+- Limits set needs SET, then `SM_ERR_NOT_SUPPORTED`: `rpc_scmi_perf.c:955-967`.
+- Domain attributes report PRIV and SET rights: `rpc_scmi_perf.c:743-755`;
+  Level Indexing Mode: `:740`.
+- Index range check, `SM_ERR_INVALID_PARAMETERS`: `sm/lmm/lmm_perf.c:130-132`.
+- Aggregation (highest request across LMs, a `MAX` over per-LM levels):
+  `sm/lmm/lmm_perf.c:139-153` (the `MAX` at `:148`).
+- Precedence and derivation of the grant: `configs/configtool.pl:2410`
+  (`get_perms`), the write of `SM_SCMI_PERM_<PERM>` at `:2506`;
+  `devices/MIMX95/configtool/m7mix.cfg:39` (`PERF_M7` bundled with `M7P`);
+  `configs/other/mx95frdm-pro.cfg:396` (`M7P  OWNER`).
 
 - Confirmable from this repository alone: the lock pins, the patch
   contents, that `system-manager/patches/` leaves `M7P` and `PERF_M7`
@@ -548,8 +589,9 @@ It stays provisional and open for (ii): why the table says ALL
 (ownership of `M7P`, item 1), that `PERFORMANCE_LEVEL_SET` needs only
 PRIV (item 3), and that an explicit line would not lower the grant
 (item 7) are cited at the pinned revision, not confirmable by review
-under the cite-only rule (the placement outcome of item 7 is checked in
-CI, 8.0).
+under the cite-only rule (the placement outcome of item 7 is checked by
+`scripts/sm-perf-placement-check.sh`, run by the non-draft CI job named in
+8.0 and by the lane run recorded in `docs/plans/167.md`).
 
 ### 8.2 Evidence
 
@@ -571,8 +613,9 @@ CI, 8.0).
    it. This is checked by this repository on every build:
    `scripts/sm-perf-check.sh` (lines 21 and 72-79), called from
    `scripts/sm-build.sh` (lines 189-190), fails unless the M7 record
-   holds the one line at ALL; CI runs it through the job named in 8.0;
-   the manifest line is `m7_perf_m7=ALL`. The rest of this item is
+   holds the one line at ALL; the CI job named in 8.0 runs it when the PR is
+   not a draft (no CI run of it is claimed here; the lane run is in
+   `docs/plans/167.md`); the manifest line is `m7_perf_m7=ALL`. The rest of this item is
    cited only (ii). The tool derives such a line in `get_perms`
    (`configs/configtool.pl:2410`): it takes each protocol's `perf=<perm>`
    word on the agent's lines (`:2461-2463`), keeps one value per
@@ -616,8 +659,9 @@ CI, 8.0).
    `M7P  OWNER` must give PRIV, read back with `scripts/sm-perf-check.sh
    --want` (line 30). The anchors are found by content in the M7 block, and
    a missing one fails the check. The variants are not patches and are
-   never committed; the CI result is recorded by the coordinator after the
-   PR's run. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
+   never committed. The CI job named in 8.0 runs the check when the PR is not
+   a draft; no CI run of it is claimed yet, and the lane run in
+   `docs/plans/167.md` observed ALL and PRIV. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
    later lines by two (0002 removes two test grants from the API list),
    which does not alter any entry cited here.
 
@@ -652,8 +696,9 @@ file.
 
 - Text only, no patch: if the owner wants the grant lower than ALL, a
   `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM; in the
-  API list it changes nothing. Both placements are tested in CI by
-  `scripts/sm-perf-placement-check.sh` (item 7). Proposed, pending owner
+  API list it changes nothing. Both placements are tested by
+  `scripts/sm-perf-placement-check.sh` (item 7), which the non-draft CI job
+  named in 8.0 runs and the lane run in `docs/plans/167.md` ran. Proposed, pending owner
   approval, and not needed for the M7 to set its level.
 - Check for the image build: done by #167 (`scripts/sm-perf-check.sh`,
   run by `scripts/sm-build.sh` on every build, 8.0 (i)). It asserts that
