@@ -115,6 +115,14 @@ printf 'tee' >"$TMP_ROOT/sw/tee.bin"
 # what make secure-world publishes: SHA256SUMS and build-info.txt with the lock: line
 (cd "$TMP_ROOT/sw" && sha256sum bl31.bin tee.bin >SHA256SUMS)
 printf 'lock: %s\nrelease: test\n' "$(sha256sum "$ROOT/secure-world/bsp.lock" | cut -d' ' -f1)" >"$TMP_ROOT/sw/build-info.txt"
+# what make system-manager publishes: SHA256SUMS and sm-manifest.txt (the sm.lock lines, then the build lines)
+(cd "$TMP_ROOT/sm" && sha256sum m33_image.bin >SHA256SUMS)
+{
+	while IFS= read -r l || [ -n "$l" ]; do
+		case "$l" in '' | '#'*) ;; *) echo "$l" ;; esac
+	done <"$ROOT/system-manager/sm.lock"
+	printf 'source_date_epoch=1\nbuild1_sha256=%s\nbuild2_sha256=%s\nreproducible=yes\n' x x
+} >"$TMP_ROOT/sm/sm-manifest.txt"
 run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/in2"
 check "collect: System Manager, BL31 and tee.bin come from their make outputs" 0
 if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" ' real ')" -eq 3 ] && [ "$(cat "$TMP_ROOT/in2/tee.bin")" = tee ]; then
@@ -152,6 +160,44 @@ sw_refused() { # sw_refused <label> <mutation> <message>
 		fail "collect: $1 leaves no inputs.txt" "$(cat "$TMP_ROOT/inx/inputs.txt")"
 	fi
 }
+
+# The System Manager from make system-manager is checked against that build; a --system-manager file is not
+sm_case() { # sm_case <name> <mutation command run in the copy>
+	rm -rf "$TMP_ROOT/smx" "$TMP_ROOT/inx"
+	cp -r "$TMP_ROOT/sm" "$TMP_ROOT/smx"
+	(cd "$TMP_ROOT/smx" && eval "$2")
+	run env SM_OUT="$TMP_ROOT/smx" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/inx"
+}
+# sm_line <key> [replacement]: in sm-manifest.txt, replace the <key>= line, or drop it with no replacement
+sm_line() {
+	local l
+	mv sm-manifest.txt sm-manifest.old
+	while IFS= read -r l || [ -n "$l" ]; do
+		case "$l" in "$1="*) [ -z "${2:-}" ] || echo "$2" ;; *) echo "$l" ;; esac
+	done <sm-manifest.old >sm-manifest.txt
+}
+sm_case x ':'
+check "collect: a matching SHA256SUMS and sm-manifest.txt keep the System Manager real" 0
+expect "collect: the System Manager is real after the build check" [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'm33_image.bin real')" -eq 1 ]
+sm_refused() { # sm_refused <label> <mutation> <message>
+	sm_case x "$2"
+	check "collect: $1 is refused" nonzero "m33_image.bin" "$3"
+	expect "collect: $1 leaves no inputs.txt" [ ! -e "$TMP_ROOT/inx/inputs.txt" ]
+}
+sm_refused "a changed System Manager byte" "printf 'X' | dd of=m33_image.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "SHA-256"
+sm_refused "a System Manager with no SHA256SUMS" "rm SHA256SUMS" "SHA256SUMS missing"
+sm_refused "a System Manager SHA256SUMS with no m33_image.bin entry" ": >SHA256SUMS" "no entry for m33_image.bin"
+sm_refused "a System Manager with no sm-manifest.txt" "rm sm-manifest.txt" "sm-manifest.txt missing"
+sm_refused "a System Manager built from a different sm.lock value" "sm_line sm_tag sm_tag=other" "sm.lock pins sm_tag="
+sm_refused "a System Manager manifest without an sm.lock key" "sm_line sm_commit" "has no sm_commit line"
+sm_refused "a System Manager that is not reproducible" "sm_line reproducible reproducible=no" "does not say reproducible=yes"
+sm_refused "a System Manager manifest without a reproducible line" "sm_line reproducible" "does not say reproducible=yes"
+rm -rf "$TMP_ROOT/smx" "$TMP_ROOT/inx"
+cp -r "$TMP_ROOT/sm" "$TMP_ROOT/smx"
+printf 'X' | dd of="$TMP_ROOT/smx/m33_image.bin" bs=1 seek=1 conv=notrunc 2>/dev/null
+run env SM_OUT="$TMP_ROOT/no-sm" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/inx" --system-manager "$TMP_ROOT/smx/m33_image.bin"
+check "collect: a --system-manager file is not checked against SM_OUT" 0
+expect "collect: a --system-manager file is taken as real" [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'm33_image.bin real')" -eq 1 ]
 sw_refused "a changed bl31.bin byte" "printf 'X' | dd of=bl31.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "bl31.bin: SHA-256"
 sw_refused "a changed tee.bin byte" "printf 'X' | dd of=tee.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "tee.bin: SHA-256"
 sw_refused "a missing SHA256SUMS" "rm SHA256SUMS" "SHA256SUMS: missing"

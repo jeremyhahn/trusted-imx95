@@ -19,7 +19,10 @@
 #       $SM_OUT/m33_image.bin (make system-manager), BL31 and tee.bin to
 #       $SW_OUT (make secure-world) when those files exist. The M7 image is
 #       trusted-firmware's (docs/SPEC.md): --m7 FILE when given, else a
-#       STAND-IN. An input with no
+#       STAND-IN. m33_image.bin taken from $SM_OUT is real only if SHA256SUMS
+#       and sm-manifest.txt there match it and system-manager/sm.lock and say
+#       reproducible=yes; --system-manager, --bl31 and --tee files are not
+#       checked. An input with no
 #       file is replaced by a STAND-IN payload (a labelled random blob, not a
 #       real image) and inputs.txt says "STAND-IN". The pins are checked first.
 #
@@ -158,7 +161,8 @@ mkdir -p "$dir"
 # default locations of what this repository builds
 sm_default=${SM_OUT:-$root/out/system-manager}/m33_image.bin
 sw_default=${SW_OUT:-$root/.secure-world/out}
-[ -n "${given[system-manager]:-}" ] || { [ ! -f "$sm_default" ] || given[system-manager]=$sm_default; }
+sm_used=0
+[ -n "${given[system-manager]:-}" ] || { [ ! -f "$sm_default" ] || { given[system-manager]=$sm_default; sm_used=1; }; }
 sw_used=()
 [ -n "${given[bl31]:-}" ] || { [ ! -f "$sw_default/bl31.bin" ] || { given[bl31]=$sw_default/bl31.bin; sw_used+=(bl31.bin); }; }
 [ -n "${given[tee]:-}" ] || { [ ! -f "$sw_default/tee.bin" ] || { given[tee]=$sw_default/tee.bin; sw_used+=(tee.bin); }; }
@@ -182,6 +186,39 @@ check_sw_build() {
 	[ "$infolock" = "$locksum" ] || die "$info: lock: $infolock is not the SHA-256 of secure-world/bsp.lock ($locksum); rebuild with make secure-world"
 }
 [ "${#sw_used[@]}" -eq 0 ] || check_sw_build
+
+# check_sm_build: m33_image.bin taken from the make system-manager output
+# (not given with --system-manager) must match that build: SHA256SUMS has its
+# digest, sm-manifest.txt repeats every system-manager/sm.lock key=value, and
+# says reproducible=yes. Both files are read, never sourced.
+check_sm_build() {
+	local d=${sm_default%/*} sums sman f=$sm_default want got line k mline found
+	sums=$d/SHA256SUMS
+	sman=$d/sm-manifest.txt
+	[ -f "$sums" ] || die "$f: $sums missing; $d is not a verified make system-manager output"
+	[ -f "$sman" ] || die "$f: $sman missing; $d is not a verified make system-manager output"
+	want=$(while read -r h n; do if [ "${n#\*}" = m33_image.bin ]; then echo "$h"; fi; done <"$sums")
+	[ -n "$want" ] || die "$f: $sums has no entry for m33_image.bin"
+	got=$(sha "$f")
+	[ "$got" = "$want" ] || die "$f: SHA-256 $got differs from $sums ($want)"
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in '' | '#'*) continue ;; esac
+		[[ $line =~ ^([a-z0-9_]+)=(.+)$ ]] || die "$root/system-manager/sm.lock: not key=value: $line"
+		k=${BASH_REMATCH[1]}
+		found=
+		while IFS= read -r mline || [ -n "$mline" ]; do
+			case "$mline" in "$k="*) found=$mline; break ;; esac
+		done <"$sman"
+		[ -n "$found" ] || die "$f: $sman has no $k line; sm.lock pins $line"
+		[ "$found" = "$line" ] || die "$f: $sman has $found but sm.lock pins $line; rebuild with make system-manager"
+	done <"$root/system-manager/sm.lock"
+	found=
+	while IFS= read -r mline || [ -n "$mline" ]; do
+		[ "$mline" != reproducible=yes ] || found=1
+	done <"$sman"
+	[ -n "$found" ] || die "$f: $sman does not say reproducible=yes"
+}
+[ "$sm_used" -eq 0 ] || check_sm_build
 
 : >"$dir/inputs.txt"
 # take <key> <file name in DIR> <label>
