@@ -1,0 +1,47 @@
+# Container manifest of the test boot image for scripts/ahab/policy-check.sh,
+# used by scripts/ahab/boot-image.sh (docs/boot-container/boot-image.md;
+# PROVISIONAL). Separate from container-manifest.yaml, which is #12's own file
+# and stays as #12 leaves it.
+#
+# Three OEM positions, in the order of boot-image.yaml. The entries are listed as
+# nxpimage ahab parse reports them (core_id, image_type). Every sha256, load
+# address and entry point is a policy:<KEY> value that boot-image.sh writes into
+# a policy file in its work directory from the image it just built; no digest or
+# address is committed here.
+containers:
+  - role: oem
+    images:
+      - core_id: ele
+        image_type: ele
+        sha256: policy:ELE_IMAGE_SHA256
+        load_address: policy:ELE_LOAD_ADDRESS
+        entry_point: policy:ELE_ENTRY_POINT
+  - role: oem
+    images:
+      - core_id: cortex-m33
+        image_type: executable
+        sha256: policy:SYSMGR_IMAGE_SHA256
+        load_address: policy:SYSMGR_LOAD_ADDRESS
+        entry_point: policy:SYSMGR_ENTRY_POINT
+      - core_id: cortex-m7-1
+        image_type: executable
+        sha256: policy:M7_IMAGE_SHA256
+        load_address: policy:M7_LOAD_ADDRESS
+        entry_point: policy:M7_ENTRY_POINT
+  - role: oem
+    images:
+      - core_id: cortex-a55
+        image_type: executable
+        sha256: policy:ATF_IMAGE_SHA256
+        load_address: policy:ATF_LOAD_ADDRESS
+        entry_point: policy:ATF_ENTRY_POINT
+      - core_id: cortex-a55
+        image_type: executable
+        sha256: policy:UBOOT_IMAGE_SHA256
+        load_address: policy:UBOOT_LOAD_ADDRESS
+        entry_point: policy:UBOOT_ENTRY_POINT
+      - core_id: cortex-a55
+        image_type: executable
+        sha256: policy:TEE_IMAGE_SHA256
+        load_address: policy:TEE_LOAD_ADDRESS
+        entry_point: policy:TEE_ENTRY_POINT

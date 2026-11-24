@@ -1,0 +1,9 @@
+# Reserve the secure-enclave device node for the xkmsd service account.
+#
+# Requirement R6 (docs/hsm-device-protocol/xkmsd-node.md section 3): proposed,
+# pending owner approval. The driver sets no mode on the node
+# (docs/hsm-device-protocol/enclave-interface-trace.md (a)), so the device
+# manager decides; this rule is the image's decision
+# (docs/hsm-device-protocol/local-seam-trace.md (d)). The kernel name is the
+# one the trace records.
+KERNEL=="hsm0_ch0", OWNER="root", GROUP="xkmsd", MODE="0660"

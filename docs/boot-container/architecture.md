@@ -48,6 +48,8 @@ not give.
 - The build never reads the Code Signing Tool from this repository: it takes the tool's directory from
   `CST_PATH`, and stops naming the variable when it is unset ([references/README.md](../references/README.md),
   "The Code Signing Tool in the build").
+- The test-PKI boot image, its containers, inputs, pins and stand-ins are in
+  [boot-image.md](boot-image.md) (provisional).
 - The PKI tree the containers chain to, and the commands that sign a container, are in CST_UG and CST-HSM_UG;
   they are not restated here, and none is chosen until the tool is (see [Open questions](#open-questions)).
 
