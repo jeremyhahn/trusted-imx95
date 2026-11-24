@@ -7,8 +7,10 @@
 # Families: forward-lifecycle and OEM close/lock messages; ahab_close,
 # ahab_return_lifecycle, ahab_lock; fuse burns (nxpele commit -i <fuse group>,
 # ahab_commit, ahab_sec_fuse_prog, nxpele signed-message (the signed secure-fuse path),
-# write-fuse verbs, fuse prog/override, blhost efuse). Commands split by backslash
-# continuations are joined before matching.
+# write-fuse verbs, fuse prog/override, blhost efuse); any nxpfuses use (SPSDK
+# whole-configuration fuse programming); a write (>, >>, tee, dd of=) to an nvmem or
+# ocotp node under /sys. A subcommand may be wrapped in single or double quotes.
+# Commands split by backslash continuations are joined before matching.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -20,6 +22,8 @@ test/no_lifecycle_close_test.sh\tthis guard: it holds the patterns it searches f
 
 # Commands that change the life cycle or write a fuse. Matched per line, case
 # insensitive, on lines that are not comments.
+# Q is an optional single or double quote around a subcommand word.
+Q="[\"']?"
 PATTERNS=(
   'forward[-_ ]?life[-_ ]?cycle'
   'oem[-_ ]?clos(e|ed|ing)'
@@ -28,19 +32,26 @@ PATTERNS=(
   'lc[-_ ]?(close|forward|change|transition)'
   'life[-_ ]?cycle[-_ ](close|change|forward|set|write|advance)'
   'efuse-program-once'
-  'blhost[^#]*[[:space:]]efuse'
-  'nxpele[^#]*[[:space:]](write-fuse|fuse-write|burn-fuse|fuse-program)'
-  '(^|[[:space:];&|(])fuse[[:space:]]+(prog|program|override|sense_write)'
+  "blhost[^#]*[[:space:]]${Q}efuse"
+  "nxpele[^#]*[[:space:]]${Q}(write-fuse|write-shadow-fuse|fuse-write|burn-fuse|fuse-program)"
+  "(^|[[:space:];&|(])${Q}fuse${Q}[[:space:]]+${Q}(prog|program|override|sense_write)"
   'ele[_-]?write[_-]?fuse'
   'write[-_]fuse'
   'fuse[-_]burn'
-  'nxpele[^#]*[[:space:]]commit([[:space:]]|$)'
-  'nxpele[^#]*[[:space:]]signed[-_ ]?message([[:space:]]|$)'
+  "nxpele[^#]*[[:space:]]${Q}commit${Q}([[:space:]]|\$)"
+  "nxpele[^#]*[[:space:]]${Q}signed[-_ ]?message${Q}([[:space:]]|\$)"
   'ahab_commit'
   'ahab_sec_fuse_prog'
   'ahab_lock'
   'ahab_return_lifecycle'
   'oem[-_ ]?lock'
+  # SPSDK nxpfuses programs a whole fuse configuration (fuse-map-survey.md, sources
+  # table: whole-configuration fuse programming); the survey shows no read-only
+  # subcommand that cannot write, so any use is flagged (sudo, path, env prefix,
+  # python -m spsdk.apps.nxpfuses, continuations all contain the word).
+  'nxpfuses'
+  # A write (redirect, tee, dd of=) to an nvmem or ocotp node under /sys.
+  "(>|tee[[:space:]]+(-[[:alnum:]-]+[[:space:]]+)*|of=)[[:space:]]*${Q}[^[:space:]]*/sys/[^[:space:]]*(nvmem|ocotp)"
 )
 
 # scan <root>: print "<relative path>:<line>:<text>" for every hit, rc 0 when none.
@@ -206,6 +217,63 @@ rm -f "$scratch"/scripts/*
 printf '%s\n' '# nxpele -p x signed-message -i fuse.bin' 'echo "signed-message is documented elsewhere"' >"$scratch/scripts/sm-note.sh"
 if scan "$scratch" >/dev/null 2>&1; then ok "signed-message named only in a comment or an echo passes"
 else bad "signed-message named only in a comment or an echo was flagged"; fi
+
+# Round 3 fixtures: nxpfuses, quoted subcommands, nvmem/ocotp writes. Each alone in
+# its own scratch tree; the command is on line 2 so the line number is checked too.
+i=0
+for fx in \
+  'nxpfuses write|nxpfuses write -c fuses.yaml' \
+  'nxpfuses write-single|nxpfuses -p x write-single -i fuse1' \
+  'nxpfuses sudo path|sudo /usr/local/bin/nxpfuses write -c f.yaml' \
+  'nxpfuses env prefix|SPSDK_X=1 nxpfuses write -c f.yaml' \
+  'nxpfuses python -m|python3 -m spsdk.apps.nxpfuses write -c f.yaml' \
+  'nxpele double-quoted signed-message|nxpele -p x "signed-message" -i fuse.bin' \
+  'nxpele single-quoted commit|nxpele -p x '"'commit'"' -i OEM_FW_FUSE' \
+  'nxpele quoted fuse-write|nxpele -p x "fuse-write" -i f' \
+  'quoted fuse prog|"fuse" prog 0 1' \
+  'nxpele write-shadow-fuse|nxpele -p x write-shadow-fuse --index 1 --data 0' \
+  'nvmem redirect|echo 1 > /sys/bus/nvmem/devices/imx-ocotp0/nvmem' \
+  'nvmem append quoted|printf x >> "/sys/devices/platform/ocotp/nvmem"' \
+  'nvmem tee|printf x | tee -a /sys/bus/nvmem/devices/imx-ocotp0/nvmem' \
+  'ocotp dd of|dd if=blob of=/sys/devices/platform/soc/47510000.ocotp/imx-ocotp0/nvmem bs=4'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  i=$((i + 1))
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' 'echo start' "$cmd" >"$scratch/scripts/r3fx$i.sh"
+  if out=$(scan "$scratch" 2>&1); then
+    bad "round-3 fixture $name was not flagged"
+  elif [[ $out == *scripts/r3fx$i.sh:2:* ]]; then
+    ok "round-3 fixture $name fails and names scripts/r3fx$i.sh:2"
+  else
+    bad "round-3 fixture $name failed but did not name file and line: $out"
+  fi
+done
+# A continued nxpfuses command is one command; the report names its first line.
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'echo start' "nxpfuses -p x $bs" '  write -c f.yaml' >"$scratch/scripts/r3split.sh"
+if out=$(scan "$scratch" 2>&1); then
+  bad "continued nxpfuses write was not flagged"
+elif [[ $out == *scripts/r3split.sh:2:* ]]; then
+  ok "continued nxpfuses write fails and names scripts/r3split.sh:2"
+else
+  bad "continued nxpfuses write failed but did not name file and line: $out"
+fi
+# Benign: reads of the nvmem node, redirects elsewhere, an unquoted-word lookalike.
+for fx in \
+  'read of the nvmem node|cat /sys/bus/nvmem/devices/imx-ocotp0/nvmem' \
+  'nvmem read into a file|cat /sys/bus/nvmem/devices/imx-ocotp0/nvmem > /tmp/ocotp.bin' \
+  'dd reads nvmem|dd if=/sys/bus/nvmem/devices/imx-ocotp0/nvmem of=/tmp/ocotp.bin bs=4' \
+  'nvmem read piped to tee elsewhere|xxd /sys/bus/nvmem/devices/imx-ocotp0/nvmem | tee /tmp/x.txt' \
+  'nxpele info with quoted word|nxpele -p x "get-info"' \
+  'quoted word that is not a subcommand|echo "commit message" > /tmp/m.txt'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' "$cmd" >"$scratch/scripts/benign3.sh"
+  if scan "$scratch" >/dev/null 2>&1; then ok "benign fixture passes: $name"
+  else bad "benign fixture was flagged: $name"; fi
+done
 
 # Positive control: every command named only on comment lines passes.
 rm -f "$scratch"/scripts/*
