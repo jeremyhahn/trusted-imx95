@@ -1,0 +1,569 @@
+#!/usr/bin/env bash
+# test/boot_image_test.sh: the boot image inputs (scripts/boot-image-inputs.sh)
+# and, from the assembly slice on, the signed image. Offline; no board.
+set -euo pipefail
+# shellcheck source=test/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+SCRIPT=$ROOT/scripts/boot-image-inputs.sh
+LOCK=$ROOT/boot-container/inputs.lock
+
+# --- the committed lock ---
+run "$SCRIPT" --check
+check "check: the committed pins are valid" 0 "pins OK"
+
+# --- a fixture tree: the script, the lock and the two BSP lock files ---
+fx=$TMP_ROOT/fx
+mkdir -p "$fx/scripts" "$fx/boot-container" "$fx/secure-world" "$fx/system-manager"
+cp "$SCRIPT" "$fx/scripts/"
+cp "$LOCK" "$fx/boot-container/"
+cp "$ROOT/secure-world/bsp.lock" "$fx/secure-world/"
+cp "$ROOT/system-manager/sm.lock" "$fx/system-manager/"
+FX=$fx/scripts/boot-image-inputs.sh
+FXLOCK=$fx/boot-container/inputs.lock
+
+# count_in <file> <substring>: the number of lines holding <substring>.
+count_in() {
+	local n=0 l
+	while IFS= read -r l; do [[ "$l" != *"$2"* ]] || n=$((n + 1)); done <"$1"
+	echo "$n"
+}
+
+# variant <out> <key> <new line>: write the lock with one line changed.
+variant() { # variant <out> <key> <new line, or empty to drop the key>
+	local out=$1 key=$2 new=$3 line
+	: >"$out"
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in
+		"$key="*) [ -z "$new" ] || echo "$new" >>"$out" ;;
+		*) echo "$line" >>"$out" ;;
+		esac
+	done <"$LOCK"
+}
+
+v=$TMP_ROOT/v.lock
+variant "$v" uboot_commit "uboot_commit=abc"
+run "$SCRIPT" --check --lock "$v"
+check "check: a short commit is refused" nonzero "not 40 hex"
+
+variant "$v" uboot_archive_sha256 "uboot_archive_sha256=UNREAD"
+run "$SCRIPT" --check --lock "$v"
+check "check: UNREAD is refused" nonzero "UNREAD"
+
+variant "$v" ele_installer_sha256 "ele_installer_sha256=${LOCK}"
+run "$SCRIPT" --check --lock "$v"
+check "check: a non-hex digest is refused" nonzero "not 64 hex"
+
+variant "$v" ele_installer_sha256 ""
+run "$SCRIPT" --check --lock "$v"
+check "check: a missing name is refused" nonzero "ele_installer_sha256 missing"
+
+variant "$v" uboot_branch "uboot_branch=x
+uboot_branch=y"
+run "$SCRIPT" --check --lock "$v"
+check "check: a repeated name is refused" nonzero "twice"
+
+variant "$v" ele_installer_url "ele_installer_url=http://example.invalid/x.bin"
+run "$SCRIPT" --check --lock "$v"
+check "check: a non-https URL is refused" nonzero "not an https URL"
+
+variant "$v" uboot_branch "bogus_name=1"
+run "$SCRIPT" --check --lock "$v"
+check "check: an unknown name is refused" nonzero "unknown name"
+
+run "$SCRIPT" --check --lock "$TMP_ROOT/none.lock"
+check "check: a missing lock is refused" nonzero "no lock file"
+
+variant "$FXLOCK" meta_imx_commit "meta_imx_commit=0000000000000000000000000000000000000000"
+run "$FX" --check
+check "check: meta-imx pin differing from secure-world/bsp.lock is refused" nonzero "differs from META_IMX_COMMIT"
+cp "$LOCK" "$FXLOCK"
+
+# --- collect ---
+# the test must not pick up a real make system-manager / secure-world output
+export SM_OUT=$TMP_ROOT/no-sm SW_OUT=$TMP_ROOT/no-sw
+out=$TMP_ROOT/in
+run "$SCRIPT" --collect "$out" --system-manager "$TMP_ROOT/none.bin"
+check "collect: a named file that is missing is refused" nonzero "no such file"
+
+: >"$TMP_ROOT/empty.bin"
+run "$SCRIPT" --collect "$out" --m7 "$TMP_ROOT/empty.bin"
+check "collect: an empty file is refused" nonzero "empty file"
+
+printf 'real m7 bytes' >"$TMP_ROOT/m7.bin"
+run env SM_OUT="$TMP_ROOT/no-sm" SW_OUT="$TMP_ROOT/no-sw" "$SCRIPT" --collect "$out" --m7 "$TMP_ROOT/m7.bin"
+check "collect: one real input, five stand-ins" 0 "System Manager: STAND-IN" "ELE firmware: STAND-IN"
+if [ "$(cat "$out/m7_image.bin")" = "real m7 bytes" ] &&
+	[ "$(wc -l <"$out/inputs.txt")" -eq 6 ] &&
+	[[ "$(cat "$out/inputs.txt")" == *"m7_image.bin real $(sha256sum "$TMP_ROOT/m7.bin" | cut -d' ' -f1)"* ]] &&
+	[ "$(count_in "$out/inputs.txt" STAND-IN)" -eq 5 ]; then
+	pass "collect: inputs.txt names each source and digest"
+else
+	fail "collect: inputs.txt names each source and digest" "$(cat "$out/inputs.txt")"
+fi
+if [[ "$(head -c 8 "$out/bl31.bin")" == STAND-IN* ]]; then
+	pass "collect: a stand-in payload is labelled in its own bytes"
+else
+	fail "collect: a stand-in payload is labelled in its own bytes"
+fi
+
+# defaults from the make system-manager and make secure-world output dirs
+mkdir -p "$TMP_ROOT/sm" "$TMP_ROOT/sw"
+printf 'sm' >"$TMP_ROOT/sm/m33_image.bin"
+printf 'bl31' >"$TMP_ROOT/sw/bl31.bin"
+printf 'tee' >"$TMP_ROOT/sw/tee.bin"
+# what make secure-world publishes: SHA256SUMS and build-info.txt with the lock: line
+(cd "$TMP_ROOT/sw" && sha256sum bl31.bin tee.bin >SHA256SUMS)
+printf 'lock: %s\nrelease: test\n' "$(sha256sum "$ROOT/secure-world/bsp.lock" | cut -d' ' -f1)" >"$TMP_ROOT/sw/build-info.txt"
+# what make system-manager publishes: SHA256SUMS and sm-manifest.txt (the sm.lock lines, then the build lines)
+(cd "$TMP_ROOT/sm" && sha256sum m33_image.bin >SHA256SUMS)
+{
+	while IFS= read -r l || [ -n "$l" ]; do
+		case "$l" in '' | '#'*) ;; *) echo "$l" ;; esac
+	done <"$ROOT/system-manager/sm.lock"
+	printf 'source_date_epoch=1\nbuild1_sha256=%s\nbuild2_sha256=%s\nreproducible=yes\n' x x
+} >"$TMP_ROOT/sm/sm-manifest.txt"
+run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/in2"
+check "collect: System Manager, BL31 and tee.bin come from their make outputs" 0
+if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" ' real ')" -eq 3 ] && [ "$(cat "$TMP_ROOT/in2/tee.bin")" = tee ]; then
+	pass "collect: three real inputs, three stand-ins"
+else
+	fail "collect: three real inputs, three stand-ins" "$(cat "$TMP_ROOT/in2/inputs.txt")"
+fi
+
+if [ "$(count_in "$TMP_ROOT/in2/inputs.txt" 'm7_image.bin STAND-IN')" -eq 1 ]; then
+	pass "collect: with no --m7 the M7 image is a labelled stand-in (it is trusted-firmware's)"
+else
+	fail "collect: with no --m7 the M7 image is a labelled stand-in" "$(cat "$TMP_ROOT/in2/inputs.txt")"
+fi
+
+# BL31 and tee.bin from make secure-world are checked against that build
+sw_case() { # sw_case <name> <mutation command run in the copy>
+	rm -rf "$TMP_ROOT/swx" "$TMP_ROOT/inx"
+	cp -r "$TMP_ROOT/sw" "$TMP_ROOT/swx"
+	(cd "$TMP_ROOT/swx" && eval "$2")
+	run env SM_OUT="$TMP_ROOT/sm" SW_OUT="$TMP_ROOT/swx" "$SCRIPT" --collect "$TMP_ROOT/inx"
+}
+sw_case x ':'
+check "collect: a matching SHA256SUMS and build-info.txt keep bl31.bin and tee.bin real" 0
+if [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'bl31.bin real')" -eq 1 ] && [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'tee.bin real')" -eq 1 ]; then
+	pass "collect: bl31.bin and tee.bin are real after the build check"
+else
+	fail "collect: bl31.bin and tee.bin are real after the build check" "$(cat "$TMP_ROOT/inx/inputs.txt")"
+fi
+sw_refused() { # sw_refused <label> <mutation> <message>
+	sw_case x "$2"
+	check "collect: $1 is refused" nonzero "$3"
+	if [ ! -e "$TMP_ROOT/inx/inputs.txt" ]; then
+		pass "collect: $1 leaves no inputs.txt"
+	else
+		fail "collect: $1 leaves no inputs.txt" "$(cat "$TMP_ROOT/inx/inputs.txt")"
+	fi
+}
+
+# The System Manager from make system-manager is checked against that build; a --system-manager file is not
+sm_case() { # sm_case <name> <mutation command run in the copy>
+	rm -rf "$TMP_ROOT/smx" "$TMP_ROOT/inx"
+	cp -r "$TMP_ROOT/sm" "$TMP_ROOT/smx"
+	(cd "$TMP_ROOT/smx" && eval "$2")
+	run env SM_OUT="$TMP_ROOT/smx" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/inx"
+}
+# sm_line <key> [replacement]: in sm-manifest.txt, replace the <key>= line, or drop it with no replacement
+sm_line() {
+	local l
+	mv sm-manifest.txt sm-manifest.old
+	while IFS= read -r l || [ -n "$l" ]; do
+		case "$l" in "$1="*) [ -z "${2:-}" ] || echo "$2" ;; *) echo "$l" ;; esac
+	done <sm-manifest.old >sm-manifest.txt
+}
+sm_case x ':'
+check "collect: a matching SHA256SUMS and sm-manifest.txt keep the System Manager real" 0
+expect "collect: the System Manager is real after the build check" [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'm33_image.bin real')" -eq 1 ]
+sm_refused() { # sm_refused <label> <mutation> <message>
+	sm_case x "$2"
+	check "collect: $1 is refused" nonzero "m33_image.bin" "$3"
+	expect "collect: $1 leaves no inputs.txt" [ ! -e "$TMP_ROOT/inx/inputs.txt" ]
+}
+sm_refused "a changed System Manager byte" "printf 'X' | dd of=m33_image.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "SHA-256"
+sm_refused "a System Manager with no SHA256SUMS" "rm SHA256SUMS" "SHA256SUMS missing"
+sm_refused "a System Manager SHA256SUMS with no m33_image.bin entry" ": >SHA256SUMS" "no entry for m33_image.bin"
+sm_refused "a System Manager with no sm-manifest.txt" "rm sm-manifest.txt" "sm-manifest.txt missing"
+sm_refused "a System Manager built from a different sm.lock value" "sm_line sm_tag sm_tag=other" "sm.lock pins sm_tag="
+sm_refused "a System Manager manifest without an sm.lock key" "sm_line sm_commit" "has no sm_commit line"
+sm_refused "a System Manager that is not reproducible" "sm_line reproducible reproducible=no" "does not say reproducible=yes"
+sm_refused "a System Manager manifest without a reproducible line" "sm_line reproducible" "does not say reproducible=yes"
+rm -rf "$TMP_ROOT/smx" "$TMP_ROOT/inx"
+cp -r "$TMP_ROOT/sm" "$TMP_ROOT/smx"
+printf 'X' | dd of="$TMP_ROOT/smx/m33_image.bin" bs=1 seek=1 conv=notrunc 2>/dev/null
+run env SM_OUT="$TMP_ROOT/no-sm" SW_OUT="$TMP_ROOT/sw" "$SCRIPT" --collect "$TMP_ROOT/inx" --system-manager "$TMP_ROOT/smx/m33_image.bin"
+check "collect: a --system-manager file is not checked against SM_OUT" 0
+expect "collect: a --system-manager file is taken as real" [ "$(count_in "$TMP_ROOT/inx/inputs.txt" 'm33_image.bin real')" -eq 1 ]
+sw_refused "a changed bl31.bin byte" "printf 'X' | dd of=bl31.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "bl31.bin: SHA-256"
+sw_refused "a changed tee.bin byte" "printf 'X' | dd of=tee.bin bs=1 seek=1 conv=notrunc 2>/dev/null" "tee.bin: SHA-256"
+sw_refused "a missing SHA256SUMS" "rm SHA256SUMS" "SHA256SUMS: missing"
+sw_refused "a missing build-info.txt" "rm build-info.txt" "build-info.txt: missing"
+sw_refused "a lock: line for a different bsp.lock" "printf 'lock: %064d\n' 0 >build-info.txt" "is not the SHA-256 of secure-world/bsp.lock"
+sw_refused "a SHA256SUMS with no entry for tee.bin" "sha256sum bl31.bin >SHA256SUMS" "no entry for tee.bin"
+
+# --- fetch fails closed on a digest mismatch (curl stubbed, no network) ---
+stub=$TMP_ROOT/stub
+mkdir -p "$stub"
+cat >"$stub/curl" <<'EOF'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+	[ "$1" != -o ] || { shift; out=$1; }
+	shift
+done
+printf 'not the pinned bytes' >"$out"
+EOF
+chmod +x "$stub/curl"
+run env PATH="$stub:$PATH" "$SCRIPT" --fetch "$TMP_ROOT/fetch"
+check "fetch: a download whose SHA-256 differs fails closed" nonzero "SHA-256 mismatch"
+if [ -z "$(ls "$TMP_ROOT/fetch")" ]; then
+	pass "fetch: nothing is left behind after a mismatch"
+else
+	fail "fetch: nothing is left behind after a mismatch" "$(ls "$TMP_ROOT/fetch")"
+fi
+
+# --- assembly, signing, verification and tamper (scripts/ahab/boot-image.sh) ---
+BI=$ROOT/scripts/ahab/boot-image.sh
+img_out=$TMP_ROOT/img
+run "$BI" --inputs "$TMP_ROOT/none" --out "$img_out"
+check "image: a missing inputs directory is refused" nonzero "has no ele.bin"
+
+run "$SCRIPT" --collect "$TMP_ROOT/in3"
+expect "image: stand-in inputs collected" [ -s "$TMP_ROOT/in3/inputs.txt" ]
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$img_out" --policy-out "$TMP_ROOT/img.policy"
+check "image: assemble, verify every container, check the whole image, tamper payloads, headers, signature blocks" 0 \
+	"3 of 3 containers authenticate" "6 payloads equal their inputs" "policy: OK" \
+	"tamper: ele.bin" "tamper: m33_image.bin" "tamper: m7_image.bin" \
+	"tamper: bl31.bin" "tamper: u-boot.bin" "tamper: tee.bin" \
+	"tamper: container 0 header" "tamper: container 0 signature block" \
+	"tamper: container 1 header" "tamper: container 1 signature block" \
+	"tamper: container 2 header" "tamper: container 2 signature block" \
+	"STAND-IN payloads in this image: 6" "boot-image-test: OK"
+expect "image: boot-image.bin and SHA256SUMS written" [ -s "$img_out/boot-image.bin" ] && [ -s "$img_out/SHA256SUMS" ]
+if (cd "$img_out" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
+	pass "image: SHA256SUMS verifies"
+else
+	fail "image: SHA256SUMS verifies"
+fi
+extra=0
+for f in "$img_out"/*; do
+	case "${f##*/}" in boot-image.bin | inputs.txt | SHA256SUMS) ;; *) extra=$((extra + 1)) ;; esac
+done
+if [ "$extra" -eq 0 ]; then
+	pass "image: the out directory holds no key or fuse script"
+else
+	fail "image: the out directory holds no key or fuse script" "$(ls "$img_out")"
+fi
+
+# --no-tamper is not an option: the tamper checks cannot be skipped
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$TMP_ROOT/img-nt" --no-tamper
+check "image: --no-tamper is rejected as an unknown option" nonzero "usage: boot-image.sh"
+expect "image: --no-tamper wrote no image" [ ! -e "$TMP_ROOT/img-nt/boot-image.bin" ]
+
+# a payload changed after collection, inputs.txt left alone: refused, nothing written
+cp -r "$TMP_ROOT/in3" "$TMP_ROOT/in4"
+printf 'X' >>"$TMP_ROOT/in4/bl31.bin"
+run "$BI" --inputs "$TMP_ROOT/in4" --out "$TMP_ROOT/img-ch"
+check "image: a payload changed after collection is refused" nonzero "bl31.bin" "changed since collection"
+expect "image: the refused run wrote no image" [ ! -e "$TMP_ROOT/img-ch/boot-image.bin" ]
+# a missing inputs.txt entry is refused too
+cp -r "$TMP_ROOT/in3" "$TMP_ROOT/in5"
+: >"$TMP_ROOT/in5/inputs.txt.new"
+while IFS= read -r l; do case "$l" in tee.bin*) ;; *) echo "$l" >>"$TMP_ROOT/in5/inputs.txt.new" ;; esac; done <"$TMP_ROOT/in3/inputs.txt"
+mv "$TMP_ROOT/in5/inputs.txt.new" "$TMP_ROOT/in5/inputs.txt"
+run "$BI" --inputs "$TMP_ROOT/in5" --out "$TMP_ROOT/img-ms"
+check "image: an inputs.txt without an entry for a payload is refused" nonzero "no entry for tee.bin"
+
+run "$BI" verify "$img_out/boot-image.bin"
+check "verify: the written image verifies" 0 "verify: OK"
+
+# The whole-image policy check, and two mutations of its manifest (each in the temp dir).
+PC=$ROOT/scripts/ahab/policy-check.sh
+BIM=$ROOT/scripts/ahab/boot-image-manifest.yaml
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "policy: the whole image passes against boot-image-manifest.yaml" 0 "policy: OK"
+man=$(<"$BIM")
+swapped=${man//ATF_/@@_}
+swapped=${swapped//TEE_/ATF_}
+swapped=${swapped//@@_/TEE_}
+printf '%s\n' "$swapped" >"$TMP_ROOT/man-swap.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-swap.yaml"
+check "policy: a manifest with the atf and tee entries swapped is refused" nonzero "policy: FAILED"
+mapfile -t man_lines <"$BIM"
+# The last image entry starts at the last "- core_id:" line and runs to the end of the file;
+# cutting from there removes one whole, well formed entry (so the manifest still validates and
+# only the entry-count comparison can refuse it). The first container starts at the first
+# "- role:" line and ends before the second one.
+last_entry=-1 role_first=-1 role_second=-1
+for i in "${!man_lines[@]}"; do
+	case ${man_lines[$i]} in
+	*"- core_id:"*) last_entry=$i ;;
+	*"- role:"*)
+		if [ "$role_first" -lt 0 ]; then role_first=$i; elif [ "$role_second" -lt 0 ]; then role_second=$i; fi
+		;;
+	esac
+done
+printf '%s\n' "${man_lines[@]:0:$last_entry}" >"$TMP_ROOT/man-drop.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-drop.yaml"
+check "policy: a manifest with one entry dropped is refused" nonzero "policy: FAILED" "image entries, the manifest lists 2"
+printf '%s\n' "${man_lines[@]:0:$role_first}" "${man_lines[@]:$role_second}" >"$TMP_ROOT/man-dropc.yaml"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/img.policy" "$TMP_ROOT/man-dropc.yaml"
+check "policy: a manifest with one container dropped is refused" nonzero "policy: FAILED" "the image holds"
+
+# The M7 execution metadata of the built image, read back with nxpimage ahab parse.
+# The constants are docs/boot-container/boot-image.md:31 (container 2, entry "executable"):
+# core cortex-m7-1, load 0x00000000, entry 0x303C0000. The container offset is the place of
+# container 2 in the image: containers start at 0x0, 0x4000 and 0x8000 (AHAB tag 0x87 at +3).
+WANT_M7_CORE=cortex-m7-1
+WANT_M7_TYPE=executable
+WANT_M7_LOAD=0x00000000
+WANT_M7_ENTRY=0x303c0000
+WANT_M7_CONTAINER_OFFSET=$((0x4000))
+spsdk_venv=$("$ROOT/scripts/ahab/spsdk-venv.sh")
+mkdir -p "$TMP_ROOT/m7parse"
+run "$spsdk_venv/bin/nxpimage" ahab parse -f mimx9596 -r b0 -b "$img_out/boot-image.bin" -o "$TMP_ROOT/m7parse"
+expect "m7: nxpimage ahab parse reads the full image" [ "$RC" -eq 0 -a -f "$TMP_ROOT/m7parse/parsed_config.yaml" ]
+# m7_field <key>: <key> of the second image of the second container in parsed_config.yaml
+m7_field() {
+	local l ci=-1 ii=-1
+	while IFS= read -r l; do
+		l=${l%$'\r'}
+		case "$l" in
+		"    container:"*) ci=$((ci + 1)); ii=-1 ;;
+		*"image_path:"*) ii=$((ii + 1)) ;;
+		*"$1:"*)
+			if [ "$ci" -eq 1 ] && [ "$ii" -eq 1 ] && [[ "$l" != "#"* && "$l" != *"# "* ]]; then
+				l=${l#*"$1:"}; l=${l//[\'\" ]/}; echo "${l,,}"; return
+			fi ;;
+		esac
+	done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+}
+# m7_num_eq <got> <want>: numeric equality of two 0x addresses (SPSDK prints 0x0 for 0x00000000)
+m7_num_eq() { [[ "$1" =~ ^0x[0-9a-f]+$ && "$2" =~ ^0x[0-9a-f]+$ ]] && [ $(($1)) -eq $(($2)) ]; }
+got=$(m7_field core_id)
+expect "m7: the M7 entry's core is $WANT_M7_CORE (parsed '$got')" [ "$got" = "$WANT_M7_CORE" ]
+got=$(m7_field image_type)
+expect "m7: the M7 entry's image type is $WANT_M7_TYPE (parsed '$got')" [ "$got" = "$WANT_M7_TYPE" ]
+got=$(m7_field load_address)
+expect "m7: the M7 entry's load address is $WANT_M7_LOAD (parsed '$got')" m7_num_eq "$got" "$WANT_M7_LOAD"
+got=$(m7_field entry_point)
+expect "m7: the M7 entry's entry point is $WANT_M7_ENTRY (parsed '$got')" m7_num_eq "$got" "$WANT_M7_ENTRY"
+# the container offsets: the container headers sit below the first image payload, so walk only
+# [0, first image_offset) from the parse output, 0x400-aligned, version 2 at +0 and AHAB tag 0x87 at +3;
+# no payload byte is ever read
+first_payload=0
+all_image_offsets=()
+while IFS= read -r l; do
+	if [[ "$l" =~ image_offset:\ \'(0x[0-9a-f]+)\' ]]; then
+		m=${BASH_REMATCH[1]}
+		v=$((m))
+		all_image_offsets+=("$m")
+		if [ "$first_payload" -eq 0 ] || [ "$v" -lt "$first_payload" ]; then first_payload=$v; fi
+	fi
+done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+echo "# m7: parsed image_offset values: ${all_image_offsets[*]}"
+expect "m7: the parse output records the first payload offset (got '$first_payload')" [ "${first_payload:-0}" -gt 0 ]
+# walk_containers <image> <bound>: the 0x400-aligned offsets below <bound> that start a container header
+walk_containers() {
+	python3 -I - "$1" "$2" <<'PY'
+import sys
+f = open(sys.argv[1], "rb")
+out = []
+for o in range(0, int(sys.argv[2]), 0x400):
+    f.seek(o)
+    h = f.read(4)
+    if len(h) == 4 and h[0] == 2 and h[3] == 0x87:
+        out.append(str(o))
+print(" ".join(out))
+PY
+}
+offsets=$(walk_containers "$img_out/boot-image.bin" "${first_payload:-0}")
+read -r -a offs <<<"$offsets"
+WANT_LAST_CONTAINER_OFFSET=$((0x8000))
+# the bound must lie past the last container header, or the walk could not see it
+expect "m7: the walk bound $first_payload lies past the last container header $WANT_LAST_CONTAINER_OFFSET (offsets: ${all_image_offsets[*]}; headers: $offsets)" \
+	[ "$first_payload" -gt "$WANT_LAST_CONTAINER_OFFSET" ]
+m7_offsets_ok() { [ "$#" -eq 3 ] && [ "$2" -eq "$WANT_M7_CONTAINER_OFFSET" ]; }
+expect "m7: the image holds three containers, the M7 one second, at $WANT_M7_CONTAINER_OFFSET (found: $offsets)" \
+	m7_offsets_ok "${offs[@]}"
+# patch_image <in> <out> <offset> <hex bytes>: a scratch copy with bytes written at <offset>
+patch_image() {
+	python3 -I - "$1" "$2" "$3" "$4" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+b = bytes.fromhex(sys.argv[4])
+d[int(sys.argv[3]):int(sys.argv[3]) + len(b)] = b
+open(sys.argv[2], "wb").write(d)
+PY
+}
+m7_refused() { ! m7_offsets_ok "$@"; }
+# (a) a header-shaped 0x02 ?? ?? 0x87 inside a payload, past the bound, is not a container
+planted=$((0x10000))
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/plant.bin" "$planted" "02a1b287"
+read -r -a poffs <<<"$(walk_containers "$TMP_ROOT/plant.bin" "$first_payload")"
+expect "m7: a planted 02 ?? ?? 87 at $planted, past the bound $first_payload, is not counted (found: ${poffs[*]})" \
+	m7_offsets_ok "${poffs[@]}"
+# (b) the M7 container header dropped, or moved off its offset, is refused
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/nom7.bin" "$WANT_M7_CONTAINER_OFFSET" "00000000"
+read -r -a doffs <<<"$(walk_containers "$TMP_ROOT/nom7.bin" "$first_payload")"
+expect "m7: a dropped M7 container header is refused (found: ${doffs[*]})" m7_refused "${doffs[@]}"
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/mv.bin" "$WANT_M7_CONTAINER_OFFSET" "00000000"
+patch_image "$TMP_ROOT/mv.bin" "$TMP_ROOT/mv2.bin" "$((WANT_M7_CONTAINER_OFFSET + 0x400))" "02ac0387"
+read -r -a moffs <<<"$(walk_containers "$TMP_ROOT/mv2.bin" "$first_payload")"
+expect "m7: an M7 container header moved off its offset is refused (found: ${moffs[*]})" m7_refused "${moffs[@]}"
+# --- the Cortex-A55 container (the third, index 2) read back from the parse ---
+# field <container> <image> <key>: the value of <key> of that entry in the parse,
+# lower-cased, quotes stripped; comment lines skipped. Same walk as m7_field.
+field() {
+	local l ci=-1 ii=-1
+	while IFS= read -r l; do
+		l=${l%$'\r'}
+		case "$l" in
+		"    container:"*) ci=$((ci + 1)); ii=-1 ;;
+		*"image_path:"*) ii=$((ii + 1)) ;;
+		*"$3:"*)
+			if [ "$ci" -eq "$1" ] && [ "$ii" -eq "$2" ] && [[ "$l" != "#"* && "$l" != *"# "* ]]; then
+				l=${l#*"$3:"}; l=${l//[\'\" ]/}; echo "${l,,}"; return
+			fi ;;
+		esac
+	done <"$TMP_ROOT/m7parse/parsed_config.yaml"
+}
+# Entries of container 3, counted from the parse: three, in the order atf, uboot, tee
+# (the parse names each payload file after its image type and core, so the order is
+# read from the load addresses below, not from file names).
+# a55_carries <extracted payload> <input>: the payload starts with the input's bytes
+a55_carries() { [ -n "$1" ] && cmp -s -n "$(stat -c %s "$2")" "$2" "$1"; }
+a55_entries=0
+for ii in 0 1 2 3; do [ -n "$(field 2 "$ii" image_offset)" ] && a55_entries=$((a55_entries + 1)); done
+expect "a55: container 3 holds exactly three entries (found $a55_entries)" [ "$a55_entries" -eq 3 ]
+for ii in 0 1 2; do
+	expect "a55: container 3 entry $ii runs on cortex-a55 (parsed '$(field 2 "$ii" core_id)')" [ "$(field 2 "$ii" core_id)" = cortex-a55 ]
+done
+# Cited constants (read at the pins of secure-world/bsp.lock, 2026-11-23):
+#  tee: TF-A da738d5eae93 plat/imx/imx9/imx95/platform.mk:56, BL32_BASE ?= 0x8C000000, and
+#       imx-optee-os 99f40897 core/arch/arm/plat-imx/conf.mk:729, CFG_TZDRAM_START =
+#       CFG_DRAM_BASE + 0x0C000000, with CFG_DRAM_BASE ?= 0x80000000 for the mx95
+#       flavours at conf.mk:299.
+#  atf: TF-A da738d5eae93 plat/imx/imx9/imx95/include/platform_def.h:34,
+#       BL31_BASE U(0x8A200000); SPSDK 3.13.0's atf default is the same address.
+#  uboot: a stand-in, SPSDK's default, not asserted.
+WANT_ATF_LOAD=0x8a200000 WANT_ATF_ENTRY=0x8a200000
+WANT_TEE_LOAD=0x8c000000 WANT_TEE_ENTRY=0x8c000000
+for spec in "0 atf $WANT_ATF_LOAD $WANT_ATF_ENTRY" "2 tee $WANT_TEE_LOAD $WANT_TEE_ENTRY"; do
+	read -r ii nm wl we <<<"$spec"
+	expect "a55: the $nm load_address is $wl (parsed '$(field 2 "$ii" load_address)')" m7_num_eq "$(field 2 "$ii" load_address)" "$wl"
+	expect "a55: the $nm entry_point is $we (parsed '$(field 2 "$ii" entry_point)')" m7_num_eq "$(field 2 "$ii" entry_point)" "$we"
+done
+# the order atf, uboot, tee: the payload the parse extracts for each entry starts with
+# that input's bytes
+for spec in "0 bl31.bin" "1 u-boot.bin" "2 tee.bin"; do
+	read -r ii nm <<<"$spec"
+	pf=
+	for f in "$TMP_ROOT/m7parse/container2_image${ii}_"*.bin; do [ -f "$f" ] && { pf=$f; break; }; done
+	expect "a55: container 3 entry $ii carries $nm" a55_carries "$pf" "$TMP_ROOT/in3/$nm"
+done
+# One flipped byte in the first signed payload (the ELE entry): the standalone verify rejects it.
+python3 -I - "$img_out/boot-image.bin" "$TMP_ROOT/bad.bin" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+off = d.find(b"STAND-IN ELE firmware") + 100
+d[off] ^= 0xFF
+open(sys.argv[2], "wb").write(d)
+PY
+run "$BI" verify "$TMP_ROOT/bad.bin"
+check "verify: an image with one changed payload byte is rejected" 1 "verify: FAILED"
+
+# --- negatives beyond payload bytes, on scratch copies of the image ---
+# (a) the image cut short by the last 1 KiB
+cp "$img_out/boot-image.bin" "$TMP_ROOT/cut.bin"
+truncate -s -1024 "$TMP_ROOT/cut.bin"
+run "$BI" verify "$TMP_ROOT/cut.bin"
+v_rc=$RC
+run "$PC" "$TMP_ROOT/cut.bin" "$TMP_ROOT/img.policy" "$BIM"
+expect "negative (a): a truncated image fails verify or the policy check" \
+	[ "$v_rc" -ne 0 -o "$RC" -ne 0 ]
+check "negative (a): the policy check on the truncated image prints policy: FAILED" nonzero "policy: FAILED"
+
+# (v) fuse_version and sw_version of each container, from the parse of the built image, equal
+# the values boot-image.yaml sets for that container (the yaml is read in file order)
+yaml_vals() { # yaml_vals <key>: the values of <key>: in boot-image.yaml, space separated
+	local l out=
+	while IFS= read -r l; do
+		case "$l" in *"$1:"*) l=${l#*"$1:"}; out="$out ${l//[ \'\"]/}" ;; esac
+	done <"$ROOT/scripts/ahab/boot-image.yaml"
+	echo "${out# }"
+}
+parsed_vals=$("$spsdk_venv/bin/python" -I - "$img_out/boot-image.bin" <<'PY'
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+img = AHABImage.parse(open(sys.argv[1], "rb").read(), FamilyRevision("mimx9596", "b0"))
+print(" ".join(str(int(str(c.fuse_version), 0)) for c in img.ahab_containers))
+print(" ".join(str(int(str(c.sw_version), 0)) for c in img.ahab_containers))
+PY
+)
+mapfile -t pv_lines <<<"$parsed_vals"
+read -r -a p_fuse <<<"${pv_lines[0]}"
+read -r -a p_sw <<<"${pv_lines[1]}"
+# the wanted values are constants here (0 for this test image only, scripts/ahab/boot-image.yaml:31-32,
+# :51-52, :68-69), so a yaml change that is not made here too fails; the yaml is also read as a cross-check
+y_fuse=(0 0 0)
+y_sw=(0 0 0)
+expect "version: boot-image.yaml sets fuse_version ${y_fuse[*]} and sw_version ${y_sw[*]}" \
+	[ "$(yaml_vals fuse_version)" = "${y_fuse[*]}" -a "$(yaml_vals sw_version)" = "${y_sw[*]}" ]
+for ci in 0 1 2; do
+	echo "# container $ci: parsed fuse_version ${p_fuse[$ci]:-?} sw_version ${p_sw[$ci]:-?}, yaml ${y_fuse[$ci]:-?} ${y_sw[$ci]:-?}"
+	expect "version: container $ci fuse_version and sw_version equal boot-image.yaml" \
+		[ -n "${p_fuse[$ci]:-}" -a "${p_fuse[$ci]:-}" = "${y_fuse[$ci]:-x}" -a "${p_sw[$ci]:-}" = "${y_sw[$ci]:-x}" ]
+done
+
+# (b) one non-zero byte in a gap no header, signature block or payload covers: the first
+# zero byte outside every span, read from the parse (not from the bytes)
+gap=$("$spsdk_venv/bin/python" -I - "$img_out/boot-image.bin" <<'PY'
+import sys
+from spsdk.image.ahab.ahab_image import AHABImage
+from spsdk.utils.family import FamilyRevision
+d = open(sys.argv[1], "rb").read()
+img = AHABImage.parse(d, FamilyRevision("mimx9596", "b0"))
+ok = bytearray(len(d))
+for k, c in enumerate(img.ahab_containers):
+    s = c.get_container_offset(k)
+    ok[s:s + c.length] = b"\x01" * c.length
+    for i in c.image_array:
+        ok[i.image_offset:i.image_offset + i.image_size] = b"\x01" * i.image_size
+print(next(o for o in range(len(d)) if not ok[o] and not d[o]))
+PY
+)
+expect "negative (b): a gap offset was found in the parse (got '$gap')" [ -n "$gap" -a -z "${gap//[0-9]/}" ]
+patch_image "$img_out/boot-image.bin" "$TMP_ROOT/gap.bin" "$gap" "01"
+run "$PC" "$TMP_ROOT/gap.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "negative (b): a non-zero byte in a gap is refused, naming its offset" nonzero \
+	"policy: FAILED" "$(printf 'non-zero byte at offset 0x%x' "$gap")"
+
+# (c) a second image on a fresh test PKI: verify OK, policy FAILED on the SRK table hash
+run "$BI" --inputs "$TMP_ROOT/in3" --out "$TMP_ROOT/img2" --policy-out "$TMP_ROOT/img2.policy"
+check "negative (c): a second image is built on a fresh test PKI" 0 "policy: OK"
+run "$BI" verify "$TMP_ROOT/img2/boot-image.bin"
+check "negative (c): the second image verifies on its own PKI" 0 "verify: OK"
+run "$PC" "$TMP_ROOT/img2/boot-image.bin" "$TMP_ROOT/img.policy" "$BIM"
+check "negative (c): the second image against the first policy file is refused on the SRK table hash" nonzero \
+	"policy: FAILED" "srk_table_hash"
+
+# (d) a policy file with USED_SRK_ID 1
+pol=$(<"$TMP_ROOT/img.policy")
+printf '%s\n' "${pol/USED_SRK_ID=0/USED_SRK_ID=1}" >"$TMP_ROOT/srk1.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/srk1.policy" "$BIM"
+check "negative (d): a policy file with USED_SRK_ID 1 is refused" nonzero "policy: FAILED" "used_srk_id"
+
+# (e) a floor above the image's fuse_version is refused; the same file at 0 is the control
+printf '%s\n' "${pol/FUSE_VERSION_MIN=0/FUSE_VERSION_MIN=1}" >"$TMP_ROOT/fv1.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/fv1.policy" "$BIM"
+check "negative (e): a policy file with FUSE_VERSION_MIN 1 is refused" nonzero "policy: FAILED" "fuse_version"
+printf '%s\n' "${pol/FUSE_VERSION_MIN=0/FUSE_VERSION_MIN=0}" >"$TMP_ROOT/fv0.policy"
+run "$PC" "$img_out/boot-image.bin" "$TMP_ROOT/fv0.policy" "$BIM"
+check "negative (e) control: the same policy file with FUSE_VERSION_MIN 0 passes" 0 "policy: OK"
+
+finish
