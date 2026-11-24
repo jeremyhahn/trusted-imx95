@@ -51,6 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling \
+	hdp-boundary-check integration-test-hsm-device-protocol \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -254,6 +255,14 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
+
+HDP_TREE ?= $(CURDIR)
+
+hdp-boundary-check: ## Check a tree keeps the hsm-device-protocol row (HDP_TREE=<dir>, default this repository): the row's facts, no wire protocol or xkmsd here, go-xkms #1521 named, xkmsd from a tagged release only
+	@python3 scripts/hdp-boundary-check.py "$(HDP_TREE)"
+
+integration-test-hsm-device-protocol: ## Integration test of the hsm-device-protocol row: make hdp-boundary-check end to end on the repository and on a tree that breaks the row
+	@bash test/integration/hsm_device_protocol_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
