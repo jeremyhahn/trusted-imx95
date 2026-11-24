@@ -141,8 +141,9 @@ absent.
 
 ## Fail-closed default (owner question open)
 
-**Provisional; the owner's to decide (TENANT ASK 5, Q2).** The coordinator's default keeps generate and delete failing
-closed. This section is the one statement of it; the other sections link here.
+**Proposed, pending owner approval; the owner's to decide (TENANT ASK 5, Q2).** This policy is not in
+[SPEC.md](../SPEC.md): ruling 1234 approved only the Linux calling side. The code's conservative default keeps generate
+and delete failing closed until the owner answers. This section is the one statement of it; the other sections link here.
 
 **What the pinned library cannot show.** At the pinned commit, a success-tagged reply that carries a warning rating is
 mapped to `HSM_NO_ERROR`: `hsm_api/hsm_utils.c:24-48` logs the rating (counter-warning rating 0x10 included) and
