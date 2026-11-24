@@ -45,7 +45,14 @@ body=$(cat "$bin")
 case $1 in
 cat) [ -f "$R/etc/systemd/xkmsd.service" ] ;;
 is-active) [ "$(cat "$st")" = active ] ;;
-stop) echo inactive >"$st"; rm -rf "$R/proc/4242"; echo '  sl  local_address' >"$R/proc/net/tcp" ;;
+stop)
+	# run/stopfail: the stop fails and the unit stays up; run/linger: the unit
+	# goes inactive but an xkmsd process survives it
+	[ ! -e "$R/run/stopfail" ] || exit 1
+	echo inactive >"$st"
+	[ -e "$R/run/linger" ] || rm -rf "$R/proc/4242"
+	echo '  sl  local_address' >"$R/proc/net/tcp"
+	;;
 start)
 	case $body in *FAILSTART*) echo inactive >"$st"; exit 1 ;; esac
 	case $body in *CORRUPT*)
@@ -54,6 +61,8 @@ start)
 		;;
 	esac
 	echo active >"$st"
+	mkdir -p "$R/proc/4242"
+	echo xkmsd >"$R/proc/4242/comm"
 	case $body in *NOLISTEN*) ;; *)
 		# the /proc view of a daemon listening on 8443 (0x20FB), plus a
 		# connected socket on port 80 that is not a listener (state 01)
@@ -90,6 +99,14 @@ fi
 EOF
 	chmod +x "$FAKE_OPT/$tool/$tool"
 done
+cat >"$fakebin/df" <<'EOF'
+#!/bin/bash
+# Stub df: the host's df, unless FAKE_DF_FREE names the KiB free on one
+# filesystem mounted at / that holds every board path.
+[ -n "${FAKE_DF_FREE:-}" ] || exec "${0%/*}/../hosttools/df" "$@"
+echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+echo "fake 99999999 0 $FAKE_DF_FREE 0% /"
+EOF
 chmod +x "$fakebin"/*
 # The board has neither: the PATH is the fake bin plus symlinks to every host
 # tool except ss and netstat, so a host ss never shows through.
@@ -272,6 +289,51 @@ D "$tmp/rb4.log" --rollback ../etc board.invalid
 ok "--rollback rejects a stamp that is a path" [ "$RC" != 0 ]
 D "$tmp/dry2.log" --rollback 20260101T000003Z --dry-run board.invalid
 ok "--rollback --dry-run prints a plan" out_has "$tmp/dry2.log" "plan:"
+
+# --- rollback never replaces live state under a running xkmsd ------------------
+# stopfail: systemctl stop fails and the unit stays active; linger: the unit
+# goes inactive but an xkmsd process survives
+for how in stopfail linger; do
+	R=$tmp/boardS-$how
+	mkboard "$R"
+	export XKMS_FAKE_ROOT=$R
+	XKMS_STAMP=20260101T000004Z D "$tmp/s-$how.log" board.invalid "$tmp/b-new"
+	ok "$how setup: deployed" [ "$RC" = 0 ]
+	echo "written after the deploy" >"$R/var/lib/xkms/later"
+	touch "$R/run/$how"
+	snap "$R" "$tmp/snapS"
+	D "$tmp/rs-$how.log" --rollback 20260101T000004Z board.invalid
+	ok "$how: --rollback refuses" [ "$RC" != 0 ]
+	ok "$how: --rollback says it left the live tree" out_has "$tmp/rs-$how.log" "live tree untouched"
+	ok "$how: binary, config and state byte-identical" restored "$R" "$tmp/snapS"
+	ok "$how: no restore copies left behind" [ ! -e "$R/var/lib/xkms.restore" ]
+done
+R=$tmp/boardS-deploy
+mkboard "$R"
+export XKMS_FAKE_ROOT=$R
+touch "$R/run/stopfail"
+snap "$R" "$tmp/snapS"
+XKMS_STAMP=20260101T000004Z D "$tmp/s-deploy.log" board.invalid "$tmp/b-new"
+ok "stopfail: deploy refuses" [ "$RC" != 0 ]
+ok "stopfail: deploy leaves the board byte-identical" restored "$R" "$tmp/snapS"
+ok "stopfail: deploy leaves the unit active" [ "$(cat "$R/run/state")" = active ]
+
+# --- preflight reserves room for the copies a rollback makes -------------------
+R=$tmp/boardF
+mkboard "$R"
+head -c 4194304 /dev/urandom >"$R/var/lib/xkms/big"
+export XKMS_FAKE_ROOT=$R
+snap "$R" "$tmp/snapF"
+live=0
+for n in $(du -sk "$R/usr/local/bin/xkmsd" "$R/etc/xkms" "$R/var/lib/xkms" | cut -f1); do live=$((live + n)); done
+# room for one backup and the staged binary, not for a rollback's copies too
+FAKE_DF_FREE=$((live + 64)) XKMS_STAMP=20260101T000005Z D "$tmp/df.log" board.invalid "$tmp/b-new"
+ok "room for one backup only: preflight refuses" [ "$RC" != 0 ]
+ok "room for one backup only: says why" out_has "$tmp/df.log" "copies a rollback makes"
+ok "room for one backup only: board untouched" restored "$R" "$tmp/snapF"
+ok "room for one backup only: no backup made" [ ! -e "$R/var/backups/xkms/20260101T000005Z" ]
+FAKE_DF_FREE=$((2 * live + 64)) XKMS_STAMP=20260101T000006Z D "$tmp/df2.log" board.invalid "$tmp/b-new"
+ok "room for backup and rollback: deploy succeeds" [ "$RC" = 0 ]
 
 # --- pruning -----------------------------------------------------------------
 R=$tmp/boardE

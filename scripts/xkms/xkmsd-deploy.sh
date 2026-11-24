@@ -69,6 +69,26 @@ r_sums() { # r_sums <dir>: the per-file SHA-256 list of a tree, sorted by path
 
 r_treesum() { r_sums "$1" | sha256sum | cut -d' ' -f1; }
 
+r_fs() { df -Pk "$1" | tail -n 1 | tr -s ' ' | cut -d' ' -f6; } # r_fs <path>: its mount point
+
+r_free() { df -Pk "$1" | tail -n 1 | tr -s ' ' | cut -d' ' -f4; } # r_free <path>: KiB free there
+
+r_stop() { # r_stop <who>: stop the unit, then prove nothing of it still runs
+	local p c
+	systemctl stop "$UNIT" || { echo "$1: systemctl stop $UNIT failed"; return 1; }
+	if systemctl is-active --quiet "$UNIT"; then
+		echo "$1: $UNIT still active after stop"
+		return 1
+	fi
+	p=$(systemctl show -p MainPID --value "$UNIT" 2>/dev/null)
+	[ "${p:-0}" = 0 ] || { echo "$1: $UNIT still has MainPID $p after stop"; return 1; }
+	for p in "$R"/proc/[0-9]*/comm; do
+		[ -r "$p" ] || continue
+		read -r c <"$p" 2>/dev/null || continue
+		[ "$c" != xkmsd ] || { echo "$1: an xkmsd process (pid $(basename "${p%/comm}")) still runs after stop"; return 1; }
+	done
+}
+
 r_preflight() { # r_preflight <new binary KiB>
 	r_init
 	command -v systemctl >/dev/null || { echo "board: no systemctl"; return 1; }
@@ -79,14 +99,26 @@ r_preflight() { # r_preflight <new binary KiB>
 	[ -d "$ETC" ] || { echo "board: $ETC is missing"; return 1; }
 	[ -d "$VAR" ] || { echo "board: $VAR is missing"; return 1; }
 	mkdir -p "$BK" && chmod 700 "$BK" || { echo "board: cannot create $BK"; return 1; }
-	need=$1
-	for n in $(du -sk "$BIN" "$ETC" "$VAR" | cut -f1); do need=$((need + n)); done
-	free=$(df -Pk "$BK" | tail -n 1 | tr -s ' ' | cut -d' ' -f4)
-	[ "${free:-0}" -ge $((need + MINKB)) ] || {
-		echo "board: $free KiB free in $BK, need $((need + MINKB)) KiB"
-		return 1
-	}
-	echo "board: preflight ok ($free KiB free, $need KiB to back up and install)"
+	# What each filesystem must hold at once: the backup copy in $BK; the staged
+	# binary beside $BIN; and the copy of each tree that a rollback makes beside
+	# the live one before it swaps them (the live tree still exists then).
+	local kb ke kv reqs fs want f k
+	kb=$(du -sk "$BIN" | cut -f1) ke=$(du -sk "$ETC" | cut -f1) kv=$(du -sk "$VAR" | cut -f1)
+	reqs="$(r_fs "$BK") $((kb + ke + kv))
+$(r_fs "$BIN") $(($1 + kb))
+$(r_fs "$ETC") $ke
+$(r_fs "$VAR") $kv"
+	for fs in $(printf '%s\n' "$reqs" | cut -d' ' -f1 | LC_ALL=C sort -u); do
+		want=0
+		while read -r f k; do [ "$f" != "$fs" ] || want=$((want + k)); done <<<"$reqs"
+		free=$(r_free "$fs")
+		[ "${free:-0}" -ge $((want + MINKB)) ] || {
+			echo "board: $free KiB free on $fs, need $((want + MINKB)) KiB (backup, staged binary and the copies a rollback makes)"
+			return 1
+		}
+		echo "board: $fs has $free KiB free, $want KiB reserved for backup, install and rollback"
+	done
+	echo "board: preflight ok"
 }
 
 r_stage() { # r_stage <sha256> <go-xkms commit>: the uploaded binary is what we meant
@@ -110,12 +142,7 @@ r_backup() { # r_backup <stamp>: with xkmsd stopped
 	[ ! -e "$d" ] || { echo "board: backup $d already exists"; return 1; }
 	if systemctl is-active --quiet "$UNIT"; then was=active; else was=inactive; fi
 	"$BIN" --version >"$BK/.version.$$" 2>&1 || true
-	systemctl stop "$UNIT" || { echo "board: cannot stop $UNIT"; rm -f "$BK/.version.$$"; return 1; }
-	if systemctl is-active --quiet "$UNIT"; then
-		echo "board: $UNIT still active after stop"
-		rm -f "$BK/.version.$$"
-		return 1
-	fi
+	r_stop board || { rm -f "$BK/.version.$$"; return 1; }
 	mkdir "$d" && cp -a "$BIN" "$d/xkmsd" && cp -a "$ETC" "$d/etc-xkms" &&
 		cp -a "$VAR" "$d/var-lib-xkms" || {
 		echo "board: backup copy failed (disk?)"
@@ -217,7 +244,9 @@ r_restore() { # r_restore <stamp>
 	d="$BK/$1"
 	[ -d "$d" ] || { echo "restore: no backup $d"; return 1; }
 	(cd "$d" && sha256sum -c --quiet SHA256SUMS) || { echo "restore: backup $d fails its SHA256SUMS; touching nothing"; return 1; }
-	systemctl stop "$UNIT" || true
+	# Never replace live state under a running daemon: it would write into the
+	# restored tree or keep stale handles. Stop it and prove it is gone first.
+	r_stop restore || { echo "restore: refusing to touch $ETC, $VAR or $BIN while xkmsd may run; live tree untouched"; return 1; }
 	rm -rf "$ETC.restore" "$VAR.restore" "$BIN.restore"
 	cp -a "$d/etc-xkms" "$ETC.restore" && cp -a "$d/var-lib-xkms" "$VAR.restore" &&
 		cp -a "$d/xkmsd" "$BIN.restore" || {
@@ -347,7 +376,7 @@ board() {
 	[ $# -eq 0 ] || args=$(printf '%q ' "$@")
 	{
 		printf 'R=%q; UNIT=xkmsd; KEEP=%q; WAIT=%q; SETTLE=%q; MINKB=%q; PORT=%q\n' "$fake" "$keep" "$wait_s" "$settle" "$minkb" "${XKMS_PORT:-}"
-		declare -f r_init r_sums r_treesum r_preflight r_stage r_unstage r_backup r_install r_start \
+		declare -f r_init r_sums r_treesum r_fs r_free r_stop r_preflight r_stage r_unstage r_backup r_install r_start \
 			r_listening r_health r_restore r_backup_commit r_prune
 		echo "r_$action $args"
 	} | ssh "${ssh_opts[@]}" "$target" "bash -s"
