@@ -10,7 +10,7 @@ source "$here/lib.sh"
 
 before=$(cd "$ROOT" && git status --porcelain --ignored)
 PY="$("$ROOT/scripts/ahab/spsdk-venv.sh")/bin/python"
-TOOL="$ROOT/scripts/device-lifecycle/evidence-bundle.py"
+TOOL="$ROOT/test/device_lifecycle/bundle_fixture.py"
 COLLECT="$ROOT/scripts/device-lifecycle/collect-evidence.sh"
 W="$TMP_ROOT/w"
 BIN="$W/bin"
@@ -82,7 +82,7 @@ rm -f "$W/out.json"
 run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
 check "good run" 0 "wrote"
 run "$PY" -I "$TOOL" check "$W/out.json" --ele-pub "$W/ele.pem" --nonce "$NONCE" --ek-public "$W/fx_ek.bin"
-check "the bundle passes evidence-bundle.py check" 0 "valid"
+check "the bundle passes the test fixture check" 0 "valid"
 mapfile -t calls <"$LOG"
 if [ "${#calls[@]}" -eq 2 ] && [[ "${calls[0]}" == "ele-attest $NONCE "* ]] &&
 	[[ "${calls[1]}" == "tpm2_readpublic -c $HANDLE "* ]]; then
@@ -91,11 +91,11 @@ else
 	fail "call order" "${calls[*]}"
 fi
 
-rm -f "$W/out.json"
-run col env ELE_ATTEST_CMD="$BIN/ele-attest" ELE_ATTEST_PUB="$W/ele.pem" "$COLLECT" "${args[@]}" -o "$W/out.json"
-check "good run with the optional self-check" 0
-expect "self-check run wrote OUT" test -s "$W/out.json"
-
+if [[ "$(<"$COLLECT")" != *bundle_fixture* && "$(<"$COLLECT")" != *evidence-bundle* ]]; then
+	pass "the collector does not call the checker"
+else
+	fail "the collector calls the checker"
+fi
 rm -f "$W/out.json"
 run col env FAIL_ELE=1 ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
 check "enclave failure" nonzero
@@ -110,17 +110,6 @@ rm -f "$W/out.json"
 run col env FAIL_TPM=1 ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/out.json"
 check "readpublic failure" nonzero
 expect "readpublic failure: no OUT" test ! -e "$W/out.json"
-
-# A wrong self-check key fails and leaves no OUT.
-"$PY" -I -c '
-import sys
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-open(sys.argv[1], "wb").write(ec.generate_private_key(ec.SECP384R1()).public_key().public_bytes(
-    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))' "$W/other.pem"
-run col env ELE_ATTEST_CMD="$BIN/ele-attest" ELE_ATTEST_PUB="$W/other.pem" "$COLLECT" "${args[@]}" -o "$W/out.json"
-check "self-check with a wrong key" nonzero
-expect "self-check failure: no OUT" test ! -e "$W/out.json"
 
 # Refusals happen before any double runs.
 refuse() { # name, then env assignments and collector arguments

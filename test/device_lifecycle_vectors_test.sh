@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# device_lifecycle_vectors_test.sh: evidence-bundle.py vectors. Generates the
+# device_lifecycle_vectors_test.sh: bundle_fixture.py vectors (test-only). Generates the
 # vector set into a temp dir, runs `check` for every manifest entry, and
 # compares exit code and failed-check name. No key is committed or kept.
 set -euo pipefail
@@ -10,7 +10,7 @@ source "$here/lib.sh"
 
 before=$(cd "$ROOT" && git status --porcelain --ignored)
 PY="$("$ROOT/scripts/ahab/spsdk-venv.sh")/bin/python"
-TOOL="$ROOT/scripts/device-lifecycle/evidence-bundle.py"
+TOOL="$ROOT/test/device_lifecycle/bundle_fixture.py"
 W="$TMP_ROOT/w"
 mkdir -p "$W"
 

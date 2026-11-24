@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# device_lifecycle_bundle_test.sh: scripts/device-lifecycle/evidence-bundle.py
+# device_lifecycle_bundle_test.sh: test/device_lifecycle/bundle_fixture.py
 # build and check, with keys generated at test time in a temp dir. No board.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ source "$here/lib.sh"
 
 before=$(cd "$ROOT" && git status --porcelain --ignored)
 PY="$("$ROOT/scripts/ahab/spsdk-venv.sh")/bin/python"
-TOOL="$ROOT/scripts/device-lifecycle/evidence-bundle.py"
+TOOL="$ROOT/test/device_lifecycle/bundle_fixture.py"
 W="$TMP_ROOT/w"
 mkdir -p "$W"
 NONCE=00112233445566778899aabbccddeeff

@@ -2,7 +2,7 @@
 
 > **Status: PROPOSED, pending owner approval, go-xkms and go-trusted-platform** · Row: device-lifecycle · Issue: #177
 
-This page proposes the one evidence bundle the Cortex-A55 hands to go-xkms for endorse-01. go-xkms's endorse-01 verifier and go-trusted-platform #884 own the real wire format; this is the device side's input to them, not a decision. Everything below beyond the order and the caller is proposed, pending owner approval.
+This page proposes the one evidence bundle the Cortex-A55 hands to go-xkms for endorse-01. go-xkms's endorse-01 verifier and go-trusted-platform #884 own the real wire format and the verification; this is the device side's input to them, a proposal for go-xkms and go-trusted-platform, not an interface of this repository. This repository ships no verifier: a test-only fixture helper (`test/device_lifecycle/bundle_fixture.py`) builds and checks synthetic bundles for its own tests and is not a command for users or for the provisioning station. Everything below beyond the order and the caller is proposed, pending owner approval.
 
 ## Decision basis
 
@@ -34,7 +34,7 @@ The enclave call comes first (the verifier's nonce in, the attestation response 
 
 ## Checks a verifier makes
 
-The checker is `scripts/device-lifecycle/evidence-bundle.py check`, offline.
+These are the checks the proposal assumes a verifier makes; the verifier is go-xkms's endorse-01, and its rules are its own. The test-only fixture helper exercises them on synthetic bundles so the proposal is testable.
 
 | Check | Status |
 |---|---|
@@ -55,19 +55,15 @@ Proposed, pending owner approval. `scripts/device-lifecycle/collect-evidence.sh 
 1. It validates the nonce (32 hex digits) and the handle (persistent range 0x81000000 to 0x81FFFFFF) and refuses before running anything else.
 2. It runs the enclave attestation: `$ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT`. The command is named by the environment variable, has no default, and must write the signed region and the signature to the two given paths and exit 0. The collector refuses to run without it.
 3. Only if that succeeded, it reads the EK public area with `tpm2_readpublic -c HANDLE -f tss -o FILE`, a read-only command.
-4. It runs `evidence-bundle.py build` into a temporary file, then, only when `ELE_ATTEST_PUB` names an enclave public key PEM (a device normally has none), `check` as a self-check. OUT is written only when every step passed.
+4. It composes the JSON bundle into a temporary file, without verifying anything, and copies it to OUT. OUT is written only when every step passed; a failed copy or move fails the collector.
 
-The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). `EVIDENCE_PYTHON` names the interpreter (default `python3`, needs `cryptography`).
+The collector never calls `tpm2_createek`, `tpm2_clear`, `tpm2_evictcontrol` or any NV-writing command. The handle is a required argument with no default because the EK template and handle are open (B5). `EVIDENCE_PYTHON` names the interpreter (default `python3`, standard library only).
 
 It waits on two things: the enclave client's attestation command (row 162, `secure-key-handling`, has none yet, so `ELE_ATTEST_CMD` is a contract, not a binding) and the answer to B5. It is tested only against doubles for both commands (`test/device_lifecycle_collect_test.sh`); nothing here touches life cycle, which closes only at the provisioning station.
 
-## Verifier vectors
+## Test vectors (test-only)
 
-Proposed, pending owner approval. `scripts/device-lifecycle/evidence-bundle.py vectors OUTDIR` writes a labelled vector set for a verifier to test against: one bundle per case, public keys (`ele-pub.pem` and three wrong-key variants), two EK public areas, and `manifest.json`. For each file the manifest lists the `check` arguments (relative to the manifest directory), the expected exit code (0 valid, 1 invalid, 2 unusable input) and a substring naming the failed check.
-
-The set is generated at test time and never committed: each run makes a fresh P-384 key in memory, writes only its public half, and signs synthetic regions (random bytes holding the nonce) with it. The manifest says so: the real response layout is not public, so these vectors prove the checks above and nothing about the real enclave output.
-
-How go-xkms would use it: run `vectors` into a temporary directory in its own test setup (the script needs only Python and `cryptography`), read `manifest.json`, feed each bundle to its endorse-01 verifier with the listed public key, nonce and optional EK, and compare accept or reject with `expect_exit` (0 accepts; 1 and 2 reject). The reasons and the exact rejection codes are endorse-01's own; `expect_check` is a hint to which rule a reject case exercises, and endorse-01's acceptance rules remain go-xkms's.
+The fixture helper's `vectors` subcommand writes labelled synthetic cases for this repository's own tests (`test/device_lifecycle_vectors_test.sh`). They are generated at test time and never committed: each run makes a fresh P-384 key in memory, writes only its public half, and signs synthetic regions with it. The real response layout is not public, so they prove the proposal's checks and nothing about the real enclave output. They are not a vector set offered to go-xkms, and not an interface of this repository.
 
 ## Open items
 

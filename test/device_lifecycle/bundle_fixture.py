@@ -1,16 +1,21 @@
-"""Build and check the device-side endorse-01 evidence bundle (proposed).
+"""TEST-ONLY fixture helper for the endorse-01 evidence bundle tests.
 
-Usage:
-  python -I evidence-bundle.py build --signed F --signature F --nonce HEX \\
+This is not a verifier and not a command for users or for the provisioning
+station. It defines no wire format and no acceptance rule of this repository:
+verification and the wire format belong to go-xkms (endorse-01) and
+go-trusted-platform (docs/SPEC.md rows). It only builds and checks the
+synthetic fixture bundles that test/device_lifecycle_*_test.sh use, so the
+collector's output and the proposal in docs/device-lifecycle/evidence-bundle.md
+can be exercised.
+
+Usage (tests only):
+  python -I bundle_fixture.py build --signed F --signature F --nonce HEX \\
       --response-version N --ek-public F --ek-template S -o OUT
-  python -I evidence-bundle.py check BUNDLE --ele-pub PEM --nonce HEX \\
+  python -I bundle_fixture.py check BUNDLE --ele-pub PEM --nonce HEX \\
       [--ek-public F]
 
-The bundle is the evidence the Cortex-A55 hands to go-xkms under owner ruling
-1234: the EdgeLock enclave attestation response (RM00284 section 3.12) with
-the verifier's nonce, then the fTPM EK public area. The format is a proposal,
-pending owner approval (docs/device-lifecycle/evidence-bundle.md); go-xkms
-and go-trusted-platform own the real wire format.
+The bundle shape is a proposal, pending owner approval, for go-xkms and
+go-trusted-platform, not an interface of this repository.
 
 A JSON object, UTF-8, sorted keys, compact separators, one trailing newline;
 byte fields are unpadded base64url. `build` is deterministic and does not
@@ -328,7 +333,7 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv):
-    p = Parser(prog="evidence-bundle.py")
+    p = Parser(prog="bundle_fixture.py")
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--signed", required=True)
@@ -349,18 +354,18 @@ def main(argv):
     try:
         if args.cmd == "build":
             build(args)
-            print("evidence-bundle: built")
+            print("bundle_fixture: built")
         elif args.cmd == "vectors":
             vectors(args)
-            print("evidence-bundle: vectors written")
+            print("bundle_fixture: vectors written")
         else:
             check(args)
-            print("evidence-bundle: valid")
+            print("bundle_fixture: valid")
     except Invalid as e:
-        print(f"evidence-bundle: invalid: {e}")
+        print(f"bundle_fixture: invalid: {e}")
         return 1
     except Unusable as e:
-        print(f"evidence-bundle: {e}", file=sys.stderr)
+        print(f"bundle_fixture: {e}", file=sys.stderr)
         return 2
     return 0
 

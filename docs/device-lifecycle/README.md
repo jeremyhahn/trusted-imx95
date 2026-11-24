@@ -21,7 +21,7 @@ This folder is the device side of go-trusted-platform's `hsm-device-lifecycle` r
 
 - Enclave evidence: [attestation-survey.md](attestation-survey.md).
 - TPM evidence and its binding to the chip: [ftpm](../ftpm/README.md) for the TPM, [evidence-binding-survey.md](evidence-binding-survey.md) for the binding.
-- The evidence handed to endorse-01 (proposed): [evidence-bundle.md](evidence-bundle.md), with its checker, the A55 collector (`scripts/device-lifecycle/collect-evidence.sh`) and the generated verifier vectors.
+- The evidence handed to endorse-01 (proposed): [evidence-bundle.md](evidence-bundle.md), and the A55 collector (`scripts/device-lifecycle/collect-evidence.sh`). Verification and the wire format belong to go-xkms and go-trusted-platform; this repository ships no verifier.
 - Carriage and enrollment: [enrollment-survey.md](enrollment-survey.md).
 - End of life: [decommission-survey.md](decommission-survey.md).
 

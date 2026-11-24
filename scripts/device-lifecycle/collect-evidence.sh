@@ -7,17 +7,13 @@
 #
 # Order: (1) the enclave attestation through $ELE_ATTEST_CMD, (2) only if it
 # succeeded, the fTPM EK public area with the read-only tpm2_readpublic,
-# (3) evidence-bundle.py build, (4) an optional self-check when ELE_ATTEST_PUB
-# names the enclave public key PEM. No default for the enclave command or the
-# handle. Never creates, clears or evicts anything in the TPM.
+# (3) compose the JSON bundle, no verification. No default for the enclave
+# command or the handle. Never creates, clears or evicts anything in the TPM.
 #
 # ELE_ATTEST_CMD is run as: $ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT
 # and must write the signed region and the 96-byte signature there, exit 0.
 # EVIDENCE_PYTHON names the interpreter (needs `cryptography`), default python3.
 set -euo pipefail
-
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-tool="$here/evidence-bundle.py"
 
 die() {
 	echo "collect-evidence: $*" >&2
@@ -63,16 +59,30 @@ $ELE_ATTEST_CMD "$nonce" "$work/signed.bin" "$work/sig.bin" ||
 tpm2_readpublic -c "$handle" -f tss -o "$work/ek.bin" >/dev/null ||
 	die "tpm2_readpublic failed"
 
-# 3. Compose into a temp file, publish only when everything passed.
-"$py" -I "$tool" build --signed "$work/signed.bin" --signature "$work/sig.bin" \
-	--nonce "$nonce" --response-version "$version" --ek-public "$work/ek.bin" \
-	--ek-template "$template" -o "$work/bundle.json" >/dev/null || die "bundle build failed"
-
-# 4. Optional self-check; a device normally has no verifier key.
-if [ -n "${ELE_ATTEST_PUB:-}" ]; then
-	"$py" -I "$tool" check "$work/bundle.json" --ele-pub "$ELE_ATTEST_PUB" \
-		--nonce "$nonce" --ek-public "$work/ek.bin" >/dev/null || die "bundle self-check failed"
-fi
+# 3. Compose into a temp file, publish only when everything passed. This only
+# arranges the collected bytes; it verifies nothing (verification belongs to
+# go-xkms and go-trusted-platform, docs/SPEC.md).
+"$py" -I -c '
+import base64, json, sys
+signed, sig, ek, out, nonce, version, template = sys.argv[1:8]
+def b64(p):
+    data = open(p, "rb").read() if p != nonce else bytes.fromhex(nonce)
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+bundle = {
+    "format": "trusted-imx95/endorse-evidence",
+    "version": 1,
+    "ele_attestation": {
+        "response_version": int(version),
+        "signed": b64(signed),
+        "signature": b64(sig),
+        "verifier_nonce": b64(nonce),
+    },
+    "ftpm_ek": {"public": b64(ek), "template": template},
+    "binding": "session",
+}
+open(out, "wb").write((json.dumps(bundle, sort_keys=True, separators=(",", ":")) + "\n").encode())
+' "$work/signed.bin" "$work/sig.bin" "$work/ek.bin" "$work/bundle.json" "$nonce" "$version" "$template" ||
+	die "bundle composition failed"
 
 cp "$work/bundle.json" "$out.tmp.$$" && mv "$out.tmp.$$" "$out"
 echo "collect-evidence: wrote $out"
