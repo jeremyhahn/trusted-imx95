@@ -271,7 +271,7 @@ done
 
 # One flipped byte in each container header (past the 4-byte tag word) and in
 # each signature block: offsets from the parse (layout.txt), not a byte scan.
-while read -r tag k hoff hlen soff slen; do
+while read -r tag k hoff _ soff slen; do
 	[ "$tag" = C ] || continue
 	for spec in "header:$((hoff + 20))" "signature block:$((soff + slen / 2))"; do
 		what=${spec%%:*}
