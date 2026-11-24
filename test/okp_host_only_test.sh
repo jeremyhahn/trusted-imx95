@@ -226,7 +226,7 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
   fixture "list form sdpshost spaced" hit scripts/ahab/key-import-check.py 'run([ "sdpshost" , "-p", "usb"])'
   fixture "multi-line subprocess.run list" hit scripts/ahab/key-import-check.py 'subprocess.run([' '    "nxpele",' '    "commit", "-i", "OEM_FW_FUSE"' '])'
   fixture "multi-line Popen with uuu path" hit scripts/ahab/key-import-check.py 'Popen(' '    "/usr/bin/uuu",' '    x)'
-  fixture "multi-line fastboot list" hit scripts/ahab/key-import-check.py '["fastboot",' '  "flash", "boot", image]'
+  fixture "multi-line fastboot list" hit scripts/ahab/key-import-check.py 'cmd = [' '    "fastboot",' '    "flash", "boot", image]'
   fixture "multi-line list of plain strings" pass scripts/ahab/key-import-check.py 'names = [' '    "alpha",' '    "beta",' ']'
   fixture "multi-line print of prose naming fastboot" pass scripts/ahab/key-import-check.py 'print(' '    "use fastboot later,"' '    "then stop")'
   fixture "list naming fastboot-docs" pass scripts/ahab/key-import-check.py 'names = ["fastboot-docs"]'
