@@ -600,6 +600,29 @@ that tree on 2026-11-24 (**read twice**: the first reading is the one
   start-list `PERF_*` entries, all `PERF_A55`); the caller lines
   `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` and `:1272`,
   `sm/utilities/monitor/monitor_cmds.c:1809`.
+- Second reading of the cites of 8.2 and 8.3 not listed above, by line
+  number, on 2026-11-24 (all **agreed**): `sm/rpc/scmi/rpc_scmi_perf.c:691-763`
+  (domain attributes handler), `:810-900` (describe levels), `:990-1055`
+  (limits get) and `:1134-1161` (level get), each from the line after the
+  signature to the closing brace plus one blank line; none of the four
+  denies the call (`SM_ERR_DENIED` is only at `:960` and `:1103`, in the two
+  set handlers), and the domain attributes handler only reads the grant to
+  report it (`:743-755`); `configs/other/mx95frdm-pro.cfg:149` (the comment
+  "Modified via PERF protocol"), `:161` (`CLK_BUSM7`) and `:180` (`CLK_M7`),
+  both inside that block; `:57` (dictionary `PRIV`); and
+  `configs/configtool.pl:2461-2474` (the `<proto>=<perm>` match at `:2461`,
+  the resource words at `:2467-2468`, one value saved per resource at
+  `:2474`; the block closes at `:2476`).
+- Sub-ranges that 8.2 cites inside ranges listed above (same reading, so
+  also **agreed**): `mx95frdm-pro.cfg:379-392` and `:394` (inside `:377-396`),
+  `dev_sm_perf.c:417-419`, `:423-425`, `:429-431` and `:435-437` (the four
+  rows inside `:415-441`), `rpc_scmi_perf.c:955-961` and `:963-967` (inside
+  `:955-967`), `:1098-1104` (inside `:1098-1111`).
+- **Not read**: the generated `configs/mx95frdm-pro/config_scmi.h:57` (the
+  agent 0 record header) and `:96` (the `PERF_M7` line) are not in the
+  fetched tree; they exist only after `make cfg`, so this lane did not
+  re-read them. They are covered by `scripts/sm-perf-check.sh` on every
+  build, not by a vendor read.
 - **Not read**: whether the M7 domain's supply index is the one set at
   `dev_sm_perf.c:1347`; whether the monitor utility is built into the
   image.
@@ -643,8 +666,9 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    configuration tool (`make config=mx95frdm-pro cfg`, 8.0), and was
    read after generating it from the pinned file with this repository's
    two patches applied. Its agent 0 record, headed "SCMI AGENT0 Config
-   (M7)" (`configs/mx95frdm-pro/config_scmi.h:57`), sets
-   `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
+   (M7)" (`configs/mx95frdm-pro/config_scmi.h:57`, generated, not re-read
+   in the fetched tree: **unconfirmed** by vendor read, checked by the build
+   below), sets `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
    the only line naming `PERF_M7` in the file, so no other agent holds
    it. This is checked by this repository on every build:
    `scripts/sm-perf-check.sh` (lines 21 and 72-79), called from
