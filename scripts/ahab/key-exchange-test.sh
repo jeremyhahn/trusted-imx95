@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
-# key-exchange-test.sh: build and verify a key_exchange_req signed message for
-# the i.MX 95 B0 (mimx9596 b0) on a throwaway test SRK set (issue #163,
-# docs/oem-key-provisioning/key-exchange-msg.md).
-#
-#   key-exchange-test.sh        generate four ECDSA P-384 test SRKs and a fifth,
-#                               foreign key in a mktemp -d work directory
-#                               outside the clone, build the message with
-#                               nxpimage signed-msg export, verify it with
-#                               nxpimage signed-msg verify, then check that a
-#                               tampered signature and a message signed by a key
-#                               outside the SRK table are rejected. The work
-#                               directory, keys included, is removed on exit.
-#
-# This exercises the message format only. Nothing is sent to a device: no
-# board, no blhost, no fuse, no life-cycle step. The message holds no ECDH key
-# (oem_private_key and nxp_prod_ka_pub are left out) and the test SRK set
-# belongs to this run only. The SPSDK venv comes from spsdk-venv.sh (pinned).
+# key-exchange-test.sh builds and verifies a key_exchange_req signed message on a throwaway test SRK set, and checks a tampered or foreign-signed message is rejected; nothing is sent to a device.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -138,14 +122,11 @@ echo "offsets from the header: signature block $block, SRK table $srk_off, signa
 sig_data_off=$((sig_off + 8 + 10)) # a byte inside the r value of the signature
 tamper "$((srk_off + 20))" tampered-srk-table
 if verify tampered-srk-table.bin; then bad "tampered srk-table accepted"; else ok "tampered srk-table rejected"; fi
-# A flipped byte inside the message body (the command fields) is not rejected by
-# SPSDK verify; the signature covers it, which the independent check below shows.
+# SPSDK verify does not reject a flipped body byte; the independent check below does.
 tamper "$body_off" tampered-body
 if verify tampered-body.bin; then ok "SPSDK verify accepts a flipped body byte (the signature check below rejects it)"; else ok "SPSDK verify rejects a flipped body byte"; fi
 
-# The signature is checked independently of SPSDK: nxpimage signed-msg verify of
-# the pinned SPSDK accepted a flipped signature byte (see
-# docs/oem-key-provisioning/key-exchange-msg.md).
+# Check the signature independently: SPSDK verify accepted a flipped signature byte.
 sigcheck() { "$venv/bin/python" -I "$here/msg-sig-check.py" "$1" "$2" >"$work/sigcheck.log" 2>&1; }
 if sigcheck "$work/msg.bin" "$work/srk0.pub"; then ok "signature valid (independent check)"; else tail -n 3 "$work/sigcheck.log" >&2; bad "signature of the message is not valid"; fi
 tamper "$sig_data_off" tampered-signature

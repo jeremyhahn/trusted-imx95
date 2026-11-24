@@ -68,7 +68,7 @@ done
 
 declare -A pin=()
 wheels=()
-names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE BL31_BASE BL31_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
+names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_TAG TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE BL31_BASE BL31_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
 
 [ -f "$lock" ] || die "$lock: no such lock file"
 n=0
@@ -173,8 +173,27 @@ plat_bl31_size=$((0x00040000))
 { [ "$bl31_base" -eq "$plat_bl31_base" ] && [ "$bl31_size" -eq "$plat_bl31_size" ]; } ||
 	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) differs from the BL31 the pinned TF-A links at (BASE 0x8A200000, SIZE 0x00040000, imx95 platform_def.h)"
 
+# Owner ruling 1234 (superseding the part of ruling 771 that excluded imx-atf):
+# BL31 is NXP's imx-atf at the BSP release's revision, or upstream Arm TF-A at
+# a tagged release; OP-TEE OS is NXP's BSP OP-TEE. The lock may name nothing
+# else. Each source takes its own kind of release tag, which the build fetches
+# and requires to peel to TFA_COMMIT.
+case "${pin[TFA_REPO]}" in
+https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
+	[[ "${pin[TFA_TAG]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+		die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an upstream release tag vX.Y.Z (owner ruling 771)"
+	;;
+https://github.com/nxp-imx/imx-atf.git)
+	[[ "${pin[TFA_TAG]}" =~ ^lf-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+		die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an imx-atf release tag lf-X.Y.Z-A.B.C (owner ruling 1234)"
+	;;
+*) die "$lock: TFA_REPO ${pin[TFA_REPO]} is neither upstream Arm TF-A nor NXP's imx-atf, https://github.com/nxp-imx/imx-atf.git (owner rulings 771 and 1234)" ;;
+esac
+[ "${pin[OPTEE_REPO]}" = https://github.com/nxp-imx/imx-optee-os.git ] ||
+	die "$lock: OPTEE_REPO ${pin[OPTEE_REPO]} is not NXP's BSP OP-TEE, https://github.com/nxp-imx/imx-optee-os.git (owner ruling 771)"
+
 if [ "$check_only" = 1 ]; then
-	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
+	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_TAG]} ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
 	exit 0
 fi
 
@@ -302,6 +321,17 @@ fetch_src() {
 	}
 }
 step src-tfa fetch_src tfa "${pin[TFA_REPO]}" "${pin[TFA_COMMIT]}"
+# tfa_tag: the release tag, fetched from the same upstream, peels to the pin.
+tfa_tag() {
+	local dir=$work/src/tfa got
+	git -C "$dir" fetch -q --depth 1 "${pin[TFA_REPO]}" "refs/tags/${pin[TFA_TAG]}"
+	got=$(git -C "$dir" rev-parse "FETCH_HEAD^{commit}")
+	[ "$got" = "${pin[TFA_COMMIT]}" ] || {
+		echo "tag ${pin[TFA_TAG]} peels to $got, pinned TFA_COMMIT ${pin[TFA_COMMIT]}"
+		return 1
+	}
+}
+step tfa-tag tfa_tag
 step src-optee fetch_src optee "${pin[OPTEE_REPO]}" "${pin[OPTEE_COMMIT]}"
 step src-ftpm fetch_src ftpm "${pin[FTPM_REPO]}" "${pin[FTPM_COMMIT]}"
 step src-mstpm fetch_src mstpm "${pin[MSTPM_REPO]}" "${pin[MSTPM_COMMIT]}"
@@ -363,7 +393,7 @@ cp "$stage/bl31.bin" "$stage/tee.bin" "$stage/SHA256SUMS" "$out/"
 {
 	echo "lock: $(sha256sum "$lock" | cut -d' ' -f1)"
 	echo "release: ${pin[LF_RELEASE]} (provisional, #14 Q2)"
-	echo "tfa: ${pin[TFA_COMMIT]} PLAT=${pin[TFA_PLAT]} SPD=opteed BL32_BASE=${pin[BL32_BASE]} BL32_SIZE=${pin[BL32_SIZE]}"
+	echo "tfa: ${pin[TFA_COMMIT]} tag ${pin[TFA_TAG]} PLAT=${pin[TFA_PLAT]} SPD=opteed BL32_BASE=${pin[BL32_BASE]} BL32_SIZE=${pin[BL32_SIZE]}"
 	echo "optee: ${pin[OPTEE_COMMIT]} ${optee_flags[*]//CROSS_COMPILE*=*/} CFG_EARLY_TA=y early TAs $ftpm_uuid (fTPM) $pkcs11_uuid (PKCS#11)"
 	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage TEE_STORAGE_PRIVATE_REE"
 	echo "toolchain: $("${cross}gcc" --version | head -n 1)"

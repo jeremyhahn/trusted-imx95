@@ -24,18 +24,28 @@ META_IMX_REPO=https://github.com/nxp-imx/meta-imx.git
 META_IMX_COMMIT=2eb758f42cfb96042344815b7dd7755b06ba1e3b
 
 # TF-A BL31: NXP's imx-atf at the commit the BSP release's recipe names
-# (owner ruling 1234 counts imx-atf as upstream TF-A). meta-imx-bsp/recipes-bsp/
-# imx-atf/imx-atf_2.14.bb at the meta-imx commit above sets SRCBRANCH=lf_v2.14
-# and SRCREV to the commit below; the pin is the commit, not the branch. Its
-# tree has plat/imx/imx9/imx95, so the platform name is imx95.
+# (owner ruling 1234, which supersedes the part of ruling 771 that excluded
+# imx-atf). meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb at the meta-imx
+# commit above sets SRCBRANCH=lf_v2.14 and SRCREV to the commit below; the pin
+# is the commit, not the branch. Its tree has plat/imx/imx9/imx95, so the
+# platform name is imx95.
+# TFA_TAG is the release tag: the script takes only an imx-atf URL with an
+# lf-X.Y.Z-A.B.C tag (or an upstream Arm TF-A URL with a vX.Y.Z tag), and the
+# build fetches the tag and fails unless it peels to TFA_COMMIT. The tag names
+# the commit; it is passed to no build step. lf-6.18.37-2.1.0 is the imx-atf
+# tag of this BSP release as docs/secure-world/upstream-survey.md (S2) and
+# memory-protection-survey.md (S2) name it. That it peels to the commit below
+# was NOT established offline (no vendor source here); until a build runs, the
+# tag check is the guard, and it fails closed if the tag points elsewhere.
 TFA_REPO=https://github.com/nxp-imx/imx-atf.git
+TFA_TAG=lf-6.18.37-2.1.0
 TFA_COMMIT=af9eb2c1748ee3abc0ead7dc76e462f50c573036
 TFA_PLAT=imx95
 
 # OP-TEE OS 4.10: meta-imx-bsp/dynamic-layers/meta-arm/recipes-security/
 # optee/optee-os_4.10.0.imx.bb (branch lf-6.18.37_2.1.0). The i.MX 95 flavour
 # this tree supports is mx95evk only (core/arch/arm/plat-imx/conf.mk); there
-# is no FRDM-IMX95-PRO flavour.
+# is no FRDM-IMX95-PRO flavour. The script takes only NXP's imx-optee-os here.
 OPTEE_REPO=https://github.com/nxp-imx/imx-optee-os.git
 OPTEE_COMMIT=99f40897dd1fc28b4c792773b167e3db629db2ff
 OPTEE_PLATFORM=imx-mx95evk

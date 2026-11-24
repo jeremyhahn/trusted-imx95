@@ -23,9 +23,10 @@ key in the clear, and what crosses the boundary is a request through the HSM API
 
 ## Key store rollback protection
 
-An update to the key store counts only after an operation carrying the strict-operation flag is acknowledged
-(RM00284 §2.4.2, as the SPEC row cites it). An update made without the flag, or not yet acknowledged, is not a
-committed update (RM00284 §2.4.2).
+A key update or a key deletion counts as rollback-protected only when the enclave acknowledges both the
+strict-operation flag and the monotonic-counter flag for that operation; an operation acknowledged with only one of
+them is not rollback-protected (RM00284 §2.4.2; owner decision 241). An update made without both flags, or not yet
+acknowledged for both, is not a committed update.
 
 The acknowledgement alone does not show that the monotonic counter advanced. The public library's sources show that
 past a key store's `max_updates_number` the enclave still accepts updates, returning the `HSM_KEY_STORE_COUNTER`
@@ -104,19 +105,26 @@ under [Missing](#missing).
 - **The number of keys, key types and key store size** the board needs: the cited sections give no figures for the
   board's use.
 
-## Proposed SPEC change, pending owner approval
+## The policy check
 
-This section proposes a change to the `secure-key-handling` row of [SPEC.md](../SPEC.md). It is not a requirement
-until the owner approves it, and the row's text is unchanged.
+`scripts/skh-policy-check.py` states this row as a fail-closed check of a trace of enclave operations, one JSON
+object per line (`make skh-policy-check SKH_TRACE=<file>`). It does not talk to an enclave: it decides whether a
+recorded run of the caller kept the row. A record fails when it uses an API other than the HSM API (RM00284 §3.45),
+an operation other than the services in the table above, carries a key in the clear or generates a key outside the
+enclave (RM00284 §2.4, §3.2). A key update or deletion passes only with both flags sent and acknowledged, no warning
+and the counter split configured (RM00284 §2.4.2; owner decision 241). Whichever side the owner picks to call the HSM
+API records the trace; the record's fields are the check's, until that caller exists.
 
-- Proposed wording: a key store update counts as committed only when both the strict-operation flag and the
-  monotonic-counter flag are acknowledged for that same operation, with no counter warning and the counter split
-  configured. A counter read is a diagnostic only, never evidence of a commit.
-- Reason: past a key store's update cap, or with no counter split written, the enclave accepts updates without
-  rollback protection ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4). The row's current
-  wording, that an acknowledged strict operation also advances the counter, does not hold in those cases.
-- The same wording would apply to the restatements in [secure-world/architecture.md](../secure-world/architecture.md)
-  and [oem-key-provisioning/architecture.md](../oem-key-provisioning/architecture.md).
+`test/skh_policy_check_test.sh` holds one vector per rule, and `make integration-test-secure-key-handling` drives the
+check through make end to end. What the trace cannot show, that the enclave on the board behaves as RM00284 says, is
+unconfirmed until the caller runs on the board.
+
+## Owner decision 241
+
+The proposal this file once made, that a key store update counts only when both flags are acknowledged for the same
+operation, is the row's wording since owner decision 241 ([SPEC.md](../SPEC.md), row `secure-key-handling`). The same
+rule applies to the restatements in [secure-world/architecture.md](../secure-world/architecture.md) and
+[oem-key-provisioning/architecture.md](../oem-key-provisioning/architecture.md).
 
 ## Open questions
 

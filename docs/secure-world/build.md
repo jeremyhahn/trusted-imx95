@@ -49,7 +49,7 @@ every value below from the new release's manifest and recipes and editing the lo
 |---|---|---|
 | NXP Linux BSP release | `lf-6.18.37-2.1.0`; `imx-manifest` commit `0c44ab18abe471b4326037b61893f4e69b6fc182` | The tag, peeled |
 | meta-imx | `rel_imx_6.18.37_2.1.0`, commit `2eb758f42cfb96042344815b7dd7755b06ba1e3b` | `imx-6.18.37-2.1.0.xml` in that manifest |
-| TF-A BL31 | `nxp-imx/imx-atf`, commit `af9eb2c1748ee3abc0ead7dc76e462f50c573036` (branch `lf_v2.14`; the pin is the commit) | `meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb` in meta-imx: its `SRCREV`. The release manifest itself lists no imx-atf entry. Its tree has `plat/imx/imx9/imx95` |
+| TF-A BL31 | `nxp-imx/imx-atf`, commit `af9eb2c1748ee3abc0ead7dc76e462f50c573036` (branch `lf_v2.14`; the pin is the commit) | `meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb` in meta-imx: its `SRCREV`. The release manifest itself lists no imx-atf entry. Its tree has `plat/imx/imx9/imx95`. The lock pins the release tag too (`TFA_TAG`, `lf-6.18.37-2.1.0`, as the surveys name it), and the build fetches it and fails unless it peels to the commit; that it does was not established offline |
 | OP-TEE OS 4.10 | `nxp-imx/imx-optee-os`, branch `lf-6.18.37_2.1.0`, commit `99f40897dd1fc28b4c792773b167e3db629db2ff` | `optee-os_4.10.0.imx.bb` in meta-imx |
 | `SM_SECURE_BASE` `0x8A000000`, `SM_SECURE_END` `0x8DFFFFFF` (inclusive; the A55 secure window) | Proposed, pending owner approval; unverified against the SM configuration (vendor source absent here) | [Survey](memory-protection-survey.md) sections 4 and 6. TF-A assumes the SM made the window secure-only and does not check it (section 5). The script refuses a `BL32_BASE`/`BL32_SIZE` window that is not inside this one, so a BL32 move outside it is an offline error. Whether the real SM configuration still has this window is checked only at the first `make system-manager` |
 | fTPM TA | `OP-TEE/optee_ftpm`, tag `4.10.0`, commit `a09269b15de635e1816fe832e26adfbfb44c5455` | The tag, peeled |
@@ -65,9 +65,9 @@ wheels.
 Two choices here differ from the wording elsewhere:
 
 - **BL31 is NXP's `imx-atf`** at the commit the BSP release's recipe names, with `PLAT=imx95 SPD=opteed`. Owner
-  ruling 1234 counts `imx-atf` as upstream TF-A; it replaces ruling 771's pin of upstream `v2.15.0` and its exclusion
-  of `imx-atf`. `make secure-world` builds this BL31 with the pinned OP-TEE. That the BL31 boots and starts this
-  OP-TEE on the board is not checked. The pin is a commit on NXP's `lf_v2.14` branch, not a tag.
+  ruling 1234 counts `imx-atf` as upstream TF-A; it supersedes the part of ruling 771 that pinned upstream
+  `v2.15.0` and excluded `imx-atf`. `make secure-world` builds this BL31 with the pinned OP-TEE. That the BL31 boots and starts this
+  OP-TEE on the board is not checked. The pin is a commit on NXP's `lf_v2.14` branch; the tag `TFA_TAG` only names it, and the build checks that the tag peels to it.
 - **The OP-TEE platform is `imx-mx95evk`.** This OP-TEE tree has no FRDM-IMX95-PRO flavour: `mx95evk` is the only
   i.MX 95 flavour in `core/arch/arm/plat-imx/conf.mk`, and the release's OP-TEE recipe maps the `mx95` machines to
   it. The FRDM-Pro machine is one of them through the shared `imx95-evk.inc`; that this mapping applies was not
@@ -167,7 +167,8 @@ as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 | 2 | not yet recorded | not yet recorded |
 
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
-every non-comment, non-blank line of `secure-world/bsp.lock`, the script's two UUID assignments, its `optee_flags`
+every non-comment, non-blank line of `secure-world/bsp.lock` but `TFA_TAG` (it names `TFA_COMMIT`, is checked at
+fetch and reaches no build step), the script's two UUID assignments, its `optee_flags`
 array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed.
 The test fails when any pin, toolchain or wheel line of the lock, or any build argument or flag, differs from the
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
@@ -192,6 +193,15 @@ all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the 
 `needs.preflight.outputs.secure_world != 'false'`, so a README-only PR skips the whole job (image build, setup and
 build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
 `make test` runs only the offline lock check and the script's unit tests.
+
+*Owner rulings 771 and 1234 in the script.* The lock check refuses a `TFA_REPO` other than NXP's `imx-atf`
+(`github.com/nxp-imx/imx-atf.git`, ruling 1234) or upstream Arm TF-A (`git.trustedfirmware.org` or its `ARM-software`
+GitHub mirror, ruling 771's sources); a `TFA_TAG` that is not that source's release tag (`lf-X.Y.Z-A.B.C` for `imx-atf`,
+`vX.Y.Z` for upstream; no `-rc`, no branch, no tag of the other source); and an `OPTEE_REPO` other than NXP's
+`github.com/nxp-imx/imx-optee-os.git`. `make secure-world-check-lock` (`SW_LOCK=<file>`) runs that check alone, offline,
+and `make integration-test-secure-world` drives it and `make secure-world` end to end on a fixture copy of the
+repository, offline: the committed lock passes, and each such lock is refused before any fetch, with no work directory
+made and nothing published.
 
 *Wheel platform tags.* The lock's wheels (identified by SHA-256 on PyPI) are `cryptography-50.0.2-cp311-abi3-
 manylinux_2_28_x86_64`, `cffi-2.1.1-cp313-cp313-manylinux2014_x86_64`, and `pycparser` and `pyelftools` as `py3-none-any`.

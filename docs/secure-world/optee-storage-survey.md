@@ -34,7 +34,7 @@ provisioning step was run or scripted.
 | S6 | OP-TEE documentation, "Platforms: NXP", security disclaimer | tag 4.9.0 | https://github.com/OP-TEE/optee_docs/blob/4.9.0/architecture/platforms/nxp.rst | in full |
 | S7 | NXP OP-TEE OS fork `imx-optee-os` | branch `lf-6.18.37_2.1.0` (described as tag `lf-6.18.37-2.1.0`) | https://github.com/nxp-imx/imx-optee-os/tree/lf-6.18.37_2.1.0 | commit history of `core/drivers/crypto/ele` and `plat-imx/conf.mk` since 2024 |
 | S8 | NXP U-Boot fork, "i.MX 8ULP/9x Secure boot guide using AHAB" | branch `lf_v2025.04` | https://github.com/nxp-imx/uboot-imx/blob/lf_v2025.04/doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt | boot image content, SRK fuse, closing the device |
-| S9 | NXP, "i.MX Linux User's Guide" (UG10163) | not determined | https://www.nxp.com/docs/en/user-guide/UG10163.pdf | downloaded, **not read**: the lane has no PDF reader |
+| S9 | NXP, "i.MX Linux User's Guide" (UG10163) | not determined | https://www.nxp.com/docs/en/user-guide/UG10163.pdf | downloaded, **not read**: the survey has no PDF reader |
 
 Not reached or not used: the i.MX 95 Security Reference Manual and IMX95RM
 (not public), the ELE firmware API reference for the i.MX 95 (not found as
@@ -310,7 +310,7 @@ names today.
 7. Whether OP-TEE uses a separate trusted messaging unit on the i.MX 95 and
    what the enclave grants it (section 9).
 8. Subkey revocation (section 8).
-9. The content of S9 (not readable in the lane), and the non-public i.MX 95
+9. The content of S9 (not readable in the survey), and the non-public i.MX 95
    Security Reference Manual, IMX95RM and ELE API reference.
 
 ## 11. Questions for the owner

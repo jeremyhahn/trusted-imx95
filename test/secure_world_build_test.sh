@@ -14,7 +14,7 @@ run bash "$sw" --help
 check "help prints the usage" 0 "usage: secure-world-build.sh"
 
 run bash "$sw" --check-lock
-check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "toolchain 15.2.rel1"
+check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "TF-A lf-6.18.37-2.1.0 af9eb2c1748e" "toolchain 15.2.rel1"
 
 # Owner ruling 1234 and docs/SPEC.md: BL31 is NXP's imx-atf, which counts as upstream TF-A.
 tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
@@ -135,6 +135,15 @@ edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
 edit_shape() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nnot a pin\n' "$1" || printf '%s\n' "$1"; }
+# Owner rulings 771 and 1234: the script itself refuses a TF-A source that is
+# neither upstream Arm TF-A nor NXP's imx-atf, a TF-A pin whose tag is not that
+# source's release tag, and an OP-TEE that is not NXP's BSP OP-TEE.
+edit_forkrepo() { [[ "$1" == TFA_REPO=* ]] && echo TFA_REPO=https://github.com/example/atf.git || printf '%s\n' "$1"; }
+edit_rctag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=lf-6.18.37-rc0 || printf '%s\n' "$1"; }
+edit_branchtag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=master || printf '%s\n' "$1"; }
+edit_uptag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=v2.15.0 || printf '%s\n' "$1"; }
+edit_notag() { [[ "$1" == TFA_TAG=* ]] || printf '%s\n' "$1"; }
+edit_upoptee() { [[ "$1" == OPTEE_REPO=* ]] && echo OPTEE_REPO=https://github.com/OP-TEE/optee_os.git || printf '%s\n' "$1"; }
 
 for c in \
 	"unread|is marked UNREAD" \
@@ -164,7 +173,13 @@ for c in \
 	"smendhex|SM_SECURE_END must be hex with a 0x prefix" \
 	"smorder|SM_SECURE_BASE 0x8E000000 must be below SM_SECURE_END" \
 	"smbasealign|SM_SECURE_BASE must be 2 MiB aligned" \
-	"smendalign|SM_SECURE_END + 1 must be 2 MiB aligned"; do
+	"smendalign|SM_SECURE_END + 1 must be 2 MiB aligned" \
+	"forkrepo|is neither upstream Arm TF-A nor NXP's imx-atf" \
+	"rctag|TFA_TAG lf-6.18.37-rc0 is not an imx-atf release tag" \
+	"branchtag|TFA_TAG master is not an imx-atf release tag" \
+	"uptag|TFA_TAG v2.15.0 is not an imx-atf release tag" \
+	"notag|TFA_TAG is missing" \
+	"upoptee|is not NXP's BSP OP-TEE"; do
 	name=${c%%|*} want=${c#*|}
 	f=$(lockcopy "$name" "edit_$name")
 	run bash "$sw" --lock "$f" --check-lock
@@ -333,7 +348,13 @@ cmd=$1
 shift
 case "$cmd" in
 init) mkdir -p "${!#}" ;;
-fetch) echo "${!#}" >"$dir/.stubhead" ;;
+fetch)
+	# A tag fetch moves FETCH_HEAD to the tag's commit: the pinned one, or
+	# another when STUB_TAG_MOVED is set.
+	case "${!#}" in
+	refs/tags/*) echo "${!#}" >"$dir/.stubtag"; [ -z "${STUB_TAG_MOVED:-}" ] || echo 1111111111111111111111111111111111111111 >"$dir/.stubhead" ;;
+	*) echo "${!#}" >"$dir/.stubhead" ;;
+	esac ;;
 checkout) ;;
 rev-parse)
 	if [ "${STUB_GIT_BAD:-}" = "${dir##*/}" ]; then echo 0000000000000000000000000000000000000000; else cat "$dir/.stubhead"; fi ;;
@@ -455,13 +476,21 @@ two_builds() { local n; n=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ 
 expect "TF-A is built twice, once in each clean build directory" two_builds
 expect "the reproducibility result is recorded" has_line 'reproducible: yes' "$TMP_ROOT/ok/out/build-info.txt"
 expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/build-1" -a -d "$TMP_ROOT/ok/work/build-2"
+lock_value() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == "$2="* ]] && { printf '%s\n' "${l#"$2="}"; return 0; }; done <"$1"; return 1; }
+tag_fetched() { [ "$(<"$TMP_ROOT/ok/work/build-1/src/tfa/.stubtag")" = "refs/tags/$(lock_value "$good" TFA_TAG)" ]; }
+expect "the TF-A release tag is fetched from the pinned repository and checked" tag_fetched
+expect "build-info.txt records the TF-A tag" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=imx95 SPD=opteed BL32_BASE=$(lock_value "$good" BL32_BASE) BL32_SIZE=$(lock_value "$good" BL32_SIZE)" "$TMP_ROOT/ok/out/build-info.txt"
+
+# The release tag peels to another commit than TFA_COMMIT: the build stops.
+fullrun tagmoved "$oklock" STUB_TAG_MOVED=1
+check "a TF-A tag that does not peel to TFA_COMMIT stops the build" nonzero "tfa-tag failed" "tag $(lock_value "$good" TFA_TAG) peels to 1111111111111111111111111111111111111111"
+expect "a moved tag publishes nothing" nothing_published tagmoved
 
 # The BL31 build call (the only make call in the TF-A tree): its platform is the
 # TFA_PLAT of the lock (read here with the script's NAME=value rule, not typed
 # twice), the dispatcher is OP-TEE, the target is bl31, the output is under the
 # build directory, and each clean build makes exactly one such call.
 # lock_value <lock> <NAME>: the value of the one NAME=value line.
-lock_value() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == "$2="* ]] && { printf '%s\n' "${l#"$2="}"; return 0; }; done <"$1"; return 1; }
 # tfa_call_ok <log> <work> <plat>: one correct BL31 call in each of build-1 and build-2
 tfa_call_ok() {
 	local log=$1 work=$2 plat=$3 base=${4:-$bl32_base} size=${5:-$bl32_size} n l c w
@@ -515,7 +544,7 @@ all_optee_window() {
 optee_window_bad() { ! all_optee_window "$@"; }
 expect "every OP-TEE make call carries CFG_TZDRAM_START/SIZE equal to the lock's BL32_BASE/BL32_SIZE" all_optee_window "$mlog" "$bl32_base" "$bl32_size"
 expect "a planted other CFG_TZDRAM_START fails the OP-TEE window check" optee_window_bad "${mlog//CFG_TZDRAM_START=$bl32_base/CFG_TZDRAM_START=0x8E000000}" "$bl32_base" "$bl32_size"
-expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
+expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
 
 # A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
 edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; else edit_tcsum "$1"; fi; }
@@ -527,7 +556,7 @@ base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A
 expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
 expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A400000 "$bl32_size"
 expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
-expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
+expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
 
 # A non-default System Manager grant with a matching lock: the whole two-build
 # driver must pass --grants to both --single children, or the children check the
@@ -603,7 +632,8 @@ expect "a wrong artefact hash publishes nothing" nothing_published badhash
 optee_config_digest() {
 	local lk=${1:-$good} sc=${2:-$sw} l on=0 acc=
 	while IFS= read -r l || [ -n "$l" ]; do
-		[[ -z "${l//[[:space:]]/}" || "$l" == \#* ]] && continue
+		# TFA_TAG names TFA_COMMIT (checked at fetch) and reaches no build step.
+		[[ -z "${l//[[:space:]]/}" || "$l" == \#* || "$l" == TFA_TAG=* ]] && continue
 		acc+="$l"$'\n'
 	done <"$lk"
 	while IFS= read -r l; do
@@ -643,6 +673,10 @@ for n in optee_pin ftpm_pin mstpm_pin; do
 	lk=$(lockcopy "dg$n" "edit_$n")
 	expect "a changed ${n%_pin} commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
 done
+lk=$(lockcopy dgtag edit_rctag)
+expect "the TF-A tag line, which no build step reads, leaves the digest" tied_with "$lk" "$sw"
+lk=$(lockcopy dgtfa edit_unread)
+expect "a changed TF-A commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
 ftpm_script=$TMP_ROOT/ftpm-script.sh
 : >"$ftpm_script"
 while IFS= read -r l; do

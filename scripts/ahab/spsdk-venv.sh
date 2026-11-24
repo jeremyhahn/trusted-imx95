@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
-# spsdk-venv.sh: print the path of a venv, outside the clone, that holds the
-# pinned SPSDK, and fail unless its nxpimage reports exactly that version.
-#
-# SPSDK_VENV names the venv. Unset, it is a per-pin directory under
-# ${XDG_CACHE_HOME:-$HOME/.cache}/trusted-imx95/. A venv without nxpimage is
-# created there: build-requirements.txt then requirements.txt, each with
-# `pip install --require-hashes`, so every file pip installs matches a
-# SHA-256 in this directory. An existing venv is never changed, only checked.
+# spsdk-venv.sh prints the path of a venv holding the pinned SPSDK (SPSDK_VENV, default under the user cache), creating it with hash-checked installs; an existing venv is only checked.
 set -euo pipefail
 
 SPSDK_PIN=3.13.0
