@@ -239,8 +239,8 @@ check offline, and a fake build whose patched file widens the M7 block.
   Manager builds with it, and the output has a non-empty `m33_image.bin` and manifest and a linked ARM ELF. The
   check does not run the image on a board or verify its behaviour. It does cover reproducibility:
   `scripts/sm-toolchain-check.sh` runs `make system-manager` (line 12), whose `scripts/sm-build.sh` builds two
-  clean trees (`h1=$(build 1)` at line 191, `h2=$(build 2)` at line 193) and, when their `m33_image.bin` hashes
-  differ, sets `reproducible=no` (lines 195-196), records it in the manifest (line 205) and fails with `die "not reproducible"` (line 208). The base image does not need to change (#14).
+  clean trees (`h1=$(build 1)` at line 196, `h2=$(build 2)` at line 198) and, when their `m33_image.bin` hashes
+  differ, sets `reproducible=no` (line 201), records it in the manifest (line 211) and fails with `die "not reproducible"` (line 214). The base image does not need to change (#14).
   Where to check: the runs are on this project's GitHub Actions page (github.com, Actions tab), by the run IDs
   above; the job log shows the `sm-toolchain-check` step. They were read from the GitHub Actions API by the
   coordinator, not by the lane, which has no network access to them.
