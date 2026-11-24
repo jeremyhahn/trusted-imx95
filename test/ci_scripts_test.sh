@@ -1225,6 +1225,18 @@ else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
 fi
 
+# ci.yml runs integration on every pull request but a docs-only one, ci:full
+# or not, and CI Gate accepts its skip only on a docs-only pull request.
+it_if=$(awk '/^  integration:$/ { j = 1; next } j && /^    if:/ { sub(/^    if: /, ""); print; exit }' <<<"$ci")
+# shellcheck disable=SC2016 # the expression is ci.yml's literal text
+want_if='${{ (github.event_name != '"'workflow_dispatch'"' || github.ref == '"'refs/heads/main'"') && !github.event.pull_request.draft && needs.preflight.outputs.verdict == '"'run'"' && needs.preflight.outputs.docs_only != '"'true'"' }}'
+# shellcheck disable=SC2016
+if [ "$it_if" = "$want_if" ] && grep -qxF '          check integration "${{ needs.integration.result }}" code' <<<"$ci"; then
+	pass "ci.yml: integration runs on every pull request but a docs-only one, checked as code"
+else
+	fail "ci.yml: integration runs on every pull request but a docs-only one, checked as code" "if: $it_if"
+fi
+
 # --- reap-stale-ci-stacks.sh v6: the dangling images a rebuild leaves --------
 # (Codex reliability P1: each trusted rebuild moves the content tag to a new
 # ID and leaves the old ID dangling, which the tag loop never sees.) A stub
