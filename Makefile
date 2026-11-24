@@ -39,13 +39,13 @@ export PATH := $(TOOLS_DIR):$(PATH)
 NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH or in .tools/bin; run make tools (or make docker-run CMD='make $@')"; exit 1; }
 
 # Every shell script git tracks, and every Python script under scripts/.
-SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh scripts/okp/*.sh test/*.sh test/integration/*.sh))
-PY_SCRIPTS := $(sort $(wildcard scripts/*.py scripts/okp/*.py))
+SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/integration/*.sh))
+PY_SCRIPTS := $(sort $(wildcard scripts/*.py test/okp/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
+	deps-check lint lint-shell lint-python lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
@@ -118,12 +118,21 @@ deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs th
 
 ## --- The lint-class gates the canonical ci.yml runs on the PR tier ---
 
-lint: lint-shell lint-workflows lint-docs docs-check ## shellcheck, actionlint, the Markdown link check and docs-check
+lint: lint-shell lint-python lint-workflows lint-docs docs-check ## shellcheck, the Python parse check, actionlint, the Markdown link check and docs-check
 
 lint-shell: ## shellcheck every shell script
 	@$(call NEED_TOOL,shellcheck)
 	@shellcheck -x $(SH_SCRIPTS)
 	@echo "lint-shell: OK ($(words $(SH_SCRIPTS)) scripts)"
+
+# PY_SCRIPTS includes the test-only helpers under test/okp/. ast.parse writes
+# no __pycache__ into the clone.
+lint-python: ## Every Python script and test helper parses (python3 only)
+	@[ -n "$(PY_SCRIPTS)" ] || { echo "lint-python: no Python script found"; exit 1; }
+	@for f in $(PY_SCRIPTS); do \
+		python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$$f" \
+		|| { echo "lint-python: $$f does not parse"; exit 1; }; done
+	@echo "lint-python: OK ($(words $(PY_SCRIPTS)) scripts: $(PY_SCRIPTS))"
 
 lint-workflows: ## actionlint every workflow (with shellcheck of their run steps)
 	@$(call NEED_TOOL,actionlint)
