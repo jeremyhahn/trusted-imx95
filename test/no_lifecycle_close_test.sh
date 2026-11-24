@@ -240,7 +240,7 @@ for fx in \
   'fastboot flash|fastboot flash boot image.bin' \
   'fastboot flash after if|if fastboot flash boot image.bin; then :; fi' \
   'fastboot flash after while|while ! fastboot flash boot x.bin; do :; done' \
-  'fastboot flash in substitution|x=$(fastboot erase userdata)' \
+  "fastboot flash in substitution|x=\$(fastboot erase userdata)" \
   'sdpshost direct|sdpshost -p usb write-file 0x0 x.bin' \
   'el2go-host direct|el2go-host dev -h' \
   'el2go-host module|python3 -m spsdk.apps.el2go_host dev' \

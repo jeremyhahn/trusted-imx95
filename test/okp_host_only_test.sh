@@ -191,7 +191,7 @@ if [ -z "${OKP_HOST_ONLY_ROOT:-}" ]; then
   fixture "else fastboot" hit $ks 'else fastboot reboot'
   fixture "and-and fastboot" hit $ks 'true && fastboot reboot'
   fixture "or-or fastboot" hit $ks 'false || fastboot reboot'
-  fixture "command substitution fastboot" hit $ks 'x=$(fastboot getvar all)'
+  fixture "command substitution fastboot" hit $ks "x=\$(fastboot getvar all)"
   fixture "sdpshost direct" hit $ks 'sdpshost -p usb write-file 0x0 x.bin'
   fixture "el2go-host direct" hit $ks 'el2go-host dev -h'
   fixture "sdpshost after if" hit $ks 'if sdpshost -h; then :; fi'
