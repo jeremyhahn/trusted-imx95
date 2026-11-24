@@ -2,7 +2,7 @@
 # The recipe text holds a literal ${PN}; the single quotes are meant.
 # shellcheck disable=SC2016
 # Static check of the enclave-access recipe (R6, proposed, pending owner approval):
-# the udev rule, the group-only recipe and the image's install line. No bitbake.
+# the udev rule, the group-only recipe and that no image recipe installs it. No bitbake.
 set -u
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -10,7 +10,6 @@ FAILS=0
 
 recipe_rel=platform-image/recipes-security/enclave-access/enclave-access.bb
 rules_rel=platform-image/recipes-security/enclave-access/files/90-enclave-access.rules
-image_rel=platform-image/recipes-core/images/trusted-imx95-image.bb
 
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
@@ -78,12 +77,21 @@ recipe_ok() {
 	return 0
 }
 
+# image_ok FILE...: no image recipe installs enclave-access (R6 is pending owner
+# approval; the recipe is a proposal and stays out of the image).
 image_ok() {
-	local t
-	t=$(<"$1")
-	case $t in *'IMAGE_INSTALL = "packagegroup-core-boot enclave-access '*) return 0 ;; esac
-	echo "image does not install enclave-access"
-	return 1
+	local f l
+	for f in "$@"; do
+		while IFS= read -r l; do
+			case $l in '#'*) continue ;; esac
+			case $l in *enclave-access*)
+				echo "$f installs enclave-access"
+				return 1
+				;;
+			esac
+		done <"$f"
+	done
+	return 0
 }
 
 t() {
@@ -99,7 +107,9 @@ neg() {
 
 t "rule: kernel, owner, group, mode 0660" rule_ok "$ROOT/$rules_rel"
 t "recipe: useradd, group only" recipe_ok "$ROOT/$recipe_rel"
-t "image installs enclave-access" image_ok "$ROOT/$image_rel"
+t "image recipes do not install enclave-access" image_ok "$ROOT"/platform-image/recipes-core/images/*.bb
+printf '%s\n' 'IMAGE_INSTALL = "packagegroup-core-boot enclave-access"' >"$scratch/image.bb"
+neg "negative: image installs enclave-access" image_ok "$scratch/image.bb"
 
 # negative cases on scratch copies
 sed_copy() { # FROM TO NEWFILE (literal replace on a copy of the rules)

@@ -68,7 +68,7 @@ In the text, "S1" is source 1, and so on. The "latest" pages move; a later read 
   Its mode and owner on the image are **unconfirmed** there; the driver sets none, so the device manager decides.
 - udev rules can set the node's owner, group and mode with the OWNER, GROUP and MODE keys; each value given replaces the
   compiled-in default (S6, rules "Fields" for OWNER, GROUP, MODE). A rule matches by kernel name, so one rule could name
-  that node. The image's rule is in the enclave-access recipe (R6, proposed, pending owner approval).
+  that node. The rule is in the enclave-access recipe, a proposal that no image installs until the owner decides R6.
 - systemd.exec limits what a service can see. User and Group set the account the service runs as; DynamicUser allocates
   a transient account (S5). PrivateDevices gives the service a private `/dev` with only pseudo devices, so a service
   that needs the enclave node cannot turn it on (S5). To allow named nodes, the pages point to the DeviceAllow and
