@@ -316,7 +316,7 @@ have exercised this.
 ## Checking an output directory (provisional)
 
 `scripts/platform-image-verify.sh [--allow-dirty] OUT [LOCK]`, or
-`make platform-image-verify OUT=<dir>` (`ALLOW_DIRTY=1` for `--allow-dirty`),
+`make platform-image-verify OUT=<dir>` (`ALLOW_DIRTY=1` for `--allow-dirty`; empty or `0` is off, any other value is an error),
 checks that an output directory came from this checkout's pins. It is offline
 and needs no bitbake. It fails, naming every problem, when: `SHA256SUMS` does
 not verify or OUT holds an unlisted file (the compare script's own check, which

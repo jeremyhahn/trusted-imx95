@@ -103,6 +103,16 @@ check "dirty without --allow-dirty" 1 "platform_image_dirty=yes"
 run bash "$script" --allow-dirty "$d"
 check "dirty with --allow-dirty" 0 "OK, 3 artefacts"
 
+# ALLOW_DIRTY through make: only exactly 1 accepts a dirty build.
+run make -C "$ROOT" platform-image-verify OUT="$d" ALLOW_DIRTY=0
+check "make ALLOW_DIRTY=0 stays strict" 2 "platform_image_dirty=yes"
+run make -C "$ROOT" platform-image-verify OUT="$d"
+check "make without ALLOW_DIRTY stays strict" 2 "platform_image_dirty=yes"
+run make -C "$ROOT" platform-image-verify OUT="$d" ALLOW_DIRTY=1
+check "make ALLOW_DIRTY=1 accepts" 0 "OK, 3 artefacts"
+run make -C "$ROOT" platform-image-verify OUT="$d" ALLOW_DIRTY=yes
+check "make ALLOW_DIRTY=yes errors" 2 "ALLOW_DIRTY must be 0, 1 or empty"
+
 mk "$d"
 rm "$d/$t-$machine.rootfs-20261123000001.spdx.json"
 (cd "$d" && sha256sum -- * >SHA256SUMS)
@@ -136,6 +146,20 @@ echo bmap >"$d/$t-$machine.rootfs-20261123000001.wic.bmap"
 (cd "$d" && sha256sum -- $t-* >SHA256SUMS)
 run bash "$script" "$d"
 check "a bmap and no image" 1 "$t: no wic or rootfs image listed"
+
+# Only a testdata.json (named .rootfs-<ts>.), a manifest and an SBOM: no image.
+mk "$d"
+rm "$d/$t-$machine.rootfs-20261123000001.wic.zst"
+echo td >"$d/$t-$machine.rootfs-20261123000001.testdata.json"
+(cd "$d" && sha256sum -- $t-* >SHA256SUMS)
+run bash "$script" "$d"
+check "testdata.json, manifest and SBOM but no image" 1 "$t: no wic or rootfs image listed"
+
+# The two scripts carry the same image-suffix list.
+sfx() { sed -n 's/^IMAGE_SUFFIXES=//p' "$1"; }
+v=$(sfx "$script")
+c=$(sfx "$ROOT/scripts/platform-image-repro-compare.sh")
+if [ -n "$v" ] && [ "$v" = "$c" ]; then pass "verify and compare share the image suffix list"; else fail "verify and compare share the image suffix list"; fi
 
 # The production manifest holds no debug package (named in the debug recipe).
 mf=$d/$t-$machine.rootfs-20261123000001.manifest

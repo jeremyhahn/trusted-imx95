@@ -222,7 +222,8 @@ platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS lay
 
 platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 accepts a dirty build) against platform-image/manifest.lock: SHA256SUMS, machine, manifest and layer commits, an SBOM per target (offline, needs no bitbake; not in CI)
 	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
-	@scripts/platform-image-verify.sh $(if $(ALLOW_DIRTY),--allow-dirty) "$(OUT)"
+	@case "$(ALLOW_DIRTY)" in ""|0|1) ;; *) echo "platform-image-verify: ALLOW_DIRTY must be 0, 1 or empty (empty or 0 = off, 1 = on), got '$(ALLOW_DIRTY)'" >&2; exit 2 ;; esac
+	@scripts/platform-image-verify.sh $(if $(filter 1,$(ALLOW_DIRTY)),--allow-dirty) "$(OUT)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
