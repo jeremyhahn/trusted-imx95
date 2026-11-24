@@ -50,6 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
+	boot-image-inputs boot-image-test \
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
 help: ## List the targets
@@ -222,6 +223,18 @@ ahab-policy-test: ## Check a test-PKI container against a policy file written fr
 
 ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
 	@test/ahab_tamper_test.sh
+
+## --- The test-PKI boot image (docs/boot-container/boot-image.md; no board, no flash) ---
+
+BI_OUT ?= $(CURDIR)/out/boot-image
+export BI_M7
+
+boot-image-inputs: ## Collect the boot image inputs into BI_OUT/inputs (stand-ins, labelled, for what is not built; the Cortex-M7 image is trusted-firmware's: BI_M7=<file>, else a stand-in)
+	@scripts/boot-image-inputs.sh --check
+	@scripts/boot-image-inputs.sh --collect "$(BI_OUT)/inputs" $${BI_M7:+--m7 "$$BI_M7"} $${BI_UBOOT:+--uboot "$$BI_UBOOT"} $${BI_ELE:+--ele "$$BI_ELE"}
+
+boot-image-test: boot-image-inputs ## Assemble, sign (test PKI outside the tree, pinned SPSDK), verify every container and tamper-test every payload; image and SHA256SUMS in BI_OUT
+	@scripts/ahab/boot-image.sh --inputs "$(BI_OUT)/inputs" --out "$(BI_OUT)"
 
 okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a throwaway test SRK set (pinned SPSDK; message format only, sends nothing, no board, no fuse)
 	@test/key_exchange_test.sh
