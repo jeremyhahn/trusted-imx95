@@ -55,17 +55,8 @@ bi_need ctl board work
 stamp=$(date -u +%H%M%S)-$$
 bi_ready 30 || { bi_fail "xkmsd does not answer"; bi_summary restart-load; exit 1; }
 
-pids=()
 for ((w = 1; w <= writers; w++)); do
-	(
-		BI_WRITE_FAIL_OK=1 BI_WRITE_CERT=0
-		i=0
-		while :; do
-			bi_write_set "w$w" 1 "bi-rl-$stamp-w$w-$i"
-			i=$((i + 1))
-		done
-	) >/dev/null 2>&1 &
-	pids+=($!)
+	bi_spawn_writer "w$w" "bi-rl-$stamp-w$w"
 done
 
 for ((c = 1; c <= cycles; c++)); do
@@ -74,14 +65,16 @@ for ((c = 1; c <= cycles; c++)); do
 	bi_check "restart $c ($mode) under load, xkmsd answers again" bi_restart "$mode"
 done
 sleep "$gap"
-kill "${pids[@]}" 2>/dev/null
-wait "${pids[@]}" 2>/dev/null
+# each writer finishes the request it is in, so every acknowledged create is
+# in its ledger before the verify
+bi_stop_writers
 
 acked=0
 for ((w = 1; w <= writers; w++)); do
 	L=$(bi_ledger "w$w")
-	[ -s "$L" ] || continue
-	acked=$((acked + $(grep -c '^ack|' "$L")))
+	a=$(grep -c '^ack|' "$L" 2>/dev/null) || a=0
+	[ "$a" -gt 0 ] || continue
+	acked=$((acked + a))
 	bi_verify_set "w$w"
 done
 echo "acknowledged writes recorded: $acked"

@@ -24,6 +24,14 @@ drops the id. Verification checks that every acknowledged id exists, decrypts
 the old ciphertext, verifies the old signature, and compares the fingerprint
 and any certificate.
 
+Background writers (`restart-load.sh`, `powerloss.sh`) look at a stop flag only
+between requests. To stop them the script sets the flag and waits for each to
+finish the request it is in, so a create xkmsctl acknowledged is in the ledger
+before the verify. A writer still running after three xkmsctl timeouts plus
+10 s (`BI_DRAIN_SECS`) is killed with its whole process group, its xkmsctl
+included. Each create is noted as tried before it is sent; one never
+acknowledged (failed, or cut off) is reported as unknown and never counted lost.
+
 A restart counts only when it is proven: every systemctl step must succeed, a
 graceful or `kill -9` restart must change xkmsd's MainPID, and a hard reboot
 must change the board's `/proc/sys/kernel/random/boot_id`.

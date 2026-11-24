@@ -78,7 +78,9 @@ bi_plan() { echo "plan: $*"; }
 bi_ctl() {
 	local a=("${BI_CTL_ARGS[@]}")
 	[ -z "$BI_SERVER" ] || a+=(--server "$BI_SERVER")
-	timeout "${BI_CTL_TIMEOUT:-60}" "$BI_CTL" "${a[@]}" "$@"
+	# --foreground keeps xkmsctl in the caller's process group, so stopping a
+	# writer's group (bi_stop_writers) reaches it.
+	timeout --foreground "${BI_CTL_TIMEOUT:-60}" "$BI_CTL" "${a[@]}" "$@"
 }
 
 bi_board() {
@@ -225,6 +227,9 @@ bi_write_set() {
 	L=$(bi_ledger "$name")
 	for ((i = 0; i < n; i++)); do
 		id="$pfx-$i"
+		# A create that never got an answer (failed, or cut off) is unknown:
+		# bi_verify_set reports it and owes it nothing.
+		echo "try|$id||||" >>"$L"
 		if [ $((i % 2)) -eq 0 ]; then
 			bi_ctl key generate "$id" --key-type symmetric --algorithm aes-256-gcm --key-size 256 >/dev/null 2>&1 || {
 				bi_wfail "write $id: generate"
@@ -260,15 +265,77 @@ bi_write_set() {
 	fi
 }
 
+# Background writers. Each creates keys into ledger <name>, one bi_write_set at
+# a time, and looks at the stop flag only between those: a request it started
+# runs to its answer, so a create xkmsctl acknowledged is always in the ledger
+# before the writer exits. Each writer is its own process group (with its
+# xkmsctl, see bi_ctl), which bi_stop_writers kills only as a last resort.
+BI_WRITERS=()
+BI_STOP_FLAG=""
+
+# bi_spawn_writer <name> <id prefix>: starts one writer; appends its PID to BI_WRITERS.
+bi_spawn_writer() {
+	[ -n "$BI_STOP_FLAG" ] || {
+		BI_STOP_FLAG=$BI_WORK/.stop-writers.$$
+		rm -f "$BI_STOP_FLAG"
+		trap 'bi_stop_writers 0' EXIT
+		trap 'exit 130' INT TERM
+	}
+	set -m
+	(
+		set +m
+		BI_WRITE_FAIL_OK=1 BI_WRITE_CERT=0
+		i=0
+		while [ ! -e "$BI_STOP_FLAG" ]; do
+			bi_write_set "$1" 1 "$2-$i"
+			i=$((i + 1))
+		done
+	) </dev/null >/dev/null 2>&1 &
+	BI_WRITERS+=($!)
+	set +m
+}
+
+# bi_stop_writers [<secs>]: sets the stop flag and waits up to <secs> (default
+# BI_DRAIN_SECS, else three xkmsctl timeouts plus 10) for every writer to finish
+# its request and exit. A writer still running then is killed with its whole
+# process group; its last request stays unknown (a try with no ack), never absent.
+bi_stop_writers() {
+	local secs=${1:-${BI_DRAIN_SECS:-$((3 * ${BI_CTL_TIMEOUT:-60} + 10))}} p t=0 left running
+	[ "${#BI_WRITERS[@]}" -gt 0 ] || return 0
+	: >"$BI_STOP_FLAG"
+	while :; do
+		# jobs -r: the background jobs still running (an exited writer is
+		# not, though kill -0 would still find its zombie)
+		running=" $(jobs -rp | tr '\n' ' ') "
+		left=()
+		for p in "${BI_WRITERS[@]}"; do
+			case $running in *" $p "*) left+=("$p") ;; esac
+		done
+		[ "${#left[@]}" -gt 0 ] && [ "$t" -lt "$secs" ] || break
+		sleep 1
+		t=$((t + 1))
+	done
+	for p in "${left[@]}"; do
+		echo "writer $p still in a request after ${secs}s: killing its process group; that request is unknown"
+		kill -KILL -- "-$p" 2>/dev/null
+	done
+	for p in "${BI_WRITERS[@]}"; do wait "$p" 2>/dev/null; done
+	BI_WRITERS=()
+	rm -f "$BI_STOP_FLAG"
+}
+
 # bi_verify_set <name>: every ledger entry must still hold; a miss is CRITICAL.
 bi_verify_set() {
 	local name=$1 L kind id a b c d j n=0 bad=0 out
 	L=$(bi_ledger "$name")
 	[ -s "$L" ] || { bi_fail "verify $name: empty ledger"; return 0; }
+	local -A open=()
 	while IFS='|' read -r kind id a b c d; do
+		[ "$kind" != try ] || { open[$id]=1; continue; }
 		n=$((n + 1))
 		case $kind in
 		ack)
+			unset "open[$id]"
 			if ! bi_ctl key get "$id" >/dev/null 2>&1; then
 				bi_crit "acknowledged key $id does not exist"
 				bad=$((bad + 1))
@@ -306,6 +373,10 @@ bi_verify_set() {
 			;;
 		esac
 	done <"$L"
+	# Never absent, never owed: the request failed or was cut off, so whether
+	# xkmsd kept it is unknown.
+	[ "${#open[@]}" -eq 0 ] || echo "verify $name: ${#open[@]} create(s) never acknowledged (failed or in flight at a stop or cut): unknown, not checked"
+	[ "$n" -gt 0 ] || { bi_fail "verify $name: no acknowledged write in the ledger"; return 0; }
 	BI_CHECKS=$((BI_CHECKS + 1))
 	if [ "$bad" -eq 0 ]; then
 		echo "PASS verify $name: $n ledger entries intact"

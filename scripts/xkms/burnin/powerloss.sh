@@ -69,19 +69,13 @@ bi_write_set base "$n" "bi-pl-$stamp-base"
 bi_verify_set base
 
 for ((c = 1; c <= cycles; c++)); do
-	(
-		BI_WRITE_FAIL_OK=1 BI_WRITE_CERT=0
-		i=0
-		while :; do
-			bi_write_set "w$c" 1 "bi-pl-$stamp-w$c-$i"
-			i=$((i + 1))
-		done
-	) >/dev/null 2>&1 &
-	writer=$!
+	bi_spawn_writer "w$c" "bi-pl-$stamp-w$c"
 	sleep "$secs"
 	bi_check "hard reboot $c (sysrq b) and return" bi_restart hard
-	kill "$writer" 2>/dev/null
-	wait "$writer" 2>/dev/null
+	# the writer finishes the request it is in (it failed or timed out at
+	# the cut, or was answered after the return), so whatever xkmsd
+	# acknowledged is in the ledger before the verify
+	bi_stop_writers
 	bi_verify_set base
 	bi_verify_set "w$c"
 done

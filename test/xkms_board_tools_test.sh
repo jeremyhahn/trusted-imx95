@@ -134,7 +134,14 @@ set -- "${a[@]}"
 v=$2 id=${3:-}
 case " ${FAKE_CTL_FAIL:-} " in *" $v "*) echo "error: $v failed" >&2; exit 1 ;; esac
 case $v in
-generate) (set -o noclobber; : >"$k/$id") 2>/dev/null ;; # one create of an id wins
+generate)
+	(set -o noclobber; : >"$k/$id") 2>/dev/null || exit 1 # one create of an id wins
+	# FAKE_CTL_PIDS records this process; FAKE_CTL_SLOW delays the answer after
+	# the create succeeded; FAKE_CTL_ACKED lists each id as it is answered
+	[ -z "${FAKE_CTL_PIDS:-}" ] || echo "$$" >>"$FAKE_CTL_PIDS"
+	[ -z "${FAKE_CTL_SLOW:-}" ] || sleep "$FAKE_CTL_SLOW"
+	[ -z "${FAKE_CTL_ACKED:-}" ] || echo "$id" >>"$FAKE_CTL_ACKED"
+	;;
 list) ls "$k" ;;
 get) [ -e "$k/$id" ] && echo "{\"id\":\"$id\"}" ;;
 delete) [ -e "$k/$id" ] && rm -f "$k/$id" ;;
@@ -558,6 +565,53 @@ ok "concurrency: the failed signs are counted" out_has "$tmp/cc-fail.log" "(3 fa
 CC "$tmp/cc-bad.log" badsig
 ok "concurrency: answers without a signature, FAIL" [ "$RC" != 0 ]
 ok "concurrency: no client verified" out_has "$tmp/cc-bad.log" "(0 of 3)"
+
+# --- burn-in writers drain at a stop -------------------------------------------
+# Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,
+# and restart-load.sh stops its writers about 2s in: each is mid-request then.
+# A writer killed there would leave an answered create out of its ledger.
+RL() { # RL <log> [<VAR=value>...]: restart-load.sh, 2 writers, 1 restart; set RC
+	rm -rf "$tmp/kms" "$tmp/bi"
+	mkdir -p "$tmp/kms" "$tmp/bi"
+	: >"$tmp/ctl-acked"
+	echo active >"$R/run/state"
+	set +e
+	env "${@:2}" FAKE_KMS="$tmp/kms" FAKE_CTL_ACKED="$tmp/ctl-acked" XKMS_CTL=xkmsctl XKMS_WORK="$tmp/bi" XKMS_KILL_WAIT=0 \
+		"$here/scripts/xkms/burnin/restart-load.sh" --writers 2 --cycles 1 --gap-secs 1 board.invalid >"$1" 2>&1
+	RC=$?
+	set -e
+	sleep 4 # a killed writer's xkmsctl would answer now, into no ledger
+}
+all_answered_in_ledger() { # every create xkmsctl answered is acknowledged in a ledger
+	local id n=0
+	while read -r id; do
+		n=$((n + 1))
+		grep -qxF "ack|$id||||" "$tmp"/bi/ledger.w* || { echo "answered but not in a ledger: $id"; return 1; }
+	done <"$tmp/ctl-acked"
+	[ "$n" -gt 0 ]
+}
+RL "$tmp/rl-drain.log" FAKE_CTL_SLOW=3
+ok "drain: restart-load passes with a slow xkmsctl" [ "$RC" = 0 ]
+ok "drain: every answered create is in a ledger" all_answered_in_ledger
+ok "drain: no writer had to be killed" out_lacks "$tmp/rl-drain.log" "killing its process group"
+# a writer stuck past the bounded wait is killed with its process group; its
+# request is unknown, not lost
+: >"$tmp/ctl-pids"
+export FAKE_CTL_PIDS=$tmp/ctl-pids
+# shellcheck disable=SC2016 # the code runs in LB's shell, with lib.sh sourced
+LB "$tmp/hk.log" 'bi_write_set w1 1 bi-pre; export FAKE_CTL_SLOW=30; bi_spawn_writer w1 bi-hk; sleep 1; bi_stop_writers 1; bi_verify_set w1; bi_summary t'
+unset FAKE_CTL_PIDS
+ctl_gone() { # no stub xkmsctl recorded in ctl-pids is still running
+	local p
+	while read -r p; do ! kill -0 "$p" 2>/dev/null || return 1; done <"$tmp/ctl-pids"
+	[ -s "$tmp/ctl-pids" ]
+}
+sleep 1 # let init reap the killed processes
+ok "hard kill: the stuck xkmsctl went with its writer's process group" ctl_gone
+ok "hard kill: the writer is killed after the bounded wait" out_has "$tmp/hk.log" "killing its process group"
+ok "hard kill: the in-flight create is unknown" out_has "$tmp/hk.log" "1 create(s) never acknowledged"
+ok "hard kill: nothing is reported lost" out_lacks "$tmp/hk.log" CRITICAL
+ok "hard kill: verify passes" [ "$RC" = 0 ]
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do
