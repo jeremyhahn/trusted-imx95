@@ -138,6 +138,15 @@ mkts() {
 	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
 	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" "layer_x_commit=def" >"$1/build-info.txt"
 }
+
+# mksbom DIR TIMESTAMP [SPDX-CONTENT]: mkts, plus the package manifest and the
+# SPDX SBOM under the same timestamped names, listed in SHA256SUMS.
+mksbom() {
+	mkts "$1" "$2"
+	echo mf >"$1/img-m.rootfs-$2.manifest"
+	echo "${3:-spdx}" >"$1/img-m.rootfs-$2.spdx.json"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+}
 mkts "$a" 20261123000001
 mkts "$b" 20261123000002
 run bash "$script" "$a" "$b"
@@ -150,6 +159,15 @@ rm "$b/img-m.rootfs-20261123000002.ext4"
 (cd "$b" && sha256sum -- img-m.* >SHA256SUMS)
 run bash "$script" "$a" "$b"
 check "a member missing from one build: named" 1 "img-m.rootfs.ext4: only in $a"
+
+# The SBOM and the package manifest are compared like any artefact.
+mksbom "$a" 20261123000001
+mksbom "$b" 20261123000002
+run bash "$script" "$a" "$b"
+check "identical SBOM and manifest, different timestamps" 0 "5 artefacts identical"
+mksbom "$b" 20261123000002 spdx-changed
+run bash "$script" "$a" "$b"
+check "an SBOM with one changed byte: names the .spdx.json member" 1 "img-m.rootfs.spdx.json differs"
 
 run bash "$script" "$a"
 check "a missing argument" 2 "need exactly two output directories"

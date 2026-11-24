@@ -260,6 +260,13 @@ missing, unreadable, empty, or without `SOURCE_DATE_EPOCH` or a layer commit
 fails the compare, naming the file. Any differing or missing artefact fails;
 the compare script has no exception option.
 
+The SBOM (`.spdx.json`) and the package manifest (`.manifest`) are artefacts
+like the rest: they are listed in `SHA256SUMS`, paired across the two builds by
+their name without the build timestamp, and compared byte for byte. Whether
+Yocto's SPDX 3.0 output is byte-reproducible is not verified on real artefacts,
+because the EULA (#14) blocks the build; if it is not, the compare will fail
+on it and the cause has to be found then, not allowed.
+
 No real run has happened: the build stops at the NXP EULA (#14, the owner's to
 accept), so only the stub bitbake tests
 (`test/platform_image_repro_test.sh`, `test/platform_image_build_test.sh`)
