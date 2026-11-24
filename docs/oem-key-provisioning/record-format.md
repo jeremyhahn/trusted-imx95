@@ -57,5 +57,16 @@ problem named by file and JSON path (never the value); 2 not JSON. It refuses (s
 - a string of plain hex or base64 of 32 bytes or more outside the declared hash fields;
 - a hash field whose width is wrong (256-bit on A0/A1, 512-bit on B0).
 
+## Pre-close mode
+
+> **Proposed, pending owner approval.** `scripts/okp/record-check.py --pre-close RECORD.json` reads one JSON
+> file and runs nothing against a device. It checks a record written before the irreversible step, against
+> [key-ceremony-survey.md](key-ceremony-survey.md) §6: `life_cycle_before` is OEM open (case and spacing
+> ignored), `ahab_events` is an empty list, and `srk_hash`, `srk_lock_states`, `enclave_fw_version`,
+> `spsdk_version`, `public_keys` and `soc_revision` are present. `life_cycle_after`, `outcome` and
+> `step_times` are not required, since such a record cannot hold them. The ordinary field, hash-width and
+> secret checks still run. Same exit codes. `test/okp_pre_close_test.sh` ties each numbered §6 item to a
+> field, or says why it is not a record field.
+
 `make okp-record-check` runs it on the test fixture. Owner question (proposed, pending owner approval):
 whether the SPEC row should name this record; this lane does not edit SPEC.md.

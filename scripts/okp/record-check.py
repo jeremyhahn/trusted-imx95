@@ -60,6 +60,9 @@ ITEM_FIELDS = {
 
 # Hash width in hex characters. SRK hash by silicon revision (survey section 3: 256-bit on
 # A0/A1, 512-bit on B0); the other hashes take either width.
+# --pre-close (proposed): the state a record must show before the step, and the fields it cannot yet hold.
+PRE_CLOSE_STATE = "oem open"
+PRE_CLOSE_LATER = ("life_cycle_after", "outcome", "step_times")
 SRK_WIDTH = {"A0": 64, "A1": 64, "B0": 128}
 OTHER_HASH_WIDTHS = (64, 128)
 
@@ -83,7 +86,7 @@ SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,48}")
 
 
 def usage():
-    return "usage: record-check.py [-h] RECORD.json   (reads one file, touches no device)"
+    return "usage: record-check.py [-h] [--pre-close] RECORD.json   (reads one file, touches no device)"
 
 
 def type_ok(value, typ):
@@ -191,21 +194,43 @@ def secret_errors(rec):
     return errs
 
 
+def pre_close_errors(rec):
+    """Survey section 6 items a record can hold, before the irreversible step (proposed)."""
+    if not isinstance(rec, dict):
+        return []
+    errs = []
+    state = rec.get("life_cycle_before")
+    if isinstance(state, str) and " ".join(state.split()).lower() != PRE_CLOSE_STATE:
+        errs.append("$.life_cycle_before: must be the OEM open state before the step")
+    if "ahab_events" in rec and rec["ahab_events"] != []:
+        errs.append("$.ahab_events: must be an empty list before the step")
+    return errs
+
+
 def main(argv):
     if len(argv) == 2 and argv[1] in ("-h", "--help"):
         print(usage())
         return 0
-    if len(argv) != 2:
+    pre_close = len(argv) == 3 and argv[1] == "--pre-close"
+    if len(argv) != 2 and not pre_close:
         print(usage(), file=sys.stderr)
         return 2
-    path = argv[1]
+    path = argv[-1]
     try:
         with open(path, "r", encoding="utf-8") as fh:
             rec = json.load(fh)
     except (OSError, ValueError) as exc:
         print("%s: not readable JSON (%s)" % (path, type(exc).__name__), file=sys.stderr)
         return 2
-    errors = fields_errors(rec)
+    if pre_close:
+        # a record written before the step cannot hold these three
+        fields = tuple(
+            (n, t, r and n not in PRE_CLOSE_LATER, s) for n, t, r, s in FIELDS
+        )
+        errors = fields_errors(rec, fields)
+        errors += pre_close_errors(rec)
+    else:
+        errors = fields_errors(rec)
     errors += secret_errors(rec)
     if errors:
         for e in errors:
