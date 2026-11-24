@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/pins-check.sh [pin-file [requirements-file]]
+# scripts/pins-check.sh [pin-file [requirements-file [build-requirements-file [workflows-dir]]]]
 #
 # Offline consistency of the pins: is each pin well formed and does it agree
 # with its siblings? (scripts/deps-check.sh, which needs the network, says
@@ -12,13 +12,22 @@
 #   d  ALPINE_DIGEST and SW_PYTHON_DIGEST are sha256: plus 64 hex
 #   e  SW_DEBIAN_SNAPSHOT is YYYYMMDDTHHMMSSZ
 #   f  every <T>_URL in the file has <T> in PINNED_TOOLS
-# Requirements file (default scripts/ahab/requirements.txt): each requirement
-# is name==version plus at least one --hash=sha256:<64 hex>; no duplicate name.
+# Requirements files (default scripts/ahab/requirements.txt and
+# scripts/ahab/build-requirements.txt), each failure naming file and line:
+#   g  each requirement is name==version plus at least one
+#      --hash=sha256:<64 hex>; no duplicate name in a file
+#   h  a name pinned in both files has the same version and hash set
+# Workflows directory (default .github/workflows):
+#   i  every remote `uses:` ends in @ plus 40 lowercase hex and a `# <tag>`
+#      comment; one action repository (actions/checkout) names one commit
+#      across the directory; `uses: ./...` is ignored
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 pins=${1:-$here/tool-pins.sh}
 reqs=${2:-$here/ahab/requirements.txt}
+buildreqs=${3:-$here/ahab/build-requirements.txt}
+wfdir=${4:-$here/../.github/workflows}
 
 errors=0
 bad() {
@@ -27,7 +36,9 @@ bad() {
 }
 
 [ -f "$pins" ] || { echo "pins-check: $pins: no such file" >&2; exit 1; }
-[ -f "$reqs" ] || { echo "pins-check: $reqs: no such file" >&2; exit 1; }
+for f in "$reqs" "$buildreqs"; do
+	[ -f "$f" ] || { echo "pins-check: $f: no such file" >&2; exit 1; }
+done
 
 hex64='^[0-9a-f]{64}$'
 dig='^sha256:[0-9a-f]{64}$'
@@ -83,45 +94,109 @@ while IFS= read -r line || [ -n "$line" ]; do
 done <"$pins"
 
 # Requirements: join backslash continuations, then check each requirement.
+# check_reqfile <file> <versions-array> <hashes-array>: rules g's per-file part
+# (the requirement form, no duplicate name) and the record of each name's
+# version and sorted hash set, for the equality rule h.
 nreq=0
-declare -A seen=()
 req_re='^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9._!+-]+)((  *--hash=sha256:[0-9a-f]{64})+)$'
 check_req() {
-	local r=$1 key
+	local file=$1 lineno=$2 r=$3 key hs
+	local -n vers=$4 hashes=$5
 	r=${r//$'\t'/ }
 	while [[ "$r" == *"  "* ]]; do r=${r//  / }; done
 	r=${r# }
 	r=${r% }
 	nreq=$((nreq + 1))
 	if [[ ! "$r" =~ $req_re ]]; then
-		bad "$reqs" "requirement '${r%% *}' is not name==version with at least one --hash=sha256:<64 hex>"
+		bad "$file" "line $lineno: requirement '${r%% *}' is not name==version with at least one --hash=sha256:<64 hex> (rule g)"
 		return
 	fi
 	key=${BASH_REMATCH[1],,}
 	key=${key//[_.]/-}
-	if [ -n "${seen[$key]:-}" ]; then
-		bad "$reqs" "duplicate requirement '${BASH_REMATCH[1]}'"
+	if [ -n "${vers[$key]:-}" ]; then
+		bad "$file" "line $lineno: duplicate requirement '${BASH_REMATCH[1]}' (rule g)"
 	fi
-	seen[$key]=1
+	vers[$key]=${BASH_REMATCH[2]}
+	hs=${BASH_REMATCH[3]//--hash=sha256:/}
+	hashes[$key]=$(printf '%s\n' $hs | sort -u | tr '\n' ' ')
 }
-acc=
-bs=$'\\'
-while IFS= read -r line || [ -n "$line" ]; do
-	line=${line%%#*}
-	line=${line%"${line##*[![:space:]]}"}
-	[ -n "$line" ] || continue
-	if [[ "$line" == *"$bs" ]]; then
-		acc+="${line%\\} "
-		continue
-	fi
-	check_req "$acc$line"
-	acc=
-done <"$reqs"
-[ -z "$acc" ] || check_req "$acc"
-[ "$nreq" -gt 0 ] || bad "$reqs" "no requirement found"
+check_reqfile() {
+	local file=$1 line acc= lineno=0 start=0 bs=$'\\'
+	local before=$nreq
+	while IFS= read -r line || [ -n "$line" ]; do
+		lineno=$((lineno + 1))
+		line=${line%%#*}
+		line=${line%"${line##*[![:space:]]}"}
+		[ -n "$line" ] || continue
+		[ -n "$acc" ] || start=$lineno
+		if [[ "$line" == *"$bs" ]]; then
+			acc+="${line%\\} "
+			continue
+		fi
+		check_req "$file" "$start" "$acc$line" "$2" "$3"
+		acc=
+	done <"$file"
+	[ -z "$acc" ] || check_req "$file" "$start" "$acc" "$2" "$3"
+	[ "$nreq" -gt "$before" ] || bad "$file" "no requirement found (rule g)"
+}
+declare -A main_ver=() main_hash=() build_ver=() build_hash=()
+check_reqfile "$reqs" main_ver main_hash
+check_reqfile "$buildreqs" build_ver build_hash
+
+# Rule h: a name pinned in both requirements files has one version and one
+# hash set (the header of build-requirements.txt says so).
+for k in "${!build_ver[@]}"; do
+	[ -n "${main_ver[$k]:-}" ] || continue
+	[ "${main_ver[$k]}" = "${build_ver[$k]}" ] ||
+		bad "$buildreqs" "rule h: '$k' is ${build_ver[$k]} here and ${main_ver[$k]} in $reqs"
+	[ "${main_hash[$k]}" = "${build_hash[$k]}" ] ||
+		bad "$buildreqs" "rule h: '$k' has a different hash set here than in $reqs"
+done
+
+# Rule i: workflow actions. Every remote `uses:` ends in @<40 lowercase hex>
+# and a `# <tag>` comment; one action repository names one commit across the
+# directory; a local `uses: ./...` and a docker:// image are not checked.
+nuses=0
+declare -A act_commit=() act_where=()
+uses_re='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*([^[:space:]#]+)[[:space:]]*(#[[:space:]]*(.*))?$'
+if [ -d "$wfdir" ]; then
+	for wf in "$wfdir"/*.yml "$wfdir"/*.yaml; do
+		[ -f "$wf" ] || continue
+		lineno=0
+		while IFS= read -r line || [ -n "$line" ]; do
+			lineno=$((lineno + 1))
+			[[ "$line" =~ $uses_re ]] || continue
+			target=${BASH_REMATCH[2]//[\"\']/}
+			tagc=${BASH_REMATCH[4]:-}
+			[[ "$target" == ./* || "$target" == docker://* ]] && continue
+			nuses=$((nuses + 1))
+			if [[ ! "$target" =~ ^([^@]+)@([0-9a-f]{40})$ ]]; then
+				bad "$wf" "line $lineno: rule i: 'uses: $target' does not end in @ plus a 40-hex commit"
+				continue
+			fi
+			if [ -z "${tagc//[[:space:]]/}" ]; then
+				bad "$wf" "line $lineno: rule i: 'uses: ${BASH_REMATCH[1]}' has no '# <tag>' comment"
+			fi
+			repo=${BASH_REMATCH[1]}
+			repo=${repo%%/*}/$(
+				r=${BASH_REMATCH[1]#*/}
+				echo "${r%%/*}"
+			)
+			commit=${BASH_REMATCH[2]}
+			if [ -z "${act_commit[$repo]:-}" ]; then
+				act_commit[$repo]=$commit
+				act_where[$repo]="$wf:$lineno"
+			elif [ "${act_commit[$repo]}" != "$commit" ]; then
+				bad "$wf" "line $lineno: rule i: $repo is pinned to $commit here but ${act_commit[$repo]} at ${act_where[$repo]}"
+			fi
+		done <"$wf"
+	done
+else
+	bad "$wfdir" "rule i: no such directory"
+fi
 
 if [ "$errors" -ne 0 ]; then
 	echo "pins-check: FAILED ($errors problems)" >&2
 	exit 1
 fi
-echo "pins-check: OK ($ntools tools, $nreq requirements)"
+echo "pins-check: OK ($ntools tools, $nreq requirements, $nuses workflow actions)"

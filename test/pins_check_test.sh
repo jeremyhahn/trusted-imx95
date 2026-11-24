@@ -6,11 +6,14 @@ set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-CHECK=$ROOT/scripts/pins-check.sh
+CHECK=${PINS_CHECK_SCRIPT:-$ROOT/scripts/pins-check.sh}
 PINS=$ROOT/scripts/tool-pins.sh
 REQS=$ROOT/scripts/ahab/requirements.txt
 PINS_TEXT=$(<"$PINS")
 REQS_TEXT=$(<"$REQS")
+BUILD=$ROOT/scripts/ahab/build-requirements.txt
+BUILD_TEXT=$(<"$BUILD")
+WFDIR=$ROOT/.github/workflows
 N=0
 
 # bad_pins <name> <from> <to> <substring...>: a copy of the pin file with the
@@ -41,7 +44,37 @@ bad_reqs() {
 run bash "$CHECK"
 check "real files pass" 0 "pins-check: OK (4 tools,"
 run bash "$CHECK" "$PINS" "$REQS"
-check "explicit real files pass" 0 "requirements)"
+check "explicit real files pass" 0 "workflow actions)"
+run bash "$CHECK" "$PINS" "$REQS" "$BUILD" "$WFDIR"
+check "explicit real files and workflows pass" 0 "workflow actions)"
+
+# bad_build <name> <from> <to> <substring...>: a copy of build-requirements.txt.
+bad_build() {
+	local name=$1 from=$2 to=$3 f
+	shift 3
+	N=$((N + 1))
+	f=$TMP_ROOT/build.$N
+	[[ "$BUILD_TEXT" == *"$from"* ]] || { fail "$name" "fixture text '$from' not in build-requirements.txt"; return; }
+	printf '%s\n' "${BUILD_TEXT/"$from"/"$to"}" >"$f"
+	run bash "$CHECK" "$PINS" "$REQS" "$f"
+	check "$name" 1 "$@"
+}
+
+# bad_wf <name> <workflow> <from> <to> <substring...>: a scratch copy of the
+# workflows directory with <from> replaced by <to> in one file.
+bad_wf() {
+	local name=$1 wf=$2 from=$3 to=$4 d text
+	shift 4
+	N=$((N + 1))
+	d=$TMP_ROOT/wf.$N
+	mkdir -p "$d"
+	cp "$WFDIR"/*.yml "$d"/
+	text=$(<"$d/$wf")
+	[[ "$text" == *"$from"* ]] || { fail "$name" "fixture text '$from' not in $wf"; return; }
+	printf '%s\n' "${text/"$from"/"$to"}" >"$d/$wf"
+	run bash "$CHECK" "$PINS" "$REQS" "$BUILD" "$d"
+	check "$name" 1 "$@"
+}
 
 bad_pins "URL on the old version" "download/v0.76.2/" "download/v0.76.1/" "TRIVY_URL" "rule b"
 bad_pins "URL repo mismatch" "TRIVY_REPO=aquasecurity/trivy" "TRIVY_REPO=other/trivy" "TRIVY_URL" "rule b"
@@ -66,5 +99,22 @@ bad_reqs "requirement with a short hash" "${first_hash}" "${first_hash%?}" "argp
 bad_reqs "duplicate requirement" "asn1crypto==1.5.1" "argparse-addons==0.12.0 \\
     $first_hash
 asn1crypto==1.5.1" "duplicate requirement 'argparse-addons'"
+
+pk_hash=--hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+bad_build "build requirement without --hash" "packaging==26.3 \\
+    $pk_hash" "packaging==26.3" "build." "line 6" "rule g" "packaging"
+bad_build "duplicate build requirement" "setuptools-scm==9.2.2" "packaging==26.3 \\
+    $pk_hash
+setuptools-scm==9.2.2" "duplicate requirement 'packaging'" "rule g"
+bad_build "shared pin with another version" "packaging==26.3" "packaging==26.2" \
+	"rule h" "packaging" "26.2"
+bad_build "shared pin with another hash set" "$pk_hash" "${pk_hash%?}0" "rule h" "packaging" "hash set"
+
+co=actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+bad_wf "action pinned to a tag" signatures.yml "$co # v6.1.0" "actions/checkout@v6" "signatures.yml" "rule i" "40-hex"
+bad_wf "action commit in uppercase hex" signatures.yml "$co" "actions/checkout@D23441A48E516B6C34AEA4FA41551A30E30AF803" "rule i"
+bad_wf "action without a tag comment" signatures.yml "$co # v6.1.0" "$co" "rule i" "no '# <tag>' comment"
+bad_wf "two workflows, two checkout commits" releasability.yml "$co" \
+	"actions/checkout@0000000000000000000000000000000000000001" "rule i" "actions/checkout" "is pinned to"
 
 finish
