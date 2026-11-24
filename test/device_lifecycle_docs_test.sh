@@ -53,6 +53,7 @@ check_readme() {
 	grep -qiE '^> \*\*Status:.*provisional' "$f" || echo "status line lacks provisional"
 	grep -qi 'ruling 927' "$f" || echo "no ruling 927"
 	grep -qF '#25' "$f" || echo "no #25"
+	grep -E '^> \*\*Status:' "$f" | grep -qF '#177' || echo "status line lacks #177"
 	if grep -qi 'closes' "$f"; then echo "contains closes"; fi
 	while IFS= read -r link; do
 		target=${link%%#*}
@@ -103,6 +104,7 @@ neg "dropped heading" '/^## What is blocked on what$/d'
 neg "dead relative link" 's|\(attestation-survey\.md\)|(no-such-file.md)|'
 neg "dropped question row" '/^\| B3 \|/d'
 neg "no architecture.md link" '/architecture\.md/d'
+neg "status line without #177" '/^> \*\*Status:/s/#177//g'
 
 # check_page FILE: architecture.md and evidence-bundle.md. Relative links resolve against
 # $DIR; a link with only an anchor resolves against FILE itself.
