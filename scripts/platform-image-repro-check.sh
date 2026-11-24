@@ -88,8 +88,13 @@ elif cmd == "tar":    # tar ARCHIVE IDFILE -> one line per member
             d = "-"
             if m.isreg():
                 d = sha(t.extractfile(m))
-            print("%s\t%s\t%o\t%d:%d\t%s:%s\t%s\t%s" % (n, m.type.decode("latin1"), m.mode, m.uid, m.gid,
-                  m.uname, m.gname, m.linkname if (m.issym() or m.islnk()) else "-", d))
+            # Security state: xattrs (security.capability included), ACLs and device numbers.
+            # Volatile PAX keys (mtime, atime, path, size) are left out.
+            px = json.dumps(sorted((k, str(v)) for k, v in m.pax_headers.items()
+                                   if k.startswith(("SCHILY.xattr.", "SCHILY.acl.", "LIBARCHIVE.xattr."))))
+            dev = "%d:%d" % (m.devmajor, m.devminor) if (m.ischr() or m.isblk()) else "-"
+            print("%s\t%s\t%o\t%d:%d\t%s:%s\t%s\t%s\t%s\t%s" % (n, m.type.decode("latin1"), m.mode, m.uid, m.gid,
+                  m.uname, m.gname, m.linkname if (m.issym() or m.islnk()) else "-", d, dev, px))
 PY
 
 # deco FILE OUT: print the path of a plain copy (FILE itself when not compressed), the status of

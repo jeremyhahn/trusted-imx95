@@ -105,6 +105,34 @@ run "$wt/a" "$wt/b"
 expect "corrupt archive: exit nonzero" test "$rc" -ne 0
 expect "corrupt archive: refused by name" has "$wt/out" "img.rootfs-20250101.tar.gz) cannot be decompressed"
 
+# PAX metadata and device numbers (python tarfile fixtures): identical but for one attribute
+fx=$ROOT/test/repro_tar_fixture.py
+# ptcase NAME "A-args" "B-args" EXPECT: EXPECT is "match" or the member that must be named
+ptcase() {
+	mk "$wt/a"; mk "$wt/b"
+	# shellcheck disable=SC2086 # word lists of KEY=VALUE
+	python3 -I "$fx" "$wt/a/img.rootfs-20250101.tar" $2
+	# shellcheck disable=SC2086
+	python3 -I "$fx" "$wt/b/img.rootfs-20250101.tar" $3
+	rm -f "$wt/a/img.rootfs-20250101.tar.gz" "$wt/b/img.rootfs-20250101.tar.gz"
+	run "$wt/a" "$wt/b"
+	if [ "$4" = match ]; then
+		expect "$1: exit 0" test "$rc" -eq 0
+	else
+		expect "$1: exit nonzero" test "$rc" -ne 0
+		expect "$1: names the member" has "$wt/out" "first differing member: $4"
+	fi
+}
+ptcase "pax fixtures, identical" "xattr=a cap=c acl=u::rw-" "xattr=a cap=c acl=u::rw-" match
+ptcase "xattr value" "xattr=one" "xattr=two" usr/bin/tool
+ptcase "security.capability value" "cap=AQAA" "cap=AQAB" usr/bin/tool
+ptcase "libarchive security.capability value" "lcap=AQAA" "lcap=AQAB" usr/bin/tool
+ptcase "xattr present on one side only" "dev=1:3" "xattr=one" usr/bin/tool
+ptcase "ACL value" "acl=u::rw-" "acl=u::rwx" usr/bin/tool
+ptcase "device major" "dev=1:3" "dev=2:3" dev/null
+ptcase "device minor" "dev=1:3" "dev=1:5" dev/null
+mk "$wt/a"
+
 # the checker writes nothing to either directory
 mk "$wt/b"
 before=$(cd "$wt/a" && find . -exec stat -c '%n %a %s %Y' {} + | sort | md5sum)
