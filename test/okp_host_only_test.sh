@@ -26,7 +26,7 @@ FILES=(
   scripts/ahab/msg-sig-check.py
   scripts/ahab/srk-hash-check.sh
   scripts/ahab/srk-hash.py
-  scripts/okp/station-preflight.sh
+  test/okp_station_preflight_helper.sh
   scripts/okp/record-check.py
   test/okp_record_check_test.sh
   test/okp_record_drift_test.sh

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# station-preflight.sh: check the provisioning station's tool pin, and run nothing else.
+# okp_station_preflight_helper.sh: a test helper that checks a station's tool pin, and runs
+# nothing else. It lives under test/ on purpose: it is not a CLI of this repository, no SPEC
+# row names it, nothing installs it and no Makefile target runs it. Only
+# test/okp_station_preflight_test.sh calls it, with test doubles.
 #
 # Owner ruling 1234: the key exchange, the key import, the counter fuses and the life-cycle
 # close run only at the provisioning station. The owner chose SPSDK for this hardware
 # (2026-11-23); the pin is scripts/ahab/requirements.txt.
 #
-#   station-preflight.sh --dry-run
+#   okp_station_preflight_helper.sh --dry-run
 #
 # With no argument it prints usage and exits 2. --dry-run is the only mode: any other
 # argument is refused. It
@@ -18,12 +21,12 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-root=$(cd "$here/../.." && pwd -P)
+root=$(cd "$here/.." && pwd -P)
 req="$root/scripts/ahab/requirements.txt"
 arch="$root/docs/oem-key-provisioning/architecture.md"
 
 usage() {
-	echo "usage: station-preflight.sh --dry-run" >&2
+	echo "usage: okp_station_preflight_helper.sh --dry-run" >&2
 	echo "  --dry-run  check SPSDK_VENV and the SPSDK pin, list the station steps, run none" >&2
 	echo "  There is no mode that runs a step, opens a device or writes a fuse." >&2
 }

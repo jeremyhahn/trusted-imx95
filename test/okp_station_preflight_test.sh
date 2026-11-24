@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# scripts/okp/station-preflight.sh refuses by default, checks SPSDK_VENV and the SPSDK pin,
+# The test-only helper test/okp_station_preflight_helper.sh refuses by default, checks SPSDK_VENV and the SPSDK pin,
 # and runs no step (issue #176, owner ruling 1234). Test doubles only: the venv's python is a
 # stub script, and every device tool on PATH is a double that logs its call. The log must be
 # empty in every case.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-script="$here/scripts/okp/station-preflight.sh"
+script="$here/test/okp_station_preflight_helper.sh"
 pin=$(grep -m1 -oE '^spsdk==[0-9][0-9A-Za-z.]*' "$here/scripts/ahab/requirements.txt")
 pin=${pin#spsdk==}
 
