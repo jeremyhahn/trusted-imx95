@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Tests scripts/okp/record-check.py on fixture records (proposed format, pending owner approval).
+# Tests the test-only helper test/okp/record-check.py on fixture records (proposed format, pending owner approval).
 # Reads files only: no device, no network. Fake values are built here from fragments, so the
 # repository holds no key-shaped string.
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-chk="$here/scripts/okp/record-check.py"
+chk="$here/test/okp/record-check.py"
 valid="$here/test/fixtures/okp-record/valid.json"
 doc="$here/docs/oem-key-provisioning/record-format.md"
 work=$(mktemp -d)

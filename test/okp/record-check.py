@@ -2,6 +2,9 @@
 """Check one proposed station record (JSON) for required fields and for secrets.
 
 Proposed, pending owner approval: see docs/oem-key-provisioning/record-format.md.
+Internal and test-only (owner default, ASK 5): it lives under test/, nothing installs
+it, no Makefile target runs it, and no SPEC row names it. Only the okp tests under
+test/ call it; it is not a command of this repository.
 Reads the one file named on the command line and nothing else: no network, no
 device, no subprocess. The signature envelope around the payload is
 go-trusted-platform's and is not read here.
@@ -60,7 +63,7 @@ ITEM_FIELDS = {
 
 # Hash width in hex characters. SRK hash by silicon revision (survey section 3: 256-bit on
 # A0/A1, 512-bit on B0); the other hashes take either width. An unknown revision fails.
-# --pre-close (proposed): the state a record must show before the step, and the fields it cannot yet hold.
+# Pre-close mode (proposed, test-only, used by test/okp_pre_close_test.sh): the state a record must show before the step, and the fields it cannot yet hold.
 PRE_CLOSE_STATE = "oem open"
 PRE_CLOSE_LATER = ("life_cycle_after", "outcome", "step_times")
 SRK_WIDTH = {"A0": 64, "A1": 64, "B0": 128}
@@ -86,7 +89,7 @@ SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,48}")
 
 
 def usage():
-    return "usage: record-check.py [-h] [--pre-close] RECORD.json   (reads one file, touches no device)"
+    return "usage: record-check.py RECORD.json   (test-only helper; reads one file, touches no device)"
 
 
 def type_ok(value, typ):

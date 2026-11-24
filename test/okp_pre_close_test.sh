@@ -7,7 +7,7 @@
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 docs=${OKP_DOCS_DIR:-$here/docs/oem-key-provisioning}
-scripts=${OKP_SCRIPTS_DIR:-$here/scripts/okp}
+scripts=${OKP_SCRIPTS_DIR:-$here/test/okp}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fails=0

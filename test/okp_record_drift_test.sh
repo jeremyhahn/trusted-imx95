@@ -3,7 +3,7 @@
 # pending owner approval). Reads text only: no device, no network, no fuse, no life-cycle step.
 #
 # Slice 1: every row of survey section 3 maps to JSON fields, and the map, the FIELDS table of
-# scripts/okp/record-check.py (read as text) and the Fields table of record-format.md agree.
+# test/okp/record-check.py (read as text) and the Fields table of record-format.md agree.
 #
 # Overrides: OKP_DOCS_DIR (survey and format page), OKP_SCRIPTS_DIR (record-check.py).
 # Rerun the scratch fixtures: bash test/okp_record_drift_test.sh (they are built in a temp dir
@@ -11,7 +11,7 @@
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 docs=${OKP_DOCS_DIR:-$here/docs/oem-key-provisioning}
-scripts=${OKP_SCRIPTS_DIR:-$here/scripts/okp}
+scripts=${OKP_SCRIPTS_DIR:-$here/test/okp}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fails=0

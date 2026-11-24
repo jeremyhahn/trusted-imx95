@@ -9,8 +9,8 @@ fields of that record; [provisioning-records-survey.md](provisioning-records-sur
 holds and §4 what it must never hold. Until the owner answers §8, the checker uses the survey's own
 recommendations: Q1 (a) the enclave UID is the key, with the board serial alongside; Q3 (a) only a hash
 of each wrapped blob, never the blob; Q4 (a) the SRK lock state and the life-cycle state before and
-after are mandatory. They sit in one table at the top of `scripts/okp/record-check.py`
-(`OWNER_ANSWERS`), so another answer is a one-line edit.
+after are mandatory. They sit in one table at the top of the test-only checker
+`test/okp/record-check.py` (`OWNER_ANSWERS`), so another answer is a one-line edit.
 
 The envelope (survey §8 Q6) is not chosen. The checker reads the plain JSON payload; the signature
 envelope is go-trusted-platform's.
@@ -47,8 +47,12 @@ hex or base64 of 32 bytes or more is refused, so write the UID in its reported t
 
 ## What the checker refuses
 
-`scripts/okp/record-check.py RECORD.json` reads one file and touches no device. Exit 0 valid; 1 each
-problem named by file and JSON path (never the value); 2 not JSON. It refuses (survey §4):
+> **Internal and test-only (owner default, ASK 5).** The checker is a test helper under `test/okp/`:
+> nothing installs it, no Makefile target runs it, no SPEC row names it, and it is not a command of
+> this repository. `make test` runs it on the fixtures (test/okp_record_check_test.sh).
+
+The checker reads one record and touches no device. Valid, or each problem named by file and JSON
+path (never the value), or not JSON. It refuses (survey §4):
 
 - a PEM or OpenSSH private-key header in any string or key name;
 - a key name on the deny list: private key, secret, session key, wrapped key, blob, token, password,
@@ -59,14 +63,14 @@ problem named by file and JSON path (never the value); 2 not JSON. It refuses (s
 
 ## Pre-close mode
 
-> **Internal and test-only; no public target.** `scripts/okp/record-check.py --pre-close RECORD.json` reads one JSON
-> file and runs nothing against a device. It checks a record written before the irreversible step, against
+> **Internal and test-only; no public surface.** A second mode of the same test helper, used only by
+> `test/okp_pre_close_test.sh`, reads one JSON file and runs nothing against a device. It checks a record written before the irreversible step, against
 > [key-ceremony-survey.md](key-ceremony-survey.md) §6: `life_cycle_before` is OEM open (case and spacing
 > ignored), `ahab_events` is an empty list, and `srk_hash`, `srk_lock_states`, `enclave_fw_version`,
 > `spsdk_version`, `public_keys` and `soc_revision` are present. `life_cycle_after`, `outcome` and
 > `step_times` are not required, since such a record cannot hold them. The ordinary field, hash-width and
-> secret checks still run. Same exit codes. `test/okp_pre_close_test.sh` ties each numbered §6 item to a
+> secret checks still run. That test ties each numbered §6 item to a
 > field, or says why it is not a record field.
 
-`make test` runs it on the test fixture (test/okp_record_check_test.sh); there is no public target. Owner question (proposed, pending owner approval):
+There is no public target and no public invocation. Owner question (proposed, pending owner approval):
 whether the SPEC row should name this record; this lane does not edit SPEC.md.
