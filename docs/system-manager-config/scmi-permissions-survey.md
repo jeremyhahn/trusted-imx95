@@ -497,7 +497,7 @@ Every upstream claim below cites a path under the imx-sm tree and a
 line at commit `eec232878ab7` (tag `lf-6.18.37-2.1.0`, pinned in
 `system-manager/sm.lock`). The imx-sm source is not in this repository,
 and no vendor text is copied here. To check a claim, fetch that tag
-the way `scripts/sm-build.sh` does (lines 135-144, which fail closed if
+the way `scripts/sm-build.sh` does (lines 133-144, which fail closed if
 the commit differs) and open the cited line.
 
 (i) **Checked by this repository on every build.** Item 2 of 8.2: the
@@ -533,7 +533,7 @@ below lists each runtime claim with its file and line.
 
 **Reproduce the vendor read.** Upstream: `https://github.com/nxp-imx/imx-sm`,
 tag `lf-6.18.37-2.1.0`, commit `eec232878ab7dd460f5a8f3767d39dc7e9412efa`.
-Fetch it as `scripts/sm-build.sh` does (lines 139-143, 164-165), into the
+Fetch it as `scripts/sm-build.sh` does (lines 140-143, 165-166), into the
 git-ignored `out/` (create the parent first), never into a tracked path:
 
 ```
@@ -672,7 +672,7 @@ under the cite-only rule (the placement outcome of item 7 is checked by
    scratch copies of the built tree. A `PERF_M7  PRIV` line at the end of
    the M7 API list must still leave ALL, and the same line right after
    `M7P  OWNER` must give PRIV, read back with `scripts/sm-perf-check.sh
-   --want` (line 30). The anchors are found by content in the M7 block, and
+   --want` (line 31). The anchors are found by content in the M7 block, and
    a missing one fails the check. The variants are not patches and are
    never committed. The CI job named in 8.0 runs the check when the PR is not
    a draft; no CI run of it is claimed yet, and the lane run in
