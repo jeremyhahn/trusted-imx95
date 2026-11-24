@@ -77,6 +77,13 @@ they are taken from `.secure-world/out/` (not given with `--bl31` or `--tee`), `
 equal the SHA-256 of this tree's `secure-world/bsp.lock`. A miss fails closed, naming the file, and
 writes no `inputs.txt`. A file passed with `--bl31` or `--tee` is not checked.
 
+`m33_image.bin` counts as real only if it comes from a verified `make system-manager` output: when it is
+taken from `out/system-manager/` (not given with `--system-manager`), `--collect` reads, without sourcing
+them, `SHA256SUMS` there, which must list `m33_image.bin` with the file's SHA-256, and `sm-manifest.txt`,
+which must hold every `key=value` line of `system-manager/sm.lock` unchanged and the line
+`reproducible=yes`. A missing file, a missing or different line or a different digest fails closed,
+naming `m33_image.bin`, and writes no `inputs.txt`. A file passed with `--system-manager` is not checked.
+
 `inputs.lock` also records that `meta_imx_commit` equals `META_IMX_COMMIT` of `secure-world/bsp.lock`;
 `--check` fails if the two differ. The U-Boot and ELE values were read from the meta-imx recipes at
 that commit (`u-boot-imx-common_2026.04.inc`, `firmware-ele-imx_2.0.7.bb`) and each digest was also
