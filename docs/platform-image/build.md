@@ -252,9 +252,10 @@ unlisted file or a changed byte fails); then every artefact in both
 `SHA256SUMS` with the same hash; then `build-info.txt` line by line, layer
 commits and `SOURCE_DATE_EPOCH` included. The one ignored key is
 `build_seconds`, which differs every run. A difference names the artefact and
-both hashes, or the build-info key and both values. `--allow NAME` on the
-compare script excuses one named artefact for a known, documented exception;
-none is set here and the build script passes none.
+both hashes, or the build-info key and both values. A `build-info.txt` that is
+missing, unreadable, empty, or without `SOURCE_DATE_EPOCH` or a layer commit
+fails the compare, naming the file. Any differing or missing artefact fails;
+the compare script has no exception option.
 
 No real run has happened: the build stops at the NXP EULA (#14, the owner's to
 accept), so only the stub bitbake tests

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# platform-image-repro-compare.sh [--allow NAME]... OUT_A OUT_B: compare two
+# platform-image-repro-compare.sh OUT_A OUT_B: compare two
 # platform-image output directories (scripts/platform-image-build.sh --repro
 # writes them). Each directory's own SHA256SUMS must match the files in it (a
 # file missing, an extra file not listed, or a hash mismatch fails, naming the
 # file). Then every artefact must be in both SHA256SUMS with the same hash,
-# except names given with --allow (a known, documented exception; none is
-# built in). Then build-info.txt must match line by line, ignoring only
-# build_seconds= (it differs every run).
+# (a differing or missing artefact always fails; there is no exception option).
+# Then build-info.txt must be readable, carry SOURCE_DATE_EPOCH and a layer
+# revision, and match line by line, ignoring only build_seconds= (it differs
+# every run).
 # Exit 0: "platform-image-repro: OK, N artefacts identical"; 1: each difference
 # named with both values; 2: usage error. No network, no bitbake.
 # Provisional, pending the owner's answer on #14.
@@ -15,19 +16,13 @@ set -uo pipefail
 say() { echo "platform-image-repro: $*" >&2; }
 usage() {
 	say "$*"
-	echo "usage: platform-image-repro-compare.sh [--allow NAME]... OUT_A OUT_B" >&2
+	echo "usage: platform-image-repro-compare.sh OUT_A OUT_B" >&2
 	exit 2
 }
 
-allow=()
 dirs=()
 while [ $# -gt 0 ]; do
 	case $1 in
-	--allow)
-		[ $# -ge 2 ] || usage "--allow needs an artefact name"
-		allow+=("$2")
-		shift
-		;;
 	-*) usage "unknown option $1" ;;
 	*) dirs+=("$1") ;;
 	esac
@@ -42,14 +37,6 @@ bad=0
 fail() {
 	say "$*"
 	bad=1
-}
-
-is_allowed() {
-	local a
-	for a in "${allow[@]+"${allow[@]}"}"; do
-		[ "$a" != "$1" ] || return 0
-	done
-	return 1
 }
 
 # load SUMS-ARRAY-PREFIX DIR LABEL: read DIR/SHA256SUMS into names_$p (order)
@@ -112,18 +99,16 @@ same=0
 n=
 for n in "${names_a[@]+"${names_a[@]}"}"; do
 	if [ -z "${hash_b[$n]+x}" ]; then
-		is_allowed "$n" || fail "$n: only in ${dirs[0]} (hash ${hash_a[$n]})"
+		fail "$n: only in ${dirs[0]} (hash ${hash_a[$n]})"
 	elif [ "${hash_a[$n]}" = "${hash_b[$n]}" ]; then
 		same=$((same + 1))
-	elif ! is_allowed "$n"; then
-		fail "$n differs: ${hash_a[$n]} (${dirs[0]}) vs ${hash_b[$n]} (${dirs[1]})"
 	else
-		say "$n differs but is allowed (--allow)"
+		fail "$n differs: ${hash_a[$n]} (${dirs[0]}) vs ${hash_b[$n]} (${dirs[1]})"
 	fi
 done
 for n in "${names_b[@]+"${names_b[@]}"}"; do
 	[ -z "${hash_a[$n]+x}" ] || continue
-	is_allowed "$n" || fail "$n: only in ${dirs[1]} (hash ${hash_b[$n]})"
+	fail "$n: only in ${dirs[1]} (hash ${hash_b[$n]})"
 done
 
 # build-info.txt: every line but build_seconds= must match.
