@@ -23,6 +23,9 @@ BI_SERVER=${XKMS_SERVER:-}
 BI_BOARD=${XKMS_BOARD:-}
 BI_WORK=${XKMS_WORK:-}
 BI_UNIT=xkmsd
+BI_ROOT=${XKMS_FAKE_ROOT:-}         # prefix of the board's /proc paths; tests only, empty on a board
+BI_KILL_WAIT=${XKMS_KILL_WAIT:-3}   # seconds after a kill -9 before xkmsd is started if still down
+BI_BOOT_WAIT=${XKMS_REBOOT_WAIT:-15} # seconds after sysrq b before the board is polled
 BI_DRY=0
 BI_N=0
 BI_CHECKS=0
@@ -154,28 +157,54 @@ bi_ready() {
 	return 1
 }
 
-# bi_restart graceful|kill9|hard: restart xkmsd on the board the named way and wait for it.
+bi_mainpid() { bi_board "systemctl show -p MainPID --value $BI_UNIT"; } # 0 when xkmsd is down
+bi_bootid() { bi_board "cat $BI_ROOT/proc/sys/kernel/random/boot_id"; }   # new on every boot
+
+# bi_restart graceful|kill9|hard: restart the named way and prove it happened:
+# a graceful or kill -9 restart must change xkmsd's MainPID, a hard reboot the
+# board's boot_id. Any failed step, or no proof, fails; then xkmsd must answer.
 bi_restart() {
+	local pid0 pid1 boot0 boot1 i=0
 	case $1 in
-	graceful) bi_board "systemctl restart $BI_UNIT" ;;
-	kill9)
-		bi_board "systemctl kill -s KILL --kill-whom=main $BI_UNIT"
-		sleep 3
-		bi_board "systemctl is-active --quiet $BI_UNIT || systemctl start $BI_UNIT" || true
+	graceful | kill9)
+		pid0=$(bi_mainpid) || pid0=""
+		case $pid0 in '' | 0 | *[!0-9]*) echo "$BI_UNIT is not running before the $1 restart (MainPID '$pid0')"; return 1 ;; esac
+		if [ "$1" = graceful ]; then
+			bi_board "systemctl restart $BI_UNIT" || { echo "systemctl restart $BI_UNIT failed"; return 1; }
+		else
+			bi_board "systemctl kill -s KILL --kill-whom=main $BI_UNIT" || { echo "systemctl kill -s KILL $BI_UNIT failed"; return 1; }
+			sleep "$BI_KILL_WAIT"
+			bi_board "systemctl is-active --quiet $BI_UNIT || systemctl start $BI_UNIT" ||
+				{ echo "$BI_UNIT is not active after the kill -9 and a start"; return 1; }
+		fi
+		pid1=$(bi_mainpid) || pid1=""
+		case $pid1 in '' | 0 | *[!0-9]*) echo "$BI_UNIT has no MainPID after the $1 restart ('$pid1')"; return 1 ;; esac
+		[ "$pid1" != "$pid0" ] || { echo "$BI_UNIT MainPID is still $pid0: the $1 restart did not happen"; return 1; }
+		echo "$BI_UNIT restarted ($1): MainPID $pid0 -> $pid1"
 		;;
 	hard)
-		bi_board "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger" || true
-		sleep 15
-		local i=0
+		boot0=$(bi_bootid) || boot0=""
+		[ -n "$boot0" ] || { echo "cannot read the board's boot_id before the reboot"; return 1; }
+		# the connection drops with the board, so this exit status means nothing
+		bi_board "echo 1 > $BI_ROOT/proc/sys/kernel/sysrq; echo b > $BI_ROOT/proc/sysrq-trigger" || true
+		sleep "$BI_BOOT_WAIT"
 		while [ "$i" -lt 60 ]; do
 			if bi_board true 2>/dev/null; then break; fi
 			i=$((i + 1))
 			sleep 5
 		done
-		[ "$i" -lt 60 ] || return 1
+		[ "$i" -lt 60 ] || { echo "the board did not come back within 5 minutes"; return 1; }
+		boot1=$(bi_bootid) || boot1=""
+		[ -n "$boot1" ] || { echo "cannot read the board's boot_id after the reboot"; return 1; }
+		[ "$boot1" != "$boot0" ] || { echo "boot_id is still $boot0: the board did not reboot"; return 1; }
+		echo "board rebooted: boot_id $boot0 -> $boot1"
+		;;
+	*)
+		echo "bi_restart: unknown mode '$1'"
+		return 1
 		;;
 	esac
-	bi_ready 120
+	bi_ready 120 || { echo "xkmsd does not answer after the $1 restart"; return 1; }
 }
 
 # --- the durability ledger: every acknowledged write is recorded, then re-checked ----------

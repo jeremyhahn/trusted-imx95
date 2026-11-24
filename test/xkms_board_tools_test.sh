@@ -42,7 +42,19 @@ R=$XKMS_FAKE_ROOT
 st=$R/run/state
 bin=$R/usr/local/bin/xkmsd
 body=$(cat "$bin")
+# run/pid, when present, is the MainPID, and each start or restart changes it
+# unless run/samepid exists; run/restartfail and run/killfail fail those verbs
+bump() { [ ! -e "$R/run/pid" ] || [ -e "$R/run/samepid" ] || echo $(($(cat "$R/run/pid") + 1)) >"$R/run/pid"; }
 case $1 in
+restart)
+	[ ! -e "$R/run/restartfail" ] || exit 1
+	bump
+	echo active >"$st"
+	;;
+kill)
+	[ ! -e "$R/run/killfail" ] || exit 1
+	echo inactive >"$st"
+	;;
 cat) [ -f "$R/etc/systemd/xkmsd.service" ] ;;
 is-active) [ "$(cat "$st")" = active ] ;;
 stop)
@@ -61,6 +73,7 @@ start)
 		;;
 	esac
 	echo active >"$st"
+	bump
 	mkdir -p "$R/proc/4242"
 	echo xkmsd >"$R/proc/4242/comm"
 	case $body in *NOLISTEN*) ;; *)
@@ -75,7 +88,7 @@ start)
 		;;
 	esac
 	;;
-show) if [ "$(cat "$st")" = active ]; then echo 4242; else echo 0; fi ;;
+show) if [ "$(cat "$st")" = active ]; then cat "$R/run/pid" 2>/dev/null || echo 4242; else echo 0; fi ;;
 esac
 EOF
 # ss and netstat exist only when FAKE_TOOLS names them (default: neither, as on
@@ -398,6 +411,45 @@ ok "acknowledged create, failed follow-up: verify passes while the keys exist" [
 LB "$tmp/l2.log" "$ackset; rm -f \"\$FAKE_KMS/bi-x-0\"; bi_verify_set s; bi_summary t"
 ok "acknowledged key missing: verify FAILs" [ "$RC" != 0 ]
 ok "acknowledged key missing: CRITICAL names it" out_has "$tmp/l2.log" "CRITICAL: acknowledged key bi-x-0 does not exist"
+
+# --- bi_restart proves the restart happened ------------------------------------
+R=$tmp/boardR
+mkboard "$R"
+echo 100 >"$R/run/pid"
+mkdir -p "$R/proc/sys/kernel/random"
+echo boot-0001 >"$R/proc/sys/kernel/random/boot_id"
+export XKMS_FAKE_ROOT=$R XKMS_KILL_WAIT=0 XKMS_REBOOT_WAIT=0
+RS() { # RS <log> <mode> [<fake-board flag>]: one bi_restart, RC from bi_summary
+	rm -f "$R/run/restartfail" "$R/run/killfail" "$R/run/samepid"
+	[ -z "${3:-}" ] || touch "$R/run/$3"
+	echo active >"$R/run/state"
+	LB "$1" "bi_check restart bi_restart $2; bi_summary t"
+}
+for mode in graceful kill9; do
+	RS "$tmp/r-$mode.log" "$mode"
+	ok "$mode restart with a new MainPID passes" [ "$RC" = 0 ]
+	RS "$tmp/r-$mode-same.log" "$mode" samepid
+	ok "$mode restart with an unchanged MainPID FAILs" [ "$RC" != 0 ]
+	ok "$mode restart with an unchanged MainPID says so" out_has "$tmp/r-$mode-same.log" "MainPID is still"
+done
+RS "$tmp/r-gfail.log" graceful restartfail
+ok "a failed systemctl restart FAILs" [ "$RC" != 0 ]
+ok "a failed systemctl restart says so" out_has "$tmp/r-gfail.log" "systemctl restart xkmsd failed"
+RS "$tmp/r-kfail.log" kill9 killfail
+ok "a failed systemctl kill FAILs" [ "$RC" != 0 ]
+# the fake board never reboots: sysrq writes land in the temp root, and the
+# boot_id stays the same
+# boot_id stays the same. Never run it against a lib.sh that would write the
+# host's own /proc/sysrq-trigger.
+if [ -n "$XKMS_FAKE_ROOT" ] && grep -q 'BI_ROOT/proc/sysrq-trigger' "$lib"; then
+	RS "$tmp/r-hard.log" hard
+	ok "a hard reboot with an unchanged boot_id FAILs" [ "$RC" != 0 ]
+	ok "a hard reboot with an unchanged boot_id says so" out_has "$tmp/r-hard.log" "boot_id is still boot-0001"
+	ok "the sysrq trigger went to the fake root" [ "$(cat "$R/proc/sysrq-trigger")" = b ]
+else
+	fail "hard reboot" "lib.sh does not keep sysrq inside XKMS_FAKE_ROOT; not run"
+fi
+unset XKMS_KILL_WAIT XKMS_REBOOT_WAIT
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do
