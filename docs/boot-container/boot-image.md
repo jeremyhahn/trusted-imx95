@@ -133,11 +133,29 @@ before it is written are **unconfirmed** (survey U2, IMX95RM not read).
    against the OEM test SRK with one signature each.
 2. `nxpimage ahab parse` writes six payloads, and each input is the prefix of its parsed payload (SPSDK pads
    the System Manager, BL31, U-Boot and tee entries to 1 KiB; the U-Boot padding is not all zero bytes).
-3. For each of the six signed payloads, one byte in the middle of the payload is flipped in a copy of the
-   image and `nxpimage ahab verify` must fail. The run stops on the first accepted tamper.
+3. `scripts/ahab/policy-check.sh` runs on the whole image against `scripts/ahab/boot-image-manifest.yaml`
+   and must print `policy: OK`. The manifest has three `oem` positions in the order of `boot-image.yaml`
+   and lists the entries as `nxpimage ahab parse` reports them; every sha256, load address and entry
+   point is a `policy:<NAME>_...` key, and no value is committed. `boot-image.sh` writes the policy file
+   in its work directory: the test-PKI SRK table hash, `USED_SRK_ID` 0, `SRK_REVOKE_MASK` 0,
+   `FUSE_VERSION_MIN` 0, each payload's sha256 as parsed (SPSDK pads it, so it is not the `inputs.txt`
+   digest), and the addresses (the ELE, M7 and tee ones from `boot-image.yaml`; the System Manager, BL31
+   and U-Boot entries are SPSDK shorthands with no address there, so theirs are read from the parse).
+   The checker also requires that every non-zero byte lies in a container header, a signature block or a
+   referenced payload. The manifest is separate from #12's `container-manifest.yaml`, which stays as #12
+   leaves it. The run fails on anything but `policy: OK`.
+4. For each of the six signed payloads, each of the three container headers (a byte past the 4-byte tag
+   word) and each of the three signature blocks, one byte is flipped in a copy of the image and
+   `nxpimage ahab verify` must fail. The offsets come from the parse, not a byte-pattern scan. The run
+   stops on the first accepted tamper.
 
 `test/boot_image_test.sh` (in `make test`) runs these on stand-in inputs, with the pin checks, the
 stand-in labelling, the fail-closed fetch and an independent byte flip through `boot-image.sh verify`.
+It also checks `policy: OK`, refuses two mutated manifests (atf and tee swapped, one entry dropped), and
+runs four negative cases on scratch copies: (a) the image cut short by 1 KiB fails verify or the policy
+check; (b) one non-zero byte planted in a gap that no header, signature block or payload covers fails the
+policy check, naming the offset; (c) a second image on a fresh test PKI verifies, but fails the first
+image's policy file on the SRK table hash; (d) a policy file with `USED_SRK_ID` 1 fails.
 
 ## What step (c) on the board would check
 
