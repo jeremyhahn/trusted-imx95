@@ -293,7 +293,11 @@ has no `.spdx.json` listed; or the production target `trusted-imx95-image` has
 no listed `.manifest`, an empty one, or one that names a package the debug
 recipe adds (`IMAGE_INSTALL:append` in `trusted-imx95-image-debug.bb`, read
 from that file, so the list is not typed twice; exit 2 if it cannot be parsed).
-A package is matched by its whole name, so `gdbserver` is not `gdb`. The debug
+A package is matched by its whole name, so `gdbserver` is not `gdb`. The
+production manifest must also name no package manager (`rpm`, `opkg`, `dnf`,
+`apt`, `dpkg`: a list in the script, because the debug recipe installs one
+through the `package-management` image feature, not a package name; a
+provisional default, pending #14), again matched by whole name. The debug
 target's manifest is not checked. Exit 0 is OK, 1 a mismatch, 2 a usage error.
 
 A consumer runs it before AHAB signing (#14 Q4 (b)) or provisioning. Nothing has
