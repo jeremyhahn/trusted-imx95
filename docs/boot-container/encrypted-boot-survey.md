@@ -259,10 +259,10 @@ Sources not read:
 
 | Source | State |
 |---|---|
-| NXP AN14471, *Using Hardware Security Module for Code Signing* (https://www.nxp.com/docs/en/application-note/AN14471.pdf) | Reached (HTTP 200), but not read: the lane has no PDF text tool. The SPEC already cites it for HSM custody; whether it covers the DEK is unconfirmed. |
-| NXP AN12312, *Secure Boot on i.MX 8 and i.MX 8X Families using AHAB* (https://www.nxp.com/docs/en/application-note/AN12312.pdf) | Not reached (HTTP 404 from the lane). |
-| NXP i.MX Linux User's Guide (https://www.nxp.com/docs/en/user-guide/IMX_LINUX_USERS_GUIDE.pdf) | Not reached (HTTP 404 from the lane). |
-| NXP IMX95RM (https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf) | Not reached (HTTP 404 from the lane); listed as missing in the SPEC. |
+| NXP AN14471, *Using Hardware Security Module for Code Signing* (https://www.nxp.com/docs/en/application-note/AN14471.pdf) | Reached (HTTP 200), but not read: the survey has no PDF text tool. The SPEC already cites it for HSM custody; whether it covers the DEK is unconfirmed. |
+| NXP AN12312, *Secure Boot on i.MX 8 and i.MX 8X Families using AHAB* (https://www.nxp.com/docs/en/application-note/AN12312.pdf) | Not reached (HTTP 404 from the survey). |
+| NXP i.MX Linux User's Guide (https://www.nxp.com/docs/en/user-guide/IMX_LINUX_USERS_GUIDE.pdf) | Not reached (HTTP 404 from the survey). |
+| NXP IMX95RM (https://www.nxp.com/docs/en/reference-manual/IMX95RM.pdf) | Not reached (HTTP 404 from the survey); listed as missing in the SPEC. |
 | i.MX 95 Security Reference Manual | Not public (NDA); listed as missing in the SPEC. |
 | NXP RM00284 (EdgeLock Enclave HSM API) and the "ELE API Reference Guide" the U-Boot guide cites [S1] | Not read in this survey; the generate-key-blob request is known here only through U-Boot [S3] and SPSDK [S7]. |
 | NXP CST 3.1.0 and 4.0.1 user guides | Behind NXP's download login; not read. |
