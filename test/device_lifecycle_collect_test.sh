@@ -111,6 +111,17 @@ run col env FAIL_TPM=1 ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" 
 check "readpublic failure" nonzero
 expect "readpublic failure: no OUT" test ! -e "$W/out.json"
 
+# A failed output copy fails the collector: OUT's parent is missing.
+rm -rf "$W/nodir"
+run col env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" "${args[@]}" -o "$W/nodir/out.json"
+check "missing OUT parent" nonzero
+if [[ "$OUT" != *"collect-evidence: wrote"* ]]; then
+	pass "missing OUT parent: no success line"
+else
+	fail "missing OUT parent: success line printed" "$OUT"
+fi
+expect "missing OUT parent: nothing written" test ! -e "$W/nodir"
+
 # Refusals happen before any double runs.
 refuse() { # name, then env assignments and collector arguments
 	local name=$1

@@ -84,5 +84,14 @@ open(out, "wb").write((json.dumps(bundle, sort_keys=True, separators=(",", ":"))
 ' "$work/signed.bin" "$work/sig.bin" "$work/ek.bin" "$work/bundle.json" "$nonce" "$version" "$template" ||
 	die "bundle composition failed"
 
-cp "$work/bundle.json" "$out.tmp.$$" && mv "$out.tmp.$$" "$out"
+# 4. Publish. Each step fails the script on its own: a failed step in a
+# non-final `&&` position would not trip errexit.
+if ! cp "$work/bundle.json" "$out.tmp.$$"; then
+	rm -f "$out.tmp.$$"
+	die "cannot write $out; nothing was published"
+fi
+if ! mv "$out.tmp.$$" "$out"; then
+	rm -f "$out.tmp.$$"
+	die "cannot move the bundle to $out; nothing was published"
+fi
 echo "collect-evidence: wrote $out"
