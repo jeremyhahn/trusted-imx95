@@ -140,7 +140,7 @@ What this survey can say, and what it leaves to the other repositories:
 
 - **The enclave's get-info and attestation field sets for the i.MX 95.** The
   ELE library (S4) has get-info, device attestation and public-key attestation
-  interfaces, but the lane's tooling does not allow reading code outside this
+  interfaces, but the survey's tooling does not allow reading code outside this
   repository, so the fields (UID, life cycle, SRK hash readback, firmware
   version) were not read. The API reference (RM00284) is private. Nor was
   the key that signs the attestation, or a chain to an NXP root that a

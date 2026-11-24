@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# make ahab-sign-test (issue #9): a throwaway ECDSA P-384 test PKI outside the
-# tree, an i.MX 95 B0 AHAB container around a random payload, signed and
-# verified with the pinned SPSDK 3.13.0.
-#   (a) the run succeeds and the container it hands back verifies;
-#   (b) a copy with one signature byte or one payload byte flipped is rejected;
-#   (c) the run leaves no new or changed file in the clone, and no private key;
-#   (d) the run fails when the venv's SPSDK is not the pinned version.
+# make ahab-sign-test: (a) the container verifies; (b) a flipped signature or payload byte is rejected; (c) the clone is unchanged and holds no key; (d) a wrong SPSDK version fails.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -60,10 +54,7 @@ else
 	fail "(a) the run handed back no container in AHAB_OUT_DIR"
 fi
 
-# (e) make ahab-m7-test (issue #12): the container's one image entry targets the
-# Cortex-M7; the parsed core, load and entry address match m7-container.yaml;
-# a flipped payload byte is rejected.
-# yaml_val <key>: the value of the image entry's <key> in m7-container.yaml.
+# (e) make ahab-m7-test: the parsed core, load and entry address match m7-container.yaml; a flipped payload byte is rejected. yaml_val <key> reads the image entry.
 yaml_val() {
 	local l
 	while IFS= read -r l; do

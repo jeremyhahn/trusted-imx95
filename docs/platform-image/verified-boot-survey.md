@@ -29,7 +29,7 @@ All sources were read on 2026-11-12 from the public internet. "Ref" is the git r
 | S12 | Linux kernel documentation, "dm-verity" (admin guide, device-mapper) | docs.kernel.org `latest` (built from 7.4.0-rc2), read 2026-11-12 | https://docs.kernel.org/admin-guide/device-mapper/verity.html |
 | S13 | U-Boot, `doc/usage/fit/dm-verity.rst` (FIT dm-verity boot parameters) | as S1 | https://docs.u-boot.org/en/latest/usage/fit/dm-verity.html |
 
-Unreachable or not read: NXP CST download page and CST 4.0.1 release notes (404 from this lane; NXP account required); AN14533 (https://www.nxp.com/doc/AN14533, not fetched); the i.MX 95 Security Reference Manual and IMX95RM (not public); the NXP i.MX Linux User's Guide. See §4.
+Unreachable or not read: NXP CST download page and CST 4.0.1 release notes (404 from this survey; NXP account required); AN14533 (https://www.nxp.com/doc/AN14533, not fetched); the i.MX 95 Security Reference Manual and IMX95RM (not public); the NXP i.MX Linux User's Guide. See §4.
 
 ## 3. The chain, stage by stage
 
@@ -84,12 +84,12 @@ Two public mechanisms carry the chain from U-Boot to Linux. They can be combined
 
 ### 3.7 Signing tools: CST and SPSDK
 
-- NXP's guide says that from i.MX 95 B0 (AHAB 2.0) signing needs **SPSDK or CST 4.0.1**. It also says SPSDK is NXP's recommended tool for the i.MX 9x family from now on, and that CST will get bug fixes only, with no new AHAB features (S2 §1.1). `docs/SPEC.md` (`boot-container`) names **CST 3.1.0**. Going by S2, CST 3.1.0 cannot sign AHAB 2.0 containers. This mismatch is for the owner (Q1); this lane does not edit SPEC.
+- NXP's guide says that from i.MX 95 B0 (AHAB 2.0) signing needs **SPSDK or CST 4.0.1**. It also says SPSDK is NXP's recommended tool for the i.MX 9x family from now on, and that CST will get bug fixes only, with no new AHAB features (S2 §1.1). `docs/SPEC.md` (`boot-container`) names **CST 3.1.0**. Going by S2, CST 3.1.0 cannot sign AHAB 2.0 containers. This mismatch is for the owner (Q1); this survey does not edit SPEC.
 - SPSDK's `nxpimage ahab` builds and signs i.MX 95 (`mimx9596`) containers from YAML. It can rebuild what imx-mkimage builds, as the primary set (ELE firmware, OEI/DDR, System Manager, optional M7 application, SPL) and the secondary set (BL31, U-Boot, TEE) (S10). It can also re-sign an existing `flash.bin`, with ML-DSA plus ECC keys on B0 (S9).
 - SPSDK's container `signer` field takes either a key file or a *signature provider* plugin. With a plugin the private key can stay in an HSM, which is the custody model `docs/SPEC.md` asks for (S10; the plugin interface itself was not read, §4).
 - The SRK table holds four public keys of one type. SPSDK lists RSA-PSS, ECDSA (P-256, P-384, P-521), Dilithium/ML-DSA and SM2, with PQC only in the new container format. A container names the SRK it uses and can carry a revoke mask (S10).
 - The SPSDK examples were tested on the i.MX 95 **EVK**, not the FRDM PRO, and some were made on A0/A1 silicon, whose container format differs from B0 (S10, S11).
-- CST's download page could not be reached from this lane: the URL tried answered 404, and NXP downloads need an account. CST 4.0.1's release notes were not read (§4).
+- CST's download page could not be reached from this survey: the URL tried answered 404, and NXP downloads need an account. CST 4.0.1's release notes were not read (§4).
 
 ### 3.8 Anti-rollback
 
@@ -102,14 +102,14 @@ Two public mechanisms carry the chain from U-Boot to Linux. They can be combined
 ## 4. What could not be confirmed
 
 1. **The i.MX 95 Security Reference Manual and IMX95RM** are not public and not in `references/`. Without them the following could not be confirmed: ROM behaviour on a failed signature in each life cycle (beyond S11's version check), the fuse map, the number of anti-rollback fuse steps, and whether the `_no_ahabfw` mkimage targets boot on a closed part.
-2. **CST 4.0.1**: the download page and release notes could not be reached (404 from this lane; NXP downloads need an account).
+2. **CST 4.0.1**: the download page and release notes could not be reached (404 from this survey; NXP downloads need an account).
 3. **AN14533** (anti-rollback application note, linked from S11) was not read.
 4. **SPSDK signature provider interface**: the plugin API, and whether it supports PKCS#11 or ML-DSA in an HSM, was not read.
 5. **`CONFIG_AHAB_BOOT` default**: whether `ARCH_IMX9` or the i.MX 95 target selects it implicitly was not checked in Kconfig.
 6. **Linux uImage.FIT block driver** (needed by `CONFIG_FIT_VERITY`): whether it is in mainline, and from which version.
 7. **FRDM PRO silicon revision**: the upstream doc gives only B0 build steps for the FRDM PRO (S1). That the board in hand is B0 was not confirmed.
 8. **NXP i.MX Linux User's Guide and Linux Reference Manual** (cited by S6) were not read; `docs/SPEC.md` lists the BSP documentation as missing.
-9. **Issue #52's body** could not be read from this lane (no forge credentials); this survey follows the lane brief and the `platform-image` and `boot-container` rows of `docs/SPEC.md`.
+9. **Issue #52's body** could not be read from this survey (no forge credentials); this survey follows the survey brief and the `platform-image` and `boot-container` rows of `docs/SPEC.md`.
 
 ## 5. Questions for the owner
 

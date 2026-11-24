@@ -168,20 +168,101 @@ case ${1:-} in
     dockerfile=$(make -s --no-print-directory --eval 'ci-image-cache-dockerfile: ; @echo $(DOCKERFILE)' \
       ci-image-cache-dockerfile "$@") || die "make could not name the Dockerfile"
     [ -f "$dockerfile" ] || die "the Makefile's Dockerfile '$dockerfile' is not a file"
-    printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null
-    # The build pushes its own result: no local tag is resolved between the
-    # build and the push (v5, above).
-    DOCKER_CONFIG=$cfg docker buildx build --no-cache --provenance=false --sbom=false \
-      --target toolchain -f "$dockerfile" --metadata-file "$cfg/build.json" \
-      --output "type=registry,name=$remote" . \
-      || die "the build and push of $remote failed"
-    built=$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "$cfg/build.json" 2>/dev/null) \
-      || die "the build recorded no image digest for $remote"
-    got=$(registry_digest "$remote") || die "the registry gave no digest for $remote after the push"
-    [ "$got" = "$built" ] \
-      || die "the registry's $remote is $got, not the image this run built ($built)"
-    docker image rm "$remote" >/dev/null 2>&1 || true   # the build's local name, if its driver kept one
-    echo "ci-image-cache: published $local_tag as $repo@$built"
+    # LOCAL CHANGE (#159, verify 16): nothing reaches the registry before the
+    # image is checked. The build only loads the image into the daemon; its ID
+    # (the config digest, which no other job can retag) is read from the
+    # build's own --iidfile, ci-image-history.sh and trivy run on that ID, and
+    # only then is the archive of it uploaded (below). The uploaded manifest's
+    # config digest must be that ID, or publish fails and $remote is unwritten.
+    here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    work=$(mktemp -d "$PWD/.ci-image-publish.XXXXXX")
+    built_id=""
+    # Best effort, on every exit: remove the image this job built, so a runner
+    # keeps no image the job loaded. Only an ID that came from this build's
+    # --iidfile is ever removed.
+    cleanup() {
+      if [ -n "$built_id" ]; then
+        docker image rm -f "$built_id" >/dev/null 2>&1 || true
+      fi
+      rm -rf "$cfg" "$work"
+    }
+    DOCKER_CONFIG=$cfg docker buildx build --load --no-cache --provenance=false --sbom=false \
+      --target toolchain --label "ci.reap.repository=${local_tag%%:*}" \
+      -f "$dockerfile" --iidfile "$work/iid" . \
+      || die "the build of $remote failed; nothing was pushed"
+    id=$(cat "$work/iid" 2>/dev/null || true)
+    [[ "$id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "the build recorded no image ID for $remote; nothing was pushed"
+    built_id=$id
+    docker image inspect "$id" >/dev/null 2>&1 || die "the built image $id is not in the daemon; nothing was pushed"
+    "$here/ci-image-history.sh" "$id" \
+      || die "the history check refused $id; nothing was pushed"
+    docker save -o "$work/image.tar" "$id" || die "docker save of $id failed; nothing was pushed"
+    # The archive is what is uploaded, so its own config must be the checked
+    # ID: one image, and the sha256 of its config member is the ID.
+    [ "$(tar -xOf "$work/image.tar" manifest.json 2>/dev/null | jq -r 'length' 2>/dev/null)" = 1 ] \
+      || die "the saved archive of $id does not hold exactly one image; nothing was published under $remote"
+    cfgpath=$(tar -xOf "$work/image.tar" manifest.json 2>/dev/null | jq -er '.[0].Config | select(type == "string")' 2>/dev/null) \
+      || die "the saved archive of $id names no config; nothing was published under $remote"
+    case $cfgpath in /* | *..*) die "the saved archive of $id names an unsafe config path; nothing was published under $remote" ;; esac
+    archive_id=sha256:$(tar -xOf "$work/image.tar" "$cfgpath" 2>/dev/null | sha256sum | cut -c1-64)
+    [ "$archive_id" = "$id" ] \
+      || die "the saved archive's config is $archive_id, not the checked image $id; nothing was published under $remote"
+    tarname=$(basename "$work")/image.tar
+    "$here/in-toolchain-image.sh" "$id" \
+      trivy image --input "$tarname" --ignore-unfixed --skip-dirs /opt/go/mod --severity CRITICAL,HIGH --exit-code 1 \
+      || die "trivy refused $id; nothing was pushed"
+    # The registry client: crane, pinned by exact version and SHA-256 and
+    # failing closed on a mismatch. It runs on the host, never inside the image
+    # under check, and is fetched before the login so no credential exists yet.
+    crane_version=0.22.1
+    crane_url=https://github.com/google/go-containerregistry/releases/download/v$crane_version/go-containerregistry_Linux_x86_64.tar.gz
+    crane_sha256=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+    curl -fsSL --proto '=https' --tlsv1.2 --max-time 180 -o "$work/crane.tgz" "$crane_url" \
+      || die "the download of the pinned registry client (crane $crane_version) failed; nothing was published under $remote"
+    echo "$crane_sha256  $work/crane.tgz" | sha256sum -c - >/dev/null 2>&1 \
+      || die "the SHA-256 of the registry client download is not the pinned one; nothing was published under $remote"
+    mkdir -m 700 "$work/bin"
+    tar -xzf "$work/crane.tgz" -C "$work/bin" crane \
+      || die "the pinned registry client archive holds no crane; nothing was published under $remote"
+    crane=$work/bin/crane
+    printf '%s' "$RELEASE_REGISTRY_TOKEN" | DOCKER_CONFIG=$cfg docker login "$host" -u "$RELEASE_REGISTRY_USER" --password-stdin >/dev/null \
+      || die "the registry login for $host failed; nothing was pushed"
+    # LOCAL CHANGE (#159, verify 19): publish makes no `docker tag` and no
+    # `docker push`; nothing of the shared daemon's tag namespace is on its
+    # path. The checked artifact is the job-private archive saved above (in
+    # the mode-700 work directory) and its config digest, read from the
+    # archive itself, must be the checked ID. That archive is uploaded by a
+    # pinned registry client that reads the file, not the daemon, to a staging
+    # tag no other job can guess (it needs our credentials to write at all).
+    # The staged manifest's config digest must be the checked ID. Only then is
+    # $remote pointed at that manifest, by digest, on the registry side. The
+    # staging tag stays in the registry: it can only ever hold checked content.
+    staged="$repo:stage-${GITHUB_RUN_ID:-0}-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    DOCKER_CONFIG=$cfg "$crane" push "$work/image.tar" "$staged" >/dev/null \
+      || die "the upload of the checked archive failed; nothing was published under $remote"
+    mdigest=$(registry_digest "$staged") \
+      || die "the registry gave no digest for the staging tag; nothing was published under $remote"
+    pushed=$(DOCKER_CONFIG=$cfg docker buildx imagetools inspect "$repo@$mdigest" --raw 2>/dev/null \
+      | jq -er '.config.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' 2>/dev/null) \
+      || die "the staged manifest $mdigest has no config digest; nothing was published under $remote"
+    [ "$pushed" = "$id" ] \
+      || die "the staged manifest $mdigest has config $pushed, not the checked image $id; nothing was published under $remote"
+    # LOCAL CHANGE (#159, verify 5; Codex round 5): the registry may accept the
+    # promotion before imagetools reports success, and a lost response or a
+    # cancel looks like a failure. Once $remote may be visible another job on
+    # the shared daemon may pull it and record this same ID. The image is then
+    # no longer this job's alone, so cleanup ownership is released BEFORE the
+    # promotion starts: whether it succeeds, fails or is cancelled, the image
+    # is left to the age-aware reaper. A failure before this point (build,
+    # verify, upload) still removes the image. The
+    # build above carries the Makefile's ci.reap.repository label (the local
+    # toolchain repository), which is how the reaper finds this untagged image.
+    # The publish-images job runs reap-stale-ci-stacks.sh in an `if: always()`
+    # step after this one (v1.54), so the release daemon is reaped too.
+    built_id=""
+    DOCKER_CONFIG=$cfg docker buildx imagetools create --tag "$remote" "$repo@$mdigest" >/dev/null \
+      || die "promoting $repo@$mdigest to $remote failed; nothing was published under $remote (the built image is left to the reaper)"
+    echo "ci-image-cache: published $local_tag as $repo@$mdigest ($id, checked before the push, promoted by digest)"
     ;;
   *)
     die "usage: ci-image-cache.sh pull | publish [make args]"
