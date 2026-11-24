@@ -8,8 +8,9 @@
 # Then build-info.txt must be readable, carry SOURCE_DATE_EPOCH and a layer
 # revision, and match line by line, ignoring only build_seconds= (it differs
 # every run).
-# Exit 0: "platform-image-repro: OK, N artefacts identical"; 1: each difference
-# named with both values; 2: usage error. No network, no bitbake.
+# At least one artefact must be compared: two empty SHA256SUMS fail.
+# Exit 0: "platform-image-repro: OK, N artefacts identical" (N >= 1); 1: each
+# difference named with both values; 2: usage error. No network, no bitbake.
 # Provisional, pending the owner's answer on #14.
 set -uo pipefail
 
@@ -110,6 +111,11 @@ for n in "${names_b[@]+"${names_b[@]}"}"; do
 	[ -z "${hash_a[$n]+x}" ] || continue
 	fail "$n: only in ${dirs[1]} (hash ${hash_b[$n]})"
 done
+# Nothing compared is not a match: a build that published no artefact must not
+# print OK.
+if [ "$same" -eq 0 ] && [ "$bad" -eq 0 ]; then
+	fail "no artefact to compare: both SHA256SUMS are empty (${dirs[0]}, ${dirs[1]})"
+fi
 
 # build-info.txt: every line but build_seconds= must match.
 info_a=()

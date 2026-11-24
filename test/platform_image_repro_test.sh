@@ -169,6 +169,21 @@ mksbom "$b" 20261123000002 spdx-changed
 run bash "$script" "$a" "$b"
 check "an SBOM with one changed byte: names the .spdx.json member" 1 "img-m.rootfs.spdx.json differs"
 
+# Nothing to compare is a failure, never "0 artefacts identical".
+mk "$a"
+mk "$b"
+: >"$a/SHA256SUMS"
+rm -f "$a"/img.*
+: >"$b/SHA256SUMS"
+rm -f "$b"/img.*
+run bash "$script" "$a" "$b"
+check "both SHA256SUMS empty" 1 "no artefact to compare: both SHA256SUMS are empty" "$a" "$b"
+noinfo "both SHA256SUMS empty"
+mk "$b"
+run bash "$script" "$a" "$b"
+check "one SHA256SUMS empty, the other populated" 1 "only in $b"
+noinfo "one SHA256SUMS empty"
+
 run bash "$script" "$a"
 check "a missing argument" 2 "need exactly two output directories"
 run bash "$script"
