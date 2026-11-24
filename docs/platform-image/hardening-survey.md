@@ -203,7 +203,7 @@ likely conflict, to be confirmed in the first hardened build (Q2).
   enables `DEBUG_FS` [S1], and some vendor tools read it (GPU and power
   profiling; unconfirmed). Which of these restrictions apply in integrity mode
   and which only in confidentiality mode is set by `enum lockdown_reason` in
-  `include/linux/security.h` [S1]; this lane could not read that header, so
+  `include/linux/security.h` [S1]; this survey could not read that header, so
   the split is unconfirmed (Q4).
 - **`KEXEC=n`, `CRASH_DUMP=n`.** No BSP dependency found; meta-imx does not
   use kexec to boot.
@@ -298,7 +298,7 @@ keeping a policy for the whole image.
 - Whether any NXP tool in a minimal image needs `/dev/mem`, debugfs or 32-bit
   userspace.
 - The machine features of `imx95-19x19-lpddr5-frdm-pro`, the PRO's machine
-  (§5). This lane read the 15x15 FRDM machine file instead, so the
+  (§5). This survey read the 15x15 FRDM machine file instead, so the
   machine-dependent points in §5 and §6 are unverified for the PRO.
 - The device nodes and syscalls xkmsd uses (go-xkms owns them).
 - The state of meta-selinux and meta-security on wrynose.

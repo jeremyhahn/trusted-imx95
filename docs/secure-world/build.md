@@ -49,7 +49,7 @@ every value below from the new release's manifest and recipes and editing the lo
 |---|---|---|
 | NXP Linux BSP release | `lf-6.18.37-2.1.0`; `imx-manifest` commit `0c44ab18abe471b4326037b61893f4e69b6fc182` | The tag, peeled |
 | meta-imx | `rel_imx_6.18.37_2.1.0`, commit `2eb758f42cfb96042344815b7dd7755b06ba1e3b` | `imx-6.18.37-2.1.0.xml` in that manifest |
-| TF-A | Upstream Arm TF-A, tag `v2.15.0`, peeled commit `da738d5eae93af342fdc4995dd3c05acb4c9d757`, fetched from the GitHub mirror `ARM-software/arm-trusted-firmware` | The newest release tag of `git.trustedfirmware.org/TF-A/trusted-firmware-a.git`; its tree has `plat/imx/imx9/imx95` |
+| TF-A | Upstream Arm TF-A, tag `v2.15.0`, peeled commit `da738d5eae93af342fdc4995dd3c05acb4c9d757`, fetched from the GitHub mirror `ARM-software/arm-trusted-firmware` | The newest release tag of `git.trustedfirmware.org/TF-A/trusted-firmware-a.git`; its tree has `plat/imx/imx9/imx95`. The lock pins the tag too (`TFA_TAG`), and the build fetches it and fails unless it peels to the commit |
 | OP-TEE OS 4.10 | `nxp-imx/imx-optee-os`, branch `lf-6.18.37_2.1.0`, commit `99f40897dd1fc28b4c792773b167e3db629db2ff` | `optee-os_4.10.0.imx.bb` in meta-imx |
 | fTPM TA | `OP-TEE/optee_ftpm`, tag `4.10.0`, commit `a09269b15de635e1816fe832e26adfbfb44c5455` | The tag, peeled |
 | TPM 2.0 reference | `microsoft/ms-tpm-20-ref`, commit `98b60a44aba79b15fcce1c0d1e46cf5918400f6a` | The commit `optee_ftpm`'s README names |
@@ -167,7 +167,8 @@ provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 | 2 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
 
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
-every non-comment, non-blank line of `secure-world/bsp.lock`, the script's two UUID assignments, its `optee_flags`
+every non-comment, non-blank line of `secure-world/bsp.lock` but `TFA_TAG` (it names `TFA_COMMIT`, is checked at
+fetch and reaches no build step), the script's two UUID assignments, its `optee_flags`
 array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed.
 The test fails when any pin, toolchain or wheel line of the lock, or any build argument or flag, differs from the
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
@@ -192,6 +193,14 @@ all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the 
 `needs.preflight.outputs.secure_world != 'false'`, so a README-only PR skips the whole job (image build, setup and
 build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
 `make test` runs only the offline lock check and the script's unit tests.
+
+*Owner ruling 771 in the script.* The lock check refuses a `TFA_REPO` other than upstream Arm TF-A
+(`git.trustedfirmware.org` or its `ARM-software` GitHub mirror), so NXP's `imx-atf` cannot be pinned; a `TFA_TAG` that
+is not a release tag `vX.Y.Z` (no `-rc`, no branch); and an `OPTEE_REPO` other than NXP's
+`github.com/nxp-imx/imx-optee-os.git`. `make secure-world-check-lock` (`SW_LOCK=<file>`) runs that check alone, offline,
+and `make integration-test-secure-world` drives it and `make secure-world` end to end on a fixture copy of the
+repository, offline: the committed lock passes, and each such lock is refused before any fetch, with no work directory
+made and nothing published.
 
 *Wheel platform tags.* The lock's wheels (identified by SHA-256 on PyPI) are `cryptography-50.0.2-cp311-abi3-
 manylinux_2_28_x86_64`, `cffi-2.1.1-cp313-cp313-manylinux2014_x86_64`, and `pycparser` and `pyelftools` as `py3-none-any`.
