@@ -74,6 +74,9 @@ A host-side check compares the SRK table hash of a public SRK set with an expect
 A host-side test builds and verifies a key-exchange signed message on a test SRK set; it sends nothing to a device
 ([key-exchange-msg.md](key-exchange-msg.md); wrapped-key blob format on test keys: [key-import-tlv.md](key-import-tlv.md), provisional).
 
+A host-side checker reads one station record file and refuses a missing field or a secret
+([record-format.md](record-format.md), proposed, pending owner approval); it touches no device.
+
 ## Order of the steps
 
 The steps that cannot be undone are marked; each needs the owner's explicit approval. The row is blocked on that

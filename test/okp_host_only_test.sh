@@ -26,6 +26,8 @@ FILES=(
   scripts/ahab/srk-hash-check.sh
   scripts/ahab/srk-hash.py
   scripts/okp/station-preflight.sh
+  scripts/okp/record-check.py
+  test/okp_record_check_test.sh
   test/key_exchange_test.sh
   test/key_import_test.sh
   test/srk_hash_check_test.sh

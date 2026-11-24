@@ -40,7 +40,7 @@ NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH o
 
 # Every shell script git tracks, and every Python script under scripts/.
 SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh scripts/okp/*.sh test/*.sh test/integration/*.sh))
-PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
+PY_SCRIPTS := $(sort $(wildcard scripts/*.py scripts/okp/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
@@ -221,6 +221,9 @@ okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped k
 
 okp-station-preflight: ## Check SPSDK_VENV and the SPSDK pin for the provisioning station and list its steps (--dry-run only; touches no device, runs no step, no fuse)
 	@scripts/okp/station-preflight.sh --dry-run
+
+okp-record-check: ## Check the proposed station record fixture for required fields and secrets (reads one JSON file; touches no device, no network, no fuse)
+	@python3 -I scripts/okp/record-check.py test/fixtures/okp-record/valid.json
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
