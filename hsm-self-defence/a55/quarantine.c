@@ -2,11 +2,34 @@
 
 void quarantine_init(struct quarantine *q)
 {
+	int i;
+
 	q->state = QUARANTINE_NORMAL;
 	q->reason = QUARANTINE_REASON_NONE;
-	q->last_seq = 0;
+	for (i = 0; i < QUARANTINE_NSRC; i++)
+		q->last_seq[i] = 0;
 	q->replays = 0;
 	q->gaps = 0;
+}
+
+/* Index of a sender's counter, or -1 for an unknown sender. */
+static int src_index(uint8_t source)
+{
+	switch (source) {
+	case TAMPER_SRC_M7:
+		return 0;
+	case TAMPER_SRC_ADAPTER:
+		return 1;
+	default:
+		return -1;
+	}
+}
+
+uint64_t quarantine_last_seq(const struct quarantine *q, uint8_t source)
+{
+	int i = src_index(source);
+
+	return (q == NULL || i < 0) ? 0 : q->last_seq[i];
 }
 
 /* The note's table: state after an accepted event. */
@@ -50,16 +73,18 @@ unsigned quarantine_step(struct quarantine *q, const struct tamper_event *ev)
 	enum quarantine_state from, to;
 	enum quarantine_reason reason;
 	unsigned act = QUARANTINE_ACT_LOG;
+	int si;
 
 	if (q == NULL || ev == NULL)
 		return act;
-	if (ev->sequence == 0 || ev->sequence <= q->last_seq) {
+	si = src_index(ev->source);
+	if (si < 0 || ev->sequence == 0 || ev->sequence <= q->last_seq[si]) {
 		q->replays++;
 		return act | QUARANTINE_ACT_REJECTED;
 	}
-	if (ev->sequence > q->last_seq + 1)
+	if (ev->sequence > q->last_seq[si] + 1)
 		q->gaps++;
-	q->last_seq = ev->sequence;
+	q->last_seq[si] = ev->sequence;
 
 	from = q->state;
 	to = next_state(from, ev->code, &reason);

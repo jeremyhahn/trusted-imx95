@@ -37,6 +37,8 @@ static const enum quarantine_state table[NCODES][3] = {
 	{ QUARANTINE_QUARANTINED, QUARANTINE_QUARANTINED, QUARANTINE_TERMINAL },
 };
 
+#define LAST(q, src) quarantine_last_seq(&(q), (uint8_t)(src))
+
 static struct tamper_event mk(uint16_t code, uint64_t seq)
 {
 	struct tamper_event e;
@@ -70,7 +72,8 @@ static void test_init(void)
 
 	memset(&q, 0xff, sizeof(q));
 	quarantine_init(&q);
-	CHECK(q.state == QUARANTINE_NORMAL && q.last_seq == 0, "init state");
+	CHECK(q.state == QUARANTINE_NORMAL && LAST(q, TAMPER_SRC_M7) == 0 &&
+		      LAST(q, TAMPER_SRC_ADAPTER) == 0, "init state");
 	CHECK(quarantine_allow_key_op(&q) && quarantine_allow_enclave_call(&q), "normal serves");
 	CHECK(!quarantine_allow_key_op(NULL) && !quarantine_allow_enclave_call(NULL), "NULL denies");
 	CHECK(quarantine_step(&q, NULL) == QUARANTINE_ACT_LOG && q.state == QUARANTINE_NORMAL,
@@ -96,8 +99,8 @@ static void test_table(void)
 			      quarantine_state_name((enum quarantine_state)s),
 			      quarantine_state_name(q.state),
 			      quarantine_state_name(table[c][s]));
-			CHECK(q.last_seq == 2, "%s from %d: last sequence %llu", code_names[c], s,
-			      (unsigned long long)q.last_seq);
+			CHECK(LAST(q, e.source) == 2, "%s from %d: last sequence %llu", code_names[c], s,
+			      (unsigned long long)LAST(q, e.source));
 			CHECK((act & QUARANTINE_ACT_LOG) && !(act & QUARANTINE_ACT_REJECTED),
 			      "%s from %d: accepted event must log, not reject", code_names[c], s);
 			CHECK(quarantine_allow_key_op(&q) == (q.state == QUARANTINE_NORMAL),
@@ -164,7 +167,7 @@ static void test_sequence(void)
 				CHECK(act == (QUARANTINE_ACT_LOG | QUARANTINE_ACT_REJECTED),
 				      "state %d %s seq %llu: actions %#x", s, code_names[c],
 				      (unsigned long long)bad_seq[i], act);
-				CHECK(q.state == before.state && q.last_seq == 5 &&
+				CHECK(q.state == before.state && LAST(q, e.source) == 5 &&
 					      q.reason == before.reason && q.gaps == before.gaps &&
 					      q.replays == before.replays + 1,
 				      "state %d %s seq %llu: changed state", s, code_names[c],
@@ -182,7 +185,7 @@ static void test_sequence(void)
 		CHECK(!(quarantine_step(&q, &a) & QUARANTINE_ACT_REJECTED), "1 accepted");
 		CHECK(!(quarantine_step(&q, &b) & QUARANTINE_ACT_REJECTED), "2 accepted");
 		CHECK(!(quarantine_step(&q, &d) & QUARANTINE_ACT_REJECTED), "3 accepted");
-		CHECK(q.state == QUARANTINE_TERMINAL && q.last_seq == 3, "terminal at 3");
+		CHECK(q.state == QUARANTINE_TERMINAL && LAST(q, TAMPER_SRC_M7) == 3, "terminal at 3");
 		CHECK(quarantine_step(&q, &a) & QUARANTINE_ACT_REJECTED, "V1 again is a replay");
 		CHECK(q.replays == 1 && q.gaps == 0, "counters");
 	}
@@ -194,7 +197,7 @@ static void test_sequence(void)
 		quarantine_init(&q);
 		quarantine_step(&q, &a);
 		CHECK(!(quarantine_step(&q, &b) & QUARANTINE_ACT_REJECTED), "gap accepted");
-		CHECK(q.gaps == 1 && q.last_seq == 9, "gap counted");
+		CHECK(q.gaps == 1 && LAST(q, TAMPER_SRC_M7) == 9, "gap counted");
 		/* a first event with a high sequence is also a gap from 0 */
 		quarantine_init(&q);
 		CHECK(!(quarantine_step(&q, &b) & QUARANTINE_ACT_REJECTED), "first at 9 accepted");
@@ -212,10 +215,12 @@ static void walk(struct quarantine q, int depth, unsigned long *runs)
 		return;
 	for (c = 0; c < NCODES; c++) {
 		struct quarantine n = q;
-		struct tamper_event e = mk(codes[c], q.last_seq + 1);
-		struct tamper_event old = mk(codes[c], q.last_seq); /* replay */
+		struct tamper_event e = mk(codes[c], 0), old = e;
+		uint64_t last = LAST(q, e.source);
 		enum quarantine_state was = q.state;
 
+		e.sequence = last + 1;
+		old.sequence = last; /* replay (0 before any: also rejected) */
 		quarantine_step(&n, &old);
 		CHECK(n.state == was, "replay changed state");
 		quarantine_step(&n, &e);
@@ -255,6 +260,42 @@ static void test_no_return(void)
 	}
 }
 
+/* Sequences are per sender (note: strictly increasing per sender and boot):
+ * the M7 at 5 does not make the adapter's first event (1) a replay. */
+static void test_per_sender(void)
+{
+	struct quarantine q;
+	struct tamper_event m7 = mk(TAMPER_TEST_EVENT, 5), ad = mk(TAMPER_SHUTDOWN_IMMINENT, 1);
+	unsigned act;
+
+	quarantine_init(&q);
+	quarantine_step(&q, &m7);
+	CHECK(q.state == QUARANTINE_NORMAL, "M7 test event keeps normal");
+	act = quarantine_step(&q, &ad);
+	CHECK(!(act & QUARANTINE_ACT_REJECTED), "adapter seq 1 after M7 seq 5 accepted, got %#x", act);
+	CHECK(q.state == QUARANTINE_TERMINAL, "adapter shutdown moved the state: %s",
+	      quarantine_state_name(q.state));
+	CHECK(LAST(q, TAMPER_SRC_M7) == 5 && LAST(q, TAMPER_SRC_ADAPTER) == 1, "per-sender counters");
+	CHECK(q.replays == 0 && q.gaps == 1, "no replay; the M7's 0 to 5 is the only gap");
+	/* each sender's own replay is still rejected */
+	act = quarantine_step(&q, &ad);
+	CHECK(act & QUARANTINE_ACT_REJECTED, "adapter seq 1 again is a replay");
+	m7.sequence = 5;
+	act = quarantine_step(&q, &m7);
+	CHECK(act & QUARANTINE_ACT_REJECTED, "M7 seq 5 again is a replay");
+	/* an unknown sender is rejected, state untouched */
+	{
+		struct quarantine u;
+		struct tamper_event bad = mk(TAMPER_ASSERTED, 1);
+
+		quarantine_init(&u);
+		bad.source = 0x7f;
+		act = quarantine_step(&u, &bad);
+		CHECK((act & QUARANTINE_ACT_REJECTED) && u.state == QUARANTINE_NORMAL,
+		      "unknown sender rejected");
+	}
+}
+
 int main(void)
 {
 	test_init();
@@ -262,6 +303,7 @@ int main(void)
 	test_reasons();
 	test_sequence();
 	test_no_return();
+	test_per_sender();
 	if (fails != 0) {
 		printf("quarantine_test: %d failed\n", fails);
 		return 1;
