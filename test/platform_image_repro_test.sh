@@ -195,6 +195,14 @@ for d in "$a" "$b"; do
 done
 run bash "$script" "$a" "$b"
 check "metadata only, no image: fails" 1 "no wic or rootfs image listed for target img"
+# A .rootfs-<ts>.testdata.json in place of the bmap is no image either.
+for d in "$a" "$b"; do
+	rm "$d/img-m.rootfs-20261123000001.wic.bmap"
+	echo td >"$d/img-m.rootfs-20261123000001.testdata.json"
+	(cd "$d" && sha256sum -- img-m.* >SHA256SUMS)
+done
+run bash "$script" "$a" "$b"
+check "testdata.json, manifest and SBOM, no image: fails" 1 "no wic or rootfs image listed for target img"
 # A requested debug target with no image at all, though the production one has.
 for d in "$a" "$b"; do
 	mk "$d"

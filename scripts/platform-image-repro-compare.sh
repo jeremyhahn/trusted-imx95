@@ -40,6 +40,18 @@ fail() {
 	bad=1
 }
 
+# The image suffixes (the same list as platform-image-verify.sh; a test keeps
+# them equal). Metadata (.testdata.json, .manifest, .spdx.json, .wic.bmap) is
+# never an image.
+IMAGE_SUFFIXES=".wic .wic.zst .wic.gz .wic.xz .wic.bz2 .ext4 .tar.zst .tar.gz .tar.xz .tar.bz2"
+is_image() {
+	local s
+	for s in $IMAGE_SUFFIXES; do
+		[[ $1 == *"$s" ]] && return 0
+	done
+	return 1
+}
+
 # load SUMS-ARRAY-PREFIX DIR LABEL: read DIR/SHA256SUMS into names_$p (order)
 # and a map hash_$p, verifying the files in DIR against it.
 # shellcheck disable=SC2034 # read through namerefs in load
@@ -209,8 +221,7 @@ need_images() {
 		found=0
 		for k in "${names[@]+"${names[@]}"}"; do
 			case $k in
-			"$t-$mach"*.wic.bmap | "$t-$mach"*.manifest | "$t-$mach"*.spdx.json) ;;
-			"$t-$mach"*.wic* | "$t-$mach"*.rootfs*) found=1 ;;
+			"$t-$mach"*) is_image "$k" && found=1 ;;
 			esac
 		done
 		[ "$found" -eq 1 ] || fail "$dir: no wic or rootfs image listed for target $t"

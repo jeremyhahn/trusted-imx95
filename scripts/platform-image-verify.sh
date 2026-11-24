@@ -34,6 +34,18 @@ fail() {
 	say "FAIL: $*"
 	bad=1
 }
+
+# The image suffixes (the same list as platform-image-repro-compare.sh; a test
+# keeps them equal). Metadata (.testdata.json, .manifest, .spdx.json, .wic.bmap)
+# is never an image.
+IMAGE_SUFFIXES=".wic .wic.zst .wic.gz .wic.xz .wic.bz2 .ext4 .tar.zst .tar.gz .tar.xz .tar.bz2"
+is_image() {
+	local s
+	for s in $IMAGE_SUFFIXES; do
+		[[ $1 == *"$s" ]] && return 0
+	done
+	return 1
+}
 usage() {
 	say "$*"
 	echo "usage: platform-image-verify.sh [--allow-dirty] OUT [LOCK]" >&2
@@ -158,8 +170,7 @@ else
 				n=${line#*[ ]}
 				n=${n#[ *]}
 				case $n in
-				"$t-${lk[machine]:-${bi[machine]:-}}"*.wic.bmap | "$t-${lk[machine]:-${bi[machine]:-}}"*.manifest | "$t-${lk[machine]:-${bi[machine]:-}}"*.spdx.json) ;;
-				"$t-${lk[machine]:-${bi[machine]:-}}"*.wic* | "$t-${lk[machine]:-${bi[machine]:-}}"*.rootfs*) ifound=1 ;;
+				"$t-${lk[machine]:-${bi[machine]:-}}"*) is_image "$n" && ifound=1 ;;
 				esac
 			done <"$out/SHA256SUMS"
 			[ "$ifound" -eq 1 ] || fail "$t: no wic or rootfs image listed in SHA256SUMS"
