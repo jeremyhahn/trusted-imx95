@@ -92,7 +92,7 @@ board.
 
 ## The flags
 
-TF-A: `PLAT=imx95 SPD=opteed bl31`, the `imx-atf` platform `imx95` build arguments this repository uses (owner ruling 1234).
+TF-A: `PLAT=imx95 SPD=opteed BL32_BASE=0x8C000000 BL32_SIZE=0x02000000 bl31`, the `imx-atf` platform `imx95` build arguments this repository uses (owner ruling 1234). The `BL32_BASE`/`BL32_SIZE` pair is the lock's, and OP-TEE gets the same values below as `CFG_TZDRAM_START`/`CFG_TZDRAM_SIZE`.
 
 OP-TEE, set on each OP-TEE make:
 
@@ -103,6 +103,7 @@ OP-TEE, set on each OP-TEE make:
 | `CFG_REE_FS=y CFG_RPMB_FS=n` | Secure storage on the REE file system by default. RPMB needs its key programmed, once and irreversibly: the owner's decision ([ftpm/README.md](../ftpm/README.md#nv-storage)) |
 | `CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n` | No TA is loaded from the file system. The PTA that installs TAs into REE FS storage needs REE FS TA support and would not link |
 | `CFG_PKCS11_TA=y` | The PKCS#11 TA (already the default; stated) |
+| `CFG_TZDRAM_START=0x8C000000 CFG_TZDRAM_SIZE=0x02000000` | OP-TEE's secure DRAM window, from the lock's `BL32_BASE` and `BL32_SIZE`, the same pair the BL31 make call gets as `BL32_BASE=` and `BL32_SIZE=`. Proposed, pending owner approval: NXP's vendor defaults, so no built byte changes. The two builds must agree, or OP-TEE would run in memory the normal world can reach ([survey](memory-protection-survey.md) section 5); the unit test checks every make call carries the lock's pair. The window end `0x8DFFFFFF` and the SM's non-secure start `0x8E000000` are kept in step with the SM configuration by hand and are checked at the first `make system-manager`, not offline |
 | `CFG_EARLY_TA=y` | Early TAs, linked into `tee.bin` |
 | `EARLY_TA_PATHS=<fTPM TA's stripped ELF>` | The fTPM TA, UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`, as an early TA (ruling 927) |
 | `CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee` | The PKCS#11 TA as an early TA too, so `tee.bin` carries both and neither depends on the root file system |
@@ -171,7 +172,7 @@ The test fails when any pin, toolchain or wheel line of the lock, or any build a
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `feabfb3fe8c54243cdaca2dae19eb3c9bf0bc46509d1c19900915b9b5c129774`
+Build configuration digest: `a6b7e5887c9cb291f0e28fc22c0de7edf5cb4386cfc7ab5013b0d4ac63c56a9e`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 

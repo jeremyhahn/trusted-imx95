@@ -73,6 +73,12 @@ edit_url() { [[ "$1" == FTPM_REPO=* ]] && echo FTPM_REPO=http://example.org/x.gi
 edit_chars() { [[ "$1" == TFA_PLAT=* ]] && echo 'TFA_PLAT=imx95;true' || printf '%s\n' "$1"; }
 edit_unknown() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nEXTRA_FLAG=y\n' "$1" || printf '%s\n' "$1"; }
 edit_twice() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\n%s\n' "$1" "$1" || printf '%s\n' "$1"; }
+edit_b32missing() { [[ "$1" == BL32_BASE=* ]] || printf '%s\n' "$1"; }
+edit_b32hex() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=8C000000 || printf '%s\n' "$1"; }
+edit_b32zero() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x0 || printf '%s\n' "$1"; }
+edit_b32align() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8C000001 || printf '%s\n' "$1"; }
+edit_b32sizealign() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x02000001 || printf '%s\n' "$1"; }
+edit_b32wrap() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x7FFFFFFFFFE00000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x00400000; else printf '%s\n' "$1"; fi; }
 edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
@@ -90,7 +96,13 @@ for c in \
 	"missing|MSTPM_COMMIT is missing" \
 	"nowheel|no PYWHEEL line" \
 	"badwheel|PYWHEEL must be" \
-	"shape|not NAME=value"; do
+	"shape|not NAME=value" \
+	"b32missing|BL32_BASE is missing" \
+	"b32hex|BL32_BASE must be hex with a 0x prefix" \
+	"b32zero|BL32_SIZE must be nonzero" \
+	"b32align|BL32_BASE must be 2 MiB aligned" \
+	"b32sizealign|BL32_SIZE must be 2 MiB aligned" \
+	"b32wrap|wraps past 64 bits"; do
 	name=${c%%|*} want=${c#*|}
 	f=$(lockcopy "$name" "edit_$name")
 	run bash "$sw" --lock "$f" --check-lock
@@ -291,7 +303,7 @@ expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/b
 lock_value() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == "$2="* ]] && { printf '%s\n' "${l#"$2="}"; return 0; }; done <"$1"; return 1; }
 # tfa_call_ok <log> <work> <plat>: one correct BL31 call in each of build-1 and build-2
 tfa_call_ok() {
-	local log=$1 work=$2 plat=$3 n l c w
+	local log=$1 work=$2 plat=$3 base=${4:-$bl32_base} size=${5:-$bl32_size} n l c w
 	for n in 1 2; do
 		c=0 w=$work/build-$n
 		while IFS= read -r l; do
@@ -300,16 +312,20 @@ tfa_call_ok() {
 			[[ " $l " == *" PLAT=$plat "* && " $l " == *" SPD=opteed "* ]] || return 1
 			[[ "$l" == *" BUILD_BASE=$w/build/"* && "$l" == *" bl31" ]] || return 1
 			[[ "$l" != *" PLAT="*" PLAT="* && "$l" != *" SPD="*" SPD="* ]] || return 1
+			[[ " $l " == *" BL32_BASE=$base "* && " $l " == *" BL32_SIZE=$size "* ]] || return 1
+			[[ "$l" != *" BL32_BASE="*" BL32_BASE="* && "$l" != *" BL32_SIZE="*" BL32_SIZE="* ]] || return 1
 		done <<<"$log"
 		[ "$c" -eq 1 ] || return 1
 	done
 }
 tfa_plat=$(lock_value "$good" TFA_PLAT)
+bl32_base=$(lock_value "$good" BL32_BASE)
+bl32_size=$(lock_value "$good" BL32_SIZE)
 tfa_log_ok() { tfa_call_ok "$mlog" "$TMP_ROOT/ok/work" "$tfa_plat"; }
 tfa_log_ok_with() { tfa_call_ok "$1" "$TMP_ROOT/ok/work" "$tfa_plat"; }
 tfa_log_bad() { ! tfa_log_ok_with "$1"; }
 expect "the BL31 build is one make call per clean build: PLAT=$tfa_plat (from bsp.lock) SPD=opteed bl31, output under the build dir" tfa_log_ok
-bl31_line="-C $TMP_ROOT/ok/work/build-1/src/tfa -j1 BUILD_BASE=$TMP_ROOT/ok/work/build-1/build/tfa PLAT=$tfa_plat SPD=opteed bl31"
+bl31_line="-C $TMP_ROOT/ok/work/build-1/src/tfa -j1 BUILD_BASE=$TMP_ROOT/ok/work/build-1/build/tfa PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size bl31"
 bl31_line2=${bl31_line//build-1/build-2}
 expect "the TF-A call check accepts a planted good log" tfa_log_ok_with "$(printf '%s\n%s\n' "$bl31_line" "$bl31_line2")"
 expect "a planted SPD=trusty fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//SPD=opteed/SPD=trusty}" "$bl31_line2")"
@@ -318,6 +334,38 @@ expect "a planted missing bl31 target fails the TF-A call check" tfa_log_bad "$(
 expect "a planted BUILD_BASE outside the build dir fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//\/build\/tfa//elsewhere}" "$bl31_line2")"
 expect "a planted second TF-A call fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n%s\n' "$bl31_line" "$bl31_line" "$bl31_line2")"
 expect "a planted missing TF-A call fails the TF-A call check" tfa_log_bad "$bl31_line"
+expect "a planted bl31 call without BL32_BASE fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line// BL32_BASE=$bl32_base/}" "$bl31_line2")"
+expect "a planted other BL32_SIZE fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "$bl31_line" "${bl31_line2//BL32_SIZE=$bl32_size/BL32_SIZE=0x04000000}")"
+
+# The secure DRAM window: every OP-TEE make call (dev kit and image, in both
+# clean builds) carries CFG_TZDRAM_START and CFG_TZDRAM_SIZE equal to the lock's
+# BL32_BASE and BL32_SIZE, which the BL31 calls carry too (tfa_call_ok above).
+# all_optee_window <log> <base> <size>: each OP-TEE call has the pair once.
+all_optee_window() {
+	local l n=0
+	while IFS= read -r l; do
+		[[ "$l" == *"/optee "* ]] || continue
+		n=$((n + 1))
+		[[ " $l " == *" CFG_TZDRAM_START=$2 "* && " $l " == *" CFG_TZDRAM_SIZE=$3 "* ]] || return 1
+		[[ "$l" != *" CFG_TZDRAM_START="*" CFG_TZDRAM_START="* && "$l" != *" CFG_TZDRAM_SIZE="*" CFG_TZDRAM_SIZE="* ]] || return 1
+	done <<<"$1"
+	[ "$n" -ge 4 ]
+}
+optee_window_bad() { ! all_optee_window "$@"; }
+expect "every OP-TEE make call carries CFG_TZDRAM_START/SIZE equal to the lock's BL32_BASE/BL32_SIZE" all_optee_window "$mlog" "$bl32_base" "$bl32_size"
+expect "a planted other CFG_TZDRAM_START fails the OP-TEE window check" optee_window_bad "${mlog//CFG_TZDRAM_START=$bl32_base/CFG_TZDRAM_START=0x8E000000}" "$bl32_base" "$bl32_size"
+expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
+
+# A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
+edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x90000000; else edit_tcsum "$1"; fi; }
+baselock=$(lockcopy altbase edit_altbase)
+fullrun altbase "$baselock"
+check "a build with another BL32_BASE reaches publication" 0 "secure-world-build: OK"
+baselog=$(<"$TMP_ROOT/altbase/make.log")
+base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x90000000 "$bl32_size"; }
+expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
+expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x90000000 "$bl32_size"
+expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
 expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) PLAT=$tfa_plat SPD=opteed" "$TMP_ROOT/ok/out/build-info.txt"
 
 # A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's

@@ -40,6 +40,16 @@ OPTEE_REPO=https://github.com/nxp-imx/imx-optee-os.git
 OPTEE_COMMIT=99f40897dd1fc28b4c792773b167e3db629db2ff
 OPTEE_PLATFORM=imx-mx95evk
 
+# The secure DRAM window of BL31 (BL32_BASE, BL32_SIZE) and OP-TEE
+# (CFG_TZDRAM_START, CFG_TZDRAM_SIZE): one pair, passed to both builds, which
+# must agree or OP-TEE runs in memory the normal world can reach. PROPOSED,
+# PENDING OWNER APPROVAL: these are NXP's vendor defaults (0x8C000000, 32 MiB,
+# ending 0x8DFFFFFF, matching the SM's secure window), read from
+# docs/secure-world/memory-protection-survey.md sections 5 and 6, not from the
+# vendor source (absent here). Base and size are 2 MiB aligned.
+BL32_BASE=0x8C000000
+BL32_SIZE=0x02000000
+
 # The fTPM TA: OP-TEE's optee_ftpm at its tag 4.10.0 (peeled), matching the
 # OP-TEE 4.10 above; OP-TEE 4.10 carries no fTPM TA of its own. Its
 # README names the ms-tpm-20-ref commit it needs, pinned below.

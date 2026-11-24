@@ -66,7 +66,7 @@ done
 
 declare -A pin=()
 wheels=()
-names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
+names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
 
 [ -f "$lock" ] || die "$lock: no such lock file"
 n=0
@@ -88,6 +88,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	*_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || die "$lock:$n: $name must be a 40-hex commit, not $value" ;;
 	*_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "$lock:$n: $name must be a 64-hex SHA-256, not $value" ;;
 	*_REPO | *_URL) [[ "$value" =~ ^https://[A-Za-z0-9./_-]+$ ]] || die "$lock:$n: $name must be an https URL, not $value" ;;
+	BL32_BASE | BL32_SIZE) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
 	*) [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]] || die "$lock:$n: $name has characters outside [A-Za-z0-9._-]: $value" ;;
 	esac
 	pin[$name]=$value
@@ -96,6 +97,17 @@ for name in $names; do
 	[ -n "${pin[$name]+set}" ] || die "$lock: $name is missing"
 done
 [ "${#wheels[@]}" -gt 0 ] || die "$lock: no PYWHEEL line"
+
+# The secure DRAM window of BL31 and OP-TEE is one pair, passed to both builds.
+# Each value is a hand-kept pin (docs/secure-world/memory-protection-survey.md,
+# section 5): size nonzero, both 2 MiB aligned, base+size within 64 bits.
+bl32_base=$((pin[BL32_BASE]))
+bl32_size=$((pin[BL32_SIZE]))
+[ "$bl32_size" -gt 0 ] || die "$lock: BL32_SIZE must be nonzero, not ${pin[BL32_SIZE]}"
+[ $((bl32_base % 0x200000)) -eq 0 ] || die "$lock: BL32_BASE must be 2 MiB aligned, not ${pin[BL32_BASE]}"
+[ $((bl32_size % 0x200000)) -eq 0 ] || die "$lock: BL32_SIZE must be 2 MiB aligned, not ${pin[BL32_SIZE]}"
+[ "$bl32_base" -ge 0 ] && [ "$bl32_size" -ge 0 ] && [ $((bl32_base + bl32_size)) -gt "$bl32_base" ] ||
+	die "$lock: BL32_BASE ${pin[BL32_BASE]} + BL32_SIZE ${pin[BL32_SIZE]} wraps past 64 bits"
 
 if [ "$check_only" = 1 ]; then
 	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
@@ -243,7 +255,7 @@ pkcs11_uuid=fd02c9da-306c-48c7-a49c-bbd827ae86ee
 # TF-A BL31, release build, with the OP-TEE dispatcher (SPD=opteed), as the
 # NXP imx-atf platform imx95 (plat/imx/imx9/imx95) builds it with OP-TEE.
 step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cross" \
-	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
+	PLAT="${pin[TFA_PLAT]}" SPD=opteed BL32_BASE="${pin[BL32_BASE]}" BL32_SIZE="${pin[BL32_SIZE]}" bl31
 
 # OP-TEE's flags: the release recipe's log levels, REE FS secure storage
 # (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early. Both
@@ -256,6 +268,7 @@ optee_flags=(
 	CFG_REE_FS=y CFG_RPMB_FS=n
 	CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n
 	CFG_PKCS11_TA=y
+	CFG_TZDRAM_START="${pin[BL32_BASE]}" CFG_TZDRAM_SIZE="${pin[BL32_SIZE]}"
 )
 # The TA dev kit the fTPM TA builds against.
 step optee-devkit make -C "$src/optee" -j"$jobs" O="$bld/optee-devkit" "${optee_flags[@]}" ta_dev_kit
@@ -286,7 +299,7 @@ cp "$stage/bl31.bin" "$stage/tee.bin" "$stage/SHA256SUMS" "$out/"
 {
 	echo "lock: $(sha256sum "$lock" | cut -d' ' -f1)"
 	echo "release: ${pin[LF_RELEASE]} (provisional, #14 Q2)"
-	echo "tfa: ${pin[TFA_COMMIT]} PLAT=${pin[TFA_PLAT]} SPD=opteed"
+	echo "tfa: ${pin[TFA_COMMIT]} PLAT=${pin[TFA_PLAT]} SPD=opteed BL32_BASE=${pin[BL32_BASE]} BL32_SIZE=${pin[BL32_SIZE]}"
 	echo "optee: ${pin[OPTEE_COMMIT]} ${optee_flags[*]//CROSS_COMPILE*=*/} CFG_EARLY_TA=y early TAs $ftpm_uuid (fTPM) $pkcs11_uuid (PKCS#11)"
 	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage TEE_STORAGE_PRIVATE_REE"
 	echo "toolchain: $("${cross}gcc" --version | head -n 1)"

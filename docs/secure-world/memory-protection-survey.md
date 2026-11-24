@@ -135,6 +135,15 @@ the SM's `LM2` memory rules would put OP-TEE in memory the normal world can reac
   `CFG_TZDRAM_START=0x8C000000` (and the matching size) set by hand; this is a reading of the build
   files, not tested.
 
+Status note (2026-11-24, 175-sw-s4): the TF-A and OP-TEE pair of §5 and §6 is now one pin, proposed and pending owner
+approval: `BL32_BASE=0x8C000000` and `BL32_SIZE=0x02000000` in `secure-world/bsp.lock`, passed to the BL31 make
+call as `BL32_BASE=`/`BL32_SIZE=` and to every OP-TEE make call as `CFG_TZDRAM_START=`/`CFG_TZDRAM_SIZE=`. The
+build script checks the values (hex, nonzero size, 2 MiB alignment, no wrap) and `test/secure_world_build_test.sh`
+checks that every make call carries the lock's pair. These are the vendor defaults, so no built byte changes. Not
+checked: that the imx-atf and imx-optee-os trees accept these overrides (read from the quotes above, not from source,
+which is absent here) until the `secure-world-build` job runs, and the SM side (§4, window end `0x8DFF_FFFF`) stays
+hand-kept, checked at the first `make system-manager`.
+
 ## 7. Linux side: reserved memory and what the normal world sees
 
 NXP's Linux device tree for this board, `imx95-19x19-frdm-pro.dts` (S6), has these `reserved-memory`
