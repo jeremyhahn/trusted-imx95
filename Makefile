@@ -49,7 +49,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
-	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test okp-station-preflight \
+	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -218,9 +218,6 @@ okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a
 
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
-
-okp-station-preflight: ## Check SPSDK_VENV and the SPSDK pin for the provisioning station and list its steps (--dry-run only; touches no device, runs no step, no fuse)
-	@scripts/okp/station-preflight.sh --dry-run
 
 okp-record-check: ## Check the proposed station record fixture for required fields and secrets (reads one JSON file; touches no device, no network, no fuse)
 	@python3 -I scripts/okp/record-check.py test/fixtures/okp-record/valid.json
