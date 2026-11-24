@@ -33,13 +33,31 @@ The size of `mmcblk0` in the manifest must equal the board's.
 ## Rescue protocol
 
 One TCP port (`rescue.port=`, default 7777), one command per connection,
-one reply line. The device is one of `mmcblk0`, `mmcblk0boot0`, `mmcblk0boot1`;
+one reply line. The rescue system has no sshd, so the port is reachable from
+the network, and every command is authenticated with a per-session key:
+
+1. Before the kexec, over the operator's ssh session, the board generates a
+   random 256-bit key and appends it to the uploaded initramfs as one more
+   cpio archive holding `/rescue.key` (mode 0400), giving
+   `/tmp/rescue-initrd.img`, the initrd the kexec loads. The key comes back
+   over the same ssh session; `restore.sh` keeps it in a mode 0600 file
+   (`--key-file`, default `<backup dir>/rescue-session.key`, which a
+   `--no-kexec` retry reads) and deletes it once the board is back in its own
+   system. The key is never printed, logged or put on a command line.
+2. On each connection the board sends `nonce <64 hex>`, fresh per connection.
+   The client answers `auth <mac> <command line>`, `<mac>` being the SHA-256
+   of `<key>:<nonce>:<command line>`. The key never crosses the network, and a
+   captured MAC is good for no other connection or command.
+3. Without `/rescue.key`, or with a missing or wrong MAC, the board answers
+   `ERR no session key` or `ERR auth refused` and runs nothing.
+
+The device is one of `mmcblk0`, `mmcblk0boot0`, `mmcblk0boot1`;
 anything else is refused.
 
 | Command | Reply |
 | --- | --- |
 | `hash <dev> <bytes>` | SHA-256 of the first `<bytes>` of the device (read only) |
-| `write <dev> <bytes> <sha256>` + that many bytes | `OK`, or `MISMATCH <sha256 read back>` after `dd bs=4M conv=fsync` and a re-read |
+| `write <dev> <bytes> <sha256>`, then that many bytes after the auth line | `OK`, or `MISMATCH <sha256 read back>` after `dd bs=4M conv=fsync` and a re-read |
 | `reboot` | `OK`, then sync and `reboot -f` |
 
 The boot partitions are unlocked (`force_ro` 0) for the write and locked again

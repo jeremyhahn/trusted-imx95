@@ -5,6 +5,7 @@
 # usage: restore.sh <board ssh target> <backup dir> [--verify-only]
 #                   [--ip <addr/prefix> --gw <gw>] [--if <iface>]
 #                   [--manifest <file>] [--cpio <rescue.cpio.gz>] [--no-kexec]
+#                   [--key-file <file>]
 #
 # The backup dir holds the three dumps and a manifest (default manifest.txt):
 #   <dev> <file> <raw bytes> <sha256 of the raw bytes>      one line per device,
@@ -15,6 +16,10 @@
 # nothing. --no-kexec skips the preflight and the kexec: the board is already in
 # the rescue system (a retry after a failed write); --ip is then its address.
 # Without --ip the board's current address, gateway and interface are reused.
+# Every rescue command is authenticated with a per-session key the board
+# generates over ssh before the kexec (README.md, "Rescue protocol"); the key
+# is kept in --key-file (mode 0600, default <backup dir>/rescue-session.key)
+# for a --no-kexec retry and deleted when the board is back in its own system.
 # Either way the script ends by rebooting the board into its own system.
 #
 # Environment: RESTORE_SSH_OPTS (default BatchMode, ConnectTimeout=10),
@@ -31,6 +36,7 @@ root=$(cd "$here/../.." && pwd -P)
 usage() {
 	echo "usage: restore.sh <board ssh target> <backup dir> [--verify-only] [--ip <addr/prefix> --gw <gw>]"
 	echo "                  [--if <iface>] [--manifest <file>] [--cpio <rescue.cpio.gz>] [--no-kexec]"
+	echo "                  [--key-file <file>]"
 	echo "see scripts/board-rescue/README.md"
 }
 
@@ -48,6 +54,7 @@ gw=""
 ifc=""
 manifest=""
 cpio=$root/build/board-rescue/rescue.cpio.gz
+keyfile=""
 pos=()
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -59,6 +66,7 @@ while [ $# -gt 0 ]; do
 	--if) [ $# -ge 2 ] || die "--if needs a value"; ifc=$2; shift ;;
 	--manifest) [ $# -ge 2 ] || die "--manifest needs a value"; manifest=$2; shift ;;
 	--cpio) [ $# -ge 2 ] || die "--cpio needs a value"; cpio=$2; shift ;;
+	--key-file) [ $# -ge 2 ] || die "--key-file needs a value"; keyfile=$2; shift ;;
 	-*) die "unknown option $1" ;;
 	*) pos+=("$1") ;;
 	esac
@@ -70,6 +78,7 @@ backup=${pos[1]}
 [ -d "$backup" ] || die "no backup directory $backup"
 [ -n "$manifest" ] || manifest=$backup/manifest.txt
 [ -f "$manifest" ] || die "no manifest $manifest"
+[ -n "$keyfile" ] || keyfile=$backup/rescue-session.key
 [ -z "$gw" ] || [ -n "$ip" ] || die "--gw needs --ip"
 [ "$nokexec" -eq 0 ] || [ -n "$ip" ] || die "--no-kexec needs --ip (the rescue address)"
 if [ -n "$ip" ]; then
@@ -111,14 +120,41 @@ done
 
 # --- rescue protocol --------------------------------------------------------
 rescue_host=""
+key=""
 
-# rescue_cmd <command line> [dump file]: one connection; the dump, when given,
-# is streamed after the command line; prints the reply line.
+is_hex64() {
+	case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+	[ "${#1}" -eq 64 ]
+}
+
+# save_key: keeps the session key for a --no-kexec retry, readable by the
+# operator only. The key itself is never printed.
+save_key() {
+	rm -f -- "$keyfile" || return 1
+	(umask 077 && printf '%s\n' "$key" >"$keyfile")
+}
+
+load_key() {
+	[ -r "$keyfile" ] || return 1
+	read -r key <"$keyfile" || return 1
+	is_hex64 "$key"
+}
+
+# rescue_cmd <command line> [dump file]: one connection: reads the board's
+# nonce, sends "auth <mac> <command line>" (the MAC binds the session key, the
+# nonce and the line; README.md), then streams the dump when given; prints the
+# reply line. A board that sends no nonce has its first line printed instead.
 rescue_cmd() {
 	local line=$1 dump=${2:-} reply
 	(
 		exec 3<>"/dev/tcp/$rescue_host/$port" || exit 1
-		printf '%s\n' "$line" >&3
+		read -r -t 60 w nonce <&3 || exit 1
+		if [ "$w" != nonce ] || ! is_hex64 "$nonce"; then
+			printf '%s\n' "$w $nonce"
+			exit 0
+		fi
+		mac=$(printf '%s:%s:%s' "$key" "$nonce" "$line" | sha256sum) || exit 1
+		printf 'auth %s %s\n' "${mac%% *}" "$line" >&3
 		if [ -n "$dump" ]; then
 			zstd -dc -- "$dump" >&3 || exit 1
 		fi
@@ -195,11 +231,60 @@ EOS
 	[ "$have" = "$want" ] || die "uploaded initramfs has SHA-256 $have, want $want"
 	echo "restore: /tmp/rescue.cpio.gz $want"
 
+	step session-key
+	# The board generates the key and appends it to the initramfs as one more
+	# newc cpio archive holding /rescue.key, 4-byte aligned as the kernel's
+	# initramfs unpacker requires. The key comes back over this ssh session
+	# only; it is not printed here.
+	keyout=$(board 'sh -s -- rescue-key' <<'EOS'
+set -e
+umask 077
+in=/tmp/rescue.cpio.gz
+out=/tmp/rescue-initrd.img
+k=$(head -c 32 /dev/urandom | sha256sum)
+k=${k%% *}
+[ "${#k}" -eq 64 ] || { echo "ERR no random key"; exit 0; }
+zeros() {
+	i=0
+	while [ "$i" -lt "$1" ]; do printf '\000'; i=$((i + 1)); done
+}
+entry() { # entry <name> <mode, decimal> <size>: a newc header and the name
+	ns=$((${#1} + 1))
+	printf '070701%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X' 1 "$2" 0 0 1 0 "$3" 0 0 0 0 "$ns" 0
+	printf '%s\000' "$1"
+	zeros $(((4 - (110 + ns) % 4) % 4))
+}
+set -- $(wc -c <"$in")
+sz=$1
+rm -f "$out"
+{
+	cat "$in"
+	zeros $(((4 - sz % 4) % 4))
+	entry rescue.key 33024 65
+	printf '%s\n' "$k"
+	zeros 3
+	entry 'TRAILER!!!' 0 0
+} >"$out"
+echo "key=$k"
+EOS
+	) || die "session key step failed"
+	key=""
+	while IFS= read -r l; do
+		case $l in
+		ERR*) die "board session key: ${l#ERR }" ;;
+		key=*) key=${l#key=} ;;
+		esac
+	done <<<"$keyout"
+	keyout=""
+	is_hex64 "$key" || die "the board returned no session key"
+	save_key || die "cannot write the session key file $keyfile"
+	echo "restore: session key kept in $keyfile (mode 0600)"
+
 	step kexec-load
 	append="console=ttyLP0,115200 rescue.ip=$ip rescue.port=$port"
 	[ -z "$gw" ] || append="$append rescue.gw=$gw"
 	[ -z "$ifc" ] || append="$append rescue.if=$ifc"
-	board "kexec -l /boot/Image --initrd=/tmp/rescue.cpio.gz --append='$append'" || die "kexec -l failed"
+	board "kexec -l /boot/Image --initrd=/tmp/rescue-initrd.img --append='$append'" || die "kexec -l failed"
 
 	step kexec-exec
 	# The session dies with the old kernel, so the call is bounded and its
@@ -207,6 +292,7 @@ EOS
 	timeout 60 ssh "${ssh_opts[@]}" "$target" 'systemctl stop xkmsd; sync; sleep 1; kexec -e' >/dev/null 2>&1 || true
 else
 	rescue_host=${ip%%/*}
+	load_key || die "no session key in $keyfile: the rescue system refuses every command without the key of the session that started it"
 fi
 
 step wait-rescue
@@ -228,7 +314,7 @@ for d in "${devs[@]}"; do
 		step "write $d"
 		got=$(rescue_cmd "write $d ${m_bytes[$d]} ${m_sha[$d]}" "$backup/${m_file[$d]}") || die "write $d: no answer"
 		echo "restore: $d $got"
-		[ "$got" = OK ] || die "write $d did not verify (board stays in the rescue system; retry with --no-kexec --ip $ip)"
+		[ "$got" = OK ] || die "write $d did not verify (board stays in the rescue system; retry with --no-kexec --ip $ip --key-file $keyfile)"
 	fi
 done
 
@@ -245,6 +331,8 @@ sleep "${RESTORE_SETTLE:-0}"
 rootdev=$(board 'for w in $(cat /proc/cmdline); do case $w in root=*) echo "${w#root=}" ;; esac; done; findmnt -n -o SOURCE / 2>/dev/null || true') || die "board does not answer after the reboot"
 echo "restore: board root device: $(echo "$rootdev" | tr '\n' ' ')"
 [ -n "$rootdev" ] || die "the board reported no root device"
+# The rescue session is over: its key opens nothing any more.
+rm -f -- "$keyfile" || echo "restore: cannot remove $keyfile" >&2
 if [ "$rc" -ne 0 ]; then
 	echo "restore: verify-only: the board differs from the backup" >&2
 fi

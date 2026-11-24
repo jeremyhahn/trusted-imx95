@@ -1,23 +1,36 @@
 #!/bin/sh
 # PID 1 of the rescue initramfs (see README.md). Mounts the pseudo filesystems,
 # brings the network up from the kernel command line, then serves a tiny
-# command protocol on one TCP port:
+# command protocol on one TCP port. Every connection is authenticated:
+#
+#   board  -> nonce <64 hex, fresh per connection>
+#   client -> auth <mac> <command line>
+#
+# where <mac> is the SHA-256 of "<key>:<nonce>:<command line>" and <key> is the
+# per-session key in /rescue.key. restore.sh has the board generate that key
+# over the operator's ssh session just before the kexec and append it to the
+# initramfs (README.md), so it exists only in the board's RAM and with the
+# operator, and it never crosses the network: a MAC is good for one nonce, one
+# connection and one command line. Without the key file every command is
+# refused; a missing or wrong MAC gets "ERR auth refused" and nothing runs.
+# The commands:
 #
 #   hash <dev> <bytes>               -> <sha256 of the first <bytes> of the device>
 #   write <dev> <bytes> <sha256>     -> OK | MISMATCH <sha256 read back> | ERR <why>
 #   reboot                           -> OK, then sync and reboot -f
 #
 # <dev> is mmcblk0, mmcblk0boot0 or mmcblk0boot1; anything else is refused.
-# The payload of `write` follows the command line on the same connection.
+# The payload of `write` follows the auth line on the same connection.
 # Every step is logged to the console; nothing is read from the eMMC but the
 # bytes a `hash` or a write's read-back hashes, and only their digest is shown.
 #
-# `init --handle` runs one command from stdin to stdout. The server loop uses
-# it, and the tests run it with RESCUE_DEV_DIR and RESCUE_SYS_DIR pointing at
-# plain files. The real boot never sets either.
+# `init --handle` runs one connection from stdin to stdout. The server loop
+# uses it, and the tests run it with RESCUE_DEV_DIR, RESCUE_SYS_DIR and
+# RESCUE_KEY_FILE pointing at plain files. The real boot never sets them.
 
 RESCUE_DEV_DIR=${RESCUE_DEV_DIR:-/dev}
 RESCUE_SYS_DIR=${RESCUE_SYS_DIR:-/sys}
+RESCUE_KEY_FILE=${RESCUE_KEY_FILE:-/rescue.key}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH
 export PATH
 
@@ -125,8 +138,48 @@ cmd_reboot() {
 	reboot -f
 }
 
+# sha_of <string>: the SHA-256 of the string; printf is a builtin, so the
+# string never appears in a process's arguments.
+sha_of() {
+	_h=$(printf '%s' "$1" | sha256sum) || return 1
+	echo "${_h%% *}"
+}
+
+# same <a> <b>: compares two digests through their own digests, so the time a
+# mismatch takes says nothing about how much of the MAC was right.
+same() {
+	_a=$(sha_of "$1") && _b=$(sha_of "$2") && [ "$_a" = "$_b" ]
+}
+
+# authenticate: sends a fresh nonce, reads "auth <mac> <command line>" and
+# sets $line when the MAC is right; prints the refusal and fails otherwise.
+authenticate() {
+	key=""
+	[ -r "$RESCUE_KEY_FILE" ] && read -r key <"$RESCUE_KEY_FILE"
+	is_sha "$key" || { log "no session key: refused"; echo "ERR no session key"; return 1; }
+	nonce=$(head -c 32 /dev/urandom | sha256sum) || nonce=""
+	nonce=${nonce%% *}
+	is_sha "$nonce" || { echo "ERR no nonce"; return 1; }
+	echo "nonce $nonce"
+	read -r word mac line || { echo "ERR no command"; return 1; }
+	if [ "$word" != auth ] || ! is_sha "$mac"; then
+		log "unauthenticated command: refused"
+		echo "ERR auth refused"
+		return 1
+	fi
+	want=$(sha_of "$key:$nonce:$line") || want=""
+	if [ -z "$want" ] || ! same "$mac" "$want"; then
+		log "bad MAC: refused"
+		echo "ERR auth refused"
+		return 1
+	fi
+}
+
 handle() {
-	read -r cmd a1 a2 a3 extra || { echo "ERR no command"; return 0; }
+	authenticate || return 0
+	read -r cmd a1 a2 a3 extra <<EOF
+$line
+EOF
 	[ -z "$extra" ] || { echo "ERR too many arguments"; return 0; }
 	case $cmd in
 	hash) [ -n "$a2" ] && [ -z "$a3" ] || { echo "ERR usage: hash <dev> <bytes>"; return 0; }
@@ -180,6 +233,9 @@ serve() {
 	fifo=/tmp/rescue.fifo
 	mkfifo "$fifo"
 	while :; do
+		# The port is reachable from the network (the operator's host has no
+		# other way in: there is no sshd here), so every connection must
+		# carry a MAC made with the session key (authenticate).
 		log "listening on port $port"
 		# The fifo carries the handler's replies back into nc, on purpose.
 		# shellcheck disable=SC2094
