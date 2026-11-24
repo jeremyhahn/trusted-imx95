@@ -209,6 +209,8 @@ this tree, takes its location from an environment variable, stops and names the 
 ## 8. Questions for the owner
 
 1. **Which tools does the provisioning host carry?**
+   Answered by the owner, 2026-11-23 (SPSDK): SPSDK, at the pin already in `scripts/ahab/requirements.txt`. The
+   uuu/`libuuu` sub-choice, and Q2 to Q6, stay open (proposed, pending owner approval).
    Options: (a) SPSDK only, with uuu through its `libuuu` dependency and `nxpuuu`; (b) SPSDK plus the standalone uuu
    binary; (c) the standalone uuu plus a separate nxpele install.
    Recommendation: (a). It is one install with publisher attestations for both parts (S3, S14), where the standalone
@@ -235,5 +237,7 @@ this tree, takes its location from an environment variable, stops and names the 
    Options: (a) hashes only; (b) hashes plus PyPI provenance checked against the publisher repository and workflow.
    Recommendation: (b): the attestations exist for both packages today (S3, S14).
 7. **Which SPSDK version is the floor?**
+   Answered by the owner, 2026-11-23 (SPSDK): SPSDK at the existing pin, 3.13.0. Treating 3.13.0 as the floor, not
+   only the pin, is proposed, pending owner approval.
    Options: (a) 3.13.0, the latest at the time of writing (S1); (b) an earlier release the owner has already validated.
    Recommendation: (a), since the release notes list i.MX 95 keystore and fuse fixes through recent releases (S7).

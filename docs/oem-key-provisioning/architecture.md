@@ -121,6 +121,8 @@ SPEC row's citations (see [Missing](#missing)); the table lists them in the SPEC
 
 ## Open questions
 
-- Whether provisioning uses NXP's SPSDK enclave tools or another path: the owner's.
+- Answered by the owner, 2026-11-23: provisioning at the station uses SPSDK, pinned at 3.13.0 in
+  `scripts/ahab/requirements.txt`. The 3.13.0 floor and the uuu/`libuuu` sub-choice are proposed, pending owner
+  approval ([provisioning-host-survey.md](provisioning-host-survey.md) §8, Q1 and Q7).
 - Which side calls the enclave's HSM API, the Cortex-A55 Linux side or the Cortex-M7: the owner's, under
   `secure-key-handling` ([SPEC.md](../SPEC.md)).
