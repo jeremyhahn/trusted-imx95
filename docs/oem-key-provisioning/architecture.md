@@ -79,12 +79,12 @@ A host-side test builds and verifies a key-exchange signed message on a test SRK
 The steps that cannot be undone are marked; each needs the owner's explicit approval. The row is blocked on that
 approval ([SPEC.md](../SPEC.md), `oem-key-provisioning` row; RM00284 §3.23, §3.24).
 
-| Step | Source | Reversible |
-|---|---|---|
-| Key exchange with the enclave | AN14861 §2, §5.2; RM00284 §3.20 | Not given (see [Missing](#missing)) |
-| Import of the wrapped OEM key into the key store | AN14861 §5.3; RM00284 §3.2.6.3 | Not given (see [Missing](#missing)) |
-| Configure the monotonic counter fuses | RM00284 §3.24 | No: fuse write, owner's explicit approval |
-| Move the life cycle from OEM open to OEM closed | RM00284 §3.23 | No: life-cycle close, owner's explicit approval |
+| Step | Source | Reversible | Where it runs |
+|---|---|---|---|
+| Key exchange with the enclave | AN14861 §2, §5.2; RM00284 §3.20 | Not given (see [Missing](#missing)) | Provisioning station only (ruling 1234); the repository holds a host-side exercise on test keys only ([key-exchange-msg.md](key-exchange-msg.md)) |
+| Import of the wrapped OEM key into the key store | AN14861 §5.3; RM00284 §3.2.6.3 | Not given (see [Missing](#missing)) | Provisioning station only (ruling 1234); the repository holds a host-side exercise on test keys only ([key-import-tlv.md](key-import-tlv.md)) |
+| Configure the monotonic counter fuses | RM00284 §3.24 | No: fuse write, owner's explicit approval | Provisioning station only (ruling 1234); never on a development board; nothing in this repository runs it ([no_lifecycle_close_test.sh](../../test/no_lifecycle_close_test.sh)) |
+| Move the life cycle from OEM open to OEM closed | RM00284 §3.23 | No: life-cycle close, owner's explicit approval | Provisioning station only (ruling 1234); never on a development board; nothing in this repository runs it ([no_lifecycle_close_test.sh](../../test/no_lifecycle_close_test.sh)) |
 
 The order of the last two steps relative to each other, and relative to the key import, is not given by the
 SPEC row's citations (see [Missing](#missing)); the table lists them in the SPEC row's order, not as a decision.
