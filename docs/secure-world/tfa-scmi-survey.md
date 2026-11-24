@@ -129,6 +129,73 @@ which forwards every argument unchecked. A configuration that grants `AP-S`
 `LMM_1` at `EXCLUSIVE` or `CPU_M7P` would open this path to any Linux caller
 (section 6).
 
+#### 2.2.2 The grants of `AP-S`, reviewed one by one
+
+`system-manager/ap-s-grants.txt` was first written from this survey, before any
+build. The first CI build of the pinned configuration reported 41 `UNLISTED`
+lines. They were read against imx-sm `eec232878ab7dd460f5a8f3767d39dc7e9412efa`
+(`configs/other/mx95frdm-pro.cfg`, line numbers 1-based and of the file before
+patches 0001 and 0002, which touch no `AP-S` line; the patched file has the
+`AP-S` lines three lines earlier) with `scripts/sm-grants-check.sh --ap-s --print`.
+Six of the 41 were not `AP-S` grants: the `DFMT0:` to `DATA:` defines at `:552-559`
+open the next agent, `AP-NS`, and the check ran them into the `AP-S` section; the
+check was fixed (it now ends the section there, and lists the `LM2` defines at
+`:445-450` that do apply to `AP-S`). The rest are `AP-S`'s own, and every one is
+listed. The test for each: does it let `AP-S` start, stop, reset or own anything of
+another logical machine (the M7's or the SM's)? None does: `AP-S` holds no `LMM_*`,
+`CPU_M7P` or `PD_M7` (`:503-519`), and every resource it owns (`:523-533`) is the
+A55 side's own; no other LM owns those (the SM's LM lists `MU1_A` as `TEST_MU`,
+a TRDC right for its unit tests, with no API grant). Nothing is a refused grant, so nothing
+needed an overlay (`bsp.lock` pins none).
+
+| grant | config line | decision | reason |
+|---|---|---|---|
+| `DFMT0: sa=bypass`, `DFMT1: sa=secure, pa=privileged`, `OWNER: perm=sec_rw, api=all`, `EXEC: perm=sec_rwx`, `DATA: perm=sec_rw` | `:445-450` | listed | `LM2` defines before the `AP-S` line, secure-only rights; memory-protection-survey section 4 |
+| `MAILBOX type=mu, mu=1, test=0` | `:497` | listed, finding F1 | MU1 is BL31's SCMI transport (section 2.4); `test=0` is inert in this build, see F1 |
+| `CHANNEL db=0 ... a2p`, `CHANNEL db=1 ... p2a_notify` | `:498-499` | listed | the request and notification channels of that mailbox |
+| `PERF_A55 ALL` | `:503` | listed, finding F2 | A55 operating points, which PSCI suspend and BL31 use; shared with Linux |
+| `PERLPI_CAN2-5`, `PERLPI_GPIO2-5`, `PERLPI_LPUART1,4,5,6,8`, `PERLPI_WDOG3,4` all `ALL` | `:504-518` | listed, finding F3 | wake-up through the low-power interface for suspend (scmi-permissions-survey 3.3); the M7's CAN, UARTs and watchdog (`CAN_FD1`, `LPUART3`, `LPUART7`, `WDOG5`) are not among them |
+| `SYS ALL` | `:519` | listed | PSCI system reset and off (section 2.3) |
+| `A55C0-5 OWNER`, `A55P OWNER, sema=0x442313F8` | `:523-529` | listed | the A55 cores and cluster, for PSCI CPU on and off (section 2.3); `sema` is the cluster's semaphore (`sm/doc/config.md:807`) |
+| `ARM_PLL OWNER` | `:530` | listed | the A55 clock source |
+| `MU1_A OWNER` | `:531` | listed | the A side of MU1, the transport above |
+| `MU_ELE1 OWNER`, `MU_ELE2 OWNER` | `:532-533` | listed, finding F4 | the secure side's ELE channels (section 4; attack-surface-survey MU table); `GET_SOC_INFO` in section 2.2.1 uses the ELE |
+| `OCRAM EXEC, begin=0x020480000, size=256K` | `:539` | listed | secure-only OCRAM, memory-protection-survey section 4 |
+| `DDR EXEC, begin=0x08A000000, end=0x08DFFFFFF` | `:540` | listed | holds BL31 and the BL32 window; equals `SM_SECURE_BASE` and `SM_SECURE_END` in `secure-world/bsp.lock`, which that file still calls unverified |
+| `FAULT_SW2`, `FAULT_WDOG3`, `FAULT_WDOG4`, each `OWNER, reaction=lm_reset` | `:544-546` | listed, finding F5 | reset the `AP` LM only, see F5 |
+
+Findings (none blocks the build; all are in the list on purpose):
+
+- **F1, `test=0`.** The key names a unit-test client MU (`sm/doc/config.md:744`).
+  The pinned build runs `make` without `t=`, so `T=NONE` and `sm/test` is not
+  built (imx-sm `Makefile:47-59,156-158`). Risk: a build with `t=` set would
+  compile the SM's SCMI unit tests, which drive the SM through that test MU as
+  if they were this agent. `sm-build.sh` passes no `t=`. Patch 0002 drops the
+  `test` keys of the M7 LM; dropping this one needs a new patch and a new lock
+  pin, which this review does not make.
+- **F2, `PERF_A55 ALL`.** `ALL` lets `AP-S` set levels; Linux holds the same, in one
+  LM, so priv calls from the two overwrite each other. scmi-permissions-survey 3.3
+  proposes priv, or none if BL31 sets no levels; neither is confirmed, and it
+  needs a patch to the file. Left as is.
+- **F3, `PERLPI_*`.** The purpose of each is not confirmed (scmi-permissions-survey 3.3).
+  Every one is a peripheral `AP-NS` owns (`CAN_FD2-5` `:620-623`, `GPIO2-5`
+  `:747-750`, `LPUART1,4,5,6,8` `:791-795`, `WDOG3,4` `:890-891`), so `AP-S` can
+  set the wake-up of devices Linux drives; no other LM is reached.
+- **F4, `MU_ELE1`, `MU_ELE2`.** A compromised BL31 or OP-TEE can send any request to
+  the ELE over these. That is the secure world's job (keys, entropy, SoC
+  information); what limits it is the ELE's own request checks (not read here),
+  not the SM. It cannot
+  reach `MU_ELE0` (the SM's) or `MU_ELE5` (the M7's).
+- **F5, `lm_reset` on the A55 faults.** The `lm` key defaults to the LM the fault is
+  listed in (`sm/doc/config.md:810`), here `AP`: a secure-world agent can restart
+  the A55 LM, not the M7 or the SM. This is the reaction the fault-recovery survey
+  accepts for the A55 watchdogs, with the M7 supervising the restart; whether
+  `FAULT_SW2` should instead be `sys_reset` is open there (question 2).
+
+What this review did not run: the full build with the pinned toolchain (the
+check runs on the patched file before the compile, `scripts/sm-build.sh`), and
+nothing was observed on a board.
+
 ### 2.3 PSCI
 
 The i.MX 95 PSCI back end [S2, `imx95_psci.c` and `imx9_psci_common.c`]
