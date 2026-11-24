@@ -52,7 +52,7 @@ The signed region and the signature are treated as opaque bytes. The check does 
 
 Proposed, pending owner approval. `scripts/device-lifecycle/collect-evidence.sh --nonce HEX --response-version N --ek-handle 0xHHHHHHHH --ek-template S -o OUT` composes the bundle on the Cortex-A55, in the order ruling 1234 sets:
 
-1. It validates the nonce (32 hex digits) and the handle (persistent range 0x81000000 to 0x81FFFFFF) and refuses before running anything else.
+1. It validates the nonce (32 hex digits), the response version (the decimal digit 2 or 3, as the Fields table allows) and the handle (persistent range 0x81000000 to 0x81FFFFFF) and refuses before running anything else.
 2. It runs the enclave attestation: `$ELE_ATTEST_CMD NONCE_HEX SIGNED_OUT SIGNATURE_OUT`. The command is named by the environment variable, has no default, and must write the signed region and the signature to the two given paths and exit 0. The collector refuses to run without it.
 3. Only if that succeeded, it reads the EK public area with `tpm2_readpublic -c HANDLE -f tss -o FILE`, a read-only command.
 4. It composes the JSON bundle into a temporary file, without verifying anything, and copies it to OUT. OUT is written only when every step passed; a failed copy or move fails the collector.

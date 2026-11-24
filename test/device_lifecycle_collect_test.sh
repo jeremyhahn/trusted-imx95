@@ -174,6 +174,10 @@ refuse "handle past the persistent range" env ELE_ATTEST_CMD="$BIN/ele-attest" "
 	--nonce "$NONCE" --response-version 3 --ek-handle 0x82000000 --ek-template t -o "$W/out.json"
 refuse "missing handle" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" \
 	--response-version 3 --ek-template t -o "$W/out.json"
+for v in 1 4 0x3 0 03; do
+	refuse "response version $v" env ELE_ATTEST_CMD="$BIN/ele-attest" "$COLLECT" --nonce "$NONCE" \
+		--response-version "$v" --ek-handle "$HANDLE" --ek-template t -o "$W/out.json"
+done
 expect "refusals left no OUT" test ! -e "$W/out.json"
 
 cat "$LOG" >>"$W/all.log"
