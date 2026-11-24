@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# secret-scan.sh <tree|history> [repo-dir]
-#
-# Runs gitleaks (pinned in scripts/tool-pins.sh) over the working tree
-# (`tree`, the PR tier) or over every commit (`history`, the full tier).
-# Matches are redacted, and a finding prints path, line and rule only, never
-# the matched text (handbook ci-standard.md §5). Exit 1 on a finding, and on
-# a scan that could not run.
+# secret-scan.sh <tree|history> [repo-dir]: runs pinned gitleaks, redacted, printing path, line and rule only; exit 1 on a finding or a failed scan.
 set -euo pipefail
 
 mode=${1:?usage: secret-scan.sh <tree|history> [repo-dir]}
@@ -28,11 +22,7 @@ history)
 		echo "secret-scan (history): $dir is a shallow clone or not a git repository; the history scan needs the full history (actions/checkout fetch-depth: 0, or git fetch --unshallow)" >&2
 		exit 1
 	fi
-	# gitleaks' own git log (--full-history --all --diff-filter=tuxdb) emits
-	# no patch for a merge commit, so a credential added by a merge resolution
-	# and deleted later is never scanned. -m adds a diff against each parent of
-	# every merge. --log-opts replaces the default options, so these restate
-	# them with -m added.
+	# -m diffs merges against each parent so merge resolutions are scanned; --log-opts replaces the defaults, so they are restated.
 	sub=(git "$dir" --log-opts="--all --full-history --diff-filter=tuxdb -m")
 	;;
 *)

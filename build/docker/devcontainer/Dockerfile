@@ -22,7 +22,7 @@ FROM ${ALPINE_IMAGE} AS base
 # tar: GNU tar, for scripts/in-toolchain-image.sh's --owner/--group/
 # --numeric-owner stream (BusyBox tar refuses those options).
 RUN apk upgrade --no-cache \
- && apk add --no-cache bash coreutils make git python3 tar xz \
+ && apk add --no-cache bash coreutils make git python3 py3-yaml tar xz \
  && git config --system --add safe.directory '*' \
  && adduser -D -u 10001 dev
 ENV HOME=/tmp
@@ -67,11 +67,11 @@ ENV REQUIRE_ELE_SRC=1
 # SPSDK 3.13.0 for make ahab-sign-test (docs/boot-container/signing-pipeline.md):
 # scripts/ahab/spsdk-venv.sh installs its closure, every file checked against a
 # SHA-256 in scripts/ahab, into /opt/spsdk. CI stages run without network, so
-# the venv is built here. py3-pip is needed for the install only.
+# the venv is built here. py3-pip is a normal package and stays in the image: the
+# runner-label bootstrap test (test/runner_labels_test.sh) runs `python3 -I -m pip`.
 COPY scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt /pins/ahab/
-RUN apk add --no-cache --virtual .spsdk-build py3-pip \
+RUN apk add --no-cache py3-pip \
  && SPSDK_VENV=/opt/spsdk bash /pins/ahab/spsdk-venv.sh \
- && apk del --no-cache .spsdk-build \
  && rm -rf /tmp/.cache /pins/ahab
 ENV SPSDK_VENV=/opt/spsdk
 USER 10001

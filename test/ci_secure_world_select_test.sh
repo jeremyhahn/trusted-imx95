@@ -85,7 +85,7 @@ select_sw() {
 	fxg commit -q -m change
 	head=$(fxg rev-parse HEAD)
 	: >"$TMP_ROOT/out"
-	(cd "$fx" && env BASE="$BASE" HEAD="$head" EVENT="$event" CI_FULL_TIER="$full" \
+	(cd "$fx" && env BASE="$BASE" HEAD="$head" EVENT="$event" CI_FULL_LABEL="$full" \
 		DOCS_ONLY_PATTERN="$DOCS_PATTERN" LINT_GATES_PATTERN="$LINT_PATTERN" \
 		SECURE_WORLD_PATTERN="$SW_PATTERN" GITHUB_OUTPUT="$TMP_ROOT/out" \
 		bash "$TMP_ROOT/diff.sh") >"$TMP_ROOT/diff.log" 2>&1
@@ -130,7 +130,7 @@ want_sw "select: a PR with the full tier selects the build (README only)" true p
 # An empty diff is a doubt: it runs the job.
 fxg checkout -q -B empty "$BASE"
 : >"$TMP_ROOT/out"
-(cd "$fx" && env BASE="$BASE" HEAD="$BASE" EVENT=pull_request CI_FULL_TIER=false \
+(cd "$fx" && env BASE="$BASE" HEAD="$BASE" EVENT=pull_request CI_FULL_LABEL=false \
 	DOCS_ONLY_PATTERN="$DOCS_PATTERN" LINT_GATES_PATTERN="$LINT_PATTERN" \
 	SECURE_WORLD_PATTERN="$SW_PATTERN" GITHUB_OUTPUT="$TMP_ROOT/out" \
 	bash "$TMP_ROOT/diff.sh") >/dev/null 2>&1

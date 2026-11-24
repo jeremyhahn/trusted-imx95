@@ -1,22 +1,5 @@
 #!/usr/bin/env bash
-# sign-test.sh: the host-side AHAB signing pipeline on a throwaway test PKI
-# (issue #9, docs/boot-container/signing-pipeline.md).
-#
-#   sign-test.sh            generate four ECDSA P-384 test SRKs in a mktemp -d
-#                           work directory outside the clone, build and sign an
-#                           i.MX 95 B0 (mimx9596 b0) AHAB container around a
-#                           random payload (container.yaml), verify it, print
-#                           the test SRK table hash, and remove the work
-#                           directory. AHAB_OUT_DIR, if set, receives a copy of
-#                           container.bin (the container only, never a key).
-#   sign-test.sh verify <bin>
-#                           nxpimage ahab verify of <bin>: prints "verify: OK"
-#                           and exits 0, or "verify: FAILED" and exits 1.
-#
-# The SPSDK venv comes from spsdk-venv.sh (SPSDK_VENV, pinned 3.13.0). No real
-# key, no HSM, no fuse: the .bcf fuse script nxpimage ahab export writes is
-# deleted unread and never run, and the printed SRK table hash belongs to this
-# test PKI only.
+# sign-test.sh [verify <bin>]: builds, signs and verifies an i.MX 95 B0 AHAB container on a throwaway P-384 test PKI; AHAB_OUT_DIR receives container.bin. No real key, HSM or fuse.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)

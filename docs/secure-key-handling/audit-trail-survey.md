@@ -25,7 +25,7 @@ All sources are public. Versions are those fetched on 2026-11-12.
 | S9 | go-xkms README | `main` at d55b1b73c78f | https://github.com/jeremyhahn/go-xkms |
 | S10 | RFC 9334, Remote ATtestation procedureS (RATS) Architecture | RFC, January 2023 | https://www.rfc-editor.org/rfc/rfc9334 |
 
-S2's page on schneier.com returned 404; the paper's PDF at https://www.schneier.com/wp-content/uploads/2016/02/paper-auditlogs.pdf was reachable. The paper's scheme is summarised from the paper's well-known design; this lane did not re-read the PDF line by line (§8).
+S2's page on schneier.com returned 404; the paper's PDF at https://www.schneier.com/wp-content/uploads/2016/02/paper-auditlogs.pdf was reachable. The paper's scheme is summarised from the paper's well-known design; this survey did not re-read the PDF line by line (§8).
 
 ## 3. What an audit record must carry
 
@@ -59,7 +59,7 @@ What this means for the board:
 
 S1 exposes the monotonic counter in two places:
 
-- `hsm_dev_mono_counter` partitions the counter's fuse words between the ELE HSM and the V2X HSM and SHE. The header says this can be issued once per device. If no partition has been written to the fuses, counter operations return a warning and give no rollback protection. This is a fuse step; this lane does not run or script it, and the owner's oem-key-provisioning row (SPEC.md) owns it.
+- `hsm_dev_mono_counter` partitions the counter's fuse words between the ELE HSM and the V2X HSM and SHE. The header says this can be issued once per device. If no partition has been written to the fuses, counter operations return a warning and give no rollback protection. This is a fuse step; this survey does not run or script it, and the owner's oem-key-provisioning row (SPEC.md) owns it.
 - The key store flags: with the monotonic flag and the strict-operation flag set, a key store update completes only when the counter has been advanced (`hsm_key_store.h`). The header notes that newer ELE firmware renames strict to sync. Past the store's update cap, or with no partition written, updates are still accepted with a warning and no counter advance, so the caller must treat counter warnings as failures ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.1, §4).
 
 S1 does not show an API that lets an application read or advance the counter for its own use, separate from a key store update (§8).
@@ -89,9 +89,9 @@ S5 says a single-block RPMB write is atomic by the eMMC specification, and that 
 What this means for the board:
 
 - A small trusted application could hold the audit chain's head (sequence number and head hash) in RPMB and update it on each record or each batch. Unlike the fuse counter, the RPMB write counter is not a fuse, but it is still finite: 2³² authenticated writes, about 1.36 years at 100 writes a second and about 50 days at 1,000, and one head update can take several writes ([monotonic-counter-survey.md](monotonic-counter-survey.md) §3.3). Per-record updates fit only if the signing rate, times the writes per update, times the product's service life stays inside that write budget; otherwise the head is raised per batch, with the batch size set from the audit rate. The audit rate, the batch size and the service life are not set, so whether per-record updates fit is **not confirmed**; eMMC wear and write latency are further limits (not quantified here, §8). The log body stays in a Linux file; the RPMB head makes a rollback or truncation of that file visible on the board itself, before any export.
-- The RPMB key is written once to the eMMC. S5 describes OP-TEE deriving it from the eMMC serial number and the Hardware Unique Key, and warns that using RPMB before the board is secured can lock out later access once it is. This is a provisioning step that this lane does not run or script; the RPMB survey (#62) and the oem-key-provisioning row own it.
-- Whether the FRDM-IMX95-PRO's boot medium has an RPMB partition that OP-TEE can reach, and whether NXP's OP-TEE for the i.MX 95 enables `CFG_RPMB_FS`, was not confirmed from public sources in this lane (§8).
-- The Linux kernel has an RPMB subsystem in recent releases; its documentation page was not reachable from this lane (§8).
+- The RPMB key is written once to the eMMC. S5 describes OP-TEE deriving it from the eMMC serial number and the Hardware Unique Key, and warns that using RPMB before the board is secured can lock out later access once it is. This is a provisioning step that this survey does not run or script; the RPMB survey (#62) and the oem-key-provisioning row own it.
+- Whether the FRDM-IMX95-PRO's boot medium has an RPMB partition that OP-TEE can reach, and whether NXP's OP-TEE for the i.MX 95 enables `CFG_RPMB_FS`, was not confirmed from public sources in this survey (§8).
+- The Linux kernel has an RPMB subsystem in recent releases; its documentation page was not reachable from this survey (§8).
 
 ### 4.4 The Linux IMA measurement log
 

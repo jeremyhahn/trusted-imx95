@@ -16,7 +16,7 @@ step is described as a procedure.
 
 Survey date: 2026-11-12.
 
-Issue #55's own text could not be read from the lane (no forge credentials);
+Issue #55's own text could not be read from the survey (no forge credentials);
 this survey works from the `system-manager-config` row in
 [SPEC.md](../SPEC.md) and the issue title.
 
@@ -126,7 +126,7 @@ service at the tag named.
     A `DEBUG` command names the DID used by the debug access port and trace,
     which is given access to everything; an MRC entry can opt out of that
     with `nodbg` [SM-CFGDOC]. NXP recommends the standard DID map in the TRDC
-    section of the SoC reference manual, which this lane could not read.
+    section of the SoC reference manual, which this survey could not read.
 15. The EdgeLock enclave may leave some MRC regions set up after loading the
     boot container; the SM clears four by default, more if configured
     [SM-CFGDOC].
@@ -266,7 +266,7 @@ port [SM-PRO], so it reads as an EVK configuration adapted for the FRDM PRO.
 
 ## Not confirmed
 
-- Issue #55's text (no forge access from the lane).
+- Issue #55's text (no forge access from the survey).
 - The i.MX 95 reference manual (IMX95RM) TRDC chapter: the instance list,
   the standard DID map, which masters each MDAC covers, the block sizes of
   each MBC and the number of MRC regions. NXP's documents defer to it
