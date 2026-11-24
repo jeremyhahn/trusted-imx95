@@ -34,6 +34,11 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 WORKFLOW = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else HERE.parent / "code-review.yml"
+_ENV = WORKFLOW.read_text()
+NON_CODE = re.search(r"\n  NON_CODE_PATHS: '([^']*)'\n", _ENV).group(1)
+ROW_BRANCH = re.search(r"\n  ROW_BRANCH: '([^']*)'\n", _ENV).group(1)
+TRUSTED_AUTHORS = re.search(r"\n  TRUSTED_AUTHORS: '([^']*)'\n", _ENV).group(1)
+TRUSTED_PR = re.search(r"\n  TRUSTED_PR: '([^']*)'\n", _ENV).group(1)
 FAILS = []
 HEAD = "a" * 40
 BASE = "b" * 40
@@ -155,7 +160,7 @@ def run_gate(script, verdict, queued=(), in_progress=(), twin_jobs="in_progress"
                "FORGE": "github", "REVIEWER": REVIEWER, "REPO_API": API, "PR_NUM": "7",
                "EVENT_SHA": HEAD, "BASE_SHA": BASE, "BASE_REF": "main", "GITHUB_RUN_ID": "77",
                "GH_API_TOKEN": "<REDACTED>",
-               "NO_REVIEW_PATHS": NO_REVIEW, "DOCS_PATHS": DOCS,
+               "NON_CODE_PATHS": NON_CODE, "ROW_BRANCH": ROW_BRANCH, "HEAD_REF": "row/1-x", "TRUSTED_AUTHORS": TRUSTED_AUTHORS, "TRUSTED_PR": TRUSTED_PR,
                "SCOPE_SKIP": "false", "SCOPE_RESULT": "success", "REVIEW_RESULT": "skipped"}
         t0 = time.monotonic()
         out = subprocess.run(["bash", "-c", script], cwd=tmp, env=env,
@@ -172,8 +177,8 @@ def main():
     src = WORKFLOW.read_text()
     gate = job(src, "gate")
     script = run_script(step(gate, "Require a Codex approval of the head, or a no-review change"))
-    NO_REVIEW = once(r"\n      NO_REVIEW_PATHS: '([^']*)'\n", gate, "NO_REVIEW_PATHS")
-    DOCS = once(r"\n      DOCS_PATHS: '([^']*)'\n", gate, "DOCS_PATHS")
+    NO_REVIEW = NON_CODE
+    DOCS = NON_CODE
 
     # T
     check(re.search(r"\n    timeout-minutes: 10\n", gate) is not None, "T1 the gate's timeout-minutes is 10")
