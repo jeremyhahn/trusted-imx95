@@ -19,6 +19,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ALLOW=$'scripts/ahab/key-exchange-test.sh\tfixture: builds a key-exchange message on test keys, sends nothing
 scripts/ahab/key-import-test.sh\tfixture: builds a wrapped-key blob on test keys, sends nothing
 test/okp_host_only_test.sh\tthe host-only guard: its tool list and fixtures name the device tools it rejects
+test/okp_guard_coverage_test.sh\tthe coverage check: its tool-name filter and fixtures name the spellings it feeds to this guard, and run none of them
 test/no_lifecycle_close_test.sh\tthis guard: it holds the patterns it searches for'
 
 # Commands that change the life cycle or write a fuse. Matched per line, case
@@ -51,6 +52,13 @@ PATTERNS=(
   'ahab_lock'
   'ahab_return_lifecycle'
   'oem[-_ ]?lock'
+  # Found by test/okp_guard_coverage_test.sh (slice 176-okp-s6): the enclave's
+  # write-fuse service (fuse-map-survey.md), the signed field-return request
+  # (public-flow-survey.md) and U-Boot's ele_message console command, which sends
+  # any enclave message (public-flow-survey.md).
+  '(^|[^[:alpha:]])fuse_prog'
+  'return[-_ ]?life[-_ ]?cycle'
+  "(^|[[:space:];&|(])ele_message([[:space:]]|\$)"
   # SPSDK nxpfuses programs a whole fuse configuration (fuse-map-survey.md, sources
   # table: whole-configuration fuse programming); the survey shows no read-only
   # subcommand that cannot write, so any use is flagged (sudo, path, env prefix,
@@ -327,6 +335,30 @@ for fx in \
   if scan "$scratch" >/dev/null 2>&1; then ok "benign enclave fixture passes: $name"
   else bad "benign enclave fixture was flagged: $name"; fi
 done
+
+# Slice 176-okp-s6 fixtures: spellings the survey-to-guard coverage check found.
+i=0
+for fx in \
+  'fuse_prog call|err = fuse_prog(bank, word, val);' \
+  'return_lifecycle_update_req|msg=return_lifecycle_update_req' \
+  'ele_message console command|ele_message 0x17 0x1'; do
+  name=${fx%%|*}
+  cmd=${fx#*|}
+  i=$((i + 1))
+  rm -f "$scratch"/scripts/*
+  printf '%s\n' 'echo start' "$cmd" >"$scratch/scripts/s6fx$i.sh"
+  if out=$(scan "$scratch" 2>&1); then
+    bad "coverage fixture $name was not flagged"
+  elif [[ $out == *scripts/s6fx$i.sh:2:* ]]; then
+    ok "coverage fixture $name fails and names scripts/s6fx$i.sh:2"
+  else
+    bad "coverage fixture $name failed but did not name file and line: $out"
+  fi
+done
+rm -f "$scratch"/scripts/*
+printf '%s\n' 'cat /usr/share/ele_message.py.txt' >"$scratch/scripts/benign5.sh"
+if scan "$scratch" >/dev/null 2>&1; then ok "ele_message inside a file name passes"
+else bad "ele_message inside a file name was flagged"; fi
 
 # Positive control: every command named only on comment lines passes.
 rm -f "$scratch"/scripts/*
