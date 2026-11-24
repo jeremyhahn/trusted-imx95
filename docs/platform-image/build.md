@@ -62,6 +62,11 @@ section 11), written down so the owner can read a working proposal.
   source before the two targets below. Its stubbed test is
   `test/platform_image_hosttools_test.sh`.
 
+- `scripts/platform-image-verify.sh`, `make platform-image-verify OUT=<dir>`:
+  checks a published output directory against `platform-image/manifest.lock`,
+  offline, with no bitbake (see "Checking an output directory" below). Its
+  stubbed test is `test/platform_image_verify_test.sh`.
+
 The build-host run is recorded in [build-host-check.md](build-host-check.md),
 with a "repeat this run" section.
 
@@ -271,3 +276,21 @@ No real run has happened: the build stops at the NXP EULA (#14, the owner's to
 accept), so only the stub bitbake tests
 (`test/platform_image_repro_test.sh`, `test/platform_image_build_test.sh`)
 have exercised this.
+
+
+## Checking an output directory (provisional)
+
+`scripts/platform-image-verify.sh [--allow-dirty] OUT [LOCK]`, or
+`make platform-image-verify OUT=<dir>` (`ALLOW_DIRTY=1` for `--allow-dirty`),
+checks that an output directory came from this checkout's pins. It is offline
+and needs no bitbake. It fails, naming every problem, when: `SHA256SUMS` does
+not verify or OUT holds an unlisted file (the compare script's own check, which
+it calls); `build-info.txt` lacks a key or has one twice; `machine=`,
+`manifest_commit=` or a `layer_*_commit=` differs from `LOCK` (default
+`platform-image/manifest.lock`), or a layer is missing or extra;
+`platform_image_dirty=yes` without `--allow-dirty`; or a target in `targets=`
+has no `.spdx.json` listed. Exit 0 is OK, 1 a mismatch, 2 a usage error.
+
+A consumer runs it before AHAB signing (#14 Q4 (b)) or provisioning. Nothing has
+been checked on real artefacts: the EULA (#14) blocks the build, so only the
+stub test, `test/platform_image_verify_test.sh`, has run it.

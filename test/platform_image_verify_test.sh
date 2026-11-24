@@ -116,6 +116,14 @@ echo loose >"$d/unlisted.bin"
 run bash "$script" "$d"
 check "every problem is named" 1 "machine differs" "platform_image_dirty=yes" "unlisted.bin"
 
+mk "$d"
+run make -s -C "$ROOT" platform-image-verify OUT="$d"
+check "make platform-image-verify" 0 "OK, 3 artefacts"
+run make -s -C "$ROOT" platform-image-verify
+check "make without OUT" 2 "set OUT="
+run make -C "$ROOT" help
+check "make help lists the target" 0 "platform-image-verify"
+
 run bash "$script"
 check "no arguments" 2 "usage:"
 run bash "$script" --bogus "$d"

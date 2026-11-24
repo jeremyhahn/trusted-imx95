@@ -50,7 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
 help: ## List the targets
 	@echo "Targets:"
@@ -202,6 +202,10 @@ platform-image-kernel-config: ## Kernel config check on a build host: bitbake li
 
 platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS layer has a conf/layer.conf, its LAYERDEPENDS are provided and its LAYERSERIES_COMPAT has the oe-core series (needs a fetched tree, no bitbake; not in CI)
 	@scripts/platform-image-layer-check.sh
+
+platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 accepts a dirty build) against platform-image/manifest.lock: SHA256SUMS, machine, manifest and layer commits, an SBOM per target (offline, needs no bitbake; not in CI)
+	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
+	@scripts/platform-image-verify.sh $(if $(ALLOW_DIRTY),--allow-dirty) "$(OUT)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
