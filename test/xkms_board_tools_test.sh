@@ -89,7 +89,8 @@ start)
 		;;
 	esac
 	;;
-show) if [ "$(cat "$st")" = active ]; then cat "$R/run/pid" 2>/dev/null || echo 4242; else echo 0; fi ;;
+show) if [ "$2 $3" = "-p User" ]; then echo "${FAKE_UNIT_USER:-}"
+	elif [ "$(cat "$st")" = active ]; then cat "$R/run/pid" 2>/dev/null || echo 4242; else echo 0; fi ;;
 esac
 EOF
 # ss and netstat exist only when FAKE_TOOLS names them (default: neither, as on
@@ -116,10 +117,11 @@ done
 cat >"$fakebin/df" <<'EOF'
 #!/bin/bash
 # Stub df: the host's df, unless FAKE_DF_FREE names the KiB free on one
-# filesystem mounted at / that holds every board path.
+# filesystem mounted at / that holds every board path; FAKE_DF_RESERVED adds
+# KiB reserved for root (in the size, neither used nor available).
 [ -n "${FAKE_DF_FREE:-}" ] || exec "${0%/*}/../hosttools/df" "$@"
 echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
-echo "fake 99999999 0 $FAKE_DF_FREE 0% /"
+echo "fake $((FAKE_DF_FREE + ${FAKE_DF_RESERVED:-0})) 0 $FAKE_DF_FREE 0% /"
 EOF
 cat >"$fakebin/xkmsctl" <<'EOF'
 #!/bin/bash
@@ -135,6 +137,13 @@ v=$2 id=${3:-}
 case " ${FAKE_CTL_FAIL:-} " in *" $v "*) echo "error: $v failed" >&2; exit 1 ;; esac
 case $v in
 generate)
+	# FAKE_CTL_NOSPACE_AFTER: while the burn-in filler exists, creates past
+	# that many fail with ENOSPC's message
+	if [ -n "${FAKE_CTL_NOSPACE_AFTER:-}" ] && [ -e "$XKMS_FAKE_ROOT/var/lib/xkms/.burnin-filler" ]; then
+		c=$(($(cat "$k/.full" 2>/dev/null || echo 0) + 1))
+		echo "$c" >"$k/.full"
+		[ "$c" -le "$FAKE_CTL_NOSPACE_AFTER" ] || { echo "error: write $k/$id: no space left on device" >&2; exit 1; }
+	fi
 	(set -o noclobber; : >"$k/$id") 2>/dev/null || exit 1 # one create of an id wins
 	# FAKE_CTL_PIDS records this process; FAKE_CTL_SLOW delays the answer after
 	# the create succeeded; FAKE_CTL_ACKED lists each id as it is answered
@@ -612,6 +621,37 @@ ok "hard kill: the writer is killed after the bounded wait" out_has "$tmp/hk.log
 ok "hard kill: the in-flight create is unknown" out_has "$tmp/hk.log" "1 create(s) never acknowledged"
 ok "hard kill: nothing is reported lost" out_lacks "$tmp/hk.log" CRITICAL
 ok "hard kill: verify passes" [ "$RC" = 0 ]
+
+# --- diskfull.sh must see the disk full ----------------------------------------
+# The fake board's filesystem has 1000 KiB free; the filler goes in its
+# state directory, and the stub xkmsctl reports no space after N creates
+# (and has no certificates: BI_WRITE_CERT=0).
+DF() { # DF <log> [<VAR=value>...]: diskfull.sh on the fake board; set RC
+	rm -rf "$tmp/kms" "$tmp/bi"
+	mkdir -p "$tmp/kms" "$tmp/bi"
+	echo active >"$R/run/state"
+	set +e
+	env FAKE_DF_FREE=1000 "${@:2}" FAKE_KMS="$tmp/kms" XKMS_CTL=xkmsctl XKMS_WORK="$tmp/bi" BI_WRITE_CERT=0 \
+		"$here/scripts/xkms/burnin/diskfull.sh" --keys 2 --max-writes 30 --attempts 2 board.invalid >"$1" 2>&1
+	RC=$?
+	set -e
+}
+DF "$tmp/df-ok.log" FAKE_CTL_NOSPACE_AFTER=4
+ok "diskfull: no space after 4 writes passes" [ "$RC" = 0 ]
+ok "diskfull: the no-space write is named" out_has "$tmp/df-ok.log" "xkmsd reported no space at write 5"
+ok "diskfull: the writes before it are verified" out_has "$tmp/df-ok.log" "PASS verify full: 8 ledger entries intact"
+ok "diskfull: writes work again" out_has "$tmp/df-ok.log" "PASS writes work again once space is free (5 of 5)"
+ok "diskfull: the filler is gone" [ ! -e "$R/var/lib/xkms/.burnin-filler" ]
+DF "$tmp/df-never.log"
+ok "diskfull: a daemon never out of space FAILs" [ "$RC" != 0 ]
+ok "diskfull: says the disk was never full" out_has "$tmp/df-never.log" "the disk was never full: 30 writes went by"
+ok "diskfull: the filler is gone after a FAIL" [ ! -e "$R/var/lib/xkms/.burnin-filler" ]
+DF "$tmp/df-root.log" FAKE_CTL_NOSPACE_AFTER=1 FAKE_DF_RESERVED=500 FAKE_UNIT_USER=root
+ok "diskfull: a root xkmsd gets the reserved blocks filled too" out_has "$tmp/df-root.log" "(1244 KiB, 256 KiB left to xkmsd)"
+ok "diskfull: the reserved blocks are reported" out_has "$tmp/df-root.log" "it can use the 500 KiB reserved for root"
+DF "$tmp/df-user.log" FAKE_CTL_NOSPACE_AFTER=1 FAKE_DF_RESERVED=500 FAKE_UNIT_USER=xkms
+ok "diskfull: a non-root xkmsd leaves the reserved blocks" out_has "$tmp/df-user.log" "(744 KiB, 256 KiB left to xkmsd)"
+ok "diskfull: and says so" out_has "$tmp/df-user.log" "the 500 KiB reserved for root are not its to use"
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do
