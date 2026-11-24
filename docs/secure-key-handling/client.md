@@ -23,6 +23,18 @@ The revision is the one the BSP's recipe uses: the `imx-secure-enclave%.bbappend
 `imx-secure-enclave_git.bb` builds it with `PLAT = "ele"` for the i.MX 9 machines. The toolchain is the Arm GNU
 Toolchain pin of [secure-world/bsp.lock](../../secure-world/bsp.lock), read by name from that file.
 
+**Reproduce the vendor read.** The tree every file:line citation here refers to is the public repository
+`https://github.com/NXP/imx-secure-enclave.git` at commit `463845060a79dd9a6d39db3b3d8dff60225b9dfd` (`ELE_COMMIT` in
+`ele-lib.lock`; branch `lf-6.18.37_2.1.0`). A shallow fetch of that commit gives the same tree. Nothing of it is copied
+into this repository:
+
+```
+git init vendor-ele && cd vendor-ele
+git remote add origin https://github.com/NXP/imx-secure-enclave.git
+git fetch --depth 1 origin 463845060a79dd9a6d39db3b3d8dff60225b9dfd
+git checkout --detach FETCH_HEAD
+```
+
 - `make ele-lib-check` (the same check, with its refusals, runs in `make test`) parses the lock and the toolchain pin offline and refuses a short
   commit, a bad digest, an `UNREAD` value, a missing or repeated name, a non-https repository and a toolchain lock
   outside the tree.
@@ -230,7 +242,7 @@ rollback-protected on an unconfirmed split.
 
 **The `ele_client` command** (`ele_client [--split-confirmed] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del
 <key-id>`) is the front end of this backend; it widens the row beyond the host stub, at the coordinator's resume brief
-2 ([plan](../plans/162.md)). The nonce is an access credential for the key store, so it is read from a file
+2. The nonce is an access credential for the key store, so it is read from a file
 descriptor (`3<nonce-file`; a terminal is refused) and never from the arguments, where a process listing would show
 it. Every number (store id, descriptor, key id) is parsed strictly (decimal or `0x` hex, no sign, no space, no
 trailing character, at most `UINT32_MAX`) and the whole command line is checked before any HSM service is opened, so
