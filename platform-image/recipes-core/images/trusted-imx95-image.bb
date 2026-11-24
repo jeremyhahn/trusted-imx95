@@ -45,6 +45,12 @@ IMAGE_FSTYPES += "wic"
 # MISSING: provisional. A rootfs archive, the file-by-file input of the reproducible-build check
 # (scripts/platform-image-repro-check.sh); the machine's own IMAGE_FSTYPES are unreadable without a build.
 IMAGE_FSTYPES += "tar"
+# No standalone root file-system image is a flash artefact (Codex round 5 P1, docs/plans/140.md entry 31):
+# a rootfs.ext4 starts with a zero sector, which a sparse writer skips, so the old token and NV would
+# survive. The marked .wic is the only supported flash artefact. wic builds its own ext4 from the rootfs
+# tree and needs no ext4 in IMAGE_FSTYPES; the machine's defaults may add one, so it is removed here.
+# scripts/platform-image-check-root-marker.sh fails on any ext2/3/4 image left in the deploy directory.
+IMAGE_FSTYPES:remove = "ext2 ext3 ext4 ext4.gz ext4.xz ext4.bz2 ext4.zst"
 # The Freescale EULA is the owner's to accept (docs/ftpm/build.md), so the image
 # does not accept it. NXP's wic flow pulls in imx-boot, and with it
 # imx-m7-demos, which needs the EULA. This image's wks has no boot container

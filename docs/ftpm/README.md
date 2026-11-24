@@ -86,6 +86,18 @@ routing and `CONFIG_RPMB`); whether the pinned OP-TEE 4.10 has `CFG_REE_FS_INTEG
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system
 stays read-only, which is why the NV cannot live on it. The NV therefore persists across a reboot.
+
+**Supported flash artefact.** The marked `.wic` is the only one. The image does not emit a standalone `rootfs.ext4`
+(`IMAGE_FSTYPES:remove`): its first sector is zeros, which a sparse writer skips, so the old binding token and NV would
+survive. `scripts/platform-image-check-root-marker.sh` fails, naming the file, on any `*.ext2`, `*.ext3` or `*.ext4`
+(compressed or not) in the deploy directory. A root image made by hand outside the build is unsupported.
+
+**What the wipe removes.** `tee-nv-wipe` removes the whole `/data/tee` tree, the saved token and the saved id. That tree is
+OP-TEE's one REE-FS store, shared by every TA that uses private REE storage (the fTPM and, in this image, the PKCS#11 TA):
+one index file lists each TA's objects by UUID, so no file name tells the fTPM NV from PKCS#11 objects. Removing only the
+fTPM objects would need a parser of that index, which is not written; open question for the owner (the `rpmb` setting
+keeps PKCS#11 in REE FS, and a root rewrite would then wipe it as well). Nothing outside `/data/tee` is touched
+(`test/platform_image_ftpm_test.sh`, "wipe scope").
 Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement that the NV is wiped with the root file system):
 - Writing the whole `.wic` is the supported way to reprovision: it recreates `tee-data` empty, so the NV is wiped.
 - A root partition rewritten with a different build is caught on boot. The rootfs carries a build identity

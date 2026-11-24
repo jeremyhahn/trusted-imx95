@@ -13,7 +13,9 @@
 # <Range> must cover the marker's block, the checksum of that range (BlockMap chksum, the file's
 # ChecksumType) must match the image's bytes, and the file's own BmapFileChecksum, if present,
 # must match (the file hashed with that field set to zeros). Any miss, an unreadable or
-# unknown file, or no image at all is a nonzero exit. Reads files only: no device, no network.
+# unknown file, or no image at all is a nonzero exit. A standalone root image (*.ext2, *.ext3,
+# *.ext4, compressed or not) in DEPLOY_DIR is refused by name: it has no marker, and the .wic is the
+# only supported flash artefact. Reads files only: no device, no network.
 set -eu
 
 die() {
@@ -144,6 +146,13 @@ for f in "$dir"/*.wic "$dir"/*.wic.gz "$dir"/*.wic.bz2 "$dir"/*.wic.xz "$dir"/*.
 	if [ -f "$stem.bmap" ]; then
 		check_bmap "$stem.bmap" "$img" "$start"
 	fi
+done
+# A standalone root file-system image has no marker sector (its first sector is zeros, which a sparse
+# writer skips) and so cannot be a flash artefact: any of them in the output is a failure.
+for f in "$dir"/*.ext2 "$dir"/*.ext3 "$dir"/*.ext4 "$dir"/*.ext[234].gz "$dir"/*.ext[234].bz2 \
+	"$dir"/*.ext[234].xz "$dir"/*.ext[234].zst; do
+	[ -e "$f" ] || [ -L "$f" ] || continue
+	fail "$f: a standalone root file-system image carries no unbound marker; the marked .wic is the only supported flash artefact"
 done
 [ "$seen" -gt 0 ] || die "no .wic image in $dir"
 for b in "$dir"/*.bmap; do

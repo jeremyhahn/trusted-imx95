@@ -196,6 +196,22 @@ printf 'id-B\n' >"$wt/rootfs-id"
 expect "wipe: a different id wipes" test "$(wipe_run)" -eq 0
 expect "wipe: the different id removed the files" test ! -e "$wt/data/tee/obj"
 expect "wipe: the different id is recorded" test "$(<"$wt/data/tee-rootfs-id")" = id-B
+# R4 P1 re-check: what the wipe removes. The REE-FS store under /data/tee is one tree for every TA (one
+# index, dirf.db, lists each TA's objects by UUID), so a file name does not say fTPM or PKCS#11. The wipe
+# therefore removes the tree whole and touches nothing outside it. This records that, with a file outside
+# /data/tee that must survive; narrowing to the fTPM objects needs an owner decision (docs/plans/140.md 31).
+mkdir -p "$wt/data/tee/tee" "$wt/data/other"
+printf 'p11\n' >"$wt/data/tee/tee/pkcs11-object"
+printf 'ftpm\n' >"$wt/data/tee/tee/ftpm-nv-object"
+printf 'out\n' >"$wt/data/other/file"
+printf 'id-B2\n' >"$wt/rootfs-id"
+expect "wipe scope: a changed id runs ok" test "$(wipe_run)" -eq 0
+expect "wipe scope: the fTPM object is gone" test ! -e "$wt/data/tee/tee/ftpm-nv-object"
+expect "wipe scope: the REE-FS store is removed whole, so the PKCS#11 object is gone too (recorded)" test ! -e "$wt/data/tee/tee/pkcs11-object"
+expect "wipe scope: a file outside /data/tee survives" test "$(<"$wt/data/other/file")" = out
+rm -rf "$wt/data/other"
+printf 'id-B\n' >"$wt/rootfs-id"
+expect "wipe scope: the original id runs ok again" test "$(wipe_run)" -eq 0
 printf 'keep\n' >"$wt/data/tee/obj"
 rm "$wt/rootfs-id"
 expect "wipe: fails closed without a rootfs id" test "$(wipe_run)" -ne 0
@@ -458,6 +474,25 @@ rm -rf "$wt/gz-bad" "$wt/gz-bad.log" "$wt/gz-bad.raw" "$wt/tree-m7"
 expect "checker: a directory with no image fails" test "$(sh "$chk" "$wt/geom-none" >/dev/null 2>&1; echo $?)" -ne 0
 mkdir "$wt/empty-deploy"
 expect "checker: an empty deploy directory fails" test "$(sh "$chk" "$wt/empty-deploy" >/dev/null 2>&1; echo $?)" -ne 0
+# Round 5 P1: a standalone rootfs.ext4 has a zero first sector, so a sparse rewrite of it over a
+# provisioned root leaves the old binding token. The image no longer emits one (IMAGE_FSTYPES:remove) and
+# the checker refuses any in the output, by name.
+expect "image: IMAGE_FSTYPES removes the standalone ext4" ncstr "$img" 'IMAGE_FSTYPES:remove = "ext2 ext3 ext4 '
+mkdir "$wt/ext-root"
+truncate -s 4M "$wt/ext-root/unmarked.ext4"
+printf '\123\357' | dd of="$wt/ext-root/unmarked.ext4" bs=1 seek=1080 conv=notrunc 2>/dev/null
+printf 'TEEBIND1 %064d\n' 7 | dd of="$wt/ext-root/provisioned" bs=512 count=1 conv=sync 2>/dev/null
+dd if="$wt/ext-root/unmarked.ext4" of="$wt/ext-root/provisioned" bs=512 count=2048 conv=sparse,notrunc 2>/dev/null
+expect "ext4: control, a sparse rewrite of the unmarked ext4 keeps the old token" test "$(head -c 9 "$wt/ext-root/provisioned")" = "TEEBIND1 "
+for ext in ext4 ext4.gz; do
+	rm -rf "$wt/ext-bad"
+	cp -a "$wt/good/deploy" "$wt/ext-bad"
+	if [ "$ext" = ext4 ]; then cp "$wt/ext-root/unmarked.ext4" "$wt/ext-bad/rootfs.ext4"; else gzip -c "$wt/ext-root/unmarked.ext4" >"$wt/ext-bad/rootfs.ext4.gz"; fi
+	expect "ext4 ($ext): the checker refuses the output" test "$(PATH="$wt/good/bin:$PATH" sh "$chk" "$wt/ext-bad" >"$wt/ext-bad.log" 2>&1; echo $?)" -ne 0
+	expect "ext4 ($ext): ... and the log names the file" has "$wt/ext-bad.log" "rootfs.$ext: a standalone root file-system image"
+done
+expect "ext4: the good deploy (wic only) still passes" test "$(PATH="$wt/good/bin:$PATH" sh "$chk" "$wt/good/deploy" >/dev/null 2>&1; echo $?)" -eq 0
+rm -rf "$wt/ext-root" "$wt/ext-bad" "$wt/ext-bad.log"
 
 # Mutation 1: the hook names a file the wic task does not produce.
 # shellcheck disable=SC2016 # sed scripts, the $ are literal
