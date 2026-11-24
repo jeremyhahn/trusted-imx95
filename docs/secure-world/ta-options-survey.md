@@ -101,7 +101,8 @@ from the boot firmware through an OP-TEE system call (`CFG_TA_MEASURED_BOOT`, of
   the stored objects readable and copyable to other devices (S6); whether the i.MX 95 port implements it is
   unconfirmed (item 1 below).
 - **What a Linux-side attacker reaches.** Root on Linux can send any TPM command to the fTPM (the Linux kernel's
-  firmware-TPM driver exposes it as an ordinary TPM device: general knowledge, not read at a tag here); TPM
+  firmware-TPM driver registers an ordinary TPM chip, so `tpm0` and `tpmrm0` appear: linux-imx `6e694eda40aa`,
+  `drivers/char/tpm/tpm_ftpm_tee.c:171-251` and `drivers/char/tpm/tpm-chip.c:423-452`, see item 6); TPM
   authorisation and policy still apply. Root can delete or replace the encrypted NV files (denial of service, and
   rollback unless RPMB anchors them), and can stop `tee-supplicant`, which stalls the TA's storage. Root cannot read
   key material unless secure DRAM is reachable (#63) or the HUK path is weak (unconfirmed for the i.MX 95).
