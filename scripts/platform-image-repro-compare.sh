@@ -188,5 +188,36 @@ else
 		fail "build-info.txt has ${#info_a[@]} lines in ${dirs[0]} and ${#info_b[@]} in ${dirs[1]}"
 fi
 
+# Every target in build-info.txt must have a real wic or rootfs image listed (a
+# bmap, manifest or SBOM alone is not an image), in each directory.
+need_images() {
+	local -n info=$1
+	# shellcheck disable=SC2178 # a nameref to an array
+	local -n names=$2
+	local dir=$3 line tg="" mach="" t k found
+	local -a tlist
+	for line in "${info[@]}"; do
+		case $line in
+		targets=*) tg=${line#targets=} ;;
+		machine=*) mach=${line#machine=} ;;
+		esac
+	done
+	read -r -a tlist <<<"$tg"
+	[ "${#tlist[@]}" -gt 0 ] || { fail "$dir/build-info.txt: targets= is empty or missing"; return; }
+	[ -n "$mach" ] || { fail "$dir/build-info.txt: machine= is empty or missing"; return; }
+	for t in "${tlist[@]}"; do
+		found=0
+		for k in "${names[@]+"${names[@]}"}"; do
+			case $k in
+			"$t-$mach"*.wic.bmap | "$t-$mach"*.manifest | "$t-$mach"*.spdx.json) ;;
+			"$t-$mach"*.wic* | "$t-$mach"*.rootfs*) found=1 ;;
+			esac
+		done
+		[ "$found" -eq 1 ] || fail "$dir: no wic or rootfs image listed for target $t"
+	done
+}
+[ "$ok_a" -eq 0 ] || need_images info_a names_a "${dirs[0]}"
+[ "$ok_b" -eq 0 ] || need_images info_b names_b "${dirs[1]}"
+
 [ "$bad" -eq 0 ] || exit 1
 echo "platform-image-repro: OK, $same artefacts identical"

@@ -14,14 +14,14 @@ tmp=$TMP_ROOT
 mk() {
 	rm -rf "$1"
 	mkdir -p "$1"
-	echo wic >"$1/img.wic.zst"
-	echo tar >"$1/img.rootfs.tar.zst"
-	(cd "$1" && sha256sum -- img.* >SHA256SUMS)
-	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=${3:-1700000000}" \
+	echo wic >"$1/img-m.wic.zst"
+	echo tar >"$1/img-m.rootfs.tar.zst"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+	printf '%s\n' "# build-info" "machine=m" "targets=img" "SOURCE_DATE_EPOCH=${3:-1700000000}" \
 		"build_seconds=${2:-10}" "checkout_commit=abc" "layer_x_commit=def" >"$1/build-info.txt"
 }
 # rehash DIR: rewrite DIR/SHA256SUMS from the files.
-rehash() { (cd "$1" && sha256sum -- img.* >SHA256SUMS); }
+rehash() { (cd "$1" && sha256sum -- img-m.* >SHA256SUMS); }
 sum() { local s; s=$(sha256sum <"$1"); echo "${s%% *}"; }
 
 a=$tmp/a
@@ -34,29 +34,29 @@ check "identical dirs (build_seconds differs only)" 0 "platform-image-repro: OK,
 
 mk "$a"
 mk "$b"
-echo other >"$b/img.wic.zst"
+echo other >"$b/img-m.wic.zst"
 rehash "$b"
-ha=$(sum "$a/img.wic.zst")
-hb=$(sum "$b/img.wic.zst")
+ha=$(sum "$a/img-m.wic.zst")
+hb=$(sum "$b/img-m.wic.zst")
 run bash "$script" "$a" "$b"
-check "one artefact differs" 1 "img.wic.zst differs" "$ha" "$hb"
-expect "the identical artefact is not named" test "${OUT##*img.rootfs.tar.zst*}" = "$OUT"
+check "one artefact differs" 1 "img-m.wic.zst differs" "$ha" "$hb"
+expect "the identical artefact is not named" test "${OUT##*img-m.rootfs.tar.zst*}" = "$OUT"
 
-run bash "$script" --allow img.wic.zst "$a" "$b"
+run bash "$script" --allow img-m.wic.zst "$a" "$b"
 check "--allow is an unknown option" 2 "unknown option --allow"
 
 mk "$a"
 mk "$b"
-echo more >"$b/img.extra.zst"
+echo more >"$b/img-m.extra.zst"
 rehash "$b"
 run bash "$script" "$a" "$b"
-check "an artefact only in one dir" 1 "img.extra.zst: only in $b"
+check "an artefact only in one dir" 1 "img-m.extra.zst: only in $b"
 
 mk "$a"
 mk "$b"
-echo tampered >"$b/img.wic.zst"
+echo tampered >"$b/img-m.wic.zst"
 run bash "$script" "$a" "$b"
-check "bytes no longer match the dir's SHA256SUMS" 1 "img.wic.zst: bytes do not match"
+check "bytes no longer match the dir's SHA256SUMS" 1 "img-m.wic.zst: bytes do not match"
 
 mk "$a"
 mk "$b"
@@ -66,9 +66,9 @@ check "a file not listed in SHA256SUMS" 1 "unlisted.bin: in $b but not listed"
 
 mk "$a"
 mk "$b"
-rm "$b/img.rootfs.tar.zst"
+rm "$b/img-m.rootfs.tar.zst"
 run bash "$script" "$a" "$b"
-check "a listed file is missing" 1 "img.rootfs.tar.zst: listed in"
+check "a listed file is missing" 1 "img-m.rootfs.tar.zst: listed in"
 
 mk "$a"
 mk "$b" 10 1700000001
@@ -136,7 +136,7 @@ mkts() {
 	echo "${3:-tar}" >"$1/img-m.rootfs-$2.tar.zst"
 	echo ext4 >"$1/img-m.rootfs-$2.ext4"
 	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
-	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" "layer_x_commit=def" >"$1/build-info.txt"
+	printf '%s\n' "# build-info" "machine=m" "targets=img" "SOURCE_DATE_EPOCH=1700000000" "layer_x_commit=def" >"$1/build-info.txt"
 }
 
 # mksbom DIR TIMESTAMP [SPDX-CONTENT]: mkts, plus the package manifest and the
@@ -173,9 +173,9 @@ check "an SBOM with one changed byte: names the .spdx.json member" 1 "img-m.root
 mk "$a"
 mk "$b"
 : >"$a/SHA256SUMS"
-rm -f "$a"/img.*
+rm -f "$a"/img-m.*
 : >"$b/SHA256SUMS"
-rm -f "$b"/img.*
+rm -f "$b"/img-m.*
 run bash "$script" "$a" "$b"
 check "both SHA256SUMS empty" 1 "no artefact to compare: both SHA256SUMS are empty" "$a" "$b"
 noinfo "both SHA256SUMS empty"
@@ -183,6 +183,34 @@ mk "$b"
 run bash "$script" "$a" "$b"
 check "one SHA256SUMS empty, the other populated" 1 "only in $b"
 noinfo "one SHA256SUMS empty"
+
+# A target with only a bmap, manifest and SBOM (identical in both) is no image.
+for d in "$a" "$b"; do
+	mk "$d"
+	rm "$d"/img-m.*
+	echo bmap >"$d/img-m.rootfs-20261123000001.wic.bmap"
+	echo mf >"$d/img-m.rootfs-20261123000001.manifest"
+	echo spdx >"$d/img-m.rootfs-20261123000001.spdx.json"
+	(cd "$d" && sha256sum -- img-m.* >SHA256SUMS)
+done
+run bash "$script" "$a" "$b"
+check "metadata only, no image: fails" 1 "no wic or rootfs image listed for target img"
+# A requested debug target with no image at all, though the production one has.
+for d in "$a" "$b"; do
+	mk "$d"
+	printf '%s\n' "# build-info" "machine=m" "targets=img img-debug" "SOURCE_DATE_EPOCH=1700000000" \
+		"layer_x_commit=def" >"$d/build-info.txt"
+done
+run bash "$script" "$a" "$b"
+check "a requested target with no image: fails" 1 "no wic or rootfs image listed for target img-debug"
+# An empty targets= line.
+for d in "$a" "$b"; do
+	mk "$d"
+	printf '%s\n' "# build-info" "machine=m" "targets=" "SOURCE_DATE_EPOCH=1700000000" \
+		"layer_x_commit=def" >"$d/build-info.txt"
+done
+run bash "$script" "$a" "$b"
+check "empty targets=: fails" 1 "targets= is empty or missing"
 
 run bash "$script" "$a"
 check "a missing argument" 2 "need exactly two output directories"

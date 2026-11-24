@@ -63,6 +63,15 @@ for t in "$@"; do
 		ts=$((20261123000000 + seq))
 	fi
 	b="$t-$BB_MACHINE.rootfs-$ts"
+	# BB_SKIP=<target>: that target leaves nothing. BB_META=<target>: only a
+	# bmap, a manifest and an SBOM, no wic or rootfs image.
+	[ "${BB_SKIP:-}" != "$t" ] || continue
+	if [ "${BB_META:-}" = "$t" ]; then
+		echo bmap-$t >"$d/$b.wic.bmap"
+		echo mf-$t >"$d/$b.manifest"
+		echo spdx-$t >"$d/$b.spdx.json"
+		continue
+	fi
 	echo wic-$t >"$d/$b.wic.zst"
 	echo tar-$t >"$d/$b.tar.zst"
 	echo ext4-$t >"$d/$b.ext4"
@@ -155,10 +164,21 @@ check "a failing bitbake fails the script" nonzero
 expect "a failing bitbake leaves no artefacts" test ! -e "$tmp/out"
 rm -rf "$tmp/d" "$tmp/out"
 BB_NOART=1 brun "$stub:$tools"
-check "no artefacts: fails" nonzero "left no wic or rootfs artefact"
+check "no artefacts: fails" nonzero "left no wic or rootfs image for trusted-imx95-image"
 rm -rf "$tmp/d" "$tmp/out"
 BB_NOSPDX=1 brun "$stub:$tools"
 check "no SBOM: fails and names the target" nonzero "no SPDX SBOM" "trusted-imx95-image"
+
+# A target with only a bmap, manifest and SBOM, or with nothing, is no image.
+rm -rf "$tmp/d" "$tmp/out"
+BB_META=trusted-imx95-image brun "$stub:$tools"
+check "production target with metadata only: fails" nonzero "no wic or rootfs image for trusted-imx95-image"
+rm -rf "$tmp/d" "$tmp/out"
+PI_DEBUG=1 BB_META=trusted-imx95-image-debug brun "$stub:$tools"
+check "debug target with metadata only: fails" nonzero "no wic or rootfs image for trusted-imx95-image-debug"
+rm -rf "$tmp/d" "$tmp/out"
+PI_DEBUG=1 BB_SKIP=trusted-imx95-image-debug brun "$stub:$tools"
+check "debug target missing: fails" nonzero "no wic or rootfs image for trusted-imx95-image-debug"
 
 # An existing conf that differs is refused, unless forced.
 rm -rf "$tmp/d" "$tmp/out"

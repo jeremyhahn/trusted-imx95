@@ -282,13 +282,16 @@ for t in $targets; do
 		*.manifest) ;;
 		# Yocto names the rootfs ".rootfs-<timestamp>.<ext>" (IMAGE_NAME with
 		# IMAGE_VERSION_SUFFIX); the older ".rootfs.<ext>" form matches too.
+		# A bmap alone is metadata, not an image: it does not count.
+		*.wic.bmap) ;;
 		*.wic* | *.rootfs*) t_img=1 ;;
 		*) continue ;;
 		esac
 		cp "$f" "$out/"
 		n=$((n + 1))
 	done
-	[ "$t_img" -eq 0 ] || [ "$t_spdx" -eq 1 ] || die "the build left no SPDX SBOM (.spdx.json) for $t"
+	[ "$t_img" -eq 1 ] || die "the build left no wic or rootfs image for $t (a bmap, manifest or SBOM alone is not an image)"
+	[ "$t_spdx" -eq 1 ] || die "the build left no SPDX SBOM (.spdx.json) for $t"
 done
 [ "$n" -gt 0 ] || die "the build left no wic or rootfs artefact for: $targets"
 (cd "$out" && sha256sum -- * >SHA256SUMS)
