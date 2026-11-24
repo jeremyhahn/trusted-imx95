@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum ele_cli_op { ELE_CLI_GEN, ELE_CLI_SIGN, ELE_CLI_DEL, ELE_CLI_IMPORT };
+enum ele_cli_op { ELE_CLI_GEN, ELE_CLI_SIGN, ELE_CLI_DEL };
 
 struct ele_cli_cmd {
 	bool split_confirmed;	/* --split-confirmed: the caller confirmed the counter split on the device */
@@ -21,14 +21,13 @@ struct ele_cli_cmd {
 	enum ele_cli_op op;
 	uint32_t key_id;
 	const char *msg;
-	const char *blob_path;	/* import: the file holding the already wrapped blob */
 };
 
 /* Decimal digits, or 0x and hex digits. No sign, no space, no trailing
  * character, no overflow, at most UINT32_MAX. Returns 0 or -1. */
 int ele_parse_u32(const char *s, uint32_t *out);
 
-/* ele_client [--split-confirmed] [--raw] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del <key-id> | import <blob-file>.
+/* ele_client [--split-confirmed] [--raw] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del <key-id>.
  * --raw is for sign only. Returns 0 or -1; nothing is opened here. */
 int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd);
 

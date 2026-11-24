@@ -11,9 +11,6 @@ struct ele_fake {
 	uint32_t ks_mode;	/* key store open: 1 = the process dies of SIGKILL, 2 = exits 3; 3 and 4 the same inside the generate/delete update call */
 	uint32_t gen_flags, gen_key_type, gen_calls;
 	uint32_t del_flags, del_key, del_calls;
-	uint32_t imp_flags, imp_calls, imp_len;	/* the import record: flags, call count, blob length seen */
-	uint32_t imp_sum;		/* FNV-1a of the blob bytes the import call saw */
-	uint8_t imp_head[8];		/* its first bytes */
 	uint32_t sign_calls;
 	uint32_t sign_exp_size;	/* exp_signature_size the double reports ... */
 	bool sign_exp_set;	/* ... when set; otherwise 64 */

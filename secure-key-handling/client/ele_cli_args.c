@@ -88,11 +88,6 @@ int ele_cli_parse(int argc, char **argv, struct ele_cli_cmd *cmd)
 		cmd->op = ELE_CLI_DEL;
 		if (ele_parse_u32(argv[4], &cmd->key_id) != 0)
 			return -1;
-	} else if (!strcmp(argv[3], "import") && argc == 5) {
-		cmd->op = ELE_CLI_IMPORT;
-		if (argv[4][0] == '\0')
-			return -1;
-		cmd->blob_path = argv[4];
 	} else {
 		return -1;
 	}

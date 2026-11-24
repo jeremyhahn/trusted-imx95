@@ -74,20 +74,6 @@ static uint8_t gen_flags(uint32_t f)
 	return o;
 }
 
-/* The request flags of the client, mapped to the import call's. The input is
- * always the ELE TLV form (bit 0 clear) with an automatic key group: a wrapped
- * blob, never a clear key. */
-static uint8_t imp_flags(uint32_t f)
-{
-	uint8_t o = HSM_OP_IMPORT_KEY_INPUT_ELE_TLV | HSM_OP_IMPORT_KEY_FLAGS_AUTOMATIC_GROUP;
-
-	if (f & ELE_REQ_STRICT_OPERATION)
-		o |= HSM_OP_IMPORT_KEY_FLAGS_STRICT_OPERATION;
-	if (f & ELE_REQ_MONOTONIC_COUNTER)
-		o |= HSM_OP_IMPORT_KEY_FLAGS_MONOTONIC_COUNTER_INCREMENT;
-	return o;
-}
-
 /* Fill the acknowledgement from the library's return code. A counter warning
  * (HSM_KEY_STORE_COUNTER) means the update was accepted without the counter
  * advancing: the strict operation is acknowledged, the counter flag is not. */
@@ -118,7 +104,7 @@ static bool fill_ack(hsm_err_t err, uint32_t sent, bool split, struct ele_ack *a
  * session, open the key store with the nonce, do the operation, close
  * everything, write this fixed-size result to the parent, _exit. The parent
  * holds no session or key-store handle and calls the vendor library never. */
-enum op_kind { OP_GEN = 1, OP_SIGN, OP_DEL, OP_IMP };
+enum op_kind { OP_GEN = 1, OP_SIGN, OP_DEL };
 
 struct op_req {
 	enum op_kind kind;
@@ -237,35 +223,7 @@ static int hsm_del(void *p, uint32_t flags, uint32_t key_id, struct ele_ack *ack
 	return 0;
 }
 
-/* Import a wrapped blob: the same prechecks as generate (split confirmed), a
- * bounded non-empty blob, then one forked child runs the update. */
-static int hsm_import(void *p, uint32_t flags, const uint8_t *blob, size_t blob_len,
-		      uint32_t *key_id, struct ele_ack *ack)
-{
-	struct ele_hsm_ctx *c = p;
-	struct op_req rq;
-	struct op_res r;
-	int rc;
-
-	if (!c->open || !blob || blob_len == 0 || blob_len > ELE_IMPORT_MAX_BLOB)
-		return -1;
-	if (!c->counter_split_confirmed)
-		return -1;
-	memset(&rq, 0, sizeof(rq));
-	rq.kind = OP_IMP;
-	rq.flags = flags;
-	rq.msg = blob;
-	rq.msg_len = blob_len;
-	rq.split = c->counter_split_confirmed;
-	rc = run_op(c, &rq, &r);
-	if (rc != 0)
-		return rc == ELE_OP_UNKNOWN ? ELE_OP_UNKNOWN : -1;
-	ack_from_res(&r, ack);
-	*key_id = r.key_id;
-	return 0;
-}
-
-const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del, hsm_import };
+const struct ele_ops ele_hsm_ops = { hsm_generate, hsm_sign, hsm_del };
 
 /* The service step of the child: open the service, run the one operation,
  * close the service. res->status stays -1 unless the answer is valid. */
@@ -353,25 +311,6 @@ static void op_service(const struct op_req *rq, hsm_hdl_t store, struct op_res *
 			if (err == HSM_NO_ERROR && id != 0 && fill_ack(err, rq->flags, rq->split, &ack)) {
 				res_ack(res, &ack);
 				res->key_id = id;
-				res->status = 0;
-			}
-		} else if (rq->kind == OP_IMP) {
-			op_import_key_args_t a;
-			hsm_err_t err;
-
-			memset(&a, 0, sizeof(a));
-			a.input_lsb_addr = (uint8_t *)rq->msg;
-			a.input_size = (uint32_t)rq->msg_len;
-			a.flags = imp_flags(rq->flags);
-			a.key_group = 0;
-			mark_started(wfd);
-			err = hsm_import_key(svc, &a);
-			/* As for generate: a success reply with the identifier left
-			 * at zero names no key (unknown outcome). */
-			if (err == HSM_NO_ERROR && a.key_identifier != 0 &&
-			    fill_ack(err, rq->flags, rq->split, &ack)) {
-				res_ack(res, &ack);
-				res->key_id = a.key_identifier;
 				res->status = 0;
 			}
 		} else {

@@ -189,29 +189,6 @@ hsm_err_t hsm_delete_key(hsm_hdl_t key_management_hdl, op_delete_key_args_t *arg
 	return env_err();
 }
 
-/* Import: records the flags, the call and the blob it saw; the result is
- * ELE_FAKE_ERR (0 = HSM_NO_ERROR, 0x10 = HSM_KEY_STORE_COUNTER, other = error)
- * and ELE_FAKE_ID_ZERO as for generate; ks_mode 3 and 4 die inside the call. */
-hsm_err_t hsm_import_key(hsm_hdl_t key_management_hdl, op_import_key_args_t *args)
-{
-	uint32_t i, h = 2166136261u;
-
-	update_dies();
-	(void)key_management_hdl;
-	fake.imp_flags = args->flags;
-	fake.imp_len = args->input_size;
-	for (i = 0; i < args->input_size; i++) {
-		h = (h ^ args->input_lsb_addr[i]) * 16777619u;
-		if (i < sizeof(fake.imp_head))
-			fake.imp_head[i] = args->input_lsb_addr[i];
-	}
-	fake.imp_sum = h;
-	fake.imp_calls++;
-	args->key_identifier = getenv("ELE_FAKE_ID_ZERO") ? 0 : 9;
-	note("import flags=0x%x len=%u sum=%08x", (unsigned)args->flags, (unsigned)args->input_size, (unsigned)h);
-	return env_err();
-}
-
 hsm_err_t hsm_generate_signature(hsm_hdl_t signature_gen_hdl, op_generate_sign_args_t *args)
 {
 	uint32_t i;

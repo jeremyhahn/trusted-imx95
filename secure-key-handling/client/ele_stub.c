@@ -45,22 +45,4 @@ static int stub_del(void *ctx, uint32_t flags, uint32_t key_id, struct ele_ack *
 	return 0;
 }
 
-static int stub_import(void *ctx, uint32_t flags, const uint8_t *blob, size_t blob_len, uint32_t *key_id,
-		       struct ele_ack *ack)
-{
-	struct ele_stub *s = ctx;
-	size_t i;
-
-	s->imp_calls++;
-	if (s->fail)
-		return s->fail == 2 ? ELE_OP_UNKNOWN : -1;
-	s->imp_len = blob_len;
-	for (i = 0; i < blob_len && i < sizeof(s->imp_head); i++)
-		s->imp_head[i] = blob[i];
-	fill_ack(s, flags, ack);
-	*key_id = ++s->next_id;
-	s->live++;
-	return 0;
-}
-
-const struct ele_ops ele_stub_ops = { stub_generate, stub_sign, stub_del, stub_import };
+const struct ele_ops ele_stub_ops = { stub_generate, stub_sign, stub_del };

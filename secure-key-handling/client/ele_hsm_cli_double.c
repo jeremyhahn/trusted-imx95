@@ -50,19 +50,7 @@ static int dbl_del(void *ctx, uint32_t flags, uint32_t key_id, struct ele_ack *a
 	return 0;
 }
 
-static int dbl_import(void *ctx, uint32_t flags, const uint8_t *blob, size_t blob_len, uint32_t *key_id,
-		      struct ele_ack *ack)
-{
-	struct ele_hsm_ctx *x = ctx;
-
-	(void)blob;
-	(void)blob_len;
-	ack_all(flags, x->counter_split_confirmed, ack);
-	*key_id = 9;
-	return 0;
-}
-
-const struct ele_ops ele_hsm_ops = { dbl_generate, dbl_sign, dbl_del, dbl_import };
+const struct ele_ops ele_hsm_ops = { dbl_generate, dbl_sign, dbl_del };
 
 int ele_hsm_open(struct ele_hsm_ctx *c, uint32_t key_store_id, uint32_t *nonce)
 {

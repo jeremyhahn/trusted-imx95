@@ -81,36 +81,6 @@ int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *st
 	return 0;
 }
 
-int ele_import_key(struct ele_client *c, const uint8_t *blob, size_t blob_len, uint32_t *key_id,
-		   enum ele_commit *state)
-{
-	struct ele_ack ack = { 0 };
-	uint32_t id = 0;
-	int rc;
-
-	if (!c || !c->ops || !c->ops->import || !key_id || !state)
-		return -1;
-	*state = ELE_NOT_COMMITTED;
-	*key_id = 0;
-	if (!blob || blob_len == 0 || blob_len > ELE_IMPORT_MAX_BLOB)
-		return -1;
-	rc = c->ops->import(c->ctx, c->flags, blob, blob_len, &id, &ack);
-	if (rc == ELE_OP_UNKNOWN) {
-		*state = ELE_OUTCOME_UNKNOWN;
-		return -1;
-	}
-	if (rc != 0)
-		return -1;
-	*state = ele_classify(c->flags, &ack);
-	/* As for generate: an accepted import leaves a key even when the update
-	 * is refused, so its identifier is returned with the failure. */
-	if (*state != ELE_NOT_COMMITTED)
-		*key_id = id;
-	if (!ele_update_ok(c->flags, &ack, *state))
-		return -1;
-	return 0;
-}
-
 int ele_sign(struct ele_client *c, uint32_t key_id, const uint8_t *msg, size_t msg_len,
 	     uint8_t *sig, size_t *sig_len)
 {

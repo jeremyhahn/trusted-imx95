@@ -60,15 +60,7 @@ struct ele_ops {
 	int (*sign)(void *ctx, uint32_t key_id, const uint8_t *msg, size_t msg_len,
 		    uint8_t *sig, size_t *sig_len);
 	int (*del)(void *ctx, uint32_t flags, uint32_t key_id, struct ele_ack *ack);
-	/* Import an already wrapped key blob (opaque bytes, never a clear key).
-	 * Last member: an ops table that leaves it NULL has no import. */
-	int (*import)(void *ctx, uint32_t flags, const uint8_t *blob, size_t blob_len,
-		      uint32_t *key_id, struct ele_ack *ack);
 };
-
-/* The largest wrapped blob the import accepts; a larger or empty one is
- * refused before any HSM call. PROVISIONAL: a bound of this client. */
-#define ELE_IMPORT_MAX_BLOB 4096u
 
 struct ele_client {
 	const struct ele_ops *ops;
@@ -83,15 +75,6 @@ void ele_client_init(struct ele_client *c, const struct ele_ops *ops, void *ctx)
  * the library. No generate succeeds through the shipped backend until the
  * owner answers the counter-acknowledgement question (fail closed, client.md). */
 int ele_generate_key(struct ele_client *c, uint32_t *key_id, enum ele_commit *state);
-/* Import an already wrapped blob through the same commit policy as generate:
- * both request flags sent, success only with ELE_ROLLBACK_PROTECTED. One flag
- * acknowledged, a counter warning or an unconfirmed split fails with *state
- * set and the key id kept. A lost or error result after the update started is
- * ELE_OP_UNKNOWN and ELE_OUTCOME_UNKNOWN. The only key bytes crossing this
- * interface are the wrapped blob; there is no plaintext-key flag. An empty
- * blob or one over ELE_IMPORT_MAX_BLOB fails before any call. */
-int ele_import_key(struct ele_client *c, const uint8_t *blob, size_t blob_len, uint32_t *key_id,
-		   enum ele_commit *state);
 int ele_sign(struct ele_client *c, uint32_t key_id, const uint8_t *msg, size_t msg_len,
 	     uint8_t *sig, size_t *sig_len);
 /* Delete a key. The library's delete has the strict-operation flag and no

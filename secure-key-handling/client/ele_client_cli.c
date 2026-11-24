@@ -21,27 +21,9 @@
  * question open): see docs/secure-key-handling/client.md. */
 #define CTR_REASON "the pinned library cannot prove the monotonic-counter acknowledgement (fail closed)"
 
-/* Read the whole wrapped blob: 1 to ELE_IMPORT_MAX_BLOB bytes, read in full.
- * Returns the length, or -1 for an unreadable, empty or over-long file. The
- * blob is opaque and already wrapped; nothing here parses or prints it. */
-static long read_blob(const char *path, uint8_t *buf)
-{
-	FILE *f = fopen(path, "rb");
-	size_t n;
-	long ret = -1;
-
-	if (!f)
-		return -1;
-	n = fread(buf, 1, ELE_IMPORT_MAX_BLOB + 1, f);
-	if (!ferror(f) && n >= 1 && n <= ELE_IMPORT_MAX_BLOB)
-		ret = (long)n;
-	fclose(f);
-	return ret;
-}
-
 static int usage(void)
 {
-	fprintf(stderr, "usage: ele_client [--split-confirmed] [--raw] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del <key-id> | import <blob-file>\n"
+	fprintf(stderr, "usage: ele_client [--split-confirmed] [--raw] <store-id> <nonce-fd> gen | sign <key-id> <msg> | del <key-id>\n"
 			"       the nonce is read from that file descriptor (e.g. 3<nonce-file), never from arguments\n");
 	return 2;
 }
@@ -55,8 +37,6 @@ int main(int argc, char **argv)
 	struct ele_nonce_slot *slot;
 	uint32_t id = 0;
 	uint8_t sig[128] = { 0 };
-	uint8_t blob[ELE_IMPORT_MAX_BLOB];
-	size_t blob_len = 0;
 	size_t n = sizeof(sig), i;
 	int rc = 1;
 
@@ -89,24 +69,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "ele_client: generate refused: the counter split is not confirmed (--split-confirmed); failed\n");
 		return 1;
 	}
-	/* An import on an unconfirmed split, or with a blob that is empty, over
-	 * the cap or not readable in full, is refused here: no credential read,
-	 * no HSM call. */
-	if (cmd.op == ELE_CLI_IMPORT) {
-		long bl;
-
-		if (!cmd.split_confirmed) {
-			fprintf(stderr, "ele_client: import refused: the counter split is not confirmed (--split-confirmed); failed\n");
-			return 1;
-		}
-		bl = read_blob(cmd.blob_path, blob);
-		if (bl < 0) {
-			fprintf(stderr, "ele_client: import refused: the blob file is unreadable, empty or over %u bytes; failed\n",
-				(unsigned)ELE_IMPORT_MAX_BLOB);
-			return 1;
-		}
-		blob_len = (size_t)bl;
-	}
 	/* Locked storage first: when it cannot be locked the credential is never read. */
 	rc = ele_cli_open_nonce(cmd.nonce_fd, &slot);
 	if (rc == ELE_CLI_NONCE_NOLOCK) {
@@ -138,15 +100,6 @@ int main(int argc, char **argv)
 		if (rc == 0 && (printf("key %u %s\n", id, ele_commit_name(st)) < 0 || fflush(stdout) != 0)) {
 			/* The key exists whatever stdout did: name it on stderr. */
 			fprintf(stderr, "ele_client: cannot write the result; key %u was generated, commit state %s\n",
-				id, ele_commit_name(st));
-			rc = 1;
-			goto done;
-		}
-		break;
-	case ELE_CLI_IMPORT:
-		rc = ele_import_key(&cl, blob, blob_len, &id, &st) == 0 ? 0 : 1;
-		if (rc == 0 && (printf("key %u %s\n", id, ele_commit_name(st)) < 0 || fflush(stdout) != 0)) {
-			fprintf(stderr, "ele_client: cannot write the result; key %u was imported, commit state %s\n",
 				id, ele_commit_name(st));
 			rc = 1;
 			goto done;
@@ -189,7 +142,7 @@ int main(int argc, char **argv)
 	if (rc != 0 && st == ELE_OUTCOME_UNKNOWN) {
 		fprintf(stderr, "ele_client: outcome unknown (%s): the result of the %s was lost after it started; the key store may have changed. Check the key store before any retry; nothing was retried\n",
 			ele_commit_name(st),
-			cmd.op == ELE_CLI_GEN ? "generate" : cmd.op == ELE_CLI_IMPORT ? "import" : "delete");
+			cmd.op == ELE_CLI_GEN ? "generate" : "delete");
 		rc = 3;
 		goto done;
 	}
@@ -198,9 +151,6 @@ int main(int argc, char **argv)
 		/* The key exists but the update was refused: name it so it can be
 		 * reconciled or deleted. Not a protected key. */
 		fprintf(stderr, "ele_client: update refused (%s); key %u was generated and is NOT rollback-protected: reconcile or delete it; %s\n",
-			ele_commit_name(st), id, CTR_REASON);
-	else if (rc != 0 && cmd.op == ELE_CLI_IMPORT && st != ELE_NOT_COMMITTED && id != 0)
-		fprintf(stderr, "ele_client: update refused (%s); key %u was imported and is NOT rollback-protected: reconcile or delete it; %s\n",
 			ele_commit_name(st), id, CTR_REASON);
 	else if (rc != 0 && cmd.op == ELE_CLI_DEL && st != ELE_NOT_COMMITTED)
 		/* Every key-store update fails closed: the counter acknowledgement
