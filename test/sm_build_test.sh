@@ -157,6 +157,41 @@ check "perf: the only PERF_M7 line in another agent's record fails" 1 "is not in
 run "$ROOT/scripts/sm-perf-check.sh"
 check "perf: no argument fails with usage" 1 "usage: sm-perf-check.sh"
 
+# sm-perf-placement-check.sh: a PERF_M7 PRIV line in the M7 API list, or right
+# after `M7P OWNER`, on scratch copies of a built tree. The fake tree's `make
+# cfg` writes the M7 record's PERF_M7 line from the .cfg: the last PERF_M7 or
+# M7P line wins, as the survey says the real tool does.
+pt="$TMP_ROOT/pt"
+mkdir -p "$pt/tree/configs/other"
+printf 'LM0 name="SM"\nM7P OWNER\nLM1 name="M7"\n# API\n\nSYS ALL\n\n# Resources\n\nM7P                 OWNER  # CPUs first\nLPIT1 OWNER\nLM2 name="AP"\n' >"$pt/tree/configs/other/fakepro.cfg"
+# shellcheck disable=SC2016 # make's $(...) and the shell's, in the fake
+printf '%s\n' 'cfg:' \
+	'	mkdir -p configs/$(config) && p=ALL; while read -r a b _; do [ "$$a" != PERF_M7 ] || p=$$b; [ "$$a" != M7P ] || p=ALL; done < configs/other/$(config).cfg; printf "/* SCMI AGENT0 Config (M7) */\n    .perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_$$p,\n" > configs/$(config)/config_scmi.h' \
+	>"$pt/tree/Makefile"
+printf 'sm_config=fakepro\nsm_config_file=configs/other/fakepro.cfg\n' >"$pt/lock"
+pc="$ROOT/scripts/sm-perf-placement-check.sh"
+cfg_before=$(sha256sum "$pt/tree/configs/other/fakepro.cfg" | cut -d' ' -f1)
+run env SM_LOCK="$pt/lock" bash "$pc" "$pt/tree"
+check "placement: the API line leaves ALL, the line after M7P OWNER gives PRIV" 0 "api variant: M7 PERF_M7=ALL" "res variant: M7 PERF_M7=PRIV" "sm-perf-placement-check: OK"
+expect "placement: the input tree's .cfg is unchanged" has_line "$cfg_before  $pt/tree/configs/other/fakepro.cfg" <(sha256sum "$pt/tree/configs/other/fakepro.cfg")
+expect "placement: the input tree has no config_scmi.h" [ ! -e "$pt/tree/configs/fakepro/config_scmi.h" ]
+expect "placement: the scratch copies are removed" [ -z "$(find "$pt" -maxdepth 1 -name 'placement-*')" ]
+printf 'LM1 name="M7"\n# API\nSYS ALL\n\n# Resources\n\nLPIT1 OWNER\n' >"$pt/tree/configs/other/fakepro.cfg"
+run env SM_LOCK="$pt/lock" bash "$pc" "$pt/tree"
+check "placement: a missing M7P OWNER anchor fails closed" nonzero "anchor for the res variant missing"
+printf 'LM1 name="M7"\nSYS ALL\nM7P OWNER\n' >"$pt/tree/configs/other/fakepro.cfg"
+run env SM_LOCK="$pt/lock" bash "$pc" "$pt/tree"
+check "placement: a missing Resources header fails closed" nonzero "no API header in the M7 block"
+printf 'LM2 name="AP"\n' >"$pt/tree/configs/other/fakepro.cfg"
+run env SM_LOCK="$pt/lock" bash "$pc" "$pt/tree"
+check "placement: no M7 block fails closed" nonzero "no M7 LM block"
+run bash "$pc"
+check "placement: no argument fails with usage" 1 "usage: sm-perf-placement-check.sh"
+run "$ROOT/scripts/sm-perf-check.sh" --want PRIV "$repo/configs/other/perf-good.h"
+check "placement: sm-perf-check.sh --want PRIV rejects an ALL table" 1 "is not PRIV"
+run "$ROOT/scripts/sm-perf-check.sh" --want ALL "$repo/configs/other/perf-good.h"
+check "placement: sm-perf-check.sh --want ALL is the default" 0 "M7 PERF_M7=ALL"
+
 lock sm_config_sha256=0000000000000000000000000000000000000000000000000000000000000000
 run env SM_OUT="$out" bash "$sm" "$TMP_ROOT/lock"
 check "a changed configuration fails" nonzero "configs/other/fakepro.cfg SHA-256 is $cfg_sha"

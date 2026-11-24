@@ -25,7 +25,15 @@ die() {
 	exit 1
 }
 
-[ $# -eq 1 ] || die "usage: sm-perf-check.sh <generated config_scmi.h>"
+# --want <ALL|PRIV|...> as the first arguments overrides it:
+# scripts/sm-perf-placement-check.sh asks for the value a scratch variant should
+# produce. The default, which sm-build.sh uses, is unchanged.
+if [ "${1:-}" = "--want" ]; then
+	[ $# -ge 2 ] && [[ $2 =~ ^[A-Z]+$ ]] || die "usage: sm-perf-check.sh [--want <ALL|PRIV|...>] <generated config_scmi.h>"
+	want_perm=SM_SCMI_PERM_$2
+	shift 2
+fi
+[ $# -eq 1 ] || die "usage: sm-perf-check.sh [--want <ALL|PRIV|...>] <generated config_scmi.h>"
 f=$1
 [ -r "$f" ] && [ -f "$f" ] || die "cannot read ${f##*/}"
 
