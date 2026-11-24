@@ -133,7 +133,7 @@ set -- "${a[@]}"
 v=$2 id=${3:-}
 case " ${FAKE_CTL_FAIL:-} " in *" $v "*) echo "error: $v failed" >&2; exit 1 ;; esac
 case $v in
-generate) : >"$k/$id" ;;
+generate) (set -o noclobber; : >"$k/$id") 2>/dev/null ;; # one create of an id wins
 list) ls "$k" ;;
 get) [ -e "$k/$id" ] && echo "{\"id\":\"$id\"}" ;;
 delete) [ -e "$k/$id" ] && rm -f "$k/$id" ;;
@@ -450,6 +450,26 @@ else
 	fail "hard reboot" "lib.sh does not keep sysrq inside XKMS_FAKE_ROOT; not run"
 fi
 unset XKMS_KILL_WAIT XKMS_REBOOT_WAIT
+
+# --- concurrency.sh counts failed signs ----------------------------------------
+CC() { # CC <log> [<FAKE_CTL_FAIL>]: concurrency.sh, 3 clients, 1 round; set RC
+	rm -rf "$tmp/kms" "$tmp/bi"
+	mkdir -p "$tmp/kms" "$tmp/bi"
+	echo active >"$R/run/state"
+	set +e
+	FAKE_CTL_FAIL=${2:-} FAKE_KMS=$tmp/kms XKMS_CTL=xkmsctl XKMS_WORK=$tmp/bi \
+		"$here/scripts/xkms/burnin/concurrency.sh" --clients 3 --rounds 1 board.invalid >"$1" 2>&1
+	RC=$?
+	set -e
+}
+CC "$tmp/cc-ok.log"
+ok "concurrency: all signs verify, PASS" [ "$RC" = 0 ]
+CC "$tmp/cc-fail.log" sign
+ok "concurrency: every sign request fails, FAIL" [ "$RC" != 0 ]
+ok "concurrency: the failed signs are counted" out_has "$tmp/cc-fail.log" "(3 failed)"
+CC "$tmp/cc-bad.log" badsig
+ok "concurrency: answers without a signature, FAIL" [ "$RC" != 0 ]
+ok "concurrency: no client verified" out_has "$tmp/cc-bad.log" "(0 of 3)"
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do

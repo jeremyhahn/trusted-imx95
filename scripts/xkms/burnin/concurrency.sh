@@ -80,14 +80,24 @@ for ((r = 1; r <= rounds; r++)); do
 	rm -f "$BI_WORK"/cc.*sign.*
 	for ((c = 1; c <= clients; c++)); do
 		(
-			j=$(bi_ctl -o json key sign "$id" "cc-$r-$c" 2>/dev/null) || exit 0
-			s=$(bi_jget "$j" signature) || exit 0
-			bi_ctl key verify "$id" "cc-$r-$c" "$s" >/dev/null 2>&1 || touch "$BI_WORK/cc.badsign.$c"
+			# a failed request or an answer without a signature is a failure too:
+			# the parent needs one verified signature from every client
+			j=$(bi_ctl -o json key sign "$id" "cc-$r-$c" 2>/dev/null) || { touch "$BI_WORK/cc.failsign.$c"; exit 0; }
+			s=$(bi_jget "$j" signature) && [ -n "$s" ] || { touch "$BI_WORK/cc.failsign.$c"; exit 0; }
+			if bi_ctl key verify "$id" "cc-$r-$c" "$s" >/dev/null 2>&1; then
+				touch "$BI_WORK/cc.oksign.$c"
+			else
+				touch "$BI_WORK/cc.badsign.$c"
+			fi
 		) &
 	done
 	wait
+	failed=$(find "$BI_WORK" -maxdepth 1 -name 'cc.failsign.*' | wc -l)
 	bad=$(find "$BI_WORK" -maxdepth 1 -name 'cc.badsign.*' | wc -l)
-	bi_check "round $r: every concurrent signature verifies" [ "$bad" -eq 0 ]
+	good=$(find "$BI_WORK" -maxdepth 1 -name 'cc.oksign.*' | wc -l)
+	bi_check "round $r: every concurrent sign request answered with a signature ($failed failed)" [ "$failed" -eq 0 ]
+	bi_check "round $r: every concurrent signature verifies ($bad do not)" [ "$bad" -eq 0 ]
+	bi_check "round $r: one verified signature per client ($good of $clients)" [ "$good" -eq "$clients" ]
 
 	rm -f "$BI_WORK"/cc.del.*
 	for ((c = 1; c <= clients; c++)); do
