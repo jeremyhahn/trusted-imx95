@@ -23,7 +23,7 @@ mode=plain
 printf 'int main(void){return 0;}\n' >"$TMP_ROOT/probe.c"
 if cc "${cflags[@]}" -fsanitize=address,undefined "$TMP_ROOT/probe.c" -o "$TMP_ROOT/probe" >/dev/null 2>&1 &&
 	"$TMP_ROOT/probe" >/dev/null 2>&1; then
-	cflags+=(-fsanitize=address,undefined -fno-sanitize-recover=undefined)
+	cflags+=("-fsanitize=address,undefined" -fno-sanitize-recover=undefined)
 	mode=sanitized
 fi
 echo "hsd_a55: compiler flags: ${cflags[*]} ($mode)"
@@ -40,12 +40,14 @@ build_run() {
 }
 
 build_run tamper_event_test "$src" "$src/tamper_event_test.c" "$src/tamper_event.c"
+build_run quarantine_test "$src" "$src/quarantine_test.c" "$src/quarantine.c" "$src/tamper_event.c"
 
 # Every hex vector of the note appears in the parser test (and the state
 # machine test, when it carries them).
 vectors=0
 missing=
 testtxt=$(<"$src/tamper_event_test.c")
+# shellcheck disable=SC2016 # backticks are literal in the Markdown being matched
 re='`([0-9a-f]{2}( [0-9a-f]{2})+)`'
 while IFS= read -r line; do
 	[[ $line =~ ^\|\ (V|R)[0-9]+\  ]] || continue
