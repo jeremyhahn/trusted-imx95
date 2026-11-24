@@ -160,6 +160,34 @@ sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
 run bash "$script" "$d"
 check "debug package in the debug target's manifest" 0 "OK, 5 artefacts"
 
+# A package manager in the production manifest fails; the name is matched whole.
+mk "$d"
+printf 'busybox cortexa55 1.36\nopkg cortexa55 0.7\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "opkg in the production manifest" 1 "package manager opkg is in the production manifest" "$t-$machine.rootfs-20261123000001.manifest"
+
+mk "$d"
+printf 'busybox cortexa55 1.36\nrpm cortexa55 4\ngdb cortexa55 14.2\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "rpm and a debug package" 1 "package manager rpm is in" "debug package gdb is in"
+
+mk "$d"
+printf 'busybox cortexa55 1.36\nrpm-build-tools cortexa55 4\nlibdnf-conf cortexa55 1\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "names that only contain a package manager name" 0 "OK, 3 artefacts"
+
+mk "$d"
+dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
+printf 'busybox cortexa55 1.36\nrpm cortexa55 4\n' >"$dm.manifest"
+echo spdx >"$dm.spdx.json"
+rehash
+sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
+run bash "$script" "$d"
+check "rpm in the debug target's manifest" 0 "OK, 5 artefacts"
+
 # Several problems are all named.
 mk "$d" yes
 sed -i "s/^machine=.*/machine=other/" "$info"

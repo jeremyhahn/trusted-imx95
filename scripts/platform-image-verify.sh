@@ -18,8 +18,9 @@
 #   - every target in targets= has a listed <target>-<machine>*.spdx.json;
 #   - trusted-imx95-image has a listed, non-empty .manifest naming none of the
 #     packages that IMAGE_INSTALL:append in trusted-imx95-image-debug.bb adds
-#     (read from that recipe; exit 2 if it cannot be parsed). The debug target
-#     is not checked. Provisional, pending #14; not run on real artefacts.
+#     (read from that recipe; exit 2 if it cannot be parsed), and none of the
+#     package managers rpm opkg dnf apt dpkg (a list here; whole names). The
+#     debug target is not checked. Provisional, pending #14; not run on real artefacts.
 # Exit 0 OK, 1 mismatch, 2 usage error.
 set -u
 LC_ALL=C
@@ -60,6 +61,13 @@ declare -A dbgpkg=()
 dbgline=$(sed -n 's/^IMAGE_INSTALL:append[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$debug_recipe" 2>/dev/null | head -n 1)
 for p in $dbgline; do dbgpkg[$p]=1; done
 [ "${#dbgpkg[@]}" -gt 0 ] || usage "cannot parse IMAGE_INSTALL:append in $debug_recipe"
+
+# The package managers: hardening-survey section 7 says the production image
+# has none. The debug recipe gets one through the package-management image
+# feature, not through a package name, so the recipe cannot supply this list.
+# A provisional default, pending #14; a name is matched whole.
+declare -A pmpkg=()
+for p in rpm opkg dnf apt dpkg; do pmpkg[$p]=1; done
 
 # The hash check and the unlisted-file check: the compare script's own, run
 # with OUT on both sides; each message appears twice, so keep one.
@@ -148,6 +156,7 @@ else
 					mpk=1
 					read -r pkg _ <<<"$ml"
 					[ -z "${dbgpkg[$pkg]+x}" ] || fail "$n: debug package $pkg is in the production manifest"
+					[ -z "${pmpkg[$pkg]+x}" ] || fail "$n: package manager $pkg is in the production manifest"
 				done <"$out/$n" || fail "$n: cannot read the production manifest"
 				[ "$mpk" -eq 1 ] || fail "$n: the production manifest is empty"
 			done <"$out/SHA256SUMS"
