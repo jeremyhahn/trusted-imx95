@@ -25,7 +25,7 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
    (`CFG_REE_FS=y`, `CFG_RPMB_FS=n`; the TA's `CFG_FTPM_TA_TEE_STORAGE_ID` is `TEE_STORAGE_PRIVATE_REE`). `rpmb` is the
    production selection: the NV is in the eMMC RPMB (`CFG_RPMB_FS=y`, REE FS stays on for the PKCS#11 TA and other
    objects; the TA's storage ID is `TEE_STORAGE_PRIVATE_RPMB`). Any other value stops the parse, and the debug image
-   refuses `rpmb`. In neither set does an option let OP-TEE program the RPMB key: `CFG_RPMB_WRITE_KEY=n` and
+   skips itself under `rpmb` (`bb.parse.SkipRecipe`, so every other recipe, the production image included, still parses). In neither set does an option let OP-TEE program the RPMB key: `CFG_RPMB_WRITE_KEY=n` and
    `CFG_RPMB_TESTKEY=n` are set explicitly in the `rpmb` set, so RPMB writes fail until the provisioning station has
    programmed the key after OEM close ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5 and §10). That step is
    outside this repository. **Nothing was parsed or built with `rpmb`** (no bitbake here). Under `reefs` the limits

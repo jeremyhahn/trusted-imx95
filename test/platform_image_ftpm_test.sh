@@ -673,7 +673,9 @@ expect "the TA maps rpmb to the RPMB storage ID" ncstr "$ftpm_bb" 'FTPM_TA_STORA
 expect "the TA storage ID comes from the selector" ncstr "$ftpm_bb" "CFG_FTPM_TA_TEE_STORAGE_ID=\${@d.getVarFlag('FTPM_TA_STORAGE_ID', d.getVar('$sel'))"
 expect "the TA recipe's unknown value reaches bb.fatal" ncstr "$ftpm_bb" "or bb.fatal('$sel must be reefs or rpmb"
 expect "the TA recipe defaults the selector to reefs" ncstr "$ftpm_bb" "$sel ?= \"reefs\""
-expect "the debug image refuses rpmb with bb.fatal" nc "$dbg" "bb\\.fatal\\(.*$sel = \"rpmb\""
+expect "the debug image skips itself under rpmb with SkipRecipe" nc "$dbg" "raise bb\\.parse\\.SkipRecipe\\(.*$sel = \"rpmb\""
+no_fatal() { ! nc "$1" 'bb\.fatal'; }
+expect "the debug image never calls bb.fatal (production must still parse)" no_fatal "$dbg"
 expect "the debug image tests the selector for rpmb" ncstr "$dbg" "d.getVar('$sel') == 'rpmb'"
 expect "optee-os takes the shared flags" ncstr "$os_app" 'optee-ftpm-flags.inc'
 expect "the TA dev kit takes the shared flags" ncstr "$kit_app" 'optee-ftpm-flags.inc'

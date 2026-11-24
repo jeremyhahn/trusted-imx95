@@ -31,5 +31,5 @@ IMAGE_INSTALL:append = " tpm2-tools"
 # refuses the rpmb selection of optee-ftpm-flags.inc.
 python () {
     if d.getVar('TRUSTED_IMX95_FTPM_NV') == 'rpmb':
-        bb.fatal('the debug image is for development boards only: TRUSTED_IMX95_FTPM_NV = "rpmb" (production) is refused')
+        raise bb.parse.SkipRecipe('the debug image is for development boards only: TRUSTED_IMX95_FTPM_NV = "rpmb" (production) is refused')
 }
