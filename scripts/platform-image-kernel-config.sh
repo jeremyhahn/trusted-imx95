@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# platform-image-kernel-config.sh [DIR]: the kernel configuration check of
-# platform-image/. In the build directory scripts/platform-image-parse.sh left
-# in DIR, run `bitbake linux-imx -c configure` (which merges hardening.cfg and
-# resolves dependencies), find the generated .config through
-# `bitbake -e linux-imx` (B), and check it against the required table
-# platform-image/kernel-required.txt, the one test/platform_image_kernel_test.sh
-# checks the fragment against. A required `n` holds when the symbol is "is not
-# set" or absent (unmet dependencies leave it out of .config). Needs a Yocto
-# build host and the fetched layers; it is not in CI.
-# Provisional default, pending the owner's answer on #14.
+# platform-image-kernel-config.sh [DIR]: runs bitbake linux-imx -c configure and checks the generated .config against platform-image/kernel-required.txt; needs a Yocto build host, not in CI.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)

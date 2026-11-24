@@ -36,7 +36,7 @@ Each source is cited below by its tag in square brackets.
 
 Not reached, listed as unconfirmed:
 
-- Issue #33's own text: the lane has no forge credentials, so this survey
+- Issue #33's own text: the survey has no forge credentials, so this survey
   works from the `system-manager-config` row in [SPEC.md](../SPEC.md).
 - The rendered *SM Reference Manual* (HTML or PDF). It is built from the
   doxygen sources in [SM-REPO]; it was not built here. Only the chapters named
@@ -235,7 +235,7 @@ Not reached, listed as unconfirmed:
 
    Recommendation: (a), then (b). (c) conflicts with the SPEC non-goal of not
    replacing NXP's SM.
-8. **Missing documents.** May the lane or the owner add the SM Reference
+8. **Missing documents.** May the survey or the owner add the SM Reference
    Manual (built from the pinned tag), IMX95RM and the i.MX 95 Security
    Reference Manual to `references/` or the private vendor context? Several
    open points above need them, including SM image authentication and the
