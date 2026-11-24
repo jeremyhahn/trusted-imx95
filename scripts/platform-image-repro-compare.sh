@@ -132,16 +132,50 @@ info_b=()
 readinfo() {
 	local -n arr=$1
 	local line
-	if [ ! -f "$2/build-info.txt" ]; then
-		fail "$2 has no build-info.txt"
+	local f=$2/build-info.txt sde=0 layer=0
+	if [ ! -e "$f" ]; then
+		fail "$f: missing"
 		return 1
 	fi
-	while IFS= read -r line || [ -n "$line" ]; do
-		case $line in build_seconds=*) continue ;; esac
+	if [ ! -f "$f" ]; then
+		fail "$f: not a regular file, cannot be read"
+		return 1
+	fi
+	if ! { exec 3<"$f"; } 2>/dev/null; then
+		fail "$f: cannot be read"
+		return 1
+	fi
+	while IFS= read -r line <&3 || [ -n "$line" ]; do
+		case $line in
+		build_seconds=*) continue ;;
+		SOURCE_DATE_EPOCH=?*) sde=1 ;;
+		layer_*_commit=?*) layer=1 ;;
+		esac
 		arr+=("$line")
-	done <"$2/build-info.txt"
+	done
+	exec 3<&-
+	if [ "${#arr[@]}" -eq 0 ]; then
+		fail "$f: empty"
+		return 1
+	fi
+	if [ "$sde" -eq 0 ]; then
+		fail "$f: no SOURCE_DATE_EPOCH= line with a value"
+		return 1
+	fi
+	if [ "$layer" -eq 0 ]; then
+		fail "$f: no layer_<name>_commit= line with a value"
+		return 1
+	fi
 }
-if readinfo info_a "${dirs[0]}" && readinfo info_b "${dirs[1]}"; then
+# Both are read even when the first fails, so each bad file is named; a failed
+# read can never skip the comparison and still print OK.
+ok_a=0
+ok_b=0
+readinfo info_a "${dirs[0]}" && ok_a=1
+readinfo info_b "${dirs[1]}" && ok_b=1
+if [ "$ok_a$ok_b" != 11 ]; then
+	[ "$bad" -ne 0 ] || fail "build-info.txt could not be read"
+else
 	total=${#info_a[@]}
 	[ "${#info_b[@]}" -ge "$total" ] || total=${#info_b[@]}
 	i=0

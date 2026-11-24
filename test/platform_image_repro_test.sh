@@ -83,6 +83,51 @@ printf 'layer_y_commit=zzz\n' >>"$b/build-info.txt"
 run bash "$script" "$a" "$b"
 check "build-info has an extra line" 1 "build-info.txt has"
 
+# build-info.txt that cannot be read or lacks a required key fails the compare
+# (it never skips the metadata comparison and prints OK).
+noinfo() { expect "$1: no OK printed" test "${OUT##*OK*}" = "$OUT"; }
+mk "$a"
+mk "$b"
+rm "$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt missing" 1 "$b/build-info.txt: missing"
+noinfo "build-info.txt missing"
+mkdir "$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt is a directory" 1 "$b/build-info.txt: not a regular file"
+noinfo "build-info.txt is a directory"
+mk "$b"
+chmod 000 "$b/build-info.txt"
+if [ "$(id -u)" -eq 0 ]; then
+	echo "SKIP: build-info.txt chmod 000 (running as root, chmod cannot deny the read; the directory case covers the path)"
+else
+	run bash "$script" "$a" "$b"
+	check "build-info.txt unreadable" 1 "$b/build-info.txt: cannot be read"
+	noinfo "build-info.txt unreadable"
+fi
+chmod 644 "$b/build-info.txt"
+: >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt empty" 1 "$b/build-info.txt: empty"
+noinfo "build-info.txt empty"
+mk "$b"
+printf '%s\n' "# build-info" "build_seconds=1" "layer_x_commit=def" >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt without SOURCE_DATE_EPOCH" 1 "$b/build-info.txt: no SOURCE_DATE_EPOCH"
+noinfo "build-info.txt without SOURCE_DATE_EPOCH"
+printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" "checkout_commit=abc" >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt without a layer revision" 1 "$b/build-info.txt: no layer_<name>_commit"
+noinfo "build-info.txt without a layer revision"
+mk "$a"
+chmod 000 "$a/build-info.txt"
+mk "$b"
+if [ "$(id -u)" -ne 0 ]; then
+	run bash "$script" "$a" "$b"
+	check "first dir's build-info.txt unreadable" 1 "$a/build-info.txt: cannot be read"
+fi
+chmod 644 "$a/build-info.txt"
+
 # Yocto's names carry the build timestamp (.rootfs-<14 digits>.<ext>): two
 # builds made at different times compare by the name without it.
 # mkts DIR TIMESTAMP [TAR-CONTENT]
@@ -93,7 +138,7 @@ mkts() {
 	echo "${3:-tar}" >"$1/img-m.rootfs-$2.tar.zst"
 	echo ext4 >"$1/img-m.rootfs-$2.ext4"
 	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
-	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" >"$1/build-info.txt"
+	printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" "layer_x_commit=def" >"$1/build-info.txt"
 }
 mkts "$a" 20261123000001
 mkts "$b" 20261123000002
