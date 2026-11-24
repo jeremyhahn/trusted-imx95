@@ -99,8 +99,18 @@ for flag in "" --pre-close; do
   FLAG=$flag expect "revision b0 with a 512-bit hash passes ($m)" "$work/rev-b0-512.json" 0 "ok"
 done
 out=$(python3 -I "$chk" "$work/rev-c0.json" 2>&1)
-if [[ $out == *"'C0'"* && $out == *"A0, A1, B0"* ]]; then ok "unknown revision message names the value and the allowed set"
-else bad "unknown revision message lacks the value or the allowed set: $out"; fi
+if [[ $out == *"\$.soc_revision"* && $out == *"A0, A1, B0"* ]]; then ok "unknown revision message names the field and the allowed set"
+else bad "unknown revision message lacks the field or the allowed set: $out"; fi
+# Non-disclosure: a rejected value is never echoed, in either mode.
+secret=SECRETtok3n-9f2c7a1e
+for flag in "" --pre-close; do
+  m=${flag:-default}
+  mut "$work/rev-secret.json" "rec['life_cycle_before'] = 'oem open'; rec['soc_revision'] = '$secret'"
+  out=$(python3 -I "$chk" $flag "$work/rev-secret.json" 2>&1) && rc=0 || rc=$?
+  if [[ $rc -ne 0 && $out == *"\$.soc_revision"* && $out != *"$secret"* && $out != *"SECRET"* ]]; then
+    ok "rejected revision is not echoed ($m)"
+  else bad "rejected revision handling disclosed the value or did not fail ($m, rc=$rc)"; fi
+done
 mut "$work/pk-hash.json" "rec['public_keys'][0]['public_key_hash'] = '11' * 20"
 expect "wrong public key hash width refused" "$work/pk-hash.json" 1 "\$.public_keys[0].public_key_hash"
 mut "$work/ids.json" "rec['secure_object_ids'] = ['fake-object-1']"

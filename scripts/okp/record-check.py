@@ -101,13 +101,17 @@ def norm_revision(value):
 
 
 def revision_errors(rec):
-    """soc_revision must be a documented revision (A0, A1, B0), in every mode."""
+    """soc_revision must be a documented revision (A0, A1, B0), in every mode.
+
+    The message names the field and the allowed set only, never the rejected
+    value: a record field can carry anything, and the check must not echo it.
+    """
     value = rec.get("soc_revision")
     if not isinstance(value, str) or norm_revision(value) in SRK_WIDTH:
         return []  # a missing or non-string value is reported by fields_errors
     return [
-        "$.soc_revision: %r is not a known silicon revision (allowed: %s)"
-        % (value, ", ".join(sorted(SRK_WIDTH)))
+        "$.soc_revision: not a known silicon revision (allowed: %s)"
+        % ", ".join(sorted(SRK_WIDTH))
     ]
 
 
