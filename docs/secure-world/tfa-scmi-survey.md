@@ -78,6 +78,51 @@ BSP depends on the SRC SiP call, according to the fork's own code comments
 and function names; that dependency was not checked against the kernel (see
 section 6).
 
+#### 2.2.1 SiP handlers built for `imx95`, and what the SM decides
+
+Traced 2026-11-24 against the pins: imx-atf `af9eb2c1748ee3abc0ead7dc76e462f50c573036`
+(`secure-world/bsp.lock`), built as `scripts/secure-world-build.sh` builds it
+(`make PLAT=imx95 SPD=opteed bl31`, no other option), and imx-sm
+`eec232878ab7dd460f5a8f3767d39dc7e9412efa` with `configs/other/mx95frdm-pro.cfg`
+(`system-manager/sm.lock`). "atf" and "sm" below are those two commits; line
+numbers are 1-based. `platform.mk` (atf `plat/imx/imx9/imx95/platform.mk:30-31,42-43`)
+compiles the SiP dispatcher, `imx95_m7.c` and `imx95_lmm.c` unconditionally:
+no build option removes them. Every request goes out on MU1 (atf
+`plat/imx/imx9/common/scmi/scmi_client.c:36-37`, doorbell `IMX9_MU1_BASE`),
+which the pinned configuration gives to agent `AP-S`, secure, in LM 2 "AP"
+(sm `configs/other/mx95frdm-pro.cfg:496-497`). `AP-S`'s API list (same file,
+`:503-519`) grants no `LMM_*`, `CPU_M7P` or `PD_M7` right, and the
+configuration tool's output for that file (`configtool.pl`, run outside the
+repo) gives the `AP-S` entry no `lmmPerms` and no `cpuPerms[DEV_SM_CPU_M7P]`,
+so both are `SM_SCMI_PERM_NONE`. This repository's patches 0001 and 0002
+(`system-manager/patches/`) change only lines of the M7 LM, not `AP-S`. The
+configuration has three LMs (generated `SM_NUM_LM 3U`), so `imx95_m7.c` takes
+its LMM path, not its core path, for start, stop and prepare.
+
+| handler (SMC FID, sub-call) | enabling option | argument checks | agent | SM decision | verdict |
+|---|---|---|---|---|---|
+| `IMX_SIP_AARCH32` `0xC20000FD` (atf `plat/imx/common/imx_sip_svc.c:34`) | none (always built) | n/a: switches the calling A55 to AArch32, touches no other core | none, no SCMI | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_BUILDINFO` `0xC2000003` (atf `imx_sip_svc.c:95`) | none | n/a, read-only | none | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_GET_SOC_INFO` `0xC2000006` (atf `imx_sip_svc.c:97-100`) | none | n/a, read-only | none (ELE) | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_SRC` `0xC2000005`, `RESET_ADDR_SET` (atf `imx_sip_svc.c:110-114`, `plat/imx/imx9/imx95/imx95_m7.c:72`) | none | none on `x2` (vector) or `x3` (flags) | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_cpu.c:873-899` `CpuResetVectorSet` needs `cpuPerms[cpu] >= EXCLUSIVE`; `AP-S` has none for `CPU_M7P`: `SM_ERR_DENIED` | refused |
+| `IMX_SIP_SRC`, `START` (atf `imx95_m7.c:80-104`) | none | none | `AP-S` | the pinned config has three LMs, so the LMM path runs (atf `imx95_m7.c:83-93`): set LM 1's reset vector (sm `rpc_scmi_lmm.c:1490-1527` `LmmResetVectorSet`: foreign LM needs `lmmPerms >= EXCLUSIVE`), then boot LM 1 (as `LMM_BOOT` below): both denied | refused |
+| `IMX_SIP_SRC`, `STARTED` (atf `imx95_m7.c:107`) | none | none | `AP-S` | sm `rpc_scmi_cpu.c:1362-1385` `CpuInfoGet` has no permission check: answered (run mode, sleep mode, reset vector of the M7) | allowed, read-only, no control |
+| `IMX_SIP_SRC`, `STOP` (atf `imx95_m7.c:117-132`) | none | none | `AP-S` | LMM path (three LMs): force shutdown of LM 1 (atf `imx95_m7.c:119`), same check as `LMM_SHUTDOWN` below: denied | refused |
+| `IMX_SIP_SRC`, `PREP` (atf `imx95_m7.c:134-136`) | none | none | `AP-S` | LMM power-on of LM id 1 (atf passes the CPU id `1` as the LM id); sm `rpc_scmi_lmm.c:1400-1430` `LmmPowerOn`: foreign LM needs `lmmPerms >= EXCLUSIVE`: denied | refused |
+| `IMX_SIP_SRC`, `PREPED` (atf `imx95_m7.c:142`) | none | none | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_power.c:689-710` `PowerStateGet` has no permission check: answered | allowed, read-only, no control |
+| `IMX_SIP_LMM` `0xC200000F`, `LMM_BOOT` (atf `imx_sip_svc.c:120-124`, `plat/imx/imx9/imx95/imx95_lmm.c:19`) | none | none: `x2` (LM id) passed as is, no allow-list | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_lmm.c:813-843` `LmmBoot`: a foreign LM needs `lmmPerms[lm] >= EXCLUSIVE`, its own LM needs `PRIV`, else `SM_ERR_DENIED`. `AP-S` grants no `LMM_*` (sm `configs/other/mx95frdm-pro.cfg:503-519`), so LM 0, 1 and 2 are denied and any other id is rejected as out of range (`lmId < SM_NUM_LM`) | refused |
+| `IMX_SIP_LMM`, `LMM_SHUTDOWN` (atf `imx95_lmm.c:24`) | none | none | `AP-S` | sm `rpc_scmi_lmm.c:969-1000` `LmmShutdown`: same check as boot: denied | refused |
+| any other FID (atf `imx_sip_svc.c:139`) | n/a | n/a | none | n/a | refused (`SMC_UNK`) |
+
+Result: under the pinned configuration, no SiP handler lets the normal world
+start, stop, reset, prepare or retarget the M7 or any LM; only two read-only
+queries (M7 CPU info, `PD_M7` power state) are answered. The refusal rests
+entirely on the SM configuration's grants to `AP-S` (no `LMM_*` and no
+`CPU_M7P` line in `configs/other/mx95frdm-pro.cfg:503-519`), not on TF-A,
+which forwards every argument unchecked. A configuration that grants `AP-S`
+`LMM_1` at `EXCLUSIVE` or `CPU_M7P` would open this path to any Linux caller
+(section 6).
+
 ### 2.3 PSCI
 
 The i.MX 95 PSCI back end [S2, `imx95_psci.c` and `imx9_psci_common.c`]
@@ -261,9 +306,20 @@ sources above:
 - **Cortex-A55 architecture level.** Armv8.2-A (hence no PAuth, BTI or
   S-EL2) is stated from the Arm product page [S10], which returned HTTP 403
   to the lane; **unconfirmed** here.
-- **SiP surface.** The full list of SiP calls the i.MX 95 build answers, and
-  how each checks its arguments, was not traced call by call. Section 2.2
-  covers only the M7 and LMM services.
+- **SiP surface.** Traced call by call for the pinned build in section 2.2.1
+  (2026-11-24). Still not confirmed there: (a) the refusal was read from SM
+  source and generated configuration, not observed on a board; (b) whether
+  imx-atf acts on an SCMI error (for example stops after a denied reset-vector
+  set) was not traced, since every step it takes is denied anyway; (c) no
+  offline test pins the `AP-S` API list, because `test/secure_world_build_test.sh`
+  runs without network and the configuration is vendor source outside the
+  repo; it is pinned only by `sm_config_sha256` and `sm_patched_config_sha256`
+  in `system-manager/sm.lock`, which `scripts/sm-build.sh` checks when it
+  fetches; (d) `AP-S` holds `SYS ALL` (`mx95frdm-pro.cfg:519`), so the secure
+  side can reset the whole system, M7 included; that is reached by PSCI system
+  reset, not by a SiP call, and is not an M7-only control; (e) the two
+  read-only queries leak the M7's run state and reset vector to Linux, judged
+  harmless but not reviewed by the owner.
 - **Linux dependency on NXP SiP calls** (remoteproc for the M7) was not
   checked against kernel source.
 - **`SYS_PWR_FULL_CTRL`.** Its exact effect was not traced.
