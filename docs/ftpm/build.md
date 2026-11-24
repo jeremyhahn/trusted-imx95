@@ -173,7 +173,7 @@ Read from shallow fetches of the pinned commits (not copied; cited only).
   `imx95.dtsi:368` holds `scmi` and no OP-TEE or fTPM node, and no `linaro,optee` string occurs in the `imx95*` files.
 - The driver's compatible is `microsoft,ftpm` (`drivers/char/tpm/tpm_ftpm_tee.c:312`); without a node the platform
   path never probes, and the driver binds through the TEE bus (`tpm_ftpm_tee.c:328-345`) when the TA's device is
-  enumerated, which is the supplicant-triggered scan traced in `docs/plans/140.md` entry 32.
+  enumerated, which is the scan `tee-supplicant` triggers once it runs.
 - Meaning for `trusted-imx95-tpm.target`: no node, so nothing probes the fTPM before `tee-supplicant`; the ordering
   (`After=tee-supplicant@teepriv0.service`, `dev-tpmrm0.device`) holds as written.
 - Limit: only the kernel tree's DTS was read. U-Boot or the boot container may add or patch nodes at boot (the

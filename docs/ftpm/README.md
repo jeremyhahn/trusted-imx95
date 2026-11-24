@@ -97,12 +97,12 @@ stays read-only, which is why the NV cannot live on it. The NV therefore persist
 survive. `scripts/platform-image-check-root-marker.sh` fails, naming the file, on any `*.ext2`, `*.ext3` or `*.ext4`
 (compressed or not) in the deploy directory. A root image made by hand outside the build is unsupported.
 
-**What the wipe removes.** `tee-nv-wipe` removes the whole `/data/tee` tree, the saved token and the saved id. That tree is
-OP-TEE's one REE-FS store, shared by every TA that uses private REE storage (the fTPM and, in this image, the PKCS#11 TA):
-one index file lists each TA's objects by UUID, so no file name tells the fTPM NV from PKCS#11 objects. Removing only the
-fTPM objects would need a parser of that index, which is not written; open question for the owner (the `rpmb` setting
-keeps PKCS#11 in REE FS, and a root rewrite would then wipe it as well). Nothing outside `/data/tee` is touched
-(`test/platform_image_ftpm_test.sh`, "wipe scope").
+**What the wipe removes (approved, owner ASK 5, 2026-11-24).** **Warning: on a root identity or token change,
+`tee-nv-wipe` erases all of `/data/tee`**, with the saved token and the saved id. That tree is OP-TEE's one REE-FS store,
+shared by every TA that uses private REE storage, so the wipe removes every OP-TEE REE-FS object, not only the fTPM NV:
+**PKCS#11 tokens and keys stored there are lost. Back them up before any root rewrite.** This holds under both
+selections, `reefs` and `rpmb` (the `rpmb` setting keeps the PKCS#11 TA's objects in REE FS). Nothing outside
+`/data/tee` is touched (`test/platform_image_ftpm_test.sh`, "wipe scope").
 Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement that the NV is wiped with the root file system):
 - Writing the whole `.wic` is the supported way to reprovision: it recreates `tee-data` empty, so the NV is wiped.
 - A root partition rewritten with a different build is caught on boot. The rootfs carries a build identity

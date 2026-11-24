@@ -108,7 +108,7 @@ is random, drawn once per `do_rootfs` run, so two clean builds of identical
 inputs differ in that one file (and so in the image digest). Everything else
 stays at the reproducible defaults above. Any different build must wipe the
 fTPM NV, and a random identity does that without listing every
-security-relevant attribute (`docs/plans/140.md`, entry 19). A release is
+security-relevant attribute ([docs/ftpm/README.md](../ftpm/README.md)). A release is
 identified by its published image digest; to compare two builds, exclude that
 one file.
 
