@@ -54,7 +54,8 @@ check_readme() {
 	grep -qi 'ruling 927' "$f" || echo "no ruling 927"
 	grep -qF '#25' "$f" || echo "no #25"
 	grep -E '^> \*\*Status:' "$f" | grep -qF '#177' || echo "status line lacks #177"
-	if grep -qi 'closes' "$f"; then echo "contains closes"; fi
+	# the issue-closing keyword with an issue number; "closes" alone is prose (life cycle)
+	if grep -qiE '(closes|fixes|resolves):? +#[0-9]' "$f"; then echo "contains closes"; fi
 	while IFS= read -r link; do
 		target=${link%%#*}
 		anchor=""
@@ -201,6 +202,49 @@ neg_runbook "runbook life cycle in a step" 's/^(\| 3 \|.*) \|/\1 life cycle |/'
 # the README link to the runbook, and that the file is really needed
 if grep -qF '](decommission-runbook.md' "$README"; then pass "README links the runbook"; else fail "README links the runbook"; fi
 neg "README link to the runbook removed" 's|\(decommission-runbook\.md\)|(no-such-file.md)|g'
+
+# --- where the life cycle closes (ruling 1234, second half) ---------------------------
+# Removable block. The deny list is one array: tokens that must not appear on a
+# non-comment line of any file under scripts/device-lifecycle/ (ruling 1234: the life
+# cycle closes only at the provisioning station, never from this folder; ruling 1244:
+# no RPMB). Comment lines (first non-blank character #) may name them.
+DENY_TOKENS=(nvm_write fuse lifecycle life-cycle ahab_ spsdk nxpele rpmb /dev/mmcblk)
+
+# check_closing ARCH README SCRIPTDIR: prints the problems found; empty means clean.
+check_closing() {
+	local arch=$1 readme=$2 sdir=$3 re f
+	grep -qxF '## Where the life cycle closes' "$arch" || echo "architecture.md lacks the heading"
+	awk '/^## Where the life cycle closes$/ {on=1; next} /^## / {on=0} on' "$arch" | grep -q '1234' \
+		|| echo "the section does not cite ruling 1234"
+	grep -qF 'where the life cycle closes' "$readme" || echo "README row lacks the cell text"
+	re=$(IFS='|'; printf '%s' "${DENY_TOKENS[*]}")
+	while IFS= read -r f; do
+		if grep -vE '^[[:space:]]*#' "$f" | grep -qiE "$re"; then
+			echo "deny-list token in non-comment line of ${f#"$sdir"/}"
+		fi
+	done < <(find "$sdir" -type f | sort)
+}
+
+SDIR="$ROOT/scripts/device-lifecycle"
+problems=$(check_closing "$DIR/architecture.md" "$README" "$SDIR")
+if [ -z "$problems" ]; then pass "life-cycle boundary checks"; else fail "life-cycle boundary checks" "$problems"; fi
+
+# negatives on copies under mktemp
+tmpd=$(mktemp -d "$TMP_ROOT/closing.XXXXXX")
+cp -r "$SDIR" "$tmpd/scripts"
+printf 'nxpele --burn\n' >>"$tmpd/scripts/collect-evidence.sh"
+out=$(check_closing "$DIR/architecture.md" "$README" "$tmpd/scripts")
+if [ -n "$out" ]; then pass "negative: a non-comment nxpele line in a script"; else fail "negative: a non-comment nxpele line was not caught"; fi
+mkdir "$tmpd/okdir"
+printf '# nxpele is named only in a comment\n' >"$tmpd/okdir/ok.sh"
+out=$(check_closing "$DIR/architecture.md" "$README" "$tmpd/okdir")
+if [ -z "$out" ]; then pass "a comment line may name a token"; else fail "a comment line may name a token" "$out"; fi
+sed -E '/^## Where the life cycle closes$/d' "$DIR/architecture.md" >"$tmpd/arch.md"
+out=$(check_closing "$tmpd/arch.md" "$README" "$SDIR")
+if [ -n "$out" ]; then pass "negative: architecture.md without the heading"; else fail "negative: heading removal was not caught"; fi
+sed -E 's/, and where the life cycle closes//' "$README" >"$tmpd/readme.md"
+out=$(check_closing "$DIR/architecture.md" "$tmpd/readme.md" "$SDIR")
+if [ -n "$out" ]; then pass "negative: README without the cell text"; else fail "negative: README cell removal was not caught"; fi
 # runbook absent from a copy of the docs: the check reports it
 out=$(check_runbook "$TMP_ROOT/absent-runbook.md")
 if [ -n "$out" ]; then pass "negative: runbook file missing"; else fail "negative: runbook file missing was not caught"; fi
