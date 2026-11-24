@@ -14,8 +14,9 @@
 # firmware-ele-imx is not named: the machine adds it for the i.MX95
 # (hardening-survey section 7). xkmsd is installed from the xkmsd recipe
 # (recipes-security/xkmsd, a tagged go-xkms release; docs/SPEC.md,
-# `platform-image`: "It runs xkmsd from go-xkms on its Linux side"); its user,
-# unit and configuration are not in the image yet. The enclave access policy recipe (a proposal, not installed here)
+# `platform-image`: "It runs xkmsd from go-xkms on its Linux side"), with its
+# system user, its enabled systemd unit and its default configuration. The
+# enclave access policy recipe (a proposal, not installed here)
 # would only restrict the enclave node to the xkmsd group; it is not xkmsd.
 
 # hardening-survey section 7 and question 7 (b): the project image is built from

@@ -10,6 +10,8 @@ set -u
 
 recipe_rel=platform-image/recipes-security/xkmsd/xkmsd_git.bb
 image_rel=platform-image/recipes-core/images/trusted-imx95-image.bb
+unit_rel=platform-image/recipes-security/xkmsd/files/xkmsd.service
+conf_rel=platform-image/recipes-security/xkmsd/files/xkmsd.yaml
 
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch" "$TMP_ROOT"' EXIT
@@ -60,7 +62,69 @@ recipe_ok() {
 	has "$f" 'go mod verify' || { echo "modules are not verified"; return 1; }
 	has "$f" '-mod=readonly' || { echo "go.mod may be rewritten"; return 1; }
 	[ "$(val "$f" COMPATIBLE_HOST)" = 'aarch64.*-linux' ] || { echo "COMPATIBLE_HOST is not aarch64 Linux"; return 1; }
-	[ "$(val "$f" 'FILES:${PN}')" = '${bindir}/xkmsd' ] || { echo "the package does not hold \${bindir}/xkmsd"; return 1; }
+	[ "$(val "$f" 'FILES:${PN}')" = '${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${sysconfdir}/xkms' ] ||
+		{ echo "the package does not hold the binary, the unit and /etc/xkms"; return 1; }
+	return 0
+}
+
+# user_ok FILE: the recipe adds the xkmsd system user and group, no login shell.
+user_ok() {
+	local f=$1 u
+	has "$f" 'inherit pkgconfig useradd systemd' || { echo "no inherit useradd"; return 1; }
+	[ "$(val "$f" USERADD_PACKAGES)" = '${PN}' ] || { echo "USERADD_PACKAGES is not \${PN}"; return 1; }
+	[ "$(val "$f" 'GROUPADD_PARAM:${PN}')" = '--system xkmsd' ] || { echo "group xkmsd is not added"; return 1; }
+	u=$(val "$f" 'USERADD_PARAM:${PN}') || { echo "no USERADD_PARAM"; return 1; }
+	case " $u " in *' --system '*) ;; *) echo "user is not a system user"; return 1 ;; esac
+	case " $u " in *' --shell /sbin/nologin '*) ;; *) echo "user has a login shell"; return 1 ;; esac
+	case " $u " in *' --gid xkmsd '*) ;; *) echo "user is not in group xkmsd"; return 1 ;; esac
+	case $u in *' xkmsd') ;; *) echo "the user is not named xkmsd"; return 1 ;; esac
+	return 0
+}
+
+# install_ok FILE: the recipe enables the unit and installs it and the config.
+install_ok() {
+	local f=$1
+	[ "$(val "$f" 'SYSTEMD_SERVICE:${PN}')" = xkmsd.service ] || { echo "no SYSTEMD_SERVICE xkmsd.service"; return 1; }
+	[ "$(val "$f" 'SYSTEMD_AUTO_ENABLE:${PN}')" = enable ] || { echo "the unit is not enabled"; return 1; }
+	has "$f" 'file://xkmsd.service' || { echo "the unit is not in SRC_URI"; return 1; }
+	has "$f" 'file://xkmsd.yaml' || { echo "the config is not in SRC_URI"; return 1; }
+	has "$f" '${UNPACKDIR}/xkmsd.service ${D}${systemd_system_unitdir}/xkmsd.service' || { echo "the unit is not installed"; return 1; }
+	has "$f" 'install -m 0640 -g xkmsd ${UNPACKDIR}/xkmsd.yaml ${D}${sysconfdir}/xkms/xkmsd.yaml' ||
+		{ echo "the config is not installed 0640 root:xkmsd"; return 1; }
+	[ "$(val "$f" 'CONFFILES:${PN}')" = '${sysconfdir}/xkms/xkmsd.yaml' ] || { echo "the config is not a conffile"; return 1; }
+	return 0
+}
+
+# unit_ok FILE: the unit runs xkmsd as xkmsd with the shipped config, starts at
+# boot, restarts on failure and carries the sandbox lines.
+unit_ok() {
+	local f=$1 want
+	for want in 'User=xkmsd' 'Group=xkmsd' 'ExecStart=/usr/bin/xkmsd --config /etc/xkms/xkmsd.yaml' \
+		'Restart=on-failure' 'StateDirectory=xkms' 'NoNewPrivileges=yes' 'PrivateTmp=yes' \
+		'ProtectSystem=strict' 'ProtectHome=yes' 'CapabilityBoundingSet=' 'SystemCallFilter=@system-service' \
+		'UMask=0077' 'WantedBy=multi-user.target'; do
+		grep_line "$f" "$want" || { echo "the unit lacks '$want'"; return 1; }
+	done
+	return 0
+}
+
+# grep_line FILE LINE: FILE holds LINE exactly.
+grep_line() {
+	local l
+	while IFS= read -r l; do [ "$l" != "$2" ] || return 0; done <"$1"
+	return 1
+}
+
+# config_ok FILE: the config sets the state path of the unit and holds no
+# secret-looking key.
+config_ok() {
+	local f=$1 l
+	grep_line "$f" 'storage:' || { echo "no storage section"; return 1; }
+	grep_line "$f" '  path: /var/lib/xkms' || { echo "storage.path is not the unit's StateDirectory"; return 1; }
+	while IFS= read -r l; do
+		case $l in '#'*) continue ;; esac
+		case $l in *password* | *secret* | *token* | *private_key* | *PRIVATE*) echo "the config holds '$l'"; return 1 ;; esac
+	done <"$f"
 	return 0
 }
 
@@ -91,6 +155,10 @@ neg() {
 
 t "the xkmsd recipe" recipe_ok "$ROOT/$recipe_rel"
 t "the production image installs xkmsd" image_ok "$ROOT/$image_rel"
+t "the xkmsd recipe adds the xkmsd system user" user_ok "$ROOT/$recipe_rel"
+t "the xkmsd recipe installs and enables the unit and the config" install_ok "$ROOT/$recipe_rel"
+t "the xkmsd unit" unit_ok "$ROOT/$unit_rel"
+t "the xkmsd default config" config_ok "$ROOT/$conf_rel"
 
 r0=$(<"$ROOT/$recipe_rel")
 rcopy() { # FROM TO NAME: a copy of the recipe with FROM replaced by TO
@@ -107,6 +175,33 @@ neg "negative: GOTOOLCHAIN not local" recipe_ok "$(rcopy 'export GOTOOLCHAIN=loc
 neg "negative: no go mod verify" recipe_ok "$(rcopy 'go mod verify' 'true' verify)"
 neg "negative: any host" recipe_ok "$(rcopy 'COMPATIBLE_HOST = "aarch64.*-linux"' 'COMPATIBLE_HOST = ".*-linux"' host)"
 neg "negative: verify only in a comment" recipe_ok "$(rcopy '    go mod verify' '    # go mod verify' cverify)"
+
+neg "negative: no USERADD_PARAM" user_ok "$(rcopy 'USERADD_PARAM:${PN}' 'X_PARAM:${PN}' nouser)"
+neg "negative: user with a login shell" user_ok "$(rcopy '/sbin/nologin' '/bin/sh' shell)"
+neg "negative: no useradd class" user_ok "$(rcopy 'inherit pkgconfig useradd systemd' 'inherit pkgconfig systemd' noua)"
+neg "negative: unit not enabled" install_ok "$(rcopy 'SYSTEMD_AUTO_ENABLE:${PN} = "enable"' 'SYSTEMD_AUTO_ENABLE:${PN} = "disable"' noenable)"
+neg "negative: no SYSTEMD_SERVICE" install_ok "$(rcopy 'SYSTEMD_SERVICE:${PN}' 'X_SERVICE:${PN}' nosvc)"
+neg "negative: config world-readable" install_ok "$(rcopy 'install -m 0640 -g xkmsd' 'install -m 0644' confmode)"
+neg "negative: config not in SRC_URI" install_ok "$(rcopy 'file://xkmsd.yaml' 'file://other.yaml' confsrc)"
+
+u0=$(<"$ROOT/$unit_rel")
+ucopy() { # FROM TO NAME: a copy of the unit with FROM replaced by TO
+	printf '%s\n' "${u0//"$1"/"$2"}" >"$scratch/$3.service"
+	printf '%s' "$scratch/$3.service"
+}
+neg "negative: unit runs as root" unit_ok "$(ucopy 'User=xkmsd' 'User=root' root)"
+neg "negative: unit allows new privileges" unit_ok "$(ucopy 'NoNewPrivileges=yes' 'NoNewPrivileges=no' nnp)"
+neg "negative: unit without a private /tmp" unit_ok "$(ucopy 'PrivateTmp=yes' '#PrivateTmp=yes' tmp)"
+neg "negative: unit without a state directory" unit_ok "$(ucopy 'StateDirectory=xkms' '' state)"
+neg "negative: unit restarts always" unit_ok "$(ucopy 'Restart=on-failure' 'Restart=no' restart)"
+neg "negative: unit with another config" unit_ok "$(ucopy '--config /etc/xkms/xkmsd.yaml' '--config /tmp/x.yaml' exec)"
+neg "negative: unit not wanted at boot" unit_ok "$(ucopy 'WantedBy=multi-user.target' '' install)"
+
+c0=$(<"$ROOT/$conf_rel")
+printf '%s\n' "${c0//\/var\/lib\/xkms/\/tmp\/xkms}" >"$scratch/path.yaml"
+neg "negative: config state path elsewhere" config_ok "$scratch/path.yaml"
+printf '%s\n' "$c0" 'auth:' '  password: x' >"$scratch/secret.yaml"
+neg "negative: config holds a password" config_ok "$scratch/secret.yaml"
 
 printf '%s\n' 'IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"' >"$scratch/noxkmsd.bb"
 neg "negative: image without xkmsd" image_ok "$scratch/noxkmsd.bb"

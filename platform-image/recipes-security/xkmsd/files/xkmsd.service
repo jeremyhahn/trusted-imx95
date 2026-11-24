@@ -1,0 +1,52 @@
+# xkmsd on the FRDM-IMX95-PRO (docs/SPEC.md, `platform-image`). Based on
+# go-xkms's own configs/xkmsd.service at the pinned tag; the user is the
+# image's xkmsd system user, and the sandbox adds the directives of
+# docs/platform-image/hardening-survey.md section 8 that do not need a device
+# node or address family xkmsd's use on the board has not confirmed.
+[Unit]
+Description=xkmsd, the go-xkms key management daemon
+Documentation=https://github.com/jeremyhahn/go-xkms
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xkmsd
+Group=xkmsd
+ExecStart=/usr/bin/xkmsd --config /etc/xkms/xkmsd.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+# Writable state only here: /var/lib/xkms (the config's storage.path) and
+# /run/xkms (the local socket).
+StateDirectory=xkms
+StateDirectoryMode=0750
+RuntimeDirectory=xkms
+RuntimeDirectoryMode=0750
+UMask=0077
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

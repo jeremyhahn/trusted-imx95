@@ -1,0 +1,12 @@
+# xkmsd's default configuration on the FRDM-IMX95-PRO image. A key this file
+# omits takes go-xkms's built-in default (config.Defaults(), go-xkms
+# docs/xkmsd-configuration/architecture.md, "Layers and precedence"); the
+# environment (XKMS_<SECTION>_<KEY>) and flags override it. Only keys named in
+# go-xkms's configs/README.md at the pinned tag are set here. Not yet run on
+# the board. No key, secret or host name belongs in this file.
+logging:
+  level: info
+  format: json
+storage:
+  # The unit's StateDirectory=xkms.
+  path: /var/lib/xkms

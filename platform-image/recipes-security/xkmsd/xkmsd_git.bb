@@ -6,9 +6,11 @@
 # keeps the board on the latest go-xkms release (2026-11-24): raise the tag,
 # SRCREV and PV together when go-xkms tags a newer one.
 #
-# This recipe installs the binary only. Its user, its systemd unit and its
-# configuration are the next slice of row #204; the enclave node's group is
-# the enclave-access recipe's.
+# This recipe installs the binary, the xkmsd system user, its systemd unit
+# (enabled, sandboxed; files/xkmsd.service) and its default configuration
+# (files/xkmsd.yaml, /etc/xkms/xkmsd.yaml, the path go-xkms's own unit reads).
+# The xkmsd group is the one the enclave-access recipe (R6, proposed) names;
+# useradd skips a group or user that already exists.
 SUMMARY = "xkmsd from go-xkms ${XKMS_TAG}, built with the Go toolchain its go.mod asks for"
 HOMEPAGE = "https://github.com/jeremyhahn/go-xkms"
 # go-xkms is AGPL-3.0 (its LICENSE) with a commercial alternative
@@ -30,7 +32,9 @@ PV = "0.64.2-alpha"
 XKMS_GO_VERSION = "1.27.3"
 
 SRC_URI = "git://github.com/jeremyhahn/go-xkms;protocol=https;nobranch=1;tag=${XKMS_TAG};destsuffix=go-xkms \
-           https://go.dev/dl/go${XKMS_GO_VERSION}.linux-amd64.tar.gz;name=go;subdir=go-toolchain"
+           https://go.dev/dl/go${XKMS_GO_VERSION}.linux-amd64.tar.gz;name=go;subdir=go-toolchain \
+           file://xkmsd.service \
+           file://xkmsd.yaml"
 SRC_URI[go.sha256sum] = "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
 
 S = "${UNPACKDIR}/go-xkms"
@@ -41,7 +45,18 @@ COMPATIBLE_HOST = "aarch64.*-linux"
 # CGO links PKCS#11 (modules are dlopen()ed at run time) and gousb's libusb,
 # as go-xkms's own server build does (its Dockerfile.server).
 DEPENDS = "libusb1"
-inherit pkgconfig
+inherit pkgconfig useradd systemd
+
+# The service account: a system user without a login shell or a home of its
+# own; its state is the unit's StateDirectory.
+USERADD_PACKAGES = "${PN}"
+GROUPADD_PARAM:${PN} = "--system xkmsd"
+USERADD_PARAM:${PN} = "--system --gid xkmsd --home-dir /var/lib/xkms --no-create-home --shell /sbin/nologin xkmsd"
+
+# The unit starts at boot.
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE:${PN} = "xkmsd.service"
+SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 # The build tags of go-xkms's own server build (Dockerfile.server).
 XKMS_TAGS = "pkcs8,tpm2,awskms,gcpkms,azurekv,vault,pkcs11"
@@ -72,8 +87,14 @@ do_compile() {
 do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${B}/xkmsd ${D}${bindir}/xkmsd
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/xkmsd.service ${D}${systemd_system_unitdir}/xkmsd.service
+    # Root owns the configuration; the xkmsd group may read it, nobody else.
+    install -d -m 0750 -g xkmsd ${D}${sysconfdir}/xkms
+    install -m 0640 -g xkmsd ${UNPACKDIR}/xkmsd.yaml ${D}${sysconfdir}/xkms/xkmsd.yaml
 }
 
-FILES:${PN} = "${bindir}/xkmsd"
+FILES:${PN} = "${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${sysconfdir}/xkms"
+CONFFILES:${PN} = "${sysconfdir}/xkms/xkmsd.yaml"
 # Go links its own runtime: no GNU_HASH in its ELF, and its build ID is Go's.
 INSANE_SKIP:${PN} = "ldflags"
