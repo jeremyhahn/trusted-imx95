@@ -593,6 +593,13 @@ that tree on 2026-11-24 (**read twice**: the first reading is the one
   `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` (LM start
   list) and `:1272` (LM stop list), `sm/utilities/monitor/monitor_cmds.c:1809`
   (monitor write), and the unit test `sm/test/lmm/test_lmm_perf.c`.
+- Second reading of the remaining new cites, by line number, on 2026-11-24
+  (all **agreed**): `devices/MIMX95/sm/dev_sm_perf.c:2677`, `:2683` and
+  `:2706` (the ARM supply's level count, three cases; not the M7's);
+  `configs/other/mx95frdm-pro.cfg:461`, `:475` and `:489` (the only
+  start-list `PERF_*` entries, all `PERF_A55`); the caller lines
+  `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` and `:1272`,
+  `sm/utilities/monitor/monitor_cmds.c:1809`.
 - **Not read**: whether the M7 domain's supply index is the one set at
   `dev_sm_perf.c:1347`; whether the monitor utility is built into the
   image.
