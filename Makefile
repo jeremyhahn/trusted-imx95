@@ -51,6 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling \
+	hsm-self-defence-check integration-test-hsm-self-defence \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
 help: ## List the targets
@@ -254,6 +255,16 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
+
+## --- hsm-self-defence: blocked (owner rulings 1243 and 1244, #26) ---
+
+HSD_ROOT ?= $(CURDIR)
+
+hsm-self-defence-check: ## Check the hsm-self-defence row holds as written: blocked and planned in docs/SPEC.md, blocked in ROADMAP.md, its missing documents listed, nothing built (HSD_ROOT=<tree>, default this one)
+	@python3 scripts/hsm-self-defence-check.py "$(HSD_ROOT)"
+
+integration-test-hsm-self-defence: ## Integration test of the hsm-self-defence row: make hsm-self-defence-check on this tree and on trees that break the row
+	@bash test/integration/hsm_self_defence_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
