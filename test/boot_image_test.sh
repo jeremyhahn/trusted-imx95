@@ -492,9 +492,12 @@ PY
 mapfile -t pv_lines <<<"$parsed_vals"
 read -r -a p_fuse <<<"${pv_lines[0]}"
 read -r -a p_sw <<<"${pv_lines[1]}"
-read -r -a y_fuse <<<"$(yaml_vals fuse_version)"
-read -r -a y_sw <<<"$(yaml_vals sw_version)"
-expect "version: boot-image.yaml sets both fields for three containers" [ "${#y_fuse[@]}" -eq 3 -a "${#y_sw[@]}" -eq 3 ]
+# the wanted values are constants here (0 for this test image only, scripts/ahab/boot-image.yaml:31-32,
+# :51-52, :68-69), so a yaml change that is not made here too fails; the yaml is also read as a cross-check
+y_fuse=(0 0 0)
+y_sw=(0 0 0)
+expect "version: boot-image.yaml sets fuse_version ${y_fuse[*]} and sw_version ${y_sw[*]}" \
+	[ "$(yaml_vals fuse_version)" = "${y_fuse[*]}" -a "$(yaml_vals sw_version)" = "${y_sw[*]}" ]
 for ci in 0 1 2; do
 	echo "# container $ci: parsed fuse_version ${p_fuse[$ci]:-?} sw_version ${p_sw[$ci]:-?}, yaml ${y_fuse[$ci]:-?} ${y_sw[$ci]:-?}"
 	expect "version: container $ci fuse_version and sw_version equal boot-image.yaml" \
