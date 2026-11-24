@@ -472,8 +472,10 @@ static void fail_closed_default(void)
 					struct ele_ack ack = { .strict_acked = false, .counter_acked = true };
 					uint32_t kid = 0, n2;
 					int orc;
-					/* Only a delete that the key store accepts reports success. */
-					bool expect_ok = o == 1 && codes[k] == HSM_NO_ERROR && modes[m] == 0;
+					/* A generate or a delete reports success when the update ran
+					 * (mode 0) and the library returned no error. The refusal of a
+					 * generate is the client's, covered by the check above. */
+					bool expect_ok = codes[k] == HSM_NO_ERROR && modes[m] == 0;
 
 					/* The client operation above consumed the context (one
 					 * operation per open): open a fresh one so the direct
@@ -495,6 +497,11 @@ static void fail_closed_default(void)
 					snprintf(msg, sizeof(msg), "%s code 0x%x mode %u: counter_acked stays false",
 						 o == 0 ? "generate" : "delete", (unsigned)codes[k], (unsigned)modes[m]);
 					CHECK(expect_ok ? !ack.counter_acked : ack.counter_acked, msg);
+					if (o == 0 && expect_ok) {
+						snprintf(msg, sizeof(msg), "generate code 0x%x mode %u: key id is the fake's",
+							 (unsigned)codes[k], (unsigned)modes[m]);
+						CHECK(kid == 7, msg);
+					}
 				}
 				ele_hsm_close(&x);
 			}
