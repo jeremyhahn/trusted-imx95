@@ -149,6 +149,17 @@ for c in "${CHECKERS[@]}"; do checker_ok "$c"; done
 run run_all "$SURVEY"
 check "run_all on the survey" 0
 
+# The xkmsd-node design: no requirement words, one blockquote, no private
+# address or home path, links resolve, and a design status line.
+NODE="$ROOT/docs/hsm-device-protocol/xkmsd-node.md"
+expect "xkmsd-node.md exists" test -f "$NODE"
+for c in c_words c_links; do
+	out=$("$c" "$NODE")
+	if [ -z "$out" ]; then pass "$c on xkmsd-node.md"; else fail "$c on xkmsd-node.md" "$out"; fi
+done
+expect "xkmsd-node.md status names rulings 1243 and 1244" \
+	grep -qE '^> \*\*Status: DESIGN, per owner rulings 1243 and 1244' "$NODE"
+
 negative "status line dropped" c_status '/^> \*\*Status:/d'
 # shellcheck disable=SC2016 # $a is a sed address, not a shell variable
 negative "device shall do X" c_words '$a the device shall do X'
