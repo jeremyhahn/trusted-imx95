@@ -236,7 +236,8 @@ smoke_ok() {
 	local s=$1 mk=$2 want
 	for want in 'rev=$(val SRCREV)' 'build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh' \
 		'sh "$build" "$src" "$bin" "$pv" "$rev"' 'conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml' \
-		'"$bin" --config "$work/xkmsd.yaml"' 'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory"; do
+		'"$bin" --config "$work/xkmsd.yaml"' 'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory" \
+		'status --porcelain --ignored' "stat -c '%u %a'"; do
 		has "$s" "$want" || { echo "the smoke test lacks '$want'"; return 1; }
 	done
 	has "$mk" '$(MAKE) --no-print-directory platform-image-xkmsd-smoke' || { echo "integration-test-platform-image does not run the smoke test"; return 1; }
@@ -368,8 +369,12 @@ d=.
 if [ "$1" = -C ]; then d=$2; shift 2; fi
 case $1 in
 init) mkdir -p "$d/.git" ;;
-fetch) if [ "${FAKE_FETCH:-}" = fail ]; then echo "stub: fetch refused" >&2; exit 128; fi ;;
+fetch)
+	echo fetch >>"${FAKE_GIT_LOG:-/dev/null}"
+	if [ "${FAKE_FETCH:-}" = fail ]; then echo "stub: fetch refused" >&2; exit 128; fi
+	;;
 rev-parse) echo "$FAKE_REV" ;;
+status) printf '%s' "${FAKE_STATUS:-}" ;;
 esac
 EOF
 for tool in go gcc pkg-config; do printf '#!/bin/sh\nexit 0\n' >"$smk/bin/$tool"; done
@@ -432,6 +437,30 @@ else
 	smoke_run ro FAKE_DAEMON=ignore-ro
 	check "smoke: a daemon that starts on a read-only state directory fails" nonzero \
 		"FAIL: xkmsd exited 0 on a read-only state directory"
+	# The cache of the checkout: reused only when clean and private.
+	fetches() { local n=0 l; while IFS= read -r l; do n=$((n + 1)); done <"$1"; echo "$n"; }
+	gl=$scratch/git-fetches
+	want_fetches() {
+		if [ "$(fetches "$gl")" = "$1" ]; then pass "$2"; else fail "$2" "fetches: $(fetches "$gl"), want $1"; fi
+	}
+	: >"$gl"
+	smoke_run cache FAKE_GIT_LOG="$gl"
+	check "smoke: a first run fetches once" 0 "xkmsd-smoke: all passed"
+	smoke_run cache FAKE_GIT_LOG="$gl"
+	check "smoke: a clean private cache is reused" 0 "xkmsd-smoke: all passed"
+	want_fetches 1 "smoke: the clean cache was not fetched again"
+	smoke_run cache FAKE_GIT_LOG="$gl" FAKE_STATUS=$'?? planted.go\n'
+	check "smoke: a cache with a modified tree is replaced" 0 "xkmsd-smoke: all passed"
+	want_fetches 2 "smoke: the modified tree was fetched again"
+	smoke_run cache FAKE_GIT_LOG="$gl" FAKE_STATUS=$'!! ignored.o\n'
+	check "smoke: a cache with an ignored file in the tree is replaced" 0 "xkmsd-smoke: all passed"
+	want_fetches 3 "smoke: the tree with an ignored file was fetched again"
+	chmod 0755 "$scratch/cache-cache"
+	smoke_run cache FAKE_GIT_LOG="$gl"
+	check "smoke: a cache of mode 0755 is emptied" 0 "xkmsd-smoke: all passed" "not 0700: emptied"
+	want_fetches 4 "smoke: the mode-0755 cache was fetched again"
+	smoke_run cache FAKE_GIT_LOG="$gl" FAKE_FETCH=fail FAKE_STATUS=$'?? planted.go\n'
+	check "smoke: a modified tree whose refetch fails fails, it is not used" nonzero "FAIL: cannot fetch go-xkms"
 fi
 
 finish

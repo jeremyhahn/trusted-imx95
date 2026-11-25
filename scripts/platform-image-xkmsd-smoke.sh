@@ -68,8 +68,29 @@ trap cleanup EXIT
 mkdir -p "$cache"
 src=$cache/src-$rev
 
-# 1. The pinned commit, fetched by its hash.
-if [ ! -d "$src/.git" ] || [ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" != "$rev" ]; then
+# The cache holds code the build runs, so it is reused only while it is ours and
+# private: owned by the invoking user, mode 0700. A cache of another owner is
+# not touched (fail); a cache of another mode is emptied and fetched afresh.
+read -r cache_uid cache_mode < <(stat -c '%u %a' "$cache") || die "cannot stat the cache directory $cache"
+[ "$cache_uid" = "$(id -u)" ] || die "the cache directory $cache is not owned by the invoking user"
+if [ "$cache_mode" != 700 ]; then
+	echo "xkmsd-smoke: the cache directory $cache is mode $cache_mode, not 0700: emptied" >&2
+	chmod -R u+rwX "$cache"
+	rm -rf "$cache"
+	mkdir -m 0700 "$cache"
+fi
+
+# 1. The pinned commit, fetched by its hash. A cached checkout is reused only at
+# that commit with nothing modified, added or ignored-but-present in it.
+cached_ok() {
+	[ -d "$src/.git" ] || return 1
+	[ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" = "$rev" ] || return 1
+	local dirty
+	dirty=$(git -C "$src" status --porcelain --ignored 2>&1) || return 1
+	[ -z "$dirty" ]
+}
+if ! cached_ok; then
+	chmod -R u+rwX "$src" 2>/dev/null || true
 	rm -rf "$src"
 	mkdir -p "$src"
 	git -C "$src" init -q
