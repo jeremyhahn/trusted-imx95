@@ -47,7 +47,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check pins-check pins-report lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager integration-test-system-manager-config secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
@@ -173,6 +173,9 @@ tools: ## Install the pinned, digest-checked tools of scripts/tool-pins.sh into 
 
 system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in clean trees; fail unless identical
 	@scripts/sm-build.sh system-manager/sm.lock
+
+integration-test-system-manager-config: ## The system-manager-config row end to end: make system-manager on a fake imx-sm, the M7 grants, the row's documents (offline)
+	@bash test/integration/system_manager_config_test.sh
 
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
 	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
