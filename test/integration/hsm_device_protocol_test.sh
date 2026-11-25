@@ -43,8 +43,24 @@ expect "make hdp-boundary-check: no command in the tree path ran" \
 	test ! -e "$HDP_MARK" -a ! -e "$HDP_MARK2"
 RC=0
 OUT=$(make -s -C "$ROOT" hdp-boundary-check HDP_TREE="$t/docs/none \`touch \"\$HDP_MARK\"\`" 2>&1) || RC=$?
-check "make hdp-boundary-check: a command-line path with a backtick is reported unreadable, not run" 2 \
-	"hdp-boundary-check:"
+check "make hdp-boundary-check: a command-line path with a backtick and a dollar sign is refused, not run" 2 \
+	"hdp-boundary-check: a command-line HDP_TREE holding a dollar sign is refused"
 expect "make hdp-boundary-check: the command-line backtick did not run" test ! -e "$HDP_MARK"
+
+# Make runs a function in a command-line variable while it builds the recipe
+# environment: a literal $(shell ...) on the command line is refused before it
+# runs, and the same text in the environment reaches the check as a path that
+# does not exist (exit 2) with no command run.
+HDP_MARK3="$TMP_ROOT/hdp-mark-shell-cmdline"
+HDP_MARK4="$TMP_ROOT/hdp-mark-shell-env"
+rm -f "$HDP_MARK3" "$HDP_MARK4"
+run make -s -C "$ROOT" hdp-boundary-check "HDP_TREE=$TMP_ROOT/\$(shell touch $HDP_MARK3)"
+check "make hdp-boundary-check: a command-line \$(shell ...) HDP_TREE is refused" 2 \
+	"a command-line HDP_TREE holding a dollar sign is refused"
+expect "make hdp-boundary-check: the command-line \$(shell ...) did not run" test ! -e "$HDP_MARK3"
+run env HDP_TREE="$TMP_ROOT/\$(shell touch $HDP_MARK4)" make -s -C "$ROOT" hdp-boundary-check
+check "make hdp-boundary-check: an environment \$(shell ...) HDP_TREE reaches the check literally, unreadable" 2 \
+	"hdp-boundary-check:" "No such file or directory"
+expect "make hdp-boundary-check: the environment \$(shell ...) did not run" test ! -e "$HDP_MARK4"
 
 finish

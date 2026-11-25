@@ -149,6 +149,32 @@ printf '# A nested trace\n\nOwned by go-xkms #1521.\n' >"$t/docs/hsm-device-prot
 run python3 "$CHK" "$t"
 check "B4: a nested document that names go-xkms #1521 passes" 0 "ok B4 owner"
 
+# The go-xkms build cache scripts/xkms/xkmsd-build.sh keeps under build/go-xkms
+# (src checkout, module cache, work dirs) is not this repository's code.
+t="$TMP_ROOT/b3-cache"
+tree "$t"
+mkdir -p "$t/build/go-xkms/src/cmd/xkmsd" "$t/build/go-xkms/gopath/pkg/mod/example.invalid/dep@v1" \
+	"$t/build/go-xkms/build.abc123/api" "$t/build/xkms/0123"
+: >"$t/build/go-xkms/src/go.mod"
+: >"$t/build/go-xkms/src/main.go"
+: >"$t/build/go-xkms/src/cmd/xkmsd/main.go"
+: >"$t/build/go-xkms/gopath/pkg/mod/example.invalid/dep@v1/go.mod"
+: >"$t/build/go-xkms/build.abc123/api/wire.proto"
+: >"$t/build/xkms/0123/xkmsd"
+run python3 "$CHK" "$t"
+check "B3: a populated build/go-xkms cache passes" 0 "ok B3 no-protocol" "no xkmsd recipe yet: missing"
+
+for f in stray.go build/stray.go build/xkms/go.mod build/go-xkms-other/go.mod go-xkms/go.mod scripts/build/go-xkms/main.go; do
+	t="$TMP_ROOT/b3-stray-${f//\//-}"
+	tree "$t"
+	mkdir -p "$t/build/go-xkms/src" "$t/$(dirname "$f")"
+	: >"$t/build/go-xkms/src/go.mod"
+	: >"$t/$f"
+	run python3 "$CHK" "$t"
+	check "B3: $f outside the go-xkms cache still fails beside a populated cache" 1 \
+		"FAIL B3 no-protocol" "$f implements xkmsd"
+done
+
 # An unreadable subtree must fail closed (exit 2), not read as "no protocol here".
 # chmod 000 does not deny reads to root, so the case is skipped there.
 if [ "$(id -u)" = 0 ]; then

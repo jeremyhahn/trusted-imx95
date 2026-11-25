@@ -39,6 +39,10 @@ import re
 import sys
 
 SKIP_DIRS = {".git", ".tools", "out", "node_modules", "__pycache__"}
+# Skipped by path from the tree root: the upstream go-xkms checkout, module cache
+# and build directories that scripts/xkms/xkmsd-build.sh keeps (gobase_rel there,
+# gitignored). A .go file or go.mod anywhere else, build/ included, still fails B3.
+SKIP_PATHS = {"build/go-xkms"}
 PROTOCOL_SUFFIXES = (".proto", ".thrift", ".capnp", ".fbs", ".avsc", ".asn1")
 PROTOCOL_NAME = re.compile(r"^(openapi|asyncapi|swagger)[^/]*\.(ya?ml|json)$", re.IGNORECASE)
 RECIPE_NAME = re.compile(r"^(xkmsd|go-xkms)[^/]*\.bb(append)?$")
@@ -97,9 +101,16 @@ def unreadable(err):
     raise err
 
 
+def skipped(tree, top, d):
+    if d in SKIP_DIRS:
+        return True
+    rel = os.path.relpath(os.path.join(top, d), tree)
+    return rel.replace(os.sep, "/") in SKIP_PATHS
+
+
 def walk(tree):
     for top, dirs, files in os.walk(tree, onerror=unreadable):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        dirs[:] = sorted(d for d in dirs if not skipped(tree, top, d))
         for name in sorted(files):
             yield os.path.relpath(os.path.join(top, name), tree), name
         for d in dirs:

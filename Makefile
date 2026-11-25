@@ -297,9 +297,19 @@ integration-test-secure-key-handling: ## Integration test of the secure-key-hand
 
 HDP_TREE ?= $(CURDIR)
 # HDP_TREE reaches the recipe through the environment, never expanded into its shell source.
+# Make expands a command-line variable (a shell function in it runs) when it builds the
+# recipe environment, so a command-line value holding a dollar sign is refused before
+# anything runs ($(origin) and $(value) do not expand it). An environment value is
+# passed on as it is: a path with a dollar sign is given as
+# HDP_TREE='<dir>' make hdp-boundary-check.
+ifeq ($(origin HDP_TREE),command line)
+ifneq ($(findstring $$,$(value HDP_TREE)),)
+$(error hdp-boundary-check: a command-line HDP_TREE holding a dollar sign is refused, Make would expand it; set it in the environment instead: HDP_TREE='<dir>' make hdp-boundary-check)
+endif
+endif
 export HDP_TREE
 
-hdp-boundary-check: ## Check a tree keeps the hsm-device-protocol row (HDP_TREE=<dir>, default this repository): the row's facts, no wire protocol or xkmsd here, go-xkms #1521 named, xkmsd from a tagged release only
+hdp-boundary-check: ## Check a tree keeps the hsm-device-protocol row (HDP_TREE=<dir>, default this repository; a path holding a dollar sign only through the environment, never on the command line): the row's facts, no wire protocol or xkmsd here, go-xkms #1521 named, xkmsd from a tagged release only
 	@python3 scripts/hdp-boundary-check.py "$$HDP_TREE"
 
 integration-test-hsm-device-protocol: ## Integration test of the hsm-device-protocol row: make hdp-boundary-check end to end on the repository and on a tree that breaks the row
