@@ -125,7 +125,7 @@ policy matter (unconfirmed beyond [S6] §5 and §6.2).
 Fit for the enclave. A WebAuthn attestation format is identified by a
 string registered with IANA [S6 §5]. No format for the NXP EdgeLock
 Enclave was found in the WebAuthn registry (unconfirmed: the registry
-was not fetched in this lane; see §10). Using `device-attest-01` with the
+was not fetched in this survey; see §10). Using `device-attest-01` with the
 enclave would therefore need either a private format identifier, or the
 enclave's evidence wrapped in a generic one such as a RATS conceptual
 message wrapper (§7). go-trusted-platform's own ACME support is covered
@@ -163,7 +163,7 @@ and are not surveyed further here.
 
 Sources: the NXP `el2go-agent` repository on GitHub, tag `v6.5.2`
 (`doc/introduction.rst` and the source tree) [S13]. NXP's product pages
-for EdgeLock 2GO returned 404 from this lane, and the agent docs point
+for EdgeLock 2GO returned 404 from this survey, and the agent docs point
 to NXP application note AN12691, which was not read (§10).
 
 What it is, as the agent repository describes it [S13]: EdgeLock 2GO is
@@ -278,7 +278,7 @@ Options, as input:
   2026-11-12) and NXP AN12691 were not read. Whether EdgeLock 2GO
   supports the i.MX 95's enclave is unconfirmed.
 - The format of the enclave's attestation evidence (RM00284 §3.12):
-  RM00284 is in the private vendor repository, which this lane cannot
+  RM00284 is in the private vendor repository, which this survey cannot
   read; this survey relies on SPEC's citation only (#40).
 - Whether the FRDM-IMX95 leaves the factory with any NXP-signed device
   identity certificate usable as an IDevID for EST or BRSKI.

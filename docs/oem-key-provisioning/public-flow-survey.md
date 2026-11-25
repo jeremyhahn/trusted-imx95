@@ -114,12 +114,16 @@ A claim marked **unconfirmed** could not be checked against a source that this l
    - (c) Both: the one-time steps at the factory, re-provisioning in the field.
 
    No recommendation: the sources describe the transports (F5), not this policy. Note that the U-Boot paths need a U-Boot built with AHAB support, which a field image may not carry.
+
+   Answered by owner ruling 1234 (2026-11-23): provisioning runs at the provisioning station ([SPEC.md](../SPEC.md), `oem-key-provisioning` row). Still open: field re-provisioning, (b) and (c).
 4. **When is the life cycle closed, and is OEM locked ever used?**
    - (a) Close at the factory, once a signed image boots in OEM open with no ELE events.
    - (b) Close at enrolment.
    - (c) Also move to OEM locked.
 
    Recommendation: (a), with OEM open used to check images, since OEM open only warns on a failed check (F1, F4). Decide on (c) only after IMX95RM shows what locked rules out, field return in particular (**unconfirmed**).
+
+   Answered by owner ruling 1234 (2026-11-23): the life cycle is closed only at the provisioning station, never on a development board ([SPEC.md](../SPEC.md), `oem-key-provisioning` row). Still open: whether OEM locked, (c), is ever used.
 5. **When is the OEM firmware version committed to fuses?**
    - (a) At every release.
    - (b) Only at security-relevant releases.

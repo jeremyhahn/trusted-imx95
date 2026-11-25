@@ -7,7 +7,7 @@ A host-side exercise of the message format. `make okp-keyexchange-test` builds a
 `nxpimage signed-msg verify`.
 
 **This exercises the message format only. It sends nothing to a device, proves nothing about a real enclave, and this
-file documents no command to send a message to a board.** Whether and when a key exchange is run on a device is the
+file documents no command to send a message to a board.** `test/okp_host_only_test.sh` reads this exercise's scripts and fails on any device-transport tool or path in them. Whether and when a key exchange is run on a device is the
 owner's decision ([architecture.md](architecture.md#provisioning-flow)). The message holds no ECDH key: the template's
 optional `oem_private_key` and `nxp_prod_ka_pub` fields are left out, and the digests and key IDs are zero test values.
 

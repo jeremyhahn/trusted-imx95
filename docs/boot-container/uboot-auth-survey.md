@@ -314,7 +314,7 @@ guessed in the text above.
 8. The version of the SPSDK documentation page [S14]; the page does not show
    one.
 9. NXP's i.MX Linux Security Reference Manual and the i.MX 95 Security
-   Reference Manual are not public sources this lane could reach; anything
+   Reference Manual are not public sources this survey could reach; anything
    they say about OS authentication is not reflected here.
 
 ## 8. Questions for the owner
@@ -398,7 +398,7 @@ guessed in the text above.
    Recommendation: **(c) SPSDK**. NXP says i.MX 95 B0 uses AHAB 2.0, which
    needs CST 4.0.1 or SPSDK, and names SPSDK the recommended tool [S1 §2.1,
    S6 §1.1]; CST 3.1.0 is the version S1 gives for the older flow. This
-   changes SPEC.md, which this lane does not edit.
+   changes SPEC.md, which this survey does not edit.
 
 6. **Where is the boundary with #14?**
    Options: (a) as in §6: this row owns the method, the U-Boot options and the

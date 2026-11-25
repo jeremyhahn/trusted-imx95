@@ -478,9 +478,12 @@ run python3 "$sel" "$ROOT/.github/workflows/ci.yml"
 check "ci.yml: the tree secret scan runs on every tier, a docs-only PR included" 0 \
 	"PR tier, docs_only=true: the tree secret scan runs" "full tier, docs_only=true: the tree secret scan runs"
 # The condition before this fix, which skipped a docs-only PR, is caught.
-old_if="env.CI_FULL_TIER != 'true' && needs.preflight.outputs.docs_only != 'true' }}"
+# v1.54: the gosec step has no tier test (every PR is the full tier), so the
+# old condition is the template's: a step that skips on a docs-only PR.
+gstep=$'      - name: make gosec (PR tier)\n        if: ${{ !cancelled() && env.TOOLCHAIN_IMAGE != \'\' }}'
+old_gstep=${gstep/"!= '' }}"/"!= '' && needs.preflight.outputs.docs_only != 'true' }}"}
 yml=$(<"$ROOT/.github/workflows/ci.yml")
-yml=${yml//"(env.CI_FULL_TIER != 'true' || needs.preflight.outputs.docs_only == 'true') }}"/"$old_if"}
+yml=${yml//"$gstep"/"$old_gstep"}
 printf '%s\n' "$yml" >"$TMP_ROOT/ci-old.yml"
 run python3 "$sel" "$TMP_ROOT/ci-old.yml"
 check "ci.yml: a gosec condition that skips docs-only PRs fails the selection" 1 \
@@ -724,7 +727,7 @@ check "ci.yml: an env-file loop that copies GIT_CONFIG_* fails the check" 1 "a l
 # job on the shared daemon can run:
 #   IMG_RACE_PULL   after any pull, the toolchain's remote tag is moved to an
 #                   older image the registry still holds ($IMG_OLD, $DOLD)
-#   IMG_RACE_PUSH   a push first finds the tag moved to $IMG_EVIL
+#   IMG_RACE_PUSH   on every call, each daemon tag is moved to $IMG_EVIL
 #   IMG_REG_OVERWRITE  after a buildx push, the registry's tag names $DOLD
 #   IMG_NOBUILDX    the runner has no buildx plugin
 mkdir -p "$TMP_ROOT/imgbin"
@@ -735,6 +738,12 @@ key() { printf '%s' "$1" | tr '/:@' '___'; }
 s=$IMG_STATE
 r=$s/registry
 h() { printf '%s' "$1" | sha256sum | cut -c1-64; }
+if [ -n "${IMG_RACE_PUSH:-}" ]; then
+	# another job on the shared daemon moves every tag it can see (an image ID is immutable)
+	for f in "$s"/*; do
+		case ${f##*/} in sha256_* | *.digests) ;; *) [ -f "$f" ] && echo "$IMG_EVIL" >"$f" ;; esac
+	done
+fi
 case "$1 ${2:-}" in
 "image inspect")
 	ref=${*: -1}
@@ -794,20 +803,37 @@ case "$1 ${2:-}" in
 	case $2 in
 	version) echo "github.com/docker/buildx v0 stub" ;;
 	imagetools)
+		if [ "${3:-}" = create ]; then
+			# imagetools create --tag <tag> <repo>@<digest>: the registry tag takes that digest
+			[ -d "$r" ] || exit 1
+			echo "${6#*@}" >"$r/$(key "$5")"
+			exit 0
+		fi
 		[ "${3:-}" = inspect ] && [ -d "$r" ] || exit 1
-		d=$(cat "$r/$(key "$4")" 2>/dev/null) || exit 1
-		printf '{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"%s","size":1}\n' "$d" ;;
+		case $4 in *@*) d=${4#*@} ;; *) d=$(cat "$r/$(key "$4")" 2>/dev/null) || exit 1 ;; esac
+		case " $* " in
+		*" --raw "*) id=$(cat "$r/$(key "$d")" 2>/dev/null) || exit 1; printf '{"config":{"digest":"%s"}}\n' "$id" ;;
+		*) printf '{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"%s","size":1}\n' "$d" ;;
+		esac ;;
 	build)
-		meta= out= target=
+		meta= out= target= iid= load=
 		shift 2
 		while [ $# -gt 0 ]; do
 			case $1 in
 			--metadata-file) meta=$2; shift 2 ;;
 			--output) out=$2; shift 2 ;;
 			--target) target=$2; shift 2 ;;
+			--iidfile) iid=$2; shift 2 ;;
+			--load) load=1; shift ;;
 			*) shift ;;
 			esac
 		done
+		if [ -n "$load" ] && [ -z "$out" ]; then
+			id=sha256:$(h "$PUB_CONFIG_JSON")
+			echo "$id" >"$s/$(key "$id")"
+			printf '%s' "$id" >"$iid"
+			exit 0
+		fi
 		case $out in type=registry,name=*) name=${out#type=registry,name=} ;; *) exit 4 ;; esac
 		[ -d "$r" ] || exit 1
 		id=sha256:$(h "$target")
@@ -819,6 +845,13 @@ case "$1 ${2:-}" in
 		if [ -n "${IMG_REG_OVERWRITE:-}" ]; then echo "$DOLD" >"$r/$(key "$name")"; fi ;;
 	*) exit 3 ;;
 	esac ;;
+"save "*)
+	# an archive whose config member is $PUB_CONFIG_JSON, as `docker save` writes one
+	while [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done
+	t=$(mktemp -d); mkdir -p "$t/blobs/sha256"
+	printf '%s' "$PUB_CONFIG_JSON" >"$t/blobs/sha256/cfg"
+	printf '[{"Config":"blobs/sha256/cfg"}]' >"$t/manifest.json"
+	tar -C "$t" -cf "$out" manifest.json blobs; rm -rf "$t" ;;
 "create "* | "run "*)
 	echo "$*" >>"$IMG_STARTS"
 	case " $* " in *" --entrypoint du "*) printf '4\t/c\n' ;; esac ;;
@@ -845,7 +878,9 @@ rrepo=forge.example/ns/trusted-imx95-toolchain
 IMG_REMOTE=$rrepo:abc-main
 export IMG_LOG IMG_STATE IMG_STARTS IMG_GOOD IMG_OLD IMG_EVIL DGOOD DOLD IMG_REMOTE
 tc_built=sha256:$(printf '%s' toolchain | sha256sum | cut -c1-64)
-tc_pushed=sha256:$(printf '%s' manifest:toolchain | sha256sum | cut -c1-64)
+PUB_CONFIG_JSON=$(printf '%s' '{"stub":"the built toolchain config"}')
+pub_built=sha256:$(printf '%s' "$PUB_CONFIG_JSON" | sha256sum | cut -c1-64)
+export PUB_CONFIG_JSON
 it_built=sha256:$(printf '%s' integration | sha256sum | cut -c1-64)
 skey() { printf '%s' "$1" | tr '/:@' '___'; }
 lkey=$(skey "$ltag")
@@ -1071,39 +1106,79 @@ check "make integration-test: an IT_IMAGE_ID that is a tag is refused" nonzero "
 expect "a trusted job: a refused tag starts no container" test ! -s "$IMG_STARTS"
 run tc env GITHUB_EVENT_NAME=pull_request "$ROOT/scripts/in-toolchain-image.sh" "$ltag" true
 check "in-toolchain-image: a pull request may still name a tag" 0
-# Finding 2: publish pushes the build's own result, never a local tag
-# another job can move, and checks the registry's digest after the push.
-pub() { GITHUB_REF=refs/heads/main RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token cache push publish; }
-reg_image() { cat "$IMG_STATE/registry/$(skey "$(cat "$IMG_STATE/registry/$rkey")")"; }
+# publish (a checked image only, then the push) is held by test/ci_publish_test.sh.
+# Here the retag race, against this file's stateful registry: publish stages
+# the checked ID under an unguessable tag and promotes it by digest, so an
+# unchecked image never reaches the trusted tag, even when publish fails.
+pubrepo="$TMP_ROOT/pubrepo"
+mkdir -p "$pubrepo/scripts" "$pubrepo/mkbin"
+cp "$ROOT/scripts/ci-image-cache.sh" "$pubrepo/scripts/"
+echo 'FROM scratch' >"$pubrepo/Dockerfile"
+printf '#!/bin/sh\nexit 0\n' >"$pubrepo/scripts/ci-image-history.sh"
+printf '#!/bin/sh\nexit 0\n' >"$pubrepo/scripts/in-toolchain-image.sh"
+cat >"$pubrepo/mkbin/make" <<EOF
+#!/bin/sh
+case "\$*" in
+*ci-image-cache-dockerfile*) echo Dockerfile ;;
+*toolchain-image*) echo $ltag ;;
+esac
+EOF
+# The pinned registry client is a stub crane in a tarball the stub curl serves.
+# It reads the archive it is given (as crane push does) and writes the
+# registry stub: the staging tag names a manifest whose config is the
+# archive's config member.
+mkdir -p "$pubrepo/cranepkg"
+cat >"$pubrepo/cranepkg/crane" <<'EOF'
+#!/bin/sh
+echo "crane $*" >>"$IMG_LOG"
+[ "$1" = push ] || exit 2
+r=$IMG_STATE/registry
+[ -d "$r" ] || exit 1
+cp=$(tar -xOf "$2" manifest.json | jq -er '.[0].Config') || exit 1
+cfg=sha256:$(tar -xOf "$2" "$cp" | sha256sum | cut -c1-64)
+d=sha256:$(printf '%s' "pushed:$cfg" | sha256sum | cut -c1-64)
+key() { printf '%s' "$1" | tr '/:@' '___'; }
+echo "$d" >"$r/$(key "$3")"
+echo "$cfg" >"$r/$(key "$d")"
+EOF
+chmod +x "$pubrepo/cranepkg/crane"
+tar -czf "$pubrepo/crane.tgz" -C "$pubrepo/cranepkg" crane
+cat >"$pubrepo/mkbin/curl" <<'EOF'
+#!/bin/sh
+while [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done
+cp "$(dirname "$0")/../crane.tgz" "$out"
+EOF
+sed -i "s/crane_sha256=[0-9a-f]*\$/crane_sha256=$(sha256sum "$pubrepo/crane.tgz" | cut -c1-64)/" "$pubrepo/scripts/ci-image-cache.sh"
+chmod +x "$pubrepo/scripts/"* "$pubrepo/mkbin/make" "$pubrepo/mkbin/curl"
+pubrace() { (cd "$pubrepo" && env PATH="$pubrepo/mkbin:$TMP_ROOT/imgbin:$PATH" GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main \
+	GITHUB_SERVER_URL=https://forge.example CI_IMAGE_NAMESPACE=ns TOOLCHAIN_IMAGE="$ltag" GITHUB_ENV="$TMP_ROOT/github_env" \
+	RUNNER_TEMP="$rt" RELEASE_REGISTRY_USER=u RELEASE_REGISTRY_TOKEN=fake-token "$@" bash scripts/ci-image-cache.sh publish); }
+trusted_cfg() { # the config digest the registry's trusted tag names, or empty
+	local d
+	d=$(cat "$IMG_STATE/registry/$(skey "$IMG_REMOTE")" 2>/dev/null) || return 0
+	cat "$IMG_STATE/registry/$(skey "$d")" 2>/dev/null || true
+}
+regcontains() { grep -rqF "$1" "$IMG_STATE/registry" 2>/dev/null; }
 seed empty
-run pub
-check "ci-image-cache: publish pushes the image its build made" 0 "published $ltag as $rrepo@$tc_pushed"
-expect "ci-image-cache: the registry's tag names the built image" test "$(reg_image)" = "$tc_built"
-expect "ci-image-cache: publish builds straight to the registry" \
-	grep -q "^buildx build .*--output type=registry,name=$IMG_REMOTE " "$IMG_LOG"
-if grep -qE '^(push|tag) ' "$IMG_LOG"; then
-	fail "ci-image-cache: publish resolves no local tag (no docker tag or push)" "$(cat "$IMG_LOG")"
+: >"$IMG_LOG"
+run pubrace
+check "ci-image-cache: publish promotes the checked image to the trusted tag by digest" 0 "promoted by digest"
+expect "ci-image-cache: the trusted tag's config is the built image" test "$(trusted_cfg)" = "$pub_built"
+nodaemonpush() { ! grep -qE '^(tag|push) ' "$IMG_LOG"; }
+expect "ci-image-cache: publish made no docker tag or docker push call" nodaemonpush
+# The race: another job moves every tag the shared daemon holds. Publish
+# keeps no tag there and uploads the archive it checked, so the swapped image
+# reaches the registry under no tag and no digest.
+seed empty
+: >"$IMG_LOG"
+run pubrace IMG_RACE_PUSH=1
+check "ci-image-cache: publish still succeeds while another job retags the daemon's tags" 0 "promoted by digest"
+expect "ci-image-cache: the trusted tag still holds the built image under the race" test "$(trusted_cfg)" = "$pub_built"
+if regcontains "$IMG_EVIL"; then
+	fail "ci-image-cache: the swapped image reaches the registry under no tag and no digest" "$(grep -r . "$IMG_STATE/registry")"
 else
-	pass "ci-image-cache: publish resolves no local tag (no docker tag or push)"
+	pass "ci-image-cache: the swapped image reaches the registry under no tag and no digest"
 fi
-if [[ "$OUT" == *fake-token* ]]; then fail "ci-image-cache: publish prints no credential" "$OUT"; else pass "ci-image-cache: publish prints no credential"; fi
-seed empty
-IMG_RACE_PUSH=1 run pub
-if [ "$RC" != 0 ] || [ "$(reg_image)" = "$tc_built" ]; then
-	pass "ci-image-cache: a retag between the tag and the push never publishes another image as done"
-else
-	fail "ci-image-cache: a retag between the tag and the push never publishes another image as done" "registry $(reg_image); $OUT"
-fi
-seed empty
-IMG_REG_OVERWRITE=1 run pub
-check "ci-image-cache: publish fails when the registry's digest is not the build's" 1 \
-	"the registry's $IMG_REMOTE is $DOLD, not the image this run built ($tc_pushed)"
-seed empty
-IMG_NOBUILDX=1 run pub
-check "ci-image-cache: publish without buildx fails" 1 "publish needs the runner's docker buildx"
-seed yes
-run pub
-check "ci-image-cache: publish leaves a tag the registry holds" 0 "the registry holds $IMG_REMOTE; nothing to publish"
 cd "$here" || exit 1
 
 # ci.yml exports TOOLCHAIN_IMAGE only from toolchain-ref (lint, history-scan,
@@ -1115,10 +1190,51 @@ n_ref=$(grep -c 'ref=$(make -s toolchain-ref)' <<<"$ci" || true)
 n_tag=$(grep -c 'TOOLCHAIN_IMAGE=$(make -s toolchain-image)' <<<"$ci" || true)
 # shellcheck disable=SC2016
 n_it=$(grep -cE 'make (integration-test|"\$SOAK_TARGET") .*IT_IMAGE_ID="\$IT_LEASE_ID"' <<<"$ci" || true)
+# The integration, image and soak lease blocks resolve the image through
+# `make -s it-ref`, never the $IT_IMAGE tag directly (Codex P1, security): on
+# a trusted run the tag names whatever the daemon holds under it.
+# shellcheck disable=SC2016
+n_itref=$(grep -c 'ref=$(make -s it-ref IT_IMAGE="$IT_IMAGE" 2>/dev/null) || return 1' <<<"$ci" || true)
+# shellcheck disable=SC2016
+n_ittag=$(grep -cE "docker image inspect -f '\{\{\.Id\}\}' \"\\\$IT_IMAGE\"" <<<"$ci" || true)
+if [ "$n_itref" = 3 ] && [ "$n_ittag" = 0 ]; then
+	pass "ci.yml: the three lease blocks resolve the integration image through make it-ref, never the tag"
+else
+	fail "ci.yml: the three lease blocks resolve the integration image through make it-ref, never the tag" "it-ref $n_itref, tag inspect $n_ittag"
+fi
+
+# The image job's checkout is the full history while it runs make security,
+# which scans every commit (Codex P1): the job's first checkout sets fetch-depth 0.
+imgco=$(python3 - "$ROOT/.github/workflows/ci.yml" <<'EOF'
+import re, sys
+t = open(sys.argv[1]).read()
+j = t[re.search(r"^  image:\n", t, re.M).start():]
+j = j[:re.search(r"^  [a-z-]+:\n", j[5:], re.M).start() + 5]
+c = j[j.index("actions/checkout"):]
+print("full" if re.search(r"fetch-depth: 0", c[:c.index("- name:")]) else "shallow")
+EOF
+)
+if [ "$imgco" = full ] && grep -q 'make security' <<<"$ci"; then
+	pass "ci.yml: the image job checks out the full history for make security"
+else
+	fail "ci.yml: the image job checks out the full history for make security" "checkout: $imgco"
+fi
 if [ "$n_ref" = 5 ] && [ "$n_tag" = 0 ] && [ "$n_it" = 2 ]; then
 	pass "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID"
 else
 	fail "ci.yml: every job exports the toolchain-ref reference and runs the integration image by its leased ID" "toolchain-ref $n_ref, tag $n_tag, IT_IMAGE_ID $n_it"
+fi
+
+# ci.yml runs integration on every pull request but a docs-only one, ci:full
+# or not, and CI Gate accepts its skip only on a docs-only pull request.
+it_if=$(awk '/^  integration:$/ { j = 1; next } j && /^    if:/ { sub(/^    if: /, ""); print; exit }' <<<"$ci")
+# shellcheck disable=SC2016 # the expression is ci.yml's literal text
+want_if='${{ (github.event_name != '"'workflow_dispatch'"' || github.ref == '"'refs/heads/main'"') && !github.event.pull_request.draft && needs.preflight.outputs.verdict == '"'run'"' && needs.preflight.outputs.docs_only != '"'true'"' }}'
+# shellcheck disable=SC2016
+if [ "$it_if" = "$want_if" ] && grep -qxF '          check integration "${{ needs.integration.result }}" code' <<<"$ci"; then
+	pass "ci.yml: integration runs on every pull request but a docs-only one, checked as code"
+else
+	fail "ci.yml: integration runs on every pull request but a docs-only one, checked as code" "if: $it_if"
 fi
 
 # --- reap-stale-ci-stacks.sh v6: the dangling images a rebuild leaves --------

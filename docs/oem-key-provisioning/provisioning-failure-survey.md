@@ -119,9 +119,11 @@ Whether the key import (step 5) must instead come after the close is not confirm
 1. **Where does provisioning run?**
    Options: (a) a factory station with controlled power; (b) in the field, on first boot; (c) at the owner's own bench, per unit.
    Recommendation: (a). The two steps whose interruption is not understood (SRK-hash writes and the close, §3.1) should run only where the station controls the supply (§5 step 9).
+   Answered by owner ruling 1234 (2026-11-23): provisioning runs at the provisioning station ([SPEC.md](../SPEC.md), `oem-key-provisioning` row); (b) and (c) are not taken.
 2. **When is the device closed?**
    Options: (a) at the end of the same station session, after the gates in §5; (b) in a separate later session, after burn-in; (c) never in this phase (development parts stay OEM open).
    Recommendation: (a) for production, with the owner's approval of the close and only after the pre-close gate of §5 step 6 passes after the last reset (§5 step 7). Every board left OEM open is insecure (§4), and S1 §7 shows no reason to wait once the gates pass.
+   Answered by owner ruling 1234 (2026-11-23): the life cycle is closed only at the provisioning station, never on a development board; (c) is not taken for a development board because no close runs there ([SPEC.md](../SPEC.md), `oem-key-provisioning` row). Still open: whether the close is in the same station session, (a), or a later one, (b).
 3. **Key import before or after the close?**
    Options: (a) before, in OEM open; (b) after, in OEM closed; (c) both: the KEK before, operational keys after.
    Recommendation: none until AN14861 and the i.MX 95 Security Reference Manual are read. In OEM open a bad-signature import is only a warning (S3), which argues for (b) or for treating warnings as failures under (a).

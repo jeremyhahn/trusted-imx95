@@ -328,7 +328,7 @@ would settle each:
 
 - **The list of i.MX 95 system sleep modes** and what each keeps (mixes, PLLs,
   DDR self-refresh, oscillators). Defined in the SM's i.MX 95 device code
-  (`devices/MIMX95/sm/dev_sm_system.c`, not read: the lane may not read source
+  (`devices/MIMX95/sm/dev_sm_system.c`, not read: the survey may not read source
   code outside its repository) and in the i.MX 95 Reference Manual (IMX95RM),
   which this repository lists as missing.
 - **The ELE's behaviour across suspend, mix power-down and reset**: which key
@@ -342,7 +342,7 @@ would settle each:
   `plat/imx/imx95` code were not read; TFA-IMX9 covers only the build).
 - **The Linux binding for the i.MX 95 SCMI vendor protocols**
   (`Documentation/devicetree/bindings/firmware/nxp,imx95-scmi.yaml`) was fetched
-  but could not be read under the lane's rules on code files.
+  but could not be read under the survey's rules on code files.
 - **What the PRO's own configuration grants.** The device's file is
   `configs/other/mx95frdm-pro.cfg` (`public-source-survey.md` items 12-16), not
   `mx95frdm` or `mx95evk`; this survey did not read it or the EVK board port it
@@ -351,7 +351,7 @@ would settle each:
   (https://github.com/nxp-imx/imx-smct), adds**; not surveyed.
 
 Unreachable sources: none. Every public URL tried was reachable; the gaps above
-come from documents that are not public or from code the lane was not allowed to
+come from documents that are not public or from code the survey was not allowed to
 read.
 
 ## 8. Questions for the owner

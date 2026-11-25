@@ -104,7 +104,7 @@ names. This settles most of that survey's §8 item 1 for this device. The M7 is 
 | M7 CPU `CPU_M7P`, power `PD_M7` | M7 LM, start/stop lines for `msel` 0, 1, 2 | Granted: the SM powers `PD_M7` and starts the CPU at LM start; `PD_M7` is also an M7 `test` resource |
 | `M7P` (brings `PERF_M7`, `CLK_M7SYSTICK`) | M7 LM, Resources | Granted: the M7 owns `M7P` |
 | `CLK_M7`, `CLK_BUSM7`, `CLK_ENET` | SM LM (LM0), API, the group changed through the Performance protocol | SM-held; the M7 reaches `CLK_M7` only through `PERF_M7` |
-| `PERF_M7` explicit API line | M7 LM, API | **Not present.** Whether `M7P` ownership alone allows `PERFORMANCE_LEVEL_SET` (PRIV) is #107's; a `PERF_M7` line may be needed |
+| `PERF_M7` explicit API line | M7 LM, API | **Not present; provisional, #167, open.** The PRO generated table gives ALL (`configs/mx95frdm-pro/config_scmi.h:96`), and every `make system-manager` checks that with `scripts/sm-perf-check.sh` (manifest line `m7_perf_m7=ALL`); the rest of the evidence is cited at the pinned revision only and stays provisional, open. `PERFORMANCE_LEVEL_SET` needs PRIV. An API line placed before `M7P  OWNER` would not lower it. See [scmi-permissions-survey.md](scmi-permissions-survey.md) section 8 |
 | M7 console `LPUART7`; `LPUART3` | M7 LM, Resources | Granted: `LPUART7` owned; `LPUART3` owned (its `test` key dropped by 0002) |
 | Pins `GPIO_IO36`, `GPIO_IO37` (also `GPIO_IO14`, `GPIO_IO15`) | M7 LM, Pins | Granted, all four. What they are wired to on the PRO is unconfirmed |
 | M7 timers, CAN, watchdog, mailboxes (`LPIT1`, `LPTMR1/2`, `LPTPM1`, `CAN_FD1`, `WDOG5`, `MU5_A`, `MU7_B`, `MU8_B`, `IRQSTEER_M7`, `TSTMR2`) | M7 LM, Resources | Granted |
@@ -122,7 +122,7 @@ not documented in the sources read; and the SM's own debug UART is `LPUART2` (in
 
 So the M7 firmware of trusted-firmware's `imx95` row can run on the pinned configuration as it stands, and the
 tamper response by `LMM_SHUTDOWN` or `SYSTEM_POWER_STATE_SET` is granted. The changes the findings point to are
-the M7 fault reactions and, depending on #107, a `PERF_M7` grant.
+the M7 fault reactions; a `PERF_M7` grant is not among them (row above; provisional and open: the generated table is checked by every build, the rest is cited only, [survey section 8](scmi-permissions-survey.md)).
 
 ## 6. This repository's delta: the M7 fault reactions fail closed
 
@@ -228,12 +228,22 @@ check offline, and a fake build whose patched file widens the M7 block.
 
 - The run recorded in section 2 was in the lane's Linux x86_64 container, not the devcontainer image. The
   devcontainer image is Alpine (musl) and Arm's toolchain is glibc-hosted, so the image's toolchain stage now
-  installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. **The real
-  compiler has not yet built the System Manager in the image on the lane's node** (no Docker there). The CI job
-  `system-manager-build` runs `make sm-toolchain-check` (`scripts/sm-toolchain-check.sh` in the image): it runs
-  `make system-manager` with the real pinned toolchain, then checks the compiler starts, `m33_image.bin` and the
-  manifest exist and the linked `.elf` is an ARM ELF. The result of its first run is not recorded here yet. If
-  `gcompat` is not enough to start the compiler, the base image would have to change, which is the owner's choice (#14).
+  installs `gcompat` (Alpine's glibc loader and shims), and `test/sm_build_test.sh` checks that. The lane's node
+  has no Docker, so the check ran in CI. The CI job "System Manager build with the pinned Arm toolchain" runs
+  `make sm-toolchain-check` (`scripts/sm-toolchain-check.sh` in the image): it runs `make system-manager` with
+  the real pinned toolchain, then checks the compiler starts, `m33_image.bin` and the manifest exist and the
+  linked `.elf` is an ARM ELF.
+  **First result (GitHub Actions): passed.** On `main` at `bd72342`, CI run 45022475307, job 137208249253,
+  concluded success and its `sm-toolchain-check` step succeeded. It also succeeded on `fbb58056` (runs
+  45021223766 and 45013632384). So in the image, `gcompat` is enough to start the pinned compiler, the System
+  Manager builds with it, and the output has a non-empty `m33_image.bin` and manifest and a linked ARM ELF. The
+  check does not run the image on a board or verify its behaviour. It does cover reproducibility:
+  `scripts/sm-toolchain-check.sh` runs `make system-manager` (line 12), whose `scripts/sm-build.sh` builds two
+  clean trees (`h1=$(build 1)` at line 196, `h2=$(build 2)` at line 198) and, when their `m33_image.bin` hashes
+  differ, sets `reproducible=no` (line 201), records it in the manifest (line 211) and fails with `die "not reproducible"` (line 214). The base image does not need to change (#14).
+  Where to check: the runs are on this project's GitHub Actions page (github.com, Actions tab), by the run IDs
+  above; the job log shows the `sm-toolchain-check` step. They were read from the GitHub Actions API by the
+  coordinator, not by the lane, which has no network access to them.
 - Host tools the script needs: git, curl, tar, xz, make, perl and coreutils. imx-sm's README also names `gcc`,
   `g++-multilib` and `srecord`; the lane's container had `gcc`, and whether the build uses any of the three was not
   checked.

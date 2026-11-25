@@ -1,19 +1,6 @@
 #!/usr/bin/env bash
-# platform-image-hosttools.sh [DIR]: set up a non-root Yocto build host for
-# scripts/platform-image-parse.sh, in DIR (default
-# $PLATFORM_IMAGE_HOSTTOOLS_DIR, else $XDG_CACHE_HOME or $HOME/.cache, under
-# trusted-imx95/hosttools; never the repository). Idempotent.
-#  1. Yocto buildtools-extended for the pinned release is fetched with curl and
-#     checked against its published .sh.sha256sum AND the hash pinned here; a
-#     mismatch fails closed and installs nothing.
-#  2. cpio, diffstat, file, gawk and socat (with their libraries) are fetched
-#     with `apt-get download` (a private apt state directory, no root) and
-#     unpacked with `dpkg -x` under DIR; `file` needs MAGIC and the libraries
-#     LD_LIBRARY_PATH: each tool is reached through a wrapper that sets them. The SDK installer needs a real `file` on PATH.
-#  3. DIR/env.sh is written: source it, then run make platform-image-parse.
-# Test seams: HOSTTOOLS_CURL, HOSTTOOLS_APT_GET, HOSTTOOLS_DPKG, and
-# HOSTTOOLS_BUILDTOOLS_SHA256 / HOSTTOOLS_BUILDTOOLS_URL (the pin and the
-# download directory). Needs the network. Provisional, pending #14.
+# platform-image-hosttools.sh [DIR]: sets up a non-root Yocto build host (hash-checked buildtools-extended, apt-downloaded cpio, diffstat, file, gawk and socat behind wrappers) and writes DIR/env.sh.
+# Test seams: HOSTTOOLS_CURL, HOSTTOOLS_APT_GET, HOSTTOOLS_DPKG, HOSTTOOLS_BUILDTOOLS_SHA256, HOSTTOOLS_BUILDTOOLS_URL.
 set -euo pipefail
 
 version=6.0.1
@@ -48,9 +35,7 @@ if [ ! -e "$dir/.pkgs-done" ]; then
 	done
 	: >"$dir/.pkgs-done"
 fi
-# Bitbake runs its tasks with a filtered environment, so LD_LIBRARY_PATH and MAGIC
-# do not reach the extracted tools there: each is reached through a wrapper that
-# sets them (bitbake's hosttools symlinks point at the wrapper).
+# Bitbake filters the environment, so each tool is reached through a wrapper that sets LD_LIBRARY_PATH and MAGIC.
 magic=$pkgroot/usr/lib/file/magic.mgc
 [ -e "$magic" ] || magic=$pkgroot/usr/share/misc/magic.mgc
 wrap=$dir/wrappers
