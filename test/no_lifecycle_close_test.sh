@@ -21,6 +21,7 @@ ALLOW=$'scripts/ahab/key-exchange-test.sh\tfixture: builds a key-exchange messag
 scripts/ahab/key-import-test.sh\tfixture: builds a wrapped-key blob on test keys, sends nothing
 test/okp_host_only_test.sh\tthe host-only guard: its tool list and fixtures name the device tools it rejects
 test/okp_guard_coverage_test.sh\tthe coverage check: its tool-name filter and fixtures name the spellings it feeds to this guard, and run none of them
+test/device_lifecycle_docs_test.sh\tthe docs check: it greps architecture.md and the README for the heading and anchor "where the life cycle closes", and runs nothing
 test/no_lifecycle_close_test.sh\tthis guard: it holds the patterns it searches for'
 
 # Commands that change the life cycle or write a fuse. Matched per line, case
