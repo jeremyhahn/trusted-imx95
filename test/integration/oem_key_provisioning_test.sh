@@ -62,4 +62,17 @@ check "make okp-policy-check: a close not through the enclave fails" nonzero "wa
 run make -s -C "$ROOT" okp-policy-check
 check "make okp-policy-check: no OKP_TRACE names the variable" nonzero "set OKP_TRACE="
 
+# A trace path with a quote, a space and ;touch is one argument, never shell
+# source: no command runs, and the checker reports the path it cannot read.
+inj="$TMP_ROOT/pwn"
+evil="$TMP_ROOT/a\"b c;touch $inj;x.jsonl"
+run make -s -C "$ROOT" okp-policy-check OKP_TRACE="$evil"
+check "make okp-policy-check: a trace path with a quote, a space and ;touch is one argument" 2 "okp-policy-check:"
+run test ! -e "$inj"
+check "make okp-policy-check: the ;touch in the path ran no command" 0
+run make -s -C "$ROOT" okp-policy-check OKP_TRACE="\$\$(touch $inj)"
+check "make okp-policy-check: a \$(...) in the path ran no command" 2 "okp-policy-check:"
+run test ! -e "$inj"
+check "make okp-policy-check: the \$(touch) in the path ran no command" 0
+
 finish

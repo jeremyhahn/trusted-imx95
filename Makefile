@@ -283,9 +283,12 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
 
+# OKP_TRACE reaches the recipe through the environment, never expanded into its shell source.
+export OKP_TRACE
+
 okp-policy-check: ## Check the trace of a provisioning run against the oem-key-provisioning row (OKP_TRACE=<file.jsonl>; key exchange then wrapped-key import with both rollback flags, fuses and life-cycle close once and owner-approved; host-side, no enclave)
-	@[ -n "$(OKP_TRACE)" ] || { echo "okp-policy-check: set OKP_TRACE=<file.jsonl>"; exit 2; }
-	@python3 scripts/okp-policy-check.py "$(OKP_TRACE)"
+	@[ -n "$$OKP_TRACE" ] || { echo "okp-policy-check: set OKP_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/okp-policy-check.py "$$OKP_TRACE"
 
 integration-test-oem-key-provisioning: ## Integration test of the oem-key-provisioning row: make okp-policy-check end to end on provisioning runs that keep and break the row
 	@bash test/integration/oem_key_provisioning_test.sh
