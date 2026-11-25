@@ -3,7 +3,7 @@
 > **Status: PROVISIONAL** · Row: `oem-key-provisioning` ([SPEC.md](../SPEC.md)) · Issue #163
 
 A host-side check. It computes the SRK table hash of four public SRK keys or certificates and compares it with an
-expected value kept in a file. It touches no board, no fuse and no life-cycle state.
+expected value kept in a file. It touches no board, no fuse and no life-cycle state; `test/okp_host_only_test.sh` reads its scripts and fails on any device-transport tool or path in them.
 
 **Programming the SRK hash into a device is the owner's decision alone. It is not scripted here and this file gives
 no command for it.** The same holds for the life-cycle close

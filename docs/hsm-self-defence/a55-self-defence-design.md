@@ -27,6 +27,12 @@ decision to react to tampering belongs to the M7 and the System Manager, which t
 does not control (tamper F3). Nothing in this note lets an A55 observation be the only
 thing standing between an attacker and a key.
 
+One duty follows from owner ruling 1234, which makes the A55 Linux side the caller of the
+enclave's key API: when the M7 runs its tamper response, the A55 HSM service quarantines
+its key-store sessions. That is a reaction to the M7's event, not an A55 decision; it is
+designed, as proposed and pending owner approval, in the
+[tamper-response note](a55-tamper-response-design.md).
+
 ## Inputs the A55 can use
 
 Trust level "A55-self-reported" means a kernel or process on the A55 produced the
@@ -195,10 +201,30 @@ in the [A55 signals survey](a55-signals-survey.md); question 7 is in the
    - (a) Decide with the trusted-firmware and go-xkms rows once their surveys exist.
    - (b) Use an existing SCMI notification path, if one is confirmed.
 
-   Recommendation: (a). Channel not decided; no document on this branch names it.
+   Recommendation: (a). Channel not decided; no document on this branch names it. For
+   the M7's tamper event under ruling 1234 the same question is question 1 of the
+   [tamper-response note](a55-tamper-response-design.md), which names the candidates.
+
+6. **Does the A55 HSM service quarantine its key-store sessions on the M7's tamper event?**
+   (proposed, pending owner approval; ruling 1234)
+   - (a) Yes, as the tamper-response note proposes: refuse new key operations, end the
+     service's sessions, do not retry; no A55 observation of its own triggers deletion.
+   - (b) No: the A55 stays a pure witness and the M7 alone stops it.
+
+   Recommendation: (a). It costs one state machine on the side that holds the sessions
+   and removes an open session from the window in which the M7 stops the A55 LM.
 
 ## Proposed SPEC changes (proposed, pending owner approval)
 
-None. If the owner answers question 7 of the tamper survey with "here", a line in the
+If the owner answers question 7 of the tamper survey with "here", a line in the
 `hsm-self-defence` row could name this note and the A55 inputs of a55 F1 and a55 F4 as
 witness inputs only.
+
+Proposed, pending owner approval, under ruling 1234 (owner's answer to question 6 above):
+in the `hsm-self-defence` row, replace the sentence that the Cortex-A55 tamper detector,
+the NPU model and the IMA log are an open question by a sentence that the A55 Linux side,
+as the caller of the enclave's HSM API (owner ruling 1234), quarantines its key-store
+sessions on the M7's tamper event, as proposed in the
+[tamper-response note](a55-tamper-response-design.md), pending owner approval, with the
+A55 detector, the NPU model and the IMA log still an open question; and set the row's
+docs cell to both notes. No other row changes.

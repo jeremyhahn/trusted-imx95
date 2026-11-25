@@ -185,6 +185,11 @@ build() {
 		tail -n 20 "$log" >&2
 		die "build $1 failed; log: $log"
 	fi
+	# The generated SCMI table: the M7 agent holds PERF_M7 at ALL and no other
+	# agent does (survey section 8). Stdout goes to stderr, so `build` prints
+	# only the hash.
+	"$root/scripts/sm-perf-check.sh" "$tree/configs/${pin[sm_config]}/config_scmi.h" >&2 ||
+		die "the generated config_scmi.h fails scripts/sm-perf-check.sh"
 	img="$tree/build/${pin[sm_config]}/m33_image.bin"
 	[ -f "$img" ] || die "build $1 made no ${img#"$tree"/}; log: $log"
 	sha "$img"
@@ -202,6 +207,7 @@ cp "$out/tree-1/build/${pin[sm_config]}/m33_image.bin" "$out/m33_image.bin"
 {
 	for k in $keys; do echo "$k=${pin[$k]}"; done
 	echo "source_date_epoch=$epoch"
+	echo "m7_perf_m7=ALL"
 	echo "build1_sha256=$h1"
 	echo "build2_sha256=$h2"
 	echo "reproducible=$reproducible"
