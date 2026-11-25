@@ -3,8 +3,8 @@
 Build, deploy and burn in the go-xkms daemon on the i.MX95 board. The board's
 ssh target is always an argument; no address is kept in the repository.
 
-Scope: the `xkms-board` row of [SPEC.md](../SPEC.md#features), proposed,
-pending owner approval. It is not done.
+Scope: the `xkms-board` row of [SPEC.md](../SPEC.md#features), in progress;
+the owner approved it on 2026-11-25. It is not done.
 
 | Step | Command | Result |
 | --- | --- | --- |
