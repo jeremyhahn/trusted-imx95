@@ -10,6 +10,8 @@
 .tools/
 # Build output (make system-manager writes out/, gitignored): never in the context
 /out/
+# The platform-image build's artefacts and fetched layers (.gitignore)
+.platform-image/
 # The vendor images .gitignore keeps out of the tree (and so out of
 # scripts/image-tag.sh's hash) stay out of the image too; the test in
 # test/ci_scripts_test.sh holds every resources/ rule of .gitignore here.
