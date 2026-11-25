@@ -17,6 +17,7 @@ tree() {
 	cp "$ROOT/docs/references/README.md" "$t/docs/references/README.md"
 	cp "$ROOT/ROADMAP.md" "$ROOT/Makefile" "$t/"
 	cp "$ROOT/scripts/hsm-self-defence-check.py" "$t/scripts/"
+	cp -r "$ROOT/hsm-self-defence" "$t/"
 	echo "$t"
 }
 
@@ -64,10 +65,18 @@ check "make hsm-self-defence-check: dropping the missing tamper-pin document fai
 	"the one that does is missing" "phrase missing"
 
 t=$(tree roadmap)
-edit "$t/ROADMAP.md" "blocked: owner approval; A55 side open" "in progress"
+edit "$t/ROADMAP.md" "blocked: owner approval; A55 side proposed, pending owner approval" "in progress"
 run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t"
 check "make hsm-self-defence-check: a ROADMAP line no longer blocked fails" nonzero \
-	"ROADMAP.md: blocked on owner approval: not marked blocked"
+	"ROADMAP.md: blocked on owner approval: not marked blocked" \
+	"ROADMAP.md: the A55 side is proposed, pending owner approval"
+
+t=$(tree a55roadmap)
+edit "$t/ROADMAP.md" "A55 side proposed, pending owner approval" "A55 side open"
+run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t"
+check "make hsm-self-defence-check: any other wording of the A55 side fails" nonzero \
+	"FAIL 14 ROADMAP.md: the A55 side is proposed, pending owner approval" \
+	"does not say 'A55 side proposed, pending owner approval'"
 
 t=$(tree refs)
 edit "$t/docs/references/README.md" "secure-world, hsm-self-defence | Not on the public" "secure-world | Not on the public"
@@ -78,10 +87,22 @@ check "make hsm-self-defence-check: a missing document no longer listed for the 
 t=$(tree built)
 printf '\nhsm-self-defence-image: ## build it\n\t@true\n' >>"$t/Makefile"
 : >"$t/scripts/hsm-self-defence-build.sh"
-mkdir "$t/hsm-self-defence"
+: >"$t/hsm-self-defence/build.sh"
 run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t"
-check "make hsm-self-defence-check: a target, script or source tree that builds the row fails" nonzero \
-	"targets hsm-self-defence-image" "found hsm-self-defence-build.sh" "hsm-self-defence/ exists"
+check "make hsm-self-defence-check: a target, script or source file that builds the row fails" nonzero \
+	"targets hsm-self-defence-image" "found hsm-self-defence-build.sh" "found build.sh"
+
+t=$(tree nofile)
+rm "$t/hsm-self-defence/a55/quarantine.c"
+run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t"
+check "make hsm-self-defence-check: a file of the #183 tree gone fails" nonzero \
+	"the files #183 introduced are present" "missing a55/quarantine.c"
+
+t=$(tree notree)
+rm -r "$t/hsm-self-defence"
+run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t"
+check "make hsm-self-defence-check: a tree without hsm-self-defence/ fails" nonzero \
+	"the files #183 introduced are present" "missing a55/quarantine.c, a55/quarantine.h" "a55/tamper_event_test.c"
 
 t=$(tree nospec)
 rm "$t/docs/SPEC.md"

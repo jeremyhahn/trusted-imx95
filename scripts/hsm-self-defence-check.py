@@ -3,8 +3,9 @@
 
 The row is blocked (owner rulings 1243 and 1244, #26). This check proves the
 tree keeps it that way: docs/SPEC.md states the row as written and leaves it
-planned, ROADMAP.md marks it blocked on the owner, docs/references/README.md
-lists it under the missing documents, and nothing in the tree builds it.
+planned, ROADMAP.md marks it blocked on the owner with the A55 side proposed,
+docs/references/README.md lists it under the missing documents, and nothing in
+the tree builds it beyond the A55 service files #183 put in hsm-self-defence/.
 Prints one "ok"/"FAIL" line per check; exits 0 when all hold, 1 when one
 fails, 2 on a usage error.
 """
@@ -29,6 +30,17 @@ PHRASES = [
 # The only make targets and scripts a blocked row may carry: this check.
 ALLOWED_TARGETS = {"hsm-self-defence-check", "integration-test-hsm-self-defence"}
 ALLOWED_SCRIPTS = {"hsm-self-defence-check.py"}
+# ROADMAP.md's words for the A55 side (main, #183): proposed, not decided.
+ROADMAP_A55 = "A55 side proposed, pending owner approval"
+# The A55 HSM service tree #183 put on main: exactly these files, no others.
+TREE_FILES = [
+    "a55/quarantine.c",
+    "a55/quarantine.h",
+    "a55/quarantine_test.c",
+    "a55/tamper_event.c",
+    "a55/tamper_event.h",
+    "a55/tamper_event_test.c",
+]
 
 
 class Report:
@@ -97,7 +109,8 @@ def main(argv):
         line = lines[0] if len(lines) == 1 else ""
         r.check(len(lines) == 1, "ROADMAP.md: one hsm-self-defence line", f"found {len(lines)}")
         r.check("blocked: owner approval" in line, "ROADMAP.md: blocked on owner approval", "not marked blocked")
-        r.check("A55 side open" in line, "ROADMAP.md: the A55 side is open", "not marked open")
+        r.check(ROADMAP_A55 in line, "ROADMAP.md: the A55 side is proposed, pending owner approval",
+                f"does not say '{ROADMAP_A55}'")
 
     refs = read(root, "docs/references/README.md")
     if isinstance(refs, OSError):
@@ -120,8 +133,15 @@ def main(argv):
     extra = sorted(f for f in (os.listdir(scripts) if os.path.isdir(scripts) else [])
                    if f.startswith(ROW) and f not in ALLOWED_SCRIPTS)
     r.check(not extra, "scripts/: no hsm-self-defence build script", "found " + ", ".join(extra))
-    r.check(not os.path.exists(os.path.join(root, ROW)), "no top-level hsm-self-defence/ source tree",
-            f"{ROW}/ exists")
+    tree = os.path.join(root, ROW)
+    have = sorted(os.path.relpath(os.path.join(d, f), tree)
+                  for d, _, fs in os.walk(tree) for f in fs)
+    missing = [f for f in TREE_FILES if f not in have]
+    extra = [f for f in have if f not in TREE_FILES]
+    r.check(not missing, "hsm-self-defence/: the files #183 introduced are present",
+            "missing " + ", ".join(missing))
+    r.check(not extra, "hsm-self-defence/: nothing beyond the files #183 introduced",
+            "found " + ", ".join(extra))
 
     if r.failed:
         print(f"hsm-self-defence-check: FAIL ({r.failed} of {r.n} checks)")
