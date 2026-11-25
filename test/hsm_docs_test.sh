@@ -155,4 +155,66 @@ NEG=$(d_words "$TMPD/neg.md")
 if [ -n "$NEG" ]; then pass "negative: missing Recommendation detected"; else fail "negative: missing Recommendation detected"; fi
 rm -rf "$TMPD"
 
+# ---- Block 3: docs/hsm-self-defence/a55-tamper-response-design.md (issue #26) ----
+TR_REL=docs/hsm-self-defence/a55-tamper-response-design.md
+
+e_headings() {
+	local h
+	for h in "## Scope and ruling 1234" "## Who does what on a tamper event" \
+		"## Candidate channels from the M7, through the SM, to the A55" \
+		"## The tamper-event message contract" "### Test vectors" \
+		"## The service's state machine" \
+		"## What a compromised A55 can and cannot do to this path" \
+		"## Board validation list" "## Questions for the owner" \
+		"## Proposed SPEC changes (proposed, pending owner approval)"; do
+		grep -qxF "$h" "$1" || echo "missing heading $h"
+	done
+	grep -qF 'proposed, pending owner approval' "$1" || echo "no 'proposed, pending owner approval'"
+	grep -qF 'ruling 1234' "$1" || echo "no 'ruling 1234'"
+}
+
+# Every event code in the event-code table has a V vector, every reject name in
+# the validation table has an R vector.
+e_vectors() {
+	local n codes=0
+	# A backtick in the pattern is matched with a dot, to keep it out of quotes.
+	while read -r n; do
+		codes=$((codes + 1))
+		grep -qE "^\| V[0-9]+ \| $n \| " "$1" || echo "event code $n has no test vector"
+	done < <(grep -oE '^\| .0x[0-9a-f]+. \| [A-Z_]+ \|' "$1" | grep -oE '[A-Z_]{3,}')
+	while read -r n; do
+		grep -qE "^\| R[0-9]+ \| $n \| " "$1" || echo "reject $n has no test vector"
+	done < <(grep -oE '^\| [0-9]+ \| [a-z-]+ \|' "$1" | grep -oE '[a-z]+(-[a-z]+)*')
+	[ "$codes" -ge 5 ] || echo "fewer than 5 event codes"
+}
+
+e_all() {
+	{ e_headings "$1"; e_vectors "$1"; d_words "$1"; d_ids "$1"; d_links "$1"; d_private "$1"; } 2>&1
+}
+
+TR="$ROOT/$TR_REL"
+if [ -f "$TR" ]; then pass "tamper-response note exists"; else fail "tamper-response note exists"; finish; fi
+
+OUT=$(e_all "$TR")
+if [ -z "$OUT" ]; then pass "tamper-response note structure"; else fail "tamper-response note structure: $OUT"; fi
+
+if grep -q 'a55-tamper-response-design.md' "$ROOT/$DESIGN_REL"; then
+	pass "design note links the tamper-response note"
+else
+	fail "design note links the tamper-response note"
+fi
+
+# Negative: drop one heading, then one test vector row, on temp copies.
+TMPD=$(mktemp -d)
+awk '$0 != "## The service'"'"'s state machine"' "$TR" >"$TMPD/neg1.md"
+NEG=$(e_headings "$TMPD/neg1.md")
+if [ -n "$NEG" ]; then pass "negative: missing tamper-response heading detected"; else fail "negative: missing tamper-response heading detected"; fi
+awk '/^\| V3 \|/ { next } { print }' "$TR" >"$TMPD/neg2.md"
+NEG=$(e_vectors "$TMPD/neg2.md")
+if [ -n "$NEG" ]; then pass "negative: missing event-code vector detected"; else fail "negative: missing event-code vector detected"; fi
+awk '/^\| R7 \|/ { next } { print }' "$TR" >"$TMPD/neg3.md"
+NEG=$(e_vectors "$TMPD/neg3.md")
+if [ -n "$NEG" ]; then pass "negative: missing reject vector detected"; else fail "negative: missing reject vector detected"; fi
+rm -rf "$TMPD"
+
 finish

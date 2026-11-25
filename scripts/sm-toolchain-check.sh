@@ -19,6 +19,11 @@ bin="$out/m33_image.bin"
 [ -s "$bin" ] || { echo "sm-toolchain-check: $bin is missing or empty" >&2; exit 1; }
 [ -s "$out/sm-manifest.txt" ] || { echo "sm-toolchain-check: $out/sm-manifest.txt is missing or empty" >&2; exit 1; }
 
+# Survey 8.2 item 7: where a PERF_M7 PRIV line must go, tested on scratch copies
+# of the built tree (the tree and the image are untouched). It runs right after
+# the build and its artefact checks, so a failed build still reports as before.
+scripts/sm-perf-placement-check.sh "$out/tree-1"
+
 # The linked System Manager ELF must be an ARM ELF: the magic, then e_machine
 # 0x28 (EM_ARM) at offset 18.
 elf=$(find "$out/tree-1/build" -type f -name '*.elf' | head -n 1)
