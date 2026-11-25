@@ -50,7 +50,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager integration-test-system-manager-config secure-world ahab-sign-test \
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling \
+	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
 	okp-policy-check integration-test-oem-key-provisioning \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
 
@@ -280,6 +280,9 @@ okp-policy-check: ## Check the trace of a provisioning run against the oem-key-p
 
 integration-test-oem-key-provisioning: ## Integration test of the oem-key-provisioning row: make okp-policy-check end to end on provisioning runs that keep and break the row
 	@bash test/integration/oem_key_provisioning_test.sh
+
+integration-test-device-lifecycle: ## Integration test of the device-lifecycle row: the A55 collector, then endorse-01, enroll-01, device-attest-01 (tpm) against a stand-in control plane (no board, no TPM)
+	@bash test/integration/device_lifecycle_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
