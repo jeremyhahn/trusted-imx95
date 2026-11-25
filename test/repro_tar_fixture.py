@@ -25,7 +25,7 @@ with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as t:
         else:
             t.addfile(ti)
 
-    add("etc/trusted-imx95-rootfs-id", b"id")
+    add("etc/issue", b"issue")
     pax = {}
     if "xattr" in opt:
         pax["SCHILY.xattr.user.tag"] = opt["xattr"]

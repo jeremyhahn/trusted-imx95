@@ -3,7 +3,7 @@ Description=Mount the tee-data partition of the disk holding the root file syste
 # No default dependencies, like the BSP's tee-supplicant@.service (Before=sysinit.target):
 # the default ones would put this unit after sysinit.target and close an ordering cycle.
 DefaultDependencies=no
-Before=tee-nv-wipe.service
+Before=tee-supplicant@teepriv0.service
 Conflicts=shutdown.target
 Before=shutdown.target
 
@@ -12,4 +12,4 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/tee-data-mount
 ExecStop=/bin/umount /data
-# No [Install]: tee-nv-wipe.service requires this unit.
+# No [Install]: tee-supplicant's drop-in (10-nv.conf) requires this unit.

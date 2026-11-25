@@ -23,12 +23,12 @@ chmod +x "$wt/bin/sfdisk"
 
 has() { grep -qF -- "$2" "$1"; }
 
-# mk DIR [VAR=value ...]: one synthetic deploy directory. Knobs: TEE TA IMG DTB BOOT DATA MEMBER MODE ID ROOT
-# (the content of each; ID and ROOT are the allowed differences), WICZ=gz|plain, NOTEE=1 (omit tee.bin).
+# mk DIR [VAR=value ...]: one synthetic deploy directory. Knobs: TEE TA IMG DTB BOOT DATA MEMBER MODE ETC ROOT
+# (the content of each; ROOT, the wic root partition, is the allowed difference), WICZ=gz|plain, NOTEE=1 (omit tee.bin).
 mk() {
 	local d=$1 k v
 	shift
-	local TEE=tee TA=ta IMG=img DTB=dtb BOOT=boot DATA=data MEMBER=hello MODE=644 ID=id-A ROOT=root-A WICZ=plain TARZ=gz NOTEE=0
+	local TEE=tee TA=ta IMG=img DTB=dtb BOOT=boot DATA=data MEMBER=hello MODE=644 ETC=etc-A ROOT=root-A WICZ=plain TARZ=gz NOTEE=0
 	for kv in "$@"; do k=${kv%%=*}; v=${kv#*=}; printf -v "$k" '%s' "$v"; done
 	rm -rf "$d"
 	mkdir -p "$d/optee-ftpm" "$wt/stage"
@@ -46,7 +46,7 @@ mk() {
 	if [ "$WICZ" = both ]; then gzip -nk "$w"; fi
 	rm -rf "$wt/stage"
 	mkdir -p "$wt/stage/etc" "$wt/stage/usr/bin"
-	printf '%s' "$ID" >"$wt/stage/etc/trusted-imx95-rootfs-id"
+	printf '%s' "$ETC" >"$wt/stage/etc/issue"
 	printf '%s' "$MEMBER" >"$wt/stage/usr/bin/tool"
 	chmod "$MODE" "$wt/stage/usr/bin/tool"
 	ln -s tool "$wt/stage/usr/bin/link"
@@ -62,9 +62,14 @@ mk "$wt/b"
 run "$wt/a" "$wt/b"
 expect "identical inputs: exit 0" test "$rc" -eq 0
 expect "identical inputs: one line per artefact" test "$(grep -c '^OK ' "$wt/out")" -ge 7
-mk "$wt/b" ID=id-B ROOT=root-B
+mk "$wt/b" ROOT=root-B
 run "$wt/a" "$wt/b"
-expect "only the rootfs id and the root marker differ: exit 0" test "$rc" -eq 0
+expect "only the wic root partition differs (compared from the archive): exit 0" test "$rc" -eq 0
+# No member is exempt: the image carries no per-build identity file.
+mk "$wt/b" ETC=etc-B
+run "$wt/a" "$wt/b"
+expect "an /etc member differs: exit nonzero" test "$rc" -ne 0
+expect "an /etc member differs: names the member" has "$wt/out" "first differing member: etc/issue"
 mk "$wt/b" WICZ=gz
 run "$wt/a" "$wt/b"
 expect "a compressed wic on one side still matches" test "$rc" -eq 0

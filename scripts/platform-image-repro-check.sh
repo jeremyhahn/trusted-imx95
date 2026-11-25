@@ -4,21 +4,21 @@
 # usage: platform-image-repro-check.sh DEPLOY_A DEPLOY_B
 #
 # DEPLOY_A and DEPLOY_B are the deploy directories of two clean builds of the same inputs.
-# The one documented difference is /etc/trusted-imx95-rootfs-id (random per do_rootfs run,
-# docs/platform-image/build.md "Reproducible builds") and what follows from it: the root
-# partition's marker sector, so the root partition and the .wic digest. Compared:
+# The root partition and the .wic digest are not compared byte for byte: that wic's ext4 image
+# (UUID, hash seed, timestamps) is reproducible is unconfirmed; the root file system is compared
+# file by file from the rootfs archive instead (docs/platform-image/build.md "Reproducible
+# builds"). Compared:
 #   - the fTPM TA's stripped ELF, tee.bin, Image and the board's .dtb files, byte for byte;
 #   - the .wic's boot and tee-data partitions, byte for byte (found by GPT name), and the GPT
 #     entries' names, starts and sizes (not the GUIDs: unconfirmed whether wic draws them per build);
 #   - the root file system from the rootfs archive: member names, types, modes, owners, link
-#     targets and content hashes, less the id file; the first differing member is named.
+#     targets and content hashes; the first differing member is named.
 # A differing artefact prints both SHA-256s; the exit status is nonzero. A match prints one line
 # per artefact and exits 0. A missing artefact on either side fails. Nothing is written to either
 # directory (scratch in mktemp -d, removed on exit). bitbake is never run.
 set -euo pipefail
 
 TA_UUID=bc50d971-d4c9-42c4-82cb-343fb7f37896
-ID_FILE=etc/trusted-imx95-rootfs-id
 
 usage() { echo "usage: $0 DEPLOY_A DEPLOY_B" >&2; exit 2; }
 [ $# -eq 2 ] || usage
@@ -76,15 +76,13 @@ elif cmd == "firstdiff":  # firstdiff A.members B.members -> first member name w
             break
     else:
         sys.exit(1)
-elif cmd == "tar":    # tar ARCHIVE IDFILE -> one line per member
+elif cmd == "tar":    # tar ARCHIVE -> one line per member
     with tarfile.open(sys.argv[2], "r:") as t:
         for m in t:
             n = m.name
             while n.startswith("./"):
                 n = n[2:]
             n = n.rstrip("/")
-            if n == sys.argv[3]:
-                continue
             d = "-"
             if m.isreg():
                 d = sha(t.extractfile(m))
@@ -217,7 +215,7 @@ if [ "$wic_ok" -eq 1 ]; then
 		hb=$(python3 -I "$tmp/h.py" range "$pb" $lb) || { bad "wic partition $part: B unreadable"; continue; }
 		if [ "$ha" = "$hb" ]; then ok "wic partition $part $ha"; else bad "wic partition $part: A=$ha B=$hb"; fi
 	done
-	echo "NOTE  wic root partition and .wic digest not compared: they carry /$ID_FILE"
+	echo "NOTE  wic root partition and .wic digest not compared: the root file system is compared from the rootfs archive"
 fi
 
 # --- the root file system ---
@@ -233,12 +231,12 @@ if [ "$rt_ok" -eq 1 ]; then
 	tb=$(deco "$rb" "$tmp/b.tar") || { bad "rootfs archive: B ($rb) cannot be decompressed (corrupt or truncated)"; rt_ok=0; }
 fi
 if [ "$rt_ok" -eq 1 ]; then
-	python3 -I "$tmp/h.py" tar "$ta" "$ID_FILE" >"$tmp/a.members" 2>"$tmp/a.err" || { bad "rootfs archive: A cannot be read: $(tr '\n' ' ' <"$tmp/a.err")"; rt_ok=0; }
-	python3 -I "$tmp/h.py" tar "$tb" "$ID_FILE" >"$tmp/b.members" 2>"$tmp/b.err" || { bad "rootfs archive: B cannot be read: $(tr '\n' ' ' <"$tmp/b.err")"; rt_ok=0; }
+	python3 -I "$tmp/h.py" tar "$ta" >"$tmp/a.members" 2>"$tmp/a.err" || { bad "rootfs archive: A cannot be read: $(tr '\n' ' ' <"$tmp/a.err")"; rt_ok=0; }
+	python3 -I "$tmp/h.py" tar "$tb" >"$tmp/b.members" 2>"$tmp/b.err" || { bad "rootfs archive: B cannot be read: $(tr '\n' ' ' <"$tmp/b.err")"; rt_ok=0; }
 fi
 if [ "$rt_ok" -eq 1 ]; then
 	if cmp -s "$tmp/a.members" "$tmp/b.members"; then
-		ok "rootfs members (less /$ID_FILE) $(sha_of "$tmp/a.members")"
+		ok "rootfs members $(sha_of "$tmp/a.members")"
 	else
 		# not diff(1): its output format differs (BusyBox, in the Alpine CI image, prints unified)
 		first=$(python3 -I "$tmp/h.py" firstdiff "$tmp/a.members" "$tmp/b.members") || first="(unknown)"

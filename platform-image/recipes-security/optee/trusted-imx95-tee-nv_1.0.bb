@@ -4,6 +4,8 @@ SUMMARY = "Persistent storage and start-up of tee-supplicant for the fTPM NV (pr
 # tee-supplicant keeps under /data/tee. The root file system is read-only, so
 # /data is its own partition (platform-image/files/wic/trusted-imx95.wks, GPT name
 # tee-data), mounted before tee-supplicant starts. No key is stored here.
+# The NV is kept on tee-data when the root partition is rewritten; a full-image
+# flash recreates tee-data empty and so erases it (owner, 2026-11-25).
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"
 
@@ -11,8 +13,6 @@ SRC_URI = "file://tee-data-mount \
            file://tee-data-mount.service \
            file://10-nv.conf \
            file://tee-supplicant \
-           file://tee-nv-wipe \
-           file://tee-nv-wipe.service \
            file://trusted-imx95-tpm.target \
           "
 
@@ -31,14 +31,6 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/tee-data-mount.service ${D}${systemd_system_unitdir}/tee-data-mount.service
     install -d ${D}${systemd_system_unitdir}/tee-supplicant@.service.d
     install -m 0644 ${UNPACKDIR}/10-nv.conf ${D}${systemd_system_unitdir}/tee-supplicant@.service.d/10-nv.conf
-    # NV erasure tied to the rootfs identity (/etc/trusted-imx95-rootfs-id, written
-    # by the image); tee-supplicant requires this unit.
-    install -d ${D}${sbindir}
-    install -m 0755 ${UNPACKDIR}/tee-nv-wipe ${D}${sbindir}/tee-nv-wipe
-    install -m 0644 ${UNPACKDIR}/tee-nv-wipe.service ${D}${systemd_system_unitdir}/tee-nv-wipe.service
-    install -d ${D}${sysconfdir}/systemd/system/tee-supplicant@teepriv0.service.requires
-    ln -sf ${systemd_system_unitdir}/tee-nv-wipe.service \
-        ${D}${sysconfdir}/systemd/system/tee-supplicant@teepriv0.service.requires/tee-nv-wipe.service
     install -d ${D}${sysconfdir}/default
     install -m 0644 ${UNPACKDIR}/tee-supplicant ${D}${sysconfdir}/default/tee-supplicant
     # Enable the supplicant (one instance, name unused by the unit) at boot.
@@ -52,4 +44,4 @@ do_install() {
         ${D}${sysconfdir}/systemd/system/multi-user.target.wants/trusted-imx95-tpm.target
 }
 
-FILES:${PN} += "/data ${sbindir}/tee-nv-wipe ${sbindir}/tee-data-mount ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"
+FILES:${PN} += "/data ${sbindir}/tee-data-mount ${systemd_system_unitdir} ${sysconfdir}/systemd/system ${sysconfdir}/default"
