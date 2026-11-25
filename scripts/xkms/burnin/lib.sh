@@ -83,6 +83,24 @@ bi_ctl() {
 	timeout --foreground "${BI_CTL_TIMEOUT:-60}" "$BI_CTL" "${a[@]}" "$@"
 }
 
+# bi_key_absent <id>: succeed only when xkmsctl answers that the key does not
+# exist. A key that is still there fails, and so does any other error
+# (connection, auth, server, timeout): that is no answer about the key, so the
+# error text is printed and the check fails closed.
+bi_key_absent() {
+	local out
+	if out=$(bi_ctl key get "$1" 2>&1); then
+		echo "key $1 still exists"
+		return 1
+	fi
+	case $out in
+	*[Cc]onnect* | *[Dd]ial* | *[Rr]efused* | *[Tt]imed\ out* | *[Uu]nauthori* | *[Dd]enied* | *[Tt][Ll][Ss]* | *[Cc]ertificate*) ;;
+	*[Nn]ot\ [Ff]ound* | *"does not exist"* | *[Nn]o\ such\ key*) return 0 ;;
+	esac
+	echo "no not-found answer for $1 (an error is not proof the key is gone): ${out:-no output}"
+	return 1
+}
+
 bi_board() {
 	ssh -o BatchMode=yes -o ConnectTimeout=10 "$BI_BOARD" "$@"
 }

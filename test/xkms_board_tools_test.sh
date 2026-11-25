@@ -154,8 +154,17 @@ generate)
 	[ -z "${FAKE_CTL_ACKED:-}" ] || echo "$id" >>"$FAKE_CTL_ACKED"
 	;;
 list) ls "$k" ;;
-get) [ -e "$k/$id" ] && echo "{\"id\":\"$id\"}" ;;
-delete) [ -e "$k/$id" ] && rm -f "$k/$id" ;;
+get)
+	# a missing key is answered with xkmsctl's not-found error (exit 1)
+	# (FAKE_CTL_MISSING_ERR: any other error text instead, as a dead server gives)
+	[ -e "$k/$id" ] || { echo "error: ${FAKE_CTL_MISSING_ERR:-key $id not found}" >&2; exit 1; }
+	echo "{\"id\":\"$id\"}"
+	;;
+delete)
+	# FAKE_CTL_KEEP: the delete is acknowledged but the key stays
+	[ -e "$k/$id" ] || exit 1
+	[ -n "${FAKE_CTL_KEEP:-}" ] || rm -f "$k/$id"
+	;;
 encrypt) [ -e "$k/$id" ] && echo "{\"ciphertext\":\"c-$4\",\"nonce\":\"n\",\"tag\":\"t\"}" ;;
 decrypt) [ -e "$k/$id" ] && echo "${4#c-}" ;;
 sign)
@@ -652,6 +661,20 @@ ok "concurrency: the failed signs are counted" out_has "$tmp/cc-fail.log" "(3 fa
 CC "$tmp/cc-bad.log" badsig
 ok "concurrency: answers without a signature, FAIL" [ "$RC" != 0 ]
 ok "concurrency: no client verified" out_has "$tmp/cc-bad.log" "(0 of 3)"
+# the delete check needs xkmsctl's own not-found answer: an error is no proof
+gone_check_failed() { # the delete check of a log has a FAIL line (its "acknowledged)" is followed by a colon)
+	case $(cat "$1") in *"FAIL round 1: bi-cc-"*"gone after concurrent deletes ("*" acknowledged): "*) return 0 ;; *) return 1 ;; esac
+}
+ok "concurrency: a real not-found passes the delete check" out_has "$tmp/cc-ok.log" "gone after concurrent deletes ("
+gone_check_not_failed() { ! gone_check_failed "$1"; }
+ok "concurrency: the not-found delete check does not fail" gone_check_not_failed "$tmp/cc-ok.log"
+FAKE_CTL_MISSING_ERR="dial tcp 192.0.2.1:8443: connect: connection refused" CC "$tmp/cc-conn.log"
+ok "concurrency: a connection error on the delete read, FAIL" [ "$RC" != 0 ]
+ok "concurrency: the delete check is the one that fails" gone_check_failed "$tmp/cc-conn.log"
+ok "concurrency: the connection error text is reported" out_has "$tmp/cc-conn.log" "connection refused"
+FAKE_CTL_KEEP=1 CC "$tmp/cc-keep.log"
+ok "concurrency: a key still present after the deletes, FAIL" [ "$RC" != 0 ]
+ok "concurrency: the still-present key is named" out_has "$tmp/cc-keep.log" "still exists"
 
 # --- burn-in writers drain at a stop -------------------------------------------
 # Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,

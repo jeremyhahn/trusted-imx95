@@ -105,7 +105,7 @@ for ((r = 1; r <= rounds; r++)); do
 	done
 	wait
 	dels=$(find "$BI_WORK" -maxdepth 1 -name 'cc.del.*' | wc -l)
-	bi_check "round $r: $id gone after concurrent deletes ($dels acknowledged)" bash -c '! "$@" >/dev/null 2>&1' _ "$BI_CTL" "${BI_CTL_ARGS[@]}" ${BI_SERVER:+--server "$BI_SERVER"} key get "$id"
+	bi_check "round $r: $id gone after concurrent deletes ($dels acknowledged)" bi_key_absent "$id"
 	bi_check "round $r: at least one delete acknowledged" [ "$dels" -ge 1 ]
 done
 
