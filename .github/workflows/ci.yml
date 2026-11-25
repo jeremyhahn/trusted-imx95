@@ -1071,7 +1071,7 @@ env:
   # image comes from, the unit test, the fTPM NV selector the script reads
   # (optee-ftpm-flags.inc and the fTPM TA recipe), and this workflow. Any
   # doubt runs it.
-  SECURE_WORLD_PATTERN: '^(secure-world/|scripts/secure-world-build\.sh$|scripts/tool-pins\.sh$|scripts/in-toolchain-image\.sh$|scripts/image-tag\.sh$|build/docker/devcontainer/Dockerfile$|test/secure_world_build_test\.sh$|platform-image/recipes-security/optee/optee-ftpm-flags\.inc$|platform-image/recipes-security/optee/optee-ftpm_4\.10\.0\.bb$|Makefile$|\.github/workflows/ci\.yml$)'
+  SECURE_WORLD_PATTERN: '^(secure-world/|scripts/secure-world-build\.sh$|scripts/tool-pins\.sh$|scripts/in-toolchain-image\.sh$|scripts/image-tag\.sh$|build/docker/devcontainer/Dockerfile$|test/secure_world_build_test\.sh$|platform-image/recipes-security/optee/optee-ftpm-flags\.inc$|platform-image/recipes-security/optee/optee-ftpm_4\.10\.0\.bb$|platform-image/conf/local\.conf\.template$|Makefile$|\.github/workflows/ci\.yml$)'
   # v1.26.1 (Tenant Agent m1128 (9)): the repository's releasability test, which
   # a docs-only PR still runs because make coverage skips on it. CUSTOMIZE: the
   # `go test` arguments, package and -run pattern (for example
@@ -2036,7 +2036,7 @@ jobs:
           # is left out of the dump, its `run` replaced by a marker), and (c) the
           # reading job listing that job in its own `needs`.
           PRODUCER_JOB = "preflight"
-          PRODUCER_SHA256 = "ba6fc961344bbbb186955847e580cfced481e20f1fef9acb0ae3ffd02571f621"
+          PRODUCER_SHA256 = "4cf356eeedde66acc4d87ea07503d86ec7c9fcf5cb3cd66550de5f9eff4e576a"
           SELF_STEP = "Runner labels (ruling 633)"
 
 

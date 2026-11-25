@@ -133,13 +133,30 @@ nv_value() {
 	done <"$1"
 	return 1
 }
-# conf_nv <file>: the last TRUSTED_IMX95_FTPM_NV assignment of a BitBake conf
-# file that overrides the recipe default (=, := or ?=), or nothing.
+# conf_nv <file>: the value BitBake gives TRUSTED_IMX95_FTPM_NV from one conf
+# file, or nothing. Resolved the way BitBake parses it: = and := set the value
+# and a later one overrides; ?= sets it only while no earlier assignment has;
+# anything else that names the variable (??=, +=, :append, an override or flag
+# suffix, a single-quoted value) is refused, because this script cannot say
+# what BitBake would select from it, and the build must never pick a backend
+# BitBake would not. Runs in a command substitution: it returns 1 after a
+# message on stderr, and the caller exits.
 conf_nv() {
-	local l v='' re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"'
+	local l v='' set=0 op
+	local re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"[[:space:]]*$'
+	local named='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV([^A-Za-z0-9_]|$)'
 	[ -f "$1" ] || return 0
 	while IFS= read -r l || [ -n "$l" ]; do
-		if [[ "$l" =~ $re ]]; then v=${BASH_REMATCH[3]}; fi
+		if [[ "$l" =~ $re ]]; then
+			op=${BASH_REMATCH[2]}
+			if [ "$op" != '?=' ] || [ "$set" = 0 ]; then
+				v=${BASH_REMATCH[3]}
+				set=1
+			fi
+		elif [[ "$l" =~ $named ]]; then
+			echo "secure-world-build: $1: refusing the line '$l': only TRUSTED_IMX95_FTPM_NV =, := or ?= \"value\" is read; BitBake's other forms (??=, +=, :append, overrides) cannot be resolved here" >&2
+			return 1
+		fi
 	done <"$1"
 	printf '%s' "$v"
 }
@@ -155,7 +172,7 @@ nv_conf_src=
 pi_build_conf=${PLATFORM_IMAGE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/trusted-imx95/platform-image}/build/conf
 for f in "$root/platform-image/conf/local.conf.template" "$pi_build_conf"/*.conf; do
 	[ -f "$f" ] || continue
-	v=$(conf_nv "$f")
+	v=$(conf_nv "$f") || exit 1
 	[ -n "$v" ] || continue
 	if [ -n "$nv_conf" ] && [ "$v" != "$nv_conf" ]; then
 		die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$v' in $f but '$nv_conf' in $nv_conf_src; make them equal"

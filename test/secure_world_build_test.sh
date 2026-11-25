@@ -342,6 +342,38 @@ printf 'TRUSTED_IMX95_FTPM_NV = "reefs"\n' >"$pi/build/conf/auto.conf"
 fullrun nvconf-two "$oklock" PLATFORM_IMAGE_DIR="$pi"
 check "two conf files that select different backends fail closed" nonzero "the fTPM NV backends disagree" "make them equal"
 expect "two disagreeing conf files publish nothing" nothing_published nvconf-two
+rm -f "$pi/build/conf/auto.conf"
+
+# BitBake's assignment semantics inside one conf file (Codex round 3, P1): a ?=
+# applies only while nothing has set the value, = and := override, and the
+# forms this script cannot resolve are refused. The build never picks a backend
+# BitBake would not.
+# nv_conf_case <name> <backend> <conf text>: the build runs and selects backend.
+nv_conf_case() {
+	printf '%b' "$3" >"$pi/build/conf/local.conf"
+	fullrun "nvsem-$1" "$oklock" PLATFORM_IMAGE_DIR="$pi"
+	check "conf semantics, $1: builds" 0 "secure-world-build: OK"
+	expect "conf semantics, $1: the selection is $2" has "$(<"$TMP_ROOT/nvsem-$1/out/build-info.txt")" "ftpm-nv: $2"
+}
+# nv_conf_refused <name> <conf text>: the build is refused and builds nothing.
+nv_conf_refused() {
+	printf '%b' "$2" >"$pi/build/conf/local.conf"
+	fullrun "nvsem-$1" "$oklock" PLATFORM_IMAGE_DIR="$pi"
+	check "conf semantics, $1: refused" nonzero "refusing the line"
+	expect "conf semantics, $1: nothing is published" nothing_published "nvsem-$1"
+	expect "conf semantics, $1: nothing is built" test ! -s "$TMP_ROOT/nvsem-$1/make.log"
+}
+nv_conf_case eq-then-weak rpmb 'TRUSTED_IMX95_FTPM_NV = "rpmb"\nTRUSTED_IMX95_FTPM_NV ?= "reefs"\n'
+nv_conf_case immediate-then-weak rpmb 'TRUSTED_IMX95_FTPM_NV := "rpmb"\nTRUSTED_IMX95_FTPM_NV ?= "reefs"\n'
+nv_conf_case weak-then-eq rpmb 'TRUSTED_IMX95_FTPM_NV ?= "reefs"\nTRUSTED_IMX95_FTPM_NV = "rpmb"\n'
+nv_conf_case weak-then-weak reefs 'TRUSTED_IMX95_FTPM_NV ?= "reefs"\nTRUSTED_IMX95_FTPM_NV ?= "rpmb"\n'
+nv_conf_case eq-then-eq reefs 'TRUSTED_IMX95_FTPM_NV = "rpmb"\nTRUSTED_IMX95_FTPM_NV = "reefs"\n'
+nv_conf_refused default-weak 'TRUSTED_IMX95_FTPM_NV ??= "reefs"\n'
+nv_conf_refused eq-then-default-weak 'TRUSTED_IMX95_FTPM_NV = "rpmb"\nTRUSTED_IMX95_FTPM_NV ??= "reefs"\n'
+nv_conf_refused default-weak-then-eq 'TRUSTED_IMX95_FTPM_NV ??= "reefs"\nTRUSTED_IMX95_FTPM_NV = "rpmb"\n'
+nv_conf_refused append 'TRUSTED_IMX95_FTPM_NV = "rpmb"\nTRUSTED_IMX95_FTPM_NV:append = "x"\n'
+nv_conf_refused single-quoted "TRUSTED_IMX95_FTPM_NV = 'reefs'\\n"
+rm -f "$pi/build/conf/local.conf"
 
 has_line() {
 	local l
