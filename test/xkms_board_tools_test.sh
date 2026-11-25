@@ -738,7 +738,20 @@ ok "build: the manifest records the clean GOFLAGS" out_has "$tmp/bld-1/$gxc/mani
 ok "build: the manifest holds no host path" out_lacks "$tmp/bld-1/$gxc/manifest.txt" "$here"
 BLD "$tmp/bld-2.log" "$tmp/bld-2" "$pin"
 ok "build: a second build of the commit succeeds" [ "$RC" = 0 ]
-ok "build: two builds of one commit give identical records" cmp -s "$tmp/bld-1/$gxc/manifest.txt" "$tmp/bld-2/$gxc/manifest.txt"
+# The records must carry the pin and the environment, not merely agree: two
+# records that both lack them are identical too.
+same_pinned_records() {
+	local m1=$tmp/bld-1/$gxc/manifest.txt m2=$tmp/bld-2/$gxc/manifest.txt m
+	for m in "$m1" "$m2"; do
+		out_has "$m" "go-pinned: $pin" || { echo "$m: no go-pinned line"; return 1; }
+		out_has "$m" "go-version: go version $pin " || { echo "$m: no go-version line"; return 1; }
+		out_has "$m" "env: " || { echo "$m: no env line"; return 1; }
+		out_has "$m" "GOTOOLCHAIN=local" || { echo "$m: no GOTOOLCHAIN=local"; return 1; }
+		out_has "$m" "GOFLAGS= GOEXPERIMENT=" || { echo "$m: no clean GOFLAGS/GOEXPERIMENT"; return 1; }
+	done
+	cmp -s "$m1" "$m2"
+}
+ok "build: two builds of one commit give identical records that carry the pin and the environment" same_pinned_records
 
 # --- burn-in writers drain at a stop -------------------------------------------
 # Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,
