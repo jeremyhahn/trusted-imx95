@@ -2,6 +2,8 @@
 # Unit tests of scripts/hdp-boundary-check.py: the repository keeps the
 # hsm-device-protocol row, and fixture trees that break each check (B1 to B5)
 # fail with the check named. Offline; writes only under $TMP_ROOT.
+# The recipe fixtures hold ${VAR} text that must reach the .bb file unexpanded.
+# shellcheck disable=SC2016
 set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -89,7 +91,7 @@ b5_recipe() {
 	t="$TMP_ROOT/b5-$1"
 	tree "$t"
 	mkdir -p "$t/platform-image/recipes-xkms/xkmsd"
-	printf "$2" >"$t/platform-image/recipes-xkms/xkmsd/xkmsd_git.bb"
+	printf '%b' "$2" >"$t/platform-image/recipes-xkms/xkmsd/xkmsd_git.bb"
 	run python3 "$CHK" "$t"
 }
 
