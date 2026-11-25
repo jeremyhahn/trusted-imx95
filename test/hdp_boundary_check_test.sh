@@ -77,7 +77,7 @@ check "B5: an xkmsd recipe on a tagged go-xkms release passes" 0 "ok B5 release:
 t="$TMP_ROOT/b5-branch"
 tree "$t"
 mkdir -p "$t/platform-image/recipes-xkms/xkmsd"
-printf 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;branch=main"\nSRCREV = "${AUTOREV}"\n' \
+printf '%s\n' 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;branch=main"' "SRCREV = \"\${AUTOREV}\"" \
 	>"$t/platform-image/recipes-xkms/xkmsd/xkmsd_git.bb"
 run python3 "$CHK" "$t"
 check "B5: an xkmsd recipe that follows a branch fails" 1 \
