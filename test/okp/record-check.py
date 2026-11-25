@@ -88,7 +88,8 @@ HEX_RE = re.compile(r"(?:0x)?[0-9A-Fa-f]{64,}")
 B64_RE = re.compile(r"[A-Za-z0-9+/]{43,}={0,2}")
 SAFE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]{1,48}")
 LOWER_HEX_RE = re.compile(r"[0-9a-f]+")
-TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})")
+TIMESTAMP_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))")
 
 
 def usage():
@@ -151,12 +152,21 @@ def fields_errors(rec, fields=None):
 
 
 def is_timestamp(value):
-    """True for an RFC 3339 date-time with a zone (Z or +hh:mm) that names a real instant."""
-    if not isinstance(value, str) or not TIMESTAMP_RE.fullmatch(value):
+    """True for an RFC 3339 date-time with a zone (Z or +hh:mm) that names a real instant.
+
+    The whole value is checked: the date and time must exist, and an offset must have
+    hours 00-23 and minutes 00-59.
+    """
+    if not isinstance(value, str):
+        return False
+    m = TIMESTAMP_RE.fullmatch(value)
+    if not m:
         return False
     try:
-        datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
+        datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")
     except ValueError:
+        return False
+    if m.group(2) is not None and (int(m.group(2)) > 23 or int(m.group(3)) > 59):
         return False
     return True
 
