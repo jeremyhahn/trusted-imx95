@@ -67,7 +67,7 @@ c_unconfirmed() {
 	grep -qF unconfirmed "$f" || echo "no unconfirmed mark in the file"
 	grep -qE '^#+ Sources not reached' "$f" ||
 		echo "missing 'Sources not reached' heading"
-	section_body "$f" '^## 5\. ' '^## [^5]' | grep -qF unconfirmed ||
+	section_body "$f" '^## 5\. ' '^## [^5]' | grep -F unconfirmed >/dev/null ||
 		echo "section 5 has no unconfirmed cell"
 }
 
@@ -184,7 +184,7 @@ c_trace_sections() {
 	local f=$1 q
 	for q in a b c d e f; do
 		section_body "$f" "^## [(]${q}[)] " '^## ' |
-			grep -qE '[A-Za-z_.]+:[0-9]|unconfirmed' ||
+			grep -E '[A-Za-z_.]+:[0-9]|unconfirmed' >/dev/null ||
 			echo "section ($q) has neither a file:line citation nor an unconfirmed mark"
 	done
 }
