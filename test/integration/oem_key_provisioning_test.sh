@@ -13,7 +13,7 @@ set -uo pipefail
 both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
-fuse='{"step":"counter_fuse_config","owner_approval":"OD-test"}'
+fuse='{"step":"counter_fuse_config","owner_approval":"OD-test","already_configured":false}'
 close='{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
 
 good="$TMP_ROOT/good.jsonl"
@@ -21,6 +21,12 @@ printf '%s\n' "$kx" "$imp" "$fuse" "$close" >"$good"
 run make -s -C "$ROOT" okp-policy-check OKP_TRACE="$good"
 check "make okp-policy-check: a run that keeps the row passes" 0 \
 	"ok 2 key_import: committed" "ok 4 lifecycle_close: ok" "okp-policy-check: OK (4 records"
+
+t="$TMP_ROOT/kx-only.jsonl"
+printf '%s\n' "$kx" >"$t"
+run make -s -C "$ROOT" okp-policy-check OKP_TRACE="$t"
+check "make okp-policy-check: a run that stops after the key exchange fails" nonzero \
+	"FAIL end of trace: no key import committed"
 
 t="$TMP_ROOT/order.jsonl"
 printf '%s\n' "$imp" "$kx" >"$t"

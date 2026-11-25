@@ -20,7 +20,8 @@ vec() {
 both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
-fuse='{"step":"counter_fuse_config","owner_approval":"OD-test"}'
+fuse='{"step":"counter_fuse_config","owner_approval":"OD-test","already_configured":false}'
+evid='{"step":"counter_fuse_evidence","configured":true,"evidence":"OD-test-readout"}'
 close='{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
 
 vec good "$kx" "$imp" "$fuse" "$close"
@@ -28,6 +29,73 @@ run python3 "$CHK" "$TMP_ROOT/good.jsonl"
 check "a run that keeps the row passes" 0 \
 	"ok 1 key_exchange: ok" "ok 2 key_import: committed" "ok 3 counter_fuse_config: ok" \
 	"ok 4 lifecycle_close: ok" "okp-policy-check: OK (4 records"
+
+vec good-evidence "$kx" "$imp" "$evid" "$close"
+run python3 "$CHK" "$TMP_ROOT/good-evidence.jsonl"
+check "evidence of fuses configured before the run stands in for the write" 0 \
+	"ok 3 counter_fuse_evidence: ok" "okp-policy-check: OK (4 records"
+
+vec kx-only "$kx"
+run python3 "$CHK" "$TMP_ROOT/kx-only.jsonl"
+check "a trace that stops after the key exchange fails" 1 "ok 1 key_exchange: ok" \
+	"FAIL end of trace: no key import committed" "no counter_fuse_config" "no life-cycle close"
+
+vec no-import "$kx" "$fuse" "$close"
+run python3 "$CHK" "$TMP_ROOT/no-import.jsonl"
+check "a run with no import fails" 1 "FAIL end of trace: no key import committed"
+
+vec no-fuse "$kx" "$imp" "$close"
+run python3 "$CHK" "$TMP_ROOT/no-fuse.jsonl"
+check "a run with the fuses not shown configured fails" 1 "FAIL end of trace: the counter fuses are not shown configured"
+
+vec no-close "$kx" "$imp" "$fuse"
+run python3 "$CHK" "$TMP_ROOT/no-close.jsonl"
+check "a run with no life-cycle close fails" 1 "FAIL end of trace: no life-cycle close"
+
+vec refused-import-only "$kx" "{\"step\":\"key_import\",\"wrapped\":false,$both}" "$fuse" "$close"
+run python3 "$CHK" "$TMP_ROOT/refused-import-only.jsonl"
+check "an import that was refused does not count as committed" 1 "FAIL end of trace: no key import committed"
+
+nowarn='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"counter_split":true'
+for w in absent null string; do
+	case $w in
+	absent) field= ;;
+	null) field=',"warnings":null' ;;
+	string) field=',"warnings":"none"' ;;
+	esac
+	vec "import-warnings-$w" "$kx" "{\"step\":\"key_import\",\"wrapped\":true,$nowarn$field}" "$fuse" "$close"
+	run python3 "$CHK" "$TMP_ROOT/import-warnings-$w.jsonl"
+	check "an import with warnings $w is not committed" 1 "FAIL 2 key_import: not committed" "warnings absent or not a list"
+done
+
+for p in absent null true-string false-string; do
+	case $p in
+	absent) field= ;;
+	null) field=',"already_configured":null' ;;
+	true-string) field=',"already_configured":"true"' ;;
+	false-string) field=',"already_configured":"false"' ;;
+	esac
+	vec "fuse-prior-$p" "$kx" "$imp" "{\"step\":\"counter_fuse_config\",\"owner_approval\":\"OD-test\"$field}" "$close"
+	run python3 "$CHK" "$TMP_ROOT/fuse-prior-$p.jsonl"
+	check "a fuse write with the prior state $p fails" 1 "FAIL 3 counter_fuse_config: refused" \
+		"already_configured must be present and the JSON boolean false"
+done
+
+vec evid-bad '{"step":"counter_fuse_evidence","configured":true}'
+run python3 "$CHK" "$TMP_ROOT/evid-bad.jsonl"
+check "evidence without a reference fails" 1 "FAIL 1 counter_fuse_evidence" "non-empty \"evidence\""
+
+vec evid-false '{"step":"counter_fuse_evidence","configured":false,"evidence":"x"}'
+run python3 "$CHK" "$TMP_ROOT/evid-false.jsonl"
+check "evidence that the fuses are not configured fails" 1 "needs \"configured\": true"
+
+vec evid-then-write "$evid" "$fuse"
+run python3 "$CHK" "$TMP_ROOT/evid-then-write.jsonl"
+check "a fuse write after evidence of configured fuses fails" 1 "FAIL 2 counter_fuse_config" "already configured"
+
+vec write-then-evid "$fuse" "$evid"
+run python3 "$CHK" "$TMP_ROOT/write-then-evid.jsonl"
+check "evidence after a fuse write in the same run fails" 1 "FAIL 2 counter_fuse_evidence" "no prior state to evidence"
 
 vec import-first "$imp" "$kx"
 run python3 "$CHK" "$TMP_ROOT/import-first.jsonl"
