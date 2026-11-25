@@ -50,6 +50,12 @@ not give.
   "The Code Signing Tool in the build").
 - The test-PKI boot image, its containers, inputs, pins and stand-ins are in
   [boot-image.md](boot-image.md) (provisional).
+- The custody model is tested before any real HSM: `make ahab-hsm-test` signs the Cortex-M7 container
+  through SPSDK's `proxy` signature provider with a test HSM that holds the private key and receives
+  only a SHA-384 digest, never the container; the build holds public keys only
+  ([signing-pipeline.md](signing-pipeline.md#hsm-custody-test)).
+- `make integration-test-boot-container` runs the row's tests end to end
+  ([signing-pipeline.md](signing-pipeline.md#row-end-to-end)).
 - The PKI tree the containers chain to, and the commands that sign a container, are in CST_UG and CST-HSM_UG;
   they are not restated here, and none is chosen until the tool is (see [Open questions](#open-questions)).
 

@@ -55,8 +55,9 @@ FROM base AS toolchain
 # imx-sm's build requires perl. test/sm_build_test.sh runs it here.
 # gcompat: the glibc loader and libc shims. Arm's pinned arm-none-eabi toolchain
 # is built for glibc; this image is musl and has no /lib64/ld-linux-x86-64.so.2.
-# build-base: a host C compiler and libc headers, for test/ele_client_test.sh
-# (the secure-key-handling client's unit and backend tests are built on the host).
+# build-base: a native C compiler (cc), musl-dev's libc headers and binutils, which
+# test/hsd_a55_test.sh compiles the A55 host tests with (it fails without cc).
+# Also for test/ele_client_test.sh (the secure-key-handling client's unit and backend tests are built on the host).
 RUN apk add --no-cache curl jq ca-certificates openssh-keygen uv xz perl gcompat build-base
 COPY --from=fetch /out/bin/ /usr/local/bin/
 # The verified pinned secure-enclave source, for the backend tests (ELE_SRC).

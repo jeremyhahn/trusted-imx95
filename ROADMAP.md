@@ -43,10 +43,10 @@ Planned, undated. No issue is filed yet; each line gets its issue once the owner
   - (d) Provisioning: go-xkms endorse-01 issues the EK certificate, then enroll-01, then device-attest-01 in the `tpm` format.
   - (e) Measured boot: each stage that can extend the fTPM PCRs does, and each gap in [docs/ftpm/](docs/ftpm/README.md#measured-boot) is closed or accepted by the owner.
 - **secure-key-handling** — keys held in the EdgeLock key store, never in the clear — no issue yet — the Cortex-A55 Linux side calls the HSM API (owner ruling 1234) — blocked: owner approval; SE051 role and the counter acknowledgement open
-- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
+- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave, closed only at the provisioning station and never on a development board (owner ruling 1234) — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **hsm-device-protocol** — the device side of go-xkms's xkmsd-to-device protocol over 1 GbE and 10 GbE — issue #24 — the HSM is an xkmsd node (owner rulings 1243 and 1244); needs go-xkms's wire protocol (`go-xkms#1521`)
-- **device-lifecycle** — the device side of go-trusted-platform's provisioning, enrollment and attestation — no issue yet — blocked: owner approval; per owner ruling 1234 the device first presents an EdgeLock enclave attestation (RM00284 §3.12, requested by the Cortex-A55), then go-xkms endorse-01 certifies the fTPM EK, then enroll-01 and device-attest-01 in the `tpm` format (ruling 927); the root, the EK binding and the wire format are open for go-xkms and go-trusted-platform
-- **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — issue #26 — later (owner rulings 1243 and 1244); blocked: owner approval; A55 side open
+- **device-lifecycle** — the device side of go-trusted-platform's provisioning, enrollment and attestation — issue #177 (folder index #25) — blocked: owner approval; per owner ruling 1234 the device first presents an EdgeLock enclave attestation (RM00284 §3.12, requested by the Cortex-A55), then go-xkms endorse-01 certifies the fTPM EK, then enroll-01 and device-attest-01 in the `tpm` format (ruling 927); the root, the EK binding and the wire format are open for go-xkms and go-trusted-platform
+- **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — issue #26 — blocked: owner approval; A55 side proposed, pending owner approval
 
 ## Future
 
