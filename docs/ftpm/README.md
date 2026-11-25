@@ -66,7 +66,7 @@ objects, in the storage `CFG_FTPM_TA_TEE_STORAGE_ID` selects
 | | RPMB on the board's eMMC | REE file system |
 |---|---|---|
 | Rollback | The eMMC's write counter anchors the state ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §2) | None: root on Linux can restore an older copy of the files |
-| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | A full-image flash recreates `tee-data` empty (wiped); a root rewrite with a different build is wiped on boot; so is any other write of the root file-system image, the same image included (root binding token, see below) |
+| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | Yes for a rewrite of the root partition (the NV is on `tee-data`, which it does not touch); no for a full-image flash, which recreates `tee-data` empty |
 | Use from U-Boot | U-Boot can serve OP-TEE's RPMB requests itself (unconfirmed for this board) | No `tee-supplicant` before Linux, so U-Boot cannot reach the TPM's NV |
 | Precondition | The eMMC's RPMB authentication key is programmed: once, irreversibly ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5) | None |
 | Confidentiality | OP-TEE encrypts objects with keys derived from the hardware unique key | The same |
@@ -76,8 +76,8 @@ Both rest on OP-TEE's hardware unique key; whether the i.MX 95 port derives it f
 the TPM's seeds, and with them the EK the issued certificate names ([EK lifecycle](#ek-lifecycle)).
 
 Owner ruling 1234 (2026-11-23) decides the location: on production devices the NV is in the eMMC RPMB, written
-only after OEM close; the REE file system (the root file system) holds it on development boards only. A development
-board therefore has no rollback protection, and a root rewrite wipes the NV. Programming the RPMB key is a
+only after OEM close; the REE file system (on the `tee-data` partition) holds it on development boards only. A
+development board therefore has no rollback protection. Programming the RPMB key is a
 provisioning-station step after OEM close and stays out of this repository: nothing here writes it.
 
 The build selects the location with `TRUSTED_IMX95_FTPM_NV`: `reefs` (default, development boards) or `rpmb`
@@ -85,69 +85,25 @@ The build selects the location with `TRUSTED_IMX95_FTPM_NV`: `reefs` (default, d
 programmed it after OEM close; nothing was parsed or built with `rpmb` ([build.md](build.md#the-defaults-each-provisional)).
 Open, all **unconfirmed**: how OP-TEE's RPMB frames reach the eMMC (`tee-supplicant`, or the kernel's in-kernel RPMB
 routing and `CONFIG_RPMB`); whether the pinned OP-TEE 4.10 has `CFG_REE_FS_INTEGRITY_RPMB` (the survey reads it in
-4.11.0) and what it means for `tee-nv-wipe` deleting `/data/tee` under `rpmb`; U-Boot's RPMB path on this board.
+4.11.0) and what it means for the RPMB objects when a full-image flash recreates `/data/tee` under `rpmb`; U-Boot's
+RPMB path on this board.
 
 **Where the NV lives (provisional).** `tee-supplicant` (the BSP's OP-TEE client, enabled in the image) keeps OP-TEE's
 REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
 (`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system
 stays read-only, which is why the NV cannot live on it. The NV therefore persists across a reboot.
 
-**Supported flash artefact.** The marked `.wic` is the only one. The image does not emit a standalone `rootfs.ext4`
-(`IMAGE_FSTYPES:remove`): its first sector is zeros, which a sparse writer skips, so the old binding token and NV would
-survive. `scripts/platform-image-check-root-marker.sh` fails, naming the file, on any `*.ext2`, `*.ext3` or `*.ext4`
-(compressed or not) in the deploy directory. A root image made by hand outside the build is unsupported.
+**Lifecycle (owner, 2026-11-25).** The NV is not wiped automatically:
+- A rewrite of the root partition keeps the NV. It lives on `tee-data`, which a root update does not touch, so the
+  TPM's seeds and EK and the PKCS#11 keys survive root updates. Nothing on the board erases the NV on its own.
+- Writing the whole `.wic` is the reprovisioning path: it recreates `tee-data` empty, and so erases the fTPM NV
+  (under `reefs`) and all of OP-TEE's REE-FS storage under `/data/tee`: every TA's private REE objects, PKCS#11 tokens
+  and keys included, under both selections (the `rpmb` setting keeps the PKCS#11 TA's objects in REE FS). Under
+  `reefs` the board then has a new EK ([EK lifecycle](#ek-lifecycle)); under `rpmb` the fTPM NV is in the RPMB,
+  outside `tee-data` (table above).
+- There is no manual or emergency wipe command; that is not in scope.
 
-**What the wipe removes (approved, owner ASK 5, 2026-11-24).** **Warning: on a root identity or token change,
-`tee-nv-wipe` erases all of `/data/tee`**, with the saved token and the saved id. That tree is OP-TEE's one REE-FS store,
-shared by every TA that uses private REE storage, so the wipe removes every OP-TEE REE-FS object, not only the fTPM NV:
-**PKCS#11 tokens and keys stored there are lost. Back them up before any root rewrite.** This holds under both
-selections, `reefs` and `rpmb` (the `rpmb` setting keeps the PKCS#11 TA's objects in REE FS). Nothing outside
-`/data/tee` is touched (`test/platform_image_ftpm_test.sh`, "wipe scope").
-Lifecycle (provisional design; it implements the SPEC row `ftpm` requirement that the NV is wiped with the root file system):
-- Writing the whole `.wic` is the supported way to reprovision: it recreates `tee-data` empty, so the NV is wiped.
-- A root partition rewritten with a different build is caught on boot. The rootfs carries a build identity
-  (`/etc/trusted-imx95-rootfs-id`) and the oneshot `tee-nv-wipe.service` runs after the `/data` mount and before
-  `tee-supplicant`, which requires it. If `/data/tee-rootfs-id` is missing or differs, it removes everything under
-  `/data/tee`, then records the new identity (temporary file, then rename); it fails closed, so a failure stops
-  `tee-supplicant` from starting.
-- Any write of the root file-system image wipes the NV, the very same image included. The content id cannot tell a
-  rewrite of the same image apart, so `tee-nv-wipe` also binds the NV to a **root binding token**: 32 random bytes,
-  drawn on the first boot after a wipe and kept in two places, the first 512-byte sector of the root partition (the
-  boot-sector padding in front of the ext4 superblock, bytes 0-1023; ext4 does not use it) and `/data/tee-root-token` beside the NV. Because that sector is part of the file-system image itself, any
-  write of the image, the whole partition or only the file-system bytes, replaces it, whatever is left
-  untouched after the file system. The image holds a **nonzero "unbound" marker** there, not zeros: a sparse writer
-  (GNU `dd conv=sparse`, a hole-skipping copy) skips an all-zero block and would keep the old token. The marker
-  (`platform-image/files/root-marker.sh`, written into the wic by a post-step of `do_image_wic`) is `TEEUNBND1`, the
-  build's rootfs id and `U` filler up to a final newline: no byte is zero. Zeros, the marker, or any value that is not
-  this device's saved token is a fresh root. Every boot compares the two tokens (with the content id). A missing, zeroed,
-  malformed or unequal token wipes `/data/tee` and writes a fresh token to both places.
-- The check fails closed: a token sector that cannot be read, or a root that shows no ext4 superblock with a block
-  size of 4096 or more, wipes the NV and stops the unit, so `tee-supplicant` does not start with old state; a token that
-  cannot be written stops it too (after the wipe); a saved record that exists but cannot be read stops it and
-  touches nothing. The block size matters because with 4096-byte blocks the superblock shares block 0 with the
-  padding, so a sparse image copy (which skips all-zero blocks) always writes it; with 1 KiB blocks block 0 is all
-  zeros and may be skipped. The wks pins the size (`--mkfs-extraopts "-b 4096"`). No space is reserved: the file
-  system fills the partition, and `test/platform_image_ftpm_test.sh` builds one with the wks's own size and options in
-  a sparse file and runs the unit on it.
-- What was checked for something that covers those bytes: this repository's image has no dm-verity, no signature
-  and no digest over the root partition (the root is mounted read-only; dm-verity is only proposed, in the
-  [verified-boot survey](../platform-image/verified-boot-survey.md) §3.6). A future dm-verity over the root device
-  would verify these bytes (the underlying device data) and the raw write would break it: that design would have
-  to move the token out of the verified range or give it up; until then the unit simply fails closed.
-- The test rewrites a fixture with `dd bs=512 conv=sparse,notrunc` from the same image and checks that the NV is
-  wiped (and, as a control, that a zero sector would have been skipped). The wic post-step is run by the test too: its shell body, cut out of the recipe, on a synthetic sparse wic
-  with the wks's geometry, followed by a gzip and a `.bmap` made in the order the image class gives, with
-  `scripts/platform-image-check-root-marker.sh` checking every variant and the bmap (each of five mutations fails it).
-  Unbuilt: no bitbake run has produced the wic, so the real file name, the real order against a `.bmap` or compression,
-  and the bmap's real format are not confirmed. The real build is pending the owner's EULA decision, and its first run
-  must be followed by `scripts/platform-image-check-root-marker.sh <deploy-dir>` (the build's `DEPLOY_DIR_IMAGE` for the
-  image), which exits nonzero on any variant without the marker or any `.bmap` that does not map it. A flasher that skips the block despite its nonzero content is not a known case.
-- Provisional and unbuilt: that wic passes `--mkfs-extraopts` on to `mkfs.ext4` is not checked (no bitbake here); if it
-  does not, and the image's block size is smaller than 4096, the unit fails closed on first boot. Writing the token needs
-  raw write access to the root's block device while the file system is mounted read-only; a kernel without that
-  access stops the unit (fail closed), so it is a boot test item. Where `mke2fs` is absent the test writes the
-  fixture's superblock fields by hand instead.
-There is no root-only flasher. `/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on
+`/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on
 the same disk as `/` (never a global partition label, which could name another medium's NV) and fails closed if there
 is none or more than one. The NV is plain files that root on Linux can copy or roll back.
 
@@ -201,17 +157,17 @@ hardware runs happen on the lab's board host, one lane at a time. The boot media
 ## Open questions for the owner
 
 1. **RPMB key programming. Decided, owner ruling 1234.** The NV is in the eMMC RPMB on production devices, written
-   only after OEM close, and in the REE file system on development boards only (no rollback protection; a root
-   rewrite wipes the NV). The key programming is a one-time, irreversible provisioning-station step after OEM close
-   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10), outside this repository. Still open
-   (TENANT ASK 4, default no): whether a byte-identical root rewrite may keep the NV.
+   only after OEM close, and in the REE file system on development boards only (no rollback protection). The key
+   programming is a one-time, irreversible provisioning-station step after OEM close
+   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10), outside this repository. A root rewrite keeps
+   the NV; a full-image flash erases it (owner, 2026-11-25).
 2. **fTPM TA source and revision.** The `ms-tpm-20-ref` TA in OP-TEE's `optee_ftpm`, or an fTPM carried in a newer
    `optee_os`; which revision; and whether the BSP's OP-TEE 4.10 builds it unchanged. Proposed and built
    ([secure-world/build.md](../secure-world/build.md#the-pins)): `optee_ftpm` 4.10.0, which the BSP's OP-TEE 4.10 builds
    unchanged; OP-TEE 4.10 carries no fTPM of its own.
 3. **EK template.** RSA 2048 or ECC P-256, the default templates of the TCG EK Credential Profile, and whether the
    EK persists at that profile's default handle.
-4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a rootfs reflash under REE FS),
+4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a full-image flash under REE FS),
    who may do it, and what happens to the issued EK certificate: revoked, or reissued through endorse-01.
 5. **Image scope for the redeploy.** The full image, or only `flash.bin`, `tee.bin` and the kernel. The boot media
    does not change (ruling 769).

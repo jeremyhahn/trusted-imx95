@@ -29,8 +29,10 @@ state or the RPMB key, and no step to do so is scripted or documented as a comma
    `CFG_RPMB_TESTKEY=n` are set explicitly in the `rpmb` set, so RPMB writes fail until the provisioning station has
    programmed the key after OEM close ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5 and §10). That step is
    outside this repository. **Nothing was parsed or built with `rpmb`** (no bitbake here). Under `reefs` the limits
-   are: **no rollback protection** (root on Linux can restore an older copy of the files), and
-   **the NV is wiped whenever the root file system is reflashed** (SPEC row `ftpm`; a full-image flash recreates `tee-data` empty), which destroys the TPM's seeds and with them the EK.
+   are: **no rollback protection** (root on Linux can restore an older copy of the files). The NV is kept on the
+   `tee-data` partition when the root partition is rewritten; a full `.wic` flash is the reprovisioning path: it
+   recreates `tee-data` empty and so erases the fTPM NV and all OP-TEE REE-FS storage, which destroys the TPM's seeds
+   and with them the EK (SPEC row `ftpm`, owner, 2026-11-25).
 2. **The TA is `optee_ftpm` 4.10.0** (ms-tpm-20-ref), as an early TA linked into `tee.bin`
    ([question 2](README.md#open-questions-for-the-owner)).
 3. **The kernel driver is built in**, not a module. The trace ([ta-options-survey.md](../secure-world/ta-options-survey.md#unconfirmed-items),
@@ -104,24 +106,14 @@ not found (exit 1 at `do_image_wic`): BitBake looks in `<layer>/files/wic`, not 
 | `bitbake trusted-imx95-image-debug` | 0 (4698 tasks), with `optee-client`, `trusted-imx95-tee-nv` and the wic image |
 
 `tee-supplicant` is enabled at boot by `trusted-imx95-tee-nv`, which also mounts the `tee-data` partition on `/data`
-(its REE-FS storage is `/data/tee`) before the supplicant starts; the NV therefore persists across a reboot (and is wiped with a rootfs reflash)
+(its REE-FS storage is `/data/tee`) before the supplicant starts; the NV therefore persists across a reboot and a rewrite of the root partition, and a full-image flash erases it
 ([README](README.md#nv-storage)). Not run on a board.
 
 The wic's GPT, read from the image: `boot` (256 MiB, FAT, holds `Image` and the `imx95-19x19-frdm-pro*.dtb` files),
 `root` (1 GiB) and `tee-data` (64 MiB). The wks follows the BSP's boot-partition layout and leaves out only the raw
 `imx-boot` entry; the image drops the `mcore-demos/` entries of `IMAGE_BOOT_FILES` (imx-m7-demos, EULA). The rootfs has
-the `/data` mountpoint. The NV is wiped with a rootfs reflash (SPEC row `ftpm`): a full-image flash recreates `tee-data` empty.
-
-The root-sector marker and the task order (read from the pinned openembedded-core, commit
-`5d1aa5c806c061a2994f4decb59016610f093213` of `platform-image/manifest.lock`; no bitbake was run):
-`meta/classes-recipe/image.bbclass:467-470` puts `IMAGE_CMD` of the type into the generated `do_image_<type>` body;
-`:480-501` then appends every conversion command (`CONVERSION_CMD:gz`, `:xz`, `:zst`, `:bmap` at
-`image_types.bbclass:342-357`) to that same body; `:521` sets the body as the task, and `:527` and `:531` add
-`create_symlinks` and `write_image_output_manifest` as postfuncs. Postfuncs therefore run after the conversions, so a marker
-written by a `do_image_wic[postfuncs]` step would reach the `.wic` only, and the `.wic.gz` and `.wic.bmap` would be stale.
-The image therefore appends the marker step to `IMAGE_CMD:wic` (`image_types_wic.bbclass:74-105`, which ends with the `mv`
-that creates `${IMAGE_NAME}.wic`), so it runs before every conversion. That is the smallest change the class supports: no
-change to the wks, and the root partition image is not touched. Unbuilt: this order is read from the classes, not observed.
+the `/data` mountpoint. A rewrite of the root partition keeps the NV; a full-image flash recreates `tee-data` empty
+and so erases it (SPEC row `ftpm`, owner, 2026-11-25).
 
 ### Reproducible build
 

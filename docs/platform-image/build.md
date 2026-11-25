@@ -103,17 +103,8 @@ Reproducible builds and the SBOM stay at Yocto's defaults
 (SPDX 3.0) are on, and the test fails if any file under `platform-image/` sets
 the first two or removes the third.
 
-One exception to byte-for-byte reproducibility: `/etc/trusted-imx95-rootfs-id`
-is random, drawn once per `do_rootfs` run, so two clean builds of identical
-inputs differ in that one file (and so in the image digest). Everything else
-stays at the reproducible defaults above. Any different build must wipe the
-fTPM NV, and a random identity does that without listing every
-security-relevant attribute ([docs/ftpm/README.md](../ftpm/README.md)). A release is
-identified by its published image digest; to compare two builds, exclude that
-one file.
-
 `make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>`
-(`scripts/platform-image-repro-check.sh`) does that comparison. On the build
+(`scripts/platform-image-repro-check.sh`) compares two builds. On the build
 host: build the image twice from clean (separate `TMPDIR`s, same inputs), then
 pass the two deploy directories (`tmp/deploy/images/<machine>`). It needs no
 network and is not in CI. It compares byte for byte the fTPM TA's stripped ELF,
@@ -121,8 +112,9 @@ network and is not in CI. It compares byte for byte the fTPM TA's stripped ELF,
 `boot` and `tee-data` partitions (by GPT name) with the GPT entries' names,
 starts and sizes; and from the rootfs archive (`IMAGE_FSTYPES += "tar"`,
 provisional, added for this check) each member's name, type, mode, owner, link
-target and content hash. It excludes the id file and what carries it: the root
-partition (its marker sector), so the `.wic` digest, and the GPT GUIDs. It
+target and content hash. It does not compare the root partition byte for byte
+(whether ext4 is reproducible is unconfirmed; its content is the rootfs
+archive's), so not the `.wic` digest either, nor the GPT GUIDs. It
 prints each difference with both SHA-256s and exits nonzero. Paths and GUID
 behaviour are unconfirmed by a build: [docs/ftpm/build.md](../ftpm/build.md#reproducible-build).
 
