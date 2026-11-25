@@ -17,7 +17,7 @@ vec() {
 	printf '%s\n' "$@" >"$TMP_ROOT/$name.jsonl"
 }
 
-both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
+both='"status":"ok","request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
 fuse='{"step":"counter_fuse_config","status":"ok","owner_approval":"OD-test","already_configured":false}'
@@ -56,7 +56,7 @@ vec refused-import-only "$kx" "{\"step\":\"key_import\",\"wrapped\":false,$both}
 run python3 "$CHK" "$TMP_ROOT/refused-import-only.jsonl"
 check "an import that was refused does not count as committed" 1 "FAIL end of trace: no key import committed"
 
-nowarn='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"counter_split":true'
+nowarn='"status":"ok","request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"counter_split":true'
 for w in absent null string; do
 	case $w in
 	absent) field= ;;
@@ -66,6 +66,21 @@ for w in absent null string; do
 	vec "import-warnings-$w" "$kx" "{\"step\":\"key_import\",\"wrapped\":true,$nowarn$field}" "$fuse" "$close"
 	run python3 "$CHK" "$TMP_ROOT/import-warnings-$w.jsonl"
 	check "an import with warnings $w is not committed" 1 "FAIL 2 key_import: not committed" "warnings absent or not a list"
+done
+
+# An import whose outcome is not the string "ok" is not committed, whatever its flags say.
+for st in error null absent unknown number; do
+	case $st in
+	error) field='"status":"error",' ;;
+	null) field='"status":null,' ;;
+	absent) field= ;;
+	unknown) field='"status":"pending",' ;;
+	number) field='"status":0,' ;;
+	esac
+	vec "import-status-$st" "$kx" "{\"step\":\"key_import\",$field\"wrapped\":true,\"request_flags\":[\"strict\",\"monotonic\"],\"ack_flags\":[\"strict\",\"monotonic\"],\"warnings\":[],\"counter_split\":true}" "$fuse" "$close"
+	run python3 "$CHK" "$TMP_ROOT/import-status-$st.jsonl"
+	check "an import with status $st is not committed" 1 "FAIL 2 key_import: not committed" \
+		"import outcome: status" "FAIL end of trace: no key import committed"
 done
 
 for p in absent null true-string false-string; do
@@ -139,20 +154,20 @@ run python3 "$CHK" "$TMP_ROOT/unwrapped.jsonl"
 check "an import of a key that is not wrapped fails" 1 "the imported key is not wrapped"
 
 for flag in strict monotonic; do
-	vec "import-$flag-only" "$kx" "{\"step\":\"key_import\",\"wrapped\":true,\"request_flags\":[\"$flag\"],\"ack_flags\":[\"$flag\"],\"warnings\":[],\"counter_split\":true}"
+	vec "import-$flag-only" "$kx" "{\"step\":\"key_import\",\"status\":\"ok\",\"wrapped\":true,\"request_flags\":[\"$flag\"],\"ack_flags\":[\"$flag\"],\"warnings\":[],\"counter_split\":true}"
 	run python3 "$CHK" "$TMP_ROOT/import-$flag-only.jsonl"
 	check "an import acknowledged with $flag alone is not committed" 1 "FAIL 2 key_import: not committed"
 done
 
-vec half-acked "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict"],"warnings":[],"counter_split":true}'
+vec half-acked "$kx" '{"step":"key_import","status":"ok","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict"],"warnings":[],"counter_split":true}'
 run python3 "$CHK" "$TMP_ROOT/half-acked.jsonl"
 check "both flags sent, one acknowledged: not committed" 1 "monotonic flag not acknowledged"
 
-vec warning "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":["HSM_KEY_STORE_COUNTER"],"counter_split":true}'
+vec warning "$kx" '{"step":"key_import","status":"ok","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":["HSM_KEY_STORE_COUNTER"],"counter_split":true}'
 run python3 "$CHK" "$TMP_ROOT/warning.jsonl"
 check "a counter warning makes the import not committed" 1 "enclave warning HSM_KEY_STORE_COUNTER"
 
-vec no-split "$kx" '{"step":"key_import","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[]}'
+vec no-split "$kx" '{"step":"key_import","status":"ok","wrapped":true,"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[]}'
 run python3 "$CHK" "$TMP_ROOT/no-split.jsonl"
 check "no counter split: the import is not committed" 1 "counter split not configured"
 
@@ -200,7 +215,7 @@ vec bad-json '{"step":'
 run python3 "$CHK" "$TMP_ROOT/bad-json.jsonl"
 check "a record that is not JSON stops the check" 2 "bad-json.jsonl:1:"
 
-vec bad-flags "$kx" '{"step":"key_import","wrapped":true,"request_flags":"strict"}'
+vec bad-flags "$kx" '{"step":"key_import","status":"ok","wrapped":true,"request_flags":"strict"}'
 run python3 "$CHK" "$TMP_ROOT/bad-flags.jsonl"
 check "flags that are not a list stop the check" 2 "request_flags must be a list of strings"
 

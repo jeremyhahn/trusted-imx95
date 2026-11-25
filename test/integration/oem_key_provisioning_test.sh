@@ -10,7 +10,7 @@ set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib.sh"
 
-both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
+both='"status":"ok","request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
 fuse='{"step":"counter_fuse_config","status":"ok","owner_approval":"OD-test","already_configured":false}'
@@ -36,7 +36,7 @@ check "make okp-policy-check: the import before the key exchange fails" nonzero 
 
 for flag in strict monotonic; do
 	t="$TMP_ROOT/import-$flag.jsonl"
-	printf '%s\n' "$kx" "{\"step\":\"key_import\",\"wrapped\":true,\"request_flags\":[\"$flag\"],\"ack_flags\":[\"$flag\"],\"warnings\":[],\"counter_split\":true}" >"$t"
+	printf '%s\n' "$kx" "{\"step\":\"key_import\",\"status\":\"ok\",\"wrapped\":true,\"request_flags\":[\"$flag\"],\"ack_flags\":[\"$flag\"],\"warnings\":[],\"counter_split\":true}" >"$t"
 	run make -s -C "$ROOT" okp-policy-check OKP_TRACE="$t"
 	check "make okp-policy-check: an import acknowledged with $flag alone is not committed" nonzero \
 		"FAIL 2 key_import: not committed"
