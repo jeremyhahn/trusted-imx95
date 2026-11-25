@@ -16,6 +16,11 @@ RequiresMountsFor=/var/lib/xkms
 After=var-lib-xkms.mount
 AssertPathIsMountPoint=/var/lib/xkms
 AssertPathIsReadWrite=/var/lib/xkms
+# The daemon refuses to start when its key custody fails closed. Restart=on-failure
+# below must not turn that into a loop that never ends: after 5 starts in 300 s
+# systemd stops restarting and the unit settles in the failed state.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

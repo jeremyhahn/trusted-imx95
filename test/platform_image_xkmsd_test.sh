@@ -164,6 +164,7 @@ unit_ok() {
 		'UMask=0077' 'WantedBy=multi-user.target'; do
 		grep_line "$f" "$want" || { echo "the unit lacks '$want'"; return 1; }
 	done
+	unit_limits_ok "$f" || return 1
 	return 0
 }
 
@@ -172,6 +173,25 @@ grep_line() {
 	local l
 	while IFS= read -r l; do [ "$l" != "$2" ] || return 0; done <"$1"
 	return 1
+}
+
+# unit_limits_ok FILE: the [Unit] section bounds the restarts: both
+# StartLimitIntervalSec and StartLimitBurst are plain positive integers (0
+# would switch the limit off, so the unit would restart for ever).
+unit_limits_ok() {
+	local l sec= iv= burst=
+	while IFS= read -r l; do
+		case $l in
+		'['*) sec=$l ;;
+		StartLimitIntervalSec=*) [ "$sec" = '[Unit]' ] && iv=${l#*=} ;;
+		StartLimitBurst=*) [ "$sec" = '[Unit]' ] && burst=${l#*=} ;;
+		esac
+	done <"$1"
+	[ -n "$iv" ] || { echo "the unit has no StartLimitIntervalSec in [Unit]"; return 1; }
+	[ -n "$burst" ] || { echo "the unit has no StartLimitBurst in [Unit]"; return 1; }
+	[[ $iv =~ ^[1-9][0-9]*$ ]] || { echo "StartLimitIntervalSec '$iv' is not a positive number of seconds"; return 1; }
+	[[ $burst =~ ^[1-9][0-9]*$ ]] || { echo "StartLimitBurst '$burst' is not a finite positive count"; return 1; }
+	return 0
 }
 
 # config_ok FILE: every top-level key is one of the sections of go-xkms's own
@@ -324,6 +344,11 @@ neg "negative: unit allows new privileges" unit_ok "$(ucopy 'NoNewPrivileges=yes
 neg "negative: unit without a private /tmp" unit_ok "$(ucopy 'PrivateTmp=yes' '#PrivateTmp=yes' tmp)"
 neg "negative: unit without a state directory" unit_ok "$(ucopy 'StateDirectory=xkms' '' state)"
 neg "negative: unit restarts always" unit_ok "$(ucopy 'Restart=on-failure' 'Restart=no' restart)"
+neg "negative: unit without a start limit interval" unit_ok "$(ucopy 'StartLimitIntervalSec=300' '' sli)"
+neg "negative: unit without a start limit burst" unit_ok "$(ucopy 'StartLimitBurst=5' '' slb)"
+neg "negative: unit with the start limit switched off" unit_ok "$(ucopy 'StartLimitIntervalSec=300' 'StartLimitIntervalSec=0' sl0)"
+neg "negative: unit with an infinite start burst" unit_ok "$(ucopy 'StartLimitBurst=5' 'StartLimitBurst=infinity' slinf)"
+neg "negative: unit with a zero start burst" unit_ok "$(ucopy 'StartLimitBurst=5' 'StartLimitBurst=0' slz)"
 neg "negative: unit with another config" unit_ok "$(ucopy '--config /etc/xkms/xkmsd.yaml' '--config /tmp/x.yaml' exec)"
 neg "negative: unit not wanted at boot" unit_ok "$(ucopy 'WantedBy=multi-user.target' '' install)"
 
