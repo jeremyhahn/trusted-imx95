@@ -70,7 +70,8 @@ cfg() {
 	{
 		echo '# fake mx95frdm-pro'
 		echo 'LM0 name="AP"'
-		echo 'SCMI_AGENT1 name="AP"'
+		echo 'SCMI_AGENT1 name="AP-S"'
+		echo 'SYS ALL'
 		echo 'PD_HSIO OWNER'
 		echo 'LM1 name="M7"'
 		allowlist
@@ -114,6 +115,8 @@ fixture() {
 	sm="$d/system-manager"
 	mkdir -p "$sm/patches" "$TMP_ROOT/pa/configs/other"
 	cp "$GRANTS" "$sm/m7-grants.txt"
+	# The fake AP-S block's two lines (see cfg): the allowlist sm-build.sh checks it against.
+	printf '# fake\nSYS ALL\nPD_HSIO OWNER\n' >"$sm/ap-s-grants.txt"
 	cp "$repo/configs/other/fakepro.cfg" "$TMP_ROOT/pa/configs/other/fakepro.cfg"
 	mkdir -p "$TMP_ROOT/pb/configs/other"
 	cp "$patched" "$TMP_ROOT/pb/configs/other/fakepro.cfg"
