@@ -775,12 +775,28 @@ export FAKE_CTL_PIDS=$tmp/ctl-pids
 # shellcheck disable=SC2016 # the code runs in LB's shell, with lib.sh sourced
 LB "$tmp/hk.log" 'bi_write_set w1 1 bi-pre; export FAKE_CTL_SLOW=30; bi_spawn_writer w1 bi-hk; sleep 1; bi_stop_writers 1; bi_verify_set w1; bi_summary t'
 unset FAKE_CTL_PIDS
-ctl_gone() { # no stub xkmsctl recorded in ctl-pids is still running
-	local p
-	while read -r p; do ! kill -0 "$p" 2>/dev/null || return 1; done <"$tmp/ctl-pids"
-	[ -s "$tmp/ctl-pids" ]
+pid_dead() { # <pid>: gone, or a zombie (killed, not yet reaped by init: kill -0 still answers)
+	local s
+	[ -r "/proc/$1/stat" ] || return 0
+	{ read -r s <"/proc/$1/stat"; } 2>/dev/null || return 0
+	s=${s##*) }
+	case ${s%% *} in Z | X) return 0 ;; *) return 1 ;; esac
 }
-sleep 1 # let init reap the killed processes
+ctl_gone() { # every stub xkmsctl recorded in ctl-pids is dead, within a bounded wait
+	local p t=0 alive
+	[ -s "$tmp/ctl-pids" ] || return 1
+	# The group kill is signalled before bi_stop_writers returns, but the
+	# processes die and are reaped asynchronously: wait for the condition,
+	# at most 10s, not for a fixed time.
+	while [ "$t" -lt 100 ]; do
+		alive=0
+		while read -r p; do pid_dead "$p" || alive=1; done <"$tmp/ctl-pids"
+		[ "$alive" = 0 ] && return 0
+		t=$((t + 1))
+		sleep 0.1
+	done
+	return 1
+}
 ok "hard kill: the stuck xkmsctl went with its writer's process group" ctl_gone
 ok "hard kill: the writer is killed after the bounded wait" out_has "$tmp/hk.log" "killing its process group"
 ok "hard kill: the in-flight create is unknown" out_has "$tmp/hk.log" "1 create(s) never acknowledged"
