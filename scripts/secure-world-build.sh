@@ -30,6 +30,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 lock=$root/secure-world/bsp.lock
 grants=$root/system-manager/ap-s-grants.txt
+container=$root/scripts/ahab/boot-image.yaml
 # The sources and build trees stay outside the checkout: the tree secret scan
 # reads every file under it, and the fetched trees carry test keys.
 base=${XDG_CACHE_HOME:-${HOME:?HOME is unset}/.cache}/trusted-imx95/secure-world
@@ -49,6 +50,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--lock) lock=${2:?--lock needs a file} && shift 2 ;;
 	--grants) grants=${2:?--grants needs a file} && shift 2 ;;
+	--container) container=${2:?--container needs a file} && shift 2 ;;
 	--work) work=${2:?--work needs a directory} && shift 2 ;;
 	--out) out=${2:?--out needs a directory} && shift 2 ;;
 	--cache) cache=${2:?--cache needs a directory} && shift 2 ;;
@@ -56,7 +58,7 @@ while [ $# -gt 0 ]; do
 	--check-lock) check_only=1 && shift ;;
 	--single) single=1 && shift ;;
 	-h | --help)
-		echo "usage: secure-world-build.sh [--lock FILE] [--grants FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
+		echo "usage: secure-world-build.sh [--lock FILE] [--grants FILE] [--container FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
 		exit 0
 		;;
 	*) die "unknown argument: $1" ;;
@@ -173,6 +175,31 @@ plat_bl31_size=$((0x00040000))
 { [ "$bl31_base" -eq "$plat_bl31_base" ] && [ "$bl31_size" -eq "$plat_bl31_size" ]; } ||
 	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) differs from the BL31 the pinned TF-A links at (BASE 0x8A200000, SIZE 0x00040000, imx95 platform_def.h)"
 
+# BL32_BASE must be where the boot container loads and enters tee.bin. BL31 is
+# built to enter BL32 at BL32_BASE and OP-TEE is built to run from it, but the
+# container (scripts/ahab/boot-image.yaml, assembled by scripts/boot-image-inputs.sh)
+# writes the tee.bin entry's load_address and entry_point as fixed values: a
+# BL32_BASE that differs from them would send BL31 to an address where OP-TEE was
+# not loaded. The container does not take its address from the lock, so any
+# other base is refused (fail closed) until the whole boot path carries it.
+tee_load='' tee_entry='' tee_n=0 in_tee=0
+while IFS= read -r line || [ -n "$line" ]; do
+	if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+image_path:[[:space:]]*tee\.bin[[:space:]]*$ ]]; then
+		tee_n=$((tee_n + 1))
+		in_tee=1
+	elif [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
+		in_tee=0
+	elif [ "$in_tee" = 1 ] && [[ "$line" =~ ^[[:space:]]*load_address:[[:space:]]*[\'\"]?(0x[0-9A-Fa-f]{1,16})[\'\"]?[[:space:]]*$ ]]; then
+		tee_load=${BASH_REMATCH[1]}
+	elif [ "$in_tee" = 1 ] && [[ "$line" =~ ^[[:space:]]*entry_point:[[:space:]]*[\'\"]?(0x[0-9A-Fa-f]{1,16})[\'\"]?[[:space:]]*$ ]]; then
+		tee_entry=${BASH_REMATCH[1]}
+	fi
+done <"$container" 2>/dev/null || die "$container: cannot read the boot container description"
+[ "$tee_n" -eq 1 ] || die "$container: $tee_n tee.bin entries, want one"
+{ [ -n "$tee_load" ] && [ -n "$tee_entry" ]; } || die "$container: the tee.bin entry has no load_address or entry_point"
+{ [ "$((tee_load))" -eq "$bl32_base" ] && [ "$((tee_entry))" -eq "$bl32_base" ]; } ||
+	die "$lock: BL32_BASE ${pin[BL32_BASE]} differs from the boot container's tee.bin (load_address $tee_load, entry_point $tee_entry in ${container#"$root"/}): BL31 would enter an address where OP-TEE was not loaded"
+
 # Owner ruling 1234 (superseding the part of ruling 771 that excluded imx-atf):
 # BL31 is NXP's imx-atf at the BSP release's revision, or upstream Arm TF-A at
 # a tagged release; OP-TEE OS is NXP's BSP OP-TEE. The lock may name nothing
@@ -230,7 +257,7 @@ cache=$(cd "$cache" && pwd -P)
 if [ "$single" = 0 ]; then
 	for i in 1 2; do
 		echo "secure-world-build: clean build $i of 2"
-		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --grants "$grants" --work "$work/build-$i" \
+		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --grants "$grants" --container "$container" --work "$work/build-$i" \
 			--out "$work/out-$i" --cache "$cache" --jobs "$jobs" || die "build $i of 2 failed; nothing published"
 	done
 	differ=0

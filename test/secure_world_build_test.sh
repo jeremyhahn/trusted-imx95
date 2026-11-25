@@ -9,6 +9,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 sw=$ROOT/scripts/secure-world-build.sh
 good=$ROOT/secure-world/bsp.lock
+# The boot container description, and a copy of it whose tee.bin entry loads and
+# enters at <base>: the window-logic cases below use other bases than the
+# container's, and give the script a container that matches (container_for).
+ctr=$ROOT/scripts/ahab/boot-image.yaml
+container_for() { # <base> -> path of a copy of $ctr with the tee.bin address <base>
+	local t o=$TMP_ROOT/container-$1.yaml
+	t=$(<"$ctr")
+	printf '%s\n' "${t//\'0x8C000000\'/\'$1\'}" >"$o"
+	echo "$o"
+}
 
 run bash "$sw" --help
 check "help prints the usage" 0 "usage: secure-world-build.sh"
@@ -210,7 +220,7 @@ check "BL32_BASE 0x8A000000 with the default size fails" nonzero "$ovmsg"
 # BL32 ending exactly at BL31_BASE does not intersect: passes.
 W=([BL32_BASE]=0x8A000000 [BL32_SIZE]=0x00200000)
 f=$(lockcopy ovadjacent edit_ovadjacent)
-run bash "$sw" --lock "$f" --check-lock
+run bash "$sw" --lock "$f" --container "$(container_for 0x8A000000)" --check-lock
 check "a BL32 window ending exactly at BL31_BASE passes" 0 "OK"
 # The BL31 pins are validated like BL32's.
 W=([BL31_SIZE]=0x0)
@@ -245,9 +255,34 @@ W=()
 for c in "smexact|a BL32 window from above BL31 to the SM window end" "smlow|BL32_BASE just above BL31 with the default size"; do
 	name=${c%%|*}
 	f=$(lockcopy "$name" "edit_$name")
-	run bash "$sw" --lock "$f" --check-lock
+	run bash "$sw" --lock "$f" --container "$(container_for 0x8A400000)" --check-lock
 	check "$name: ${c#*|} passes" 0 "OK"
 done
+
+# The boot container loads and enters tee.bin at one fixed address; a BL32_BASE
+# that differs from it would send BL31 to an address where OP-TEE was not loaded.
+# The committed lock and container agree (the committed lock passes above). With
+# the committed container, another BL32_BASE is refused, and a container whose
+# tee.bin load address or entry point is not BL32_BASE is refused.
+ctrmsg="differs from the boot container's tee.bin"
+f=$(lockcopy smlow edit_smlow)
+run bash "$sw" --lock "$f" --check-lock
+check "BL32_BASE 0x8A400000 against the committed container (tee.bin at 0x8C000000) is refused" nonzero "$ctrmsg"
+ctr_t=$(<"$ctr")
+printf '%s\n' "${ctr_t//\'0x8C000000\'/\'0x8A400000\'}" >"$TMP_ROOT/ctr-moved.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-moved.yaml" --check-lock
+check "a container moved to 0x8A400000 against the committed lock (BL32_BASE 0x8C000000) is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t/entry_point: \'0x8C000000\'/entry_point: \'0x8C200000\'}" >"$TMP_ROOT/ctr-entry.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-entry.yaml" --check-lock
+check "a container whose tee.bin entry point alone differs from BL32_BASE is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t/load_address: \'0x8C000000\'/load_address: \'0x8C200000\'}" >"$TMP_ROOT/ctr-load.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-load.yaml" --check-lock
+check "a container whose tee.bin load address alone differs from BL32_BASE is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t//image_path: tee.bin/image_path: tee-other.bin}" >"$TMP_ROOT/ctr-notee.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-notee.yaml" --check-lock
+check "a container with no tee.bin entry is refused" nonzero "0 tee.bin entries"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/no-such-container.yaml" --check-lock
+check "a missing container description is refused" nonzero "cannot read the boot container description"
 
 sm_grants=$ROOT/system-manager/ap-s-grants.txt
 f=$(lockcopy grantend edit_grantend)
@@ -420,7 +455,7 @@ fullrun() {
 	: >"$TMP_ROOT/$n/bash.log"
 	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" \
 		STUB_BASH_LOG="$TMP_ROOT/$n/bash.log" "$@" \
-		bash "$sw" --lock "$l" ${FR_GRANTS:+--grants "$FR_GRANTS"} --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
+		bash "$sw" --lock "$l" ${FR_GRANTS:+--grants "$FR_GRANTS"} ${FR_CONTAINER:+--container "$FR_CONTAINER"} --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
 }
 nothing_published() { [ ! -e "$TMP_ROOT/$1/out/SHA256SUMS" ] && [ ! -e "$TMP_ROOT/$1/out/bl31.bin" ] && [ ! -e "$TMP_ROOT/$1/out/tee.bin" ]; }
 
@@ -549,8 +584,8 @@ expect "the published build-info records the window" has_line "tfa: $(lock_value
 # A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
 edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; else edit_tcsum "$1"; fi; }
 baselock=$(lockcopy altbase edit_altbase)
-fullrun altbase "$baselock"
-check "a build with another BL32_BASE reaches publication" 0 "secure-world-build: OK"
+FR_CONTAINER=$(container_for 0x8A400000) fullrun altbase "$baselock"
+check "a build with another BL32_BASE and a container that loads there reaches publication" 0 "secure-world-build: OK"
 baselog=$(<"$TMP_ROOT/altbase/make.log")
 base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A400000 "$bl32_size"; }
 expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
@@ -582,6 +617,12 @@ expect "the default lock's driver run gives the children another grants file tha
 fullrun altsmnog "$altsmlock"
 check "the alternative lock against the default grants is refused" nonzero "differs from the System Manager's DDR EXEC grant"
 expect "that refusal publishes nothing" nothing_published altsmnog
+
+# The same for the boot container: the lock with another BL32_BASE, run with the
+# committed container (tee.bin at 0x8C000000), is refused by the driver.
+fullrun altbasenoctr "$baselock"
+check "another BL32_BASE against the committed boot container is refused by the build" nonzero "$ctrmsg"
+expect "that refusal publishes nothing too" nothing_published altbasenoctr
 
 # A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's
 # release directory, so publication shows the script stages from the matching path.
