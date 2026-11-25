@@ -1,0 +1,12 @@
+# xkmsd's state: the image's own xkms-state partition (platform-image/wic/
+# trusted-imx95.wks.in), on persistent storage. The root filesystem is
+# read-only and OE-core's volatile /var/lib is lost at reboot, so the state
+# lives on this mount and nowhere else. noexec, nosuid and nodev: it holds data.
+[Unit]
+Description=xkmsd state (persistent partition xkms-state)
+
+[Mount]
+What=/dev/disk/by-label/xkms-state
+Where=/var/lib/xkms
+Type=ext4
+Options=rw,noatime,nosuid,nodev,noexec

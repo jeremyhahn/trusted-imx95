@@ -1,0 +1,16 @@
+# The disk layout of the FRDM-IMX95-PRO image, for eMMC (default), microSD and
+# FlexSPI-NOR-boot alternatives alike: the boot container at the i.MX boot
+# offset (IMX_BOOT_SEEK, 32 KiB; docs/platform-image/boot-media-survey.md),
+# a boot partition, the read-only root, and the persistent state partition.
+# Not built or flashed yet: no wic run has used this file.
+#
+# xkms-state is the one writable, persistent partition. The root is read-only
+# and OE-core's volatile /var/lib does not survive a reboot, so xkmsd's state
+# (/var/lib/xkms) lives here; var-lib-xkms.mount (xkmsd recipe) mounts it by
+# this label and xkmsd.service refuses to start without it. It is not in the
+# root's fstab (--no-fstab-update): the mount unit owns it.
+bootloader --ptable gpt
+part --source rawcopy --sourceparams="file=${IMAGE_BOOTLOADER}" --ondisk mmcblk --no-table --align ${IMX_BOOT_SEEK}
+part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot --active --align 8192 --size 128M
+part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --align 8192
+part /var/lib/xkms --ondisk mmcblk --fstype=ext4 --label xkms-state --align 8192 --size 256M --no-fstab-update

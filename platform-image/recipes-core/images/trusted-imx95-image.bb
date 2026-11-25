@@ -30,6 +30,11 @@ SUMMARY = "trusted-imx95 production image (provisional default, pending #14)"
 # (verified-boot-survey section 3.6 and question 5 (a): dm-verity comes later).
 IMAGE_FEATURES += "read-only-rootfs"
 
+# The disk layout holds the one persistent writable partition, xkms-state, that
+# xkmsd's state lives on (platform-image/wic/trusted-imx95.wks.in).
+IMAGE_FSTYPES += "wic"
+WKS_FILE = "trusted-imx95.wks.in"
+
 # hardening-survey section 7: add only the boot packagegroup (kernel, systemd
 # through INIT_MANAGER); the machine adds firmware-ele-imx. docs/SPEC.md,
 # `platform-image`: xkmsd runs on the Linux side.

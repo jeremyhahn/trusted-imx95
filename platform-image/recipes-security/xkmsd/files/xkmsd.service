@@ -8,6 +8,14 @@ Description=xkmsd, the go-xkms key management daemon
 Documentation=https://github.com/jeremyhahn/go-xkms
 After=network-online.target
 Wants=network-online.target
+# The state is on the image's persistent partition (var-lib-xkms.mount), never
+# on the read-only root or a volatile /var/lib. The unit starts only after that
+# mount, and fails (does not start, does not fall back) when /var/lib/xkms is
+# not a mount point or is not writable.
+RequiresMountsFor=/var/lib/xkms
+After=var-lib-xkms.mount
+AssertPathIsMountPoint=/var/lib/xkms
+AssertPathIsReadWrite=/var/lib/xkms
 
 [Service]
 Type=simple
@@ -18,8 +26,9 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
 
-# Writable state only here: /var/lib/xkms (the config's storage.path) and
-# /run/xkms (the local socket).
+# Writable state only here: /var/lib/xkms (the config's datastore.path and key
+# paths, on the persistent mount above) and /run/xkms (the local socket).
+# StateDirectory only sets the owner and mode of the mounted directory.
 StateDirectory=xkms
 StateDirectoryMode=0750
 RuntimeDirectory=xkms

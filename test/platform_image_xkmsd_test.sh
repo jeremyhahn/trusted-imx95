@@ -12,6 +12,9 @@ recipe_rel=platform-image/recipes-security/xkmsd/xkmsd_git.bb
 image_rel=platform-image/recipes-core/images/trusted-imx95-image.bb
 unit_rel=platform-image/recipes-security/xkmsd/files/xkmsd.service
 conf_rel=platform-image/recipes-security/xkmsd/files/xkmsd.yaml
+build_rel=platform-image/recipes-security/xkmsd/files/xkmsd-build.sh
+mount_rel=platform-image/recipes-security/xkmsd/files/var-lib-xkms.mount
+wks_rel=platform-image/wic/trusted-imx95.wks.in
 
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch" "$TMP_ROOT"' EXIT
@@ -58,12 +61,51 @@ recipe_ok() {
 	if has "$f" 'branch=' && ! has "$f" 'nobranch=1'; then echo "SRC_URI follows a branch"; return 1; fi
 	sha=$(val "$f" 'SRC_URI[go.sha256sum]') || { echo "no Go archive sha256"; return 1; }
 	[[ $sha =~ ^[0-9a-f]{64}$ ]] || { echo "Go archive sha256 '$sha' is malformed"; return 1; }
+	has "$f" 'file://xkmsd-build.sh' || { echo "the build script is not in SRC_URI"; return 1; }
+	has "$f" 'sh "${UNPACKDIR}/xkmsd-build.sh" "${S}" "${B}/xkmsd" "${PV}" "${SRCREV}"' ||
+		{ echo "do_compile does not run the build script (the go build command is gone)"; return 1; }
+	[ "$(val "$f" COMPATIBLE_HOST)" = 'aarch64.*-linux' ] || { echo "COMPATIBLE_HOST is not aarch64 Linux"; return 1; }
+	[ "$(val "$f" 'FILES:${PN}')" = '${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${systemd_system_unitdir}/var-lib-xkms.mount ${localstatedir}/lib/xkms ${sysconfdir}/xkms' ] ||
+		{ echo "the package does not hold the binary, the units, /var/lib/xkms and /etc/xkms"; return 1; }
+	return 0
+}
+
+# build_ok FILE: the build script the recipe and the smoke test share keeps the
+# local toolchain only, verifies modules, never rewrites go.mod, and runs
+# go build with go-xkms's server tags for ./cmd/xkmsd.
+build_ok() {
+	local f=$1
 	has "$f" 'export GOTOOLCHAIN=local' || { echo "go may fetch another toolchain"; return 1; }
 	has "$f" 'go mod verify' || { echo "modules are not verified"; return 1; }
 	has "$f" '-mod=readonly' || { echo "go.mod may be rewritten"; return 1; }
-	[ "$(val "$f" COMPATIBLE_HOST)" = 'aarch64.*-linux' ] || { echo "COMPATIBLE_HOST is not aarch64 Linux"; return 1; }
-	[ "$(val "$f" 'FILES:${PN}')" = '${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${sysconfdir}/xkms' ] ||
-		{ echo "the package does not hold the binary, the unit and /etc/xkms"; return 1; }
+	has "$f" 'go mod download' || { echo "modules are not downloaded"; return 1; }
+	has "$f" 'go build -tags "$XKMS_TAGS"' || { echo "there is no go build command"; return 1; }
+	has "$f" '-o "$out" ./cmd/xkmsd' || { echo "go build does not build ./cmd/xkmsd"; return 1; }
+	has "$f" 'XKMS_TAGS="pkcs8,tpm2,awskms,gcpkms,azurekv,vault,pkcs11"' || { echo "the build tags are not go-xkms's server tags"; return 1; }
+	return 0
+}
+
+# state_ok UNIT MOUNT WKS RECIPE IMAGE: xkmsd's state is on the persistent
+# partition: the unit needs the mount and fails closed without it, the mount
+# unit mounts the layout's xkms-state partition, the recipe ships the mount
+# unit, and the image builds that layout.
+state_ok() {
+	local unit=$1 mnt=$2 wks=$3 rec=$4 img=$5 want
+	for want in 'RequiresMountsFor=/var/lib/xkms' 'After=var-lib-xkms.mount' \
+		'AssertPathIsMountPoint=/var/lib/xkms' 'AssertPathIsReadWrite=/var/lib/xkms'; do
+		grep_line "$unit" "$want" || { echo "the unit lacks '$want'"; return 1; }
+	done
+	for want in 'What=/dev/disk/by-label/xkms-state' 'Where=/var/lib/xkms' 'Type=ext4'; do
+		grep_line "$mnt" "$want" || { echo "the mount unit lacks '$want'"; return 1; }
+	done
+	has "$mnt" 'Options=rw,' || { echo "the state mount is not read-write"; return 1; }
+	has "$wks" '--label xkms-state' || { echo "the layout has no xkms-state partition"; return 1; }
+	has "$wks" 'part /var/lib/xkms ' || { echo "the xkms-state partition is not for /var/lib/xkms"; return 1; }
+	has "$rec" 'file://var-lib-xkms.mount' || { echo "the mount unit is not in SRC_URI"; return 1; }
+	has "$rec" '${UNPACKDIR}/var-lib-xkms.mount ${D}${systemd_system_unitdir}/var-lib-xkms.mount' || { echo "the mount unit is not installed"; return 1; }
+	has "$rec" 'install -d -m 0750 ${D}${localstatedir}/lib/xkms' || { echo "the mount point is not created"; return 1; }
+	has "$img" 'WKS_FILE = "trusted-imx95.wks.in"' || { echo "the image does not use the layout"; return 1; }
+	has "$img" 'IMAGE_FSTYPES += "wic"' || { echo "the image does not build the layout"; return 1; }
 	return 0
 }
 
@@ -115,15 +157,28 @@ grep_line() {
 	return 1
 }
 
-# config_ok FILE: the config sets the state path of the unit and holds no
-# secret-looking key.
+# config_ok FILE: every top-level key is one of the sections of go-xkms's own
+# minimal configuration at the pinned tag (a key the daemon does not know is
+# not set: the old `storage:` section was one, and the daemon refused the file
+# for lack of datastore.path), the state and socket paths are the unit's, and
+# no secret-looking key is set. The smoke test starts the real daemon on it.
 config_ok() {
-	local f=$1 l
-	grep_line "$f" 'storage:' || { echo "no storage section"; return 1; }
-	grep_line "$f" '  path: /var/lib/xkms' || { echo "storage.path is not the unit's StateDirectory"; return 1; }
+	local f=$1 l k
+	while IFS= read -r l; do
+		case $l in '#'* | ' '* | '') continue ;; esac
+		k=${l%%:*}
+		case $k in
+		server | protocols | unix | logging | tls | auth | barrier | ratelimit | metrics | health | datastore | rng | default_backend | backends | ca) ;;
+		*) echo "the config sets '$k', which go-xkms's configuration does not take"; return 1 ;;
+		esac
+	done <"$f"
+	grep_line "$f" 'datastore:' || { echo "no datastore section"; return 1; }
+	grep_line "$f" '  path: "/var/lib/xkms/storage"' || { echo "datastore.path is not under the state mount"; return 1; }
+	grep_line "$f" '  socket_path: "/run/xkms/xkms.sock"' || { echo "unix.socket_path is not in the unit's RuntimeDirectory"; return 1; }
 	while IFS= read -r l; do
 		case $l in '#'*) continue ;; esac
 		case $l in *password* | *secret* | *token* | *private_key* | *PRIVATE*) echo "the config holds '$l'"; return 1 ;; esac
+		case $l in *'path: '*) case $l in *'"/var/lib/xkms/'* | *'"/run/xkms/'* | *'"/health"'*) ;; *) echo "'$l' is a path outside the state mount and the run directory"; return 1 ;; esac ;; esac
 	done <"$f"
 	return 0
 }
@@ -159,6 +214,9 @@ t "the xkmsd recipe adds the xkmsd system user" user_ok "$ROOT/$recipe_rel"
 t "the xkmsd recipe installs and enables the unit and the config" install_ok "$ROOT/$recipe_rel"
 t "the xkmsd unit" unit_ok "$ROOT/$unit_rel"
 t "the xkmsd default config" config_ok "$ROOT/$conf_rel"
+t "the xkmsd build script" build_ok "$ROOT/$build_rel"
+t "the xkmsd state is on the persistent partition and the unit fails closed without it" \
+	state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
 
 r0=$(<"$ROOT/$recipe_rel")
 rcopy() { # FROM TO NAME: a copy of the recipe with FROM replaced by TO
@@ -171,10 +229,22 @@ neg "negative: branch tag" recipe_ok "$(rcopy 'XKMS_TAG = "v0.64.2-alpha"' 'XKMS
 neg "negative: other license" recipe_ok "$(rcopy 'LICENSE = "AGPL-3.0-only"' 'LICENSE = "MIT"' lic)"
 neg "negative: no tag in SRC_URI" recipe_ok "$(rcopy 'nobranch=1;tag=${XKMS_TAG}' 'branch=main' src)"
 neg "negative: malformed Go sha256" recipe_ok "$(rcopy '65efbc80' 'zz' sha)"
-neg "negative: GOTOOLCHAIN not local" recipe_ok "$(rcopy 'export GOTOOLCHAIN=local' 'export GOTOOLCHAIN=auto' tc)"
-neg "negative: no go mod verify" recipe_ok "$(rcopy 'go mod verify' 'true' verify)"
 neg "negative: any host" recipe_ok "$(rcopy 'COMPATIBLE_HOST = "aarch64.*-linux"' 'COMPATIBLE_HOST = ".*-linux"' host)"
-neg "negative: verify only in a comment" recipe_ok "$(rcopy '    go mod verify' '    # go mod verify' cverify)"
+neg "negative: the recipe's go build command removed" recipe_ok "$(rcopy '    sh "${UNPACKDIR}/xkmsd-build.sh" "${S}" "${B}/xkmsd" "${PV}" "${SRCREV}"' '    true' nobuild)"
+neg "negative: the build call only in a comment" recipe_ok "$(rcopy '    sh "${UNPACKDIR}/xkmsd-build.sh"' '    # sh "${UNPACKDIR}/xkmsd-build.sh"' cbuild)"
+neg "negative: the build script not in SRC_URI" recipe_ok "$(rcopy '           file://xkmsd-build.sh \' '           file://other.sh \' nobsrc)"
+
+b0=$(<"$ROOT/$build_rel")
+bcopy() { # FROM TO NAME: a copy of the build script with FROM replaced by TO
+	printf '%s\n' "${b0//"$1"/"$2"}" >"$scratch/$3.sh"
+	printf '%s' "$scratch/$3.sh"
+}
+neg "negative: GOTOOLCHAIN not local" build_ok "$(bcopy 'export GOTOOLCHAIN=local' 'export GOTOOLCHAIN=auto' tc)"
+neg "negative: no go mod verify" build_ok "$(bcopy 'go mod verify' 'true' verify)"
+neg "negative: verify only in a comment" build_ok "$(bcopy 'go mod verify' '# go mod verify' cverify)"
+neg "negative: the script's go build command removed" build_ok "$(bcopy 'go build -tags' 'true -tags' nogobuild)"
+neg "negative: go build of another package" build_ok "$(bcopy './cmd/xkmsd' './cmd/xkms' otherpkg)"
+neg "negative: other build tags" build_ok "$(bcopy 'XKMS_TAGS="pkcs8,tpm2,' 'XKMS_TAGS="' tags)"
 
 neg "negative: no USERADD_PARAM" user_ok "$(rcopy 'USERADD_PARAM:${PN}' 'X_PARAM:${PN}' nouser)"
 neg "negative: user with a login shell" user_ok "$(rcopy '/sbin/nologin' '/bin/sh' shell)"
@@ -197,9 +267,40 @@ neg "negative: unit restarts always" unit_ok "$(ucopy 'Restart=on-failure' 'Rest
 neg "negative: unit with another config" unit_ok "$(ucopy '--config /etc/xkms/xkmsd.yaml' '--config /tmp/x.yaml' exec)"
 neg "negative: unit not wanted at boot" unit_ok "$(ucopy 'WantedBy=multi-user.target' '' install)"
 
+neg "negative: unit without RequiresMountsFor" state_ok "$(ucopy 'RequiresMountsFor=/var/lib/xkms' '' norm)" \
+	"$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+neg "negative: unit without the mount-point check" state_ok "$(ucopy 'AssertPathIsMountPoint=/var/lib/xkms' '' nomp)" \
+	"$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+neg "negative: unit without the read-write check" state_ok "$(ucopy 'AssertPathIsReadWrite=/var/lib/xkms' '' norw)" \
+	"$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+neg "negative: the mount-point check only in a comment" state_ok "$(ucopy 'AssertPathIsMountPoint=/var/lib/xkms' '#AssertPathIsMountPoint=/var/lib/xkms' cmp)" \
+	"$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+neg "negative: unit not ordered after the mount" state_ok "$(ucopy 'After=var-lib-xkms.mount' '' noafter)" \
+	"$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+m0=$(<"$ROOT/$mount_rel")
+printf '%s\n' "${m0//Options=rw,/Options=ro,}" >"$scratch/ro.mount"
+neg "negative: state mounted read-only" state_ok "$ROOT/$unit_rel" "$scratch/ro.mount" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+printf '%s\n' "${m0//xkms-state/other}" >"$scratch/label.mount"
+neg "negative: state mount of another label" state_ok "$ROOT/$unit_rel" "$scratch/label.mount" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+w0=$(<"$ROOT/$wks_rel")
+printf '%s\n' "${w0//--label xkms-state/--label data}" >"$scratch/nolabel.wks"
+neg "negative: layout without the xkms-state partition" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$scratch/nolabel.wks" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+neg "negative: recipe without the mount unit" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$ROOT/$wks_rel" "$(rcopy 'file://var-lib-xkms.mount' 'file://x.mount' nomount)" "$ROOT/$image_rel"
+i0=$(<"$ROOT/$image_rel")
+printf '%s\n' "${i0//WKS_FILE = /X_FILE = }" >"$scratch/nowks.bb"
+neg "negative: image without the layout" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$scratch/nowks.bb"
+
 c0=$(<"$ROOT/$conf_rel")
 printf '%s\n' "${c0//\/var\/lib\/xkms/\/tmp\/xkms}" >"$scratch/path.yaml"
 neg "negative: config state path elsewhere" config_ok "$scratch/path.yaml"
+printf '%s\n' "$c0" 'storage:' '  path: /var/lib/xkms' >"$scratch/unsupported.yaml"
+neg "negative: config names a key go-xkms does not take (storage:)" config_ok "$scratch/unsupported.yaml"
+printf '%s\n' "${c0//datastore:/datastor:}" >"$scratch/nods.yaml"
+neg "negative: config without its datastore section" config_ok "$scratch/nods.yaml"
+printf '%s\n' "${c0//\"\/run\/xkms\/xkms.sock\"/\"\/tmp\/xkms.sock\"}" >"$scratch/sock.yaml"
+neg "negative: config socket outside /run/xkms" config_ok "$scratch/sock.yaml"
+printf '%s\n' "${c0//\"\/var\/lib\/xkms\/keys\/pkcs8\"/\"\/etc\/keys\"}" >"$scratch/keys.yaml"
+neg "negative: config key path off the state mount" config_ok "$scratch/keys.yaml"
 printf '%s\n' "$c0" 'auth:' '  password: x' >"$scratch/secret.yaml"
 neg "negative: config holds a password" config_ok "$scratch/secret.yaml"
 

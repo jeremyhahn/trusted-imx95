@@ -33,7 +33,9 @@ XKMS_GO_VERSION = "1.27.3"
 
 SRC_URI = "git://github.com/jeremyhahn/go-xkms;protocol=https;nobranch=1;tag=${XKMS_TAG};destsuffix=go-xkms \
            https://go.dev/dl/go${XKMS_GO_VERSION}.linux-amd64.tar.gz;name=go;subdir=go-toolchain \
+           file://xkmsd-build.sh \
            file://xkmsd.service \
+           file://var-lib-xkms.mount \
            file://xkmsd.yaml"
 SRC_URI[go.sha256sum] = "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
 
@@ -48,7 +50,7 @@ DEPENDS = "libusb1"
 inherit pkgconfig useradd systemd
 
 # The service account: a system user without a login shell or a home of its
-# own; its state is the unit's StateDirectory.
+# own; its state is the xkms-state partition mounted on /var/lib/xkms.
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "--system xkmsd"
 USERADD_PARAM:${PN} = "--system --gid xkmsd --home-dir /var/lib/xkms --no-create-home --shell /sbin/nologin xkmsd"
@@ -57,9 +59,6 @@ USERADD_PARAM:${PN} = "--system --gid xkmsd --home-dir /var/lib/xkms --no-create
 SYSTEMD_PACKAGES = "${PN}"
 SYSTEMD_SERVICE:${PN} = "xkmsd.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
-
-# The build tags of go-xkms's own server build (Dockerfile.server).
-XKMS_TAGS = "pkcs8,tpm2,awskms,gcpkms,azurekv,vault,pkcs11"
 
 # Provisional: the Go modules are downloaded in do_compile and checked by
 # `go mod verify` against go.sum at the pinned commit. A module list in
@@ -70,18 +69,14 @@ do_compile() {
     [ "${BUILD_ARCH}" = "x86_64" ] || bbfatal "xkmsd: the Go ${XKMS_GO_VERSION} archive in SRC_URI is for an x86_64 build host, not ${BUILD_ARCH}"
     export GOROOT="${UNPACKDIR}/go-toolchain/go"
     export PATH="${GOROOT}/bin:${PATH}"
-    # Never let go fetch another toolchain than the pinned one.
-    export GOTOOLCHAIN=local
     export GOPATH="${B}/gopath" GOCACHE="${B}/gocache" GOMODCACHE="${B}/gomodcache"
-    export GOFLAGS="-mod=readonly -modcacherw -trimpath -buildvcs=false"
-    export GOOS=linux GOARCH=arm64 CGO_ENABLED=1
+    export GOOS=linux GOARCH=arm64
     export CC="${CC}" CGO_CFLAGS="${CFLAGS}" CGO_LDFLAGS="${LDFLAGS}"
-    cd "${S}"
-    go mod download
-    go mod verify
-    go build -tags "${XKMS_TAGS}" \
-        -ldflags "-X main.version=${PV} -X main.commit=${SRCREV}" \
-        -o "${B}/xkmsd" ./cmd/xkmsd
+    # The build command is one script, shared with the smoke test
+    # (scripts/platform-image-xkmsd-smoke.sh): the local toolchain only,
+    # `go mod verify` against go.sum, -mod=readonly, go-xkms's server tags,
+    # then `go build ./cmd/xkmsd`.
+    sh "${UNPACKDIR}/xkmsd-build.sh" "${S}" "${B}/xkmsd" "${PV}" "${SRCREV}"
 }
 
 do_install() {
@@ -89,12 +84,18 @@ do_install() {
     install -m 0755 ${B}/xkmsd ${D}${bindir}/xkmsd
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/xkmsd.service ${D}${systemd_system_unitdir}/xkmsd.service
+    # The state mount: the mount point is an empty directory in the read-only
+    # root; the unit mounts the image's xkms-state partition on it
+    # (platform-image/wic/trusted-imx95.wks.in). xkmsd.service refuses to
+    # start unless that mount is there and writable.
+    install -m 0644 ${UNPACKDIR}/var-lib-xkms.mount ${D}${systemd_system_unitdir}/var-lib-xkms.mount
+    install -d -m 0750 ${D}${localstatedir}/lib/xkms
     # Root owns the configuration; the xkmsd group may read it, nobody else.
     install -d -m 0750 -g xkmsd ${D}${sysconfdir}/xkms
     install -m 0640 -g xkmsd ${UNPACKDIR}/xkmsd.yaml ${D}${sysconfdir}/xkms/xkmsd.yaml
 }
 
-FILES:${PN} = "${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${sysconfdir}/xkms"
+FILES:${PN} = "${bindir}/xkmsd ${systemd_system_unitdir}/xkmsd.service ${systemd_system_unitdir}/var-lib-xkms.mount ${localstatedir}/lib/xkms ${sysconfdir}/xkms"
 CONFFILES:${PN} = "${sysconfdir}/xkms/xkmsd.yaml"
 # Go links its own runtime: no GNU_HASH in its ELF, and its build ID is Go's.
 INSANE_SKIP:${PN} = "ldflags"

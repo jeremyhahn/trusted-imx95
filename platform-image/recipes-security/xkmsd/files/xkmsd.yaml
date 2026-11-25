@@ -1,12 +1,85 @@
-# xkmsd's default configuration on the FRDM-IMX95-PRO image. A key this file
-# omits takes go-xkms's built-in default (config.Defaults(), go-xkms
-# docs/xkmsd-configuration/architecture.md, "Layers and precedence"); the
-# environment (XKMS_<SECTION>_<KEY>) and flags override it. Only keys named in
-# go-xkms's configs/README.md at the pinned tag are set here. Not yet run on
-# the board. No key, secret or host name belongs in this file.
+# xkmsd's default configuration on the FRDM-IMX95-PRO image. It is go-xkms's
+# own minimal configuration (configs/xkmsd.yaml at the pinned tag), the one the
+# daemon starts from with no privileges, with every on-disk path under
+# /var/lib/xkms (the persistent xkms-state partition, var-lib-xkms.mount) and
+# the local socket under /run/xkms. A key this file omits takes go-xkms's
+# built-in default; the environment (XKMS_<SECTION>_<KEY>) and flags override
+# it. The smoke test (scripts/platform-image-xkmsd-smoke.sh) starts the daemon
+# built from the pinned commit with this file. Not yet run on the board. No
+# key, secret or host name belongs in this file.
+#
+# The barrier is sealed at start: the passphrase strategy needs an operator to
+# initialise and unseal the node. Hardware-sealed, unattended unseal is the
+# provisioning step (go-trusted-platform), not set here.
+server:
+  host: "127.0.0.1"
+
+protocols:
+  unix: true
+  rest: false
+  grpc: false
+  quic: false
+  mcp: false
+
+unix:
+  socket_path: "/run/xkms/xkms.sock"
+
 logging:
-  level: info
-  format: json
-storage:
-  # The unit's StateDirectory=xkms.
-  path: /var/lib/xkms
+  level: "info"
+  format: "json"
+
+tls:
+  enabled: true
+
+auth:
+  enabled: true
+  type: "composite"
+
+barrier:
+  enabled: true
+  strategy: "passphrase"
+
+ratelimit:
+  enabled: false
+
+metrics:
+  enabled: false
+
+health:
+  enabled: true
+  path: "/health"
+
+datastore:
+  engine: "pebble"
+  path: "/var/lib/xkms/storage"
+
+rng:
+  mode: "software"
+  fallback_mode: "software"
+
+default_backend: "software"
+
+backends:
+  software:
+    enabled: true
+    path: "/var/lib/xkms/keys/software"
+  pkcs8:
+    enabled: true
+    path: "/var/lib/xkms/keys/pkcs8"
+
+ca:
+  identity:
+    - subject:
+        cn: "xkms Root CA"
+        organization: "go-xkms"
+      valid: 10
+      keys:
+        - algorithm: "ECDSA"
+          ecc:
+            curve: "P-256"
+          hash: "SHA-256"
+          key-type: "CA"
+      keystore-type: "software"
+      is-root: true
+  selected-ca: 0
+  default-validity-days: 365
