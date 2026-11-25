@@ -30,9 +30,12 @@ SUMMARY = "trusted-imx95 production image (provisional default, pending #14)"
 # (verified-boot-survey section 3.6 and question 5 (a): dm-verity comes later).
 IMAGE_FEATURES += "read-only-rootfs"
 
-# The disk layout holds the one persistent writable partition, xkms-state, that
-# xkmsd's state lives on (platform-image/wic/trusted-imx95.wks.in).
+# MISSING: no survey names the disk layout (boot-device layout is open). The
+# read-only root (survey section above) needs one persistent writable
+# partition, xkms-state, for xkmsd's state: the wic image builds it.
 IMAGE_FSTYPES += "wic"
+# MISSING: the layout file itself, platform-image/wic/trusted-imx95.wks.in, is
+# this row's smallest layout, not a survey's.
 WKS_FILE = "trusted-imx95.wks.in"
 
 # hardening-survey section 7: add only the boot packagegroup (kernel, systemd
