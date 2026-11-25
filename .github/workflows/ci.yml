@@ -2036,7 +2036,7 @@ jobs:
           # is left out of the dump, its `run` replaced by a marker), and (c) the
           # reading job listing that job in its own `needs`.
           PRODUCER_JOB = "preflight"
-          PRODUCER_SHA256 = "890be9fd7ee9281c8f7567529d907662b131ba2c872caeda68eb3dd36404e0f9"
+          PRODUCER_SHA256 = "ba6fc961344bbbb186955847e580cfced481e20f1fef9acb0ae3ffd02571f621"
           SELF_STEP = "Runner labels (ruling 633)"
 
 
