@@ -215,6 +215,25 @@ t "the xkmsd recipe installs and enables the unit and the config" install_ok "$R
 t "the xkmsd unit" unit_ok "$ROOT/$unit_rel"
 t "the xkmsd default config" config_ok "$ROOT/$conf_rel"
 t "the xkmsd build script" build_ok "$ROOT/$build_rel"
+# smoke_ok SCRIPT MAKEFILE: the smoke test reads the pin from the recipe, builds
+# with the recipe's script, starts the packaged config, checks the read-only
+# state dir, and the integration target runs it.
+smoke_ok() {
+	local s=$1 mk=$2 want
+	for want in 'rev=$(val SRCREV)' 'build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh' \
+		'sh "$build" "$src" "$bin" "$pv" "$rev"' 'conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml' \
+		'"$bin" --config "$work/xkmsd.yaml"' 'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory"; do
+		has "$s" "$want" || { echo "the smoke test lacks '$want'"; return 1; }
+	done
+	has "$mk" '$(MAKE) --no-print-directory platform-image-xkmsd-smoke' || { echo "integration-test-platform-image does not run the smoke test"; return 1; }
+	has "$mk" '@scripts/platform-image-xkmsd-smoke.sh' || { echo "no platform-image-xkmsd-smoke target"; return 1; }
+	return 0
+}
+t "the xkmsd smoke test is wired into the integration target" smoke_ok "$ROOT/scripts/platform-image-xkmsd-smoke.sh" "$ROOT/Makefile"
+neg "negative: the smoke test with a pin of its own" smoke_ok "$(printf '%s\n' 'rev=abc' >"$scratch/s1.sh"; printf '%s' "$scratch/s1.sh")" "$ROOT/Makefile"
+printf '%s\n' 'x:' '	@scripts/platform-image-xkmsd-smoke.sh' >"$scratch/mk"
+neg "negative: the integration target does not run the smoke test" smoke_ok "$ROOT/scripts/platform-image-xkmsd-smoke.sh" "$scratch/mk"
+
 t "the xkmsd state is on the persistent partition and the unit fails closed without it" \
 	state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$ROOT/$wks_rel" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
 
@@ -232,7 +251,7 @@ neg "negative: malformed Go sha256" recipe_ok "$(rcopy '65efbc80' 'zz' sha)"
 neg "negative: any host" recipe_ok "$(rcopy 'COMPATIBLE_HOST = "aarch64.*-linux"' 'COMPATIBLE_HOST = ".*-linux"' host)"
 neg "negative: the recipe's go build command removed" recipe_ok "$(rcopy '    sh "${UNPACKDIR}/xkmsd-build.sh" "${S}" "${B}/xkmsd" "${PV}" "${SRCREV}"' '    true' nobuild)"
 neg "negative: the build call only in a comment" recipe_ok "$(rcopy '    sh "${UNPACKDIR}/xkmsd-build.sh"' '    # sh "${UNPACKDIR}/xkmsd-build.sh"' cbuild)"
-neg "negative: the build script not in SRC_URI" recipe_ok "$(rcopy '           file://xkmsd-build.sh \' '           file://other.sh \' nobsrc)"
+neg "negative: the build script not in SRC_URI" recipe_ok "$(rcopy 'file://xkmsd-build.sh' 'file://other.sh' nobsrc)"
 
 b0=$(<"$ROOT/$build_rel")
 bcopy() { # FROM TO NAME: a copy of the build script with FROM replaced by TO
