@@ -136,7 +136,7 @@ nv_value() {
 # conf_nv <file>: the last TRUSTED_IMX95_FTPM_NV assignment of a BitBake conf
 # file that overrides the recipe default (=, := or ?=), or nothing.
 conf_nv() {
-	local l v= re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"'
+	local l v='' re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"'
 	[ -f "$1" ] || return 0
 	while IFS= read -r l || [ -n "$l" ]; do
 		if [[ "$l" =~ $re ]]; then v=${BASH_REMATCH[3]}; fi
