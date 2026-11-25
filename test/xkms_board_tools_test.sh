@@ -148,7 +148,9 @@ generate)
 	# FAKE_CTL_PIDS records this process; FAKE_CTL_SLOW delays the answer after
 	# the create succeeded; FAKE_CTL_ACKED lists each id as it is answered
 	[ -z "${FAKE_CTL_PIDS:-}" ] || echo "$$" >>"$FAKE_CTL_PIDS"
-	[ -z "${FAKE_CTL_SLOW:-}" ] || sleep "$FAKE_CTL_SLOW"
+	# (only for ids matching the glob FAKE_CTL_SLOW_MATCH when it is set)
+	# shellcheck disable=SC2254 # the glob is meant
+	[ -z "${FAKE_CTL_SLOW:-}" ] || case $id in ${FAKE_CTL_SLOW_MATCH:-*}) sleep "$FAKE_CTL_SLOW" ;; esac
 	[ -z "${FAKE_CTL_ACKED:-}" ] || echo "$id" >>"$FAKE_CTL_ACKED"
 	;;
 list) ls "$k" ;;
@@ -728,6 +730,16 @@ ok "diskfull: the reserved blocks are reported" out_has "$tmp/df-root.log" "it c
 DF "$tmp/df-user.log" FAKE_CTL_NOSPACE_AFTER=1 FAKE_DF_RESERVED=500 FAKE_UNIT_USER=xkms
 ok "diskfull: a non-root xkmsd leaves the reserved blocks" out_has "$tmp/df-user.log" "(744 KiB, 256 KiB left to xkmsd)"
 ok "diskfull: and says so" out_has "$tmp/df-user.log" "the 500 KiB reserved for root are not its to use"
+# A create that succeeds but answers after 26 s (under the 30 s timeout) is
+# owed like any other: it must be acked in the ledger and verified, and is
+# reported as SLOW, not as hung or lost.
+DF "$tmp/df-slow.log" FAKE_CTL_NOSPACE_AFTER=4 FAKE_CTL_SLOW=26 'FAKE_CTL_SLOW_MATCH=*-full-1'
+slow_id=$(cd "$tmp/kms" && echo bi-df-*-full-1)
+ok "diskfull slow: passes" [ "$RC" = 0 ]
+ok "diskfull slow: the slow create is acked in the ledger" out_has "$tmp/bi/ledger.full" "ack|$slow_id|"
+ok "diskfull slow: reported as SLOW" out_has "$tmp/df-slow.log" "SLOW: create $slow_id took"
+ok "diskfull slow: not counted as hung" out_has "$tmp/df-slow.log" "0 hung, 1 slow"
+ok "diskfull slow: every acked write verified" out_has "$tmp/df-slow.log" "PASS verify full: 8 ledger entries intact"
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do

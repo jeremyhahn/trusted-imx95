@@ -17,8 +17,11 @@ usage: diskfull.sh [options] <board ssh target>
   3. write keys until xkmsd reports no space (an error matching
      --nospace-re). FAIL when --max-writes writes or --max-kib KiB of the
      filesystem go by first: the disk was never seen full
-  4. --attempts more writes while full: each refused or acknowledged
-     promptly (no hang); xkmsd still running; the baseline readable
+  4. --attempts more writes while full: each refused or acknowledged, none
+     cut off by the 30 s timeout (a hang); xkmsd still running; the
+     baseline readable
+A create that exits 0 is acknowledged and owed however long it took; one
+that took --slow-secs or more is a warning (SLOW), never a lost write.
   5. remove the filler (always, on exit too); every write acknowledged
      before the disk was full is still readable and new writes work;
      restart xkmsd; verify the baseline and every acknowledged write
@@ -32,6 +35,7 @@ A lost or changed acknowledged write is CRITICAL. The filler is one file,
   --nospace-re <ere>  what xkmsctl says when xkmsd is out of space,
                       case-insensitive (default 'no space|ENOSPC|disk full|out of space')
   --attempts <n>      writes tried once full (default 5)
+  --slow-secs <s>     a create answered after this long is SLOW (default 25)
   --keys <n>          baseline keys (default 20)
 EOF
 	bi_common_usage
@@ -43,6 +47,7 @@ max_writes=5000
 max_kib=""
 nospace_re='no space|ENOSPC|disk full|out of space'
 attempts=5
+slow_secs=25
 n=20
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -53,6 +58,7 @@ while [ $# -gt 0 ]; do
 	--max-kib) max_kib=${2:?}; shift 2 ;;
 	--nospace-re) nospace_re=${2:?}; shift 2 ;;
 	--attempts) attempts=${2:?}; shift 2 ;;
+	--slow-secs) slow_secs=${2:?}; shift 2 ;;
 	--keys) n=${2:?}; shift 2 ;;
 	*)
 		bi_common_opt "$@"
@@ -64,7 +70,7 @@ done
 case $dir in /* ) ;; *) bi_die "--state-dir must be absolute" ;; esac
 case $dir in *[!A-Za-z0-9/_.-]*) bi_die "--state-dir has odd characters" ;; esac
 max_kib=${max_kib:-$((4 * margin))}
-for v in "$margin" "$max_writes" "$max_kib" "$attempts" "$n"; do
+for v in "$margin" "$max_writes" "$max_kib" "$attempts" "$slow_secs" "$n"; do
 	case $v in '' | *[!0-9]*) bi_die "numeric option expected, got '$v'" ;; esac
 done
 
@@ -121,8 +127,10 @@ bi_check "fill $dir's filesystem ($fill KiB, $margin KiB left to xkmsd)" bi_boar
 room0=$(room) || room0=""
 
 # try_write <ledger> <id>: one create; sets $res to ack, nospace, refused or
-# hung, and $msg to xkmsctl's first line. The try line comes first, so a create
-# never answered stays unknown.
+# hung (cut off by the 30 s timeout, so unknown), $msg to xkmsctl's first line
+# and $secs to how long it took. The try line comes first, so a create never
+# answered stays unknown. A create that exits 0 is acked whatever its latency:
+# it is owed from then on, and slowness is reported apart (SLOW), not as loss.
 try_write() {
 	local L start out rc
 	L=$(bi_ledger "$1")
@@ -130,22 +138,29 @@ try_write() {
 	start=$SECONDS
 	out=$(BI_CTL_TIMEOUT=30 bi_ctl key generate "$2" --key-type symmetric --algorithm aes-256-gcm --key-size 256 2>&1)
 	rc=$?
+	secs=$((SECONDS - start))
 	msg=${out%%$'\n'*}
-	if [ "$rc" = 124 ] || [ $((SECONDS - start)) -ge 25 ]; then
-		res=hung
-	elif [ "$rc" -ne 0 ]; then
-		if printf '%s\n' "$out" | grep -Eqi -- "$nospace_re"; then res=nospace; else res=refused; fi
-	else
+	if [ "$rc" = 0 ]; then
 		res=ack # from now it is owed
 		bi_ack "$L" "$2"
 		j=$(bi_ctl -o json key get "$2" 2>/dev/null) && echo "meta|$2|$(printf '%s' "$j" | bi_sha)|||" >>"$L"
+	elif [ "$rc" = 124 ]; then
+		res=hung
+	elif printf '%s\n' "$out" | grep -Eqi -- "$nospace_re"; then
+		res=nospace
+	else
+		res=refused
+	fi
+	if [ "$res" != hung ] && [ "$secs" -ge "$slow_secs" ]; then
+		slow=$((slow + 1))
+		echo "SLOW: create $2 took ${secs}s to answer ($res); counted as $res, not lost"
 	fi
 }
 count() { # count <res>: tally one result
 	case $1 in ack) acked=$((acked + 1)) ;; hung) hung=$((hung + 1)) ;; refused) other=$((other + 1)) ;; esac
 }
 
-acked=0 hung=0 other=0 i=0 full=0 bound=""
+acked=0 hung=0 other=0 slow=0 i=0 full=0 bound=""
 while :; do
 	if [ "$i" -ge "$max_writes" ]; then bound="$max_writes writes"; break; fi
 	if [ $((i % 25)) -eq 0 ] && [ -n "$room0" ] && r=$(room) && [ $((room0 - r)) -gt "$max_kib" ]; then
@@ -161,7 +176,7 @@ while :; do
 	fi
 	count "$res"
 done
-echo "until full: $acked acknowledged, $other refused for another reason, $hung hung"
+echo "until full: $acked acknowledged, $other refused for another reason, $hung hung, $slow slow (${slow_secs}s or more)"
 if [ "$full" = 1 ]; then
 	bi_check "xkmsd reported no space (bound $max_writes writes, $max_kib KiB)" true
 	nospace=0
@@ -194,5 +209,6 @@ bi_verify_set base
 ! has_ack full || bi_verify_set full
 ! has_ack after || bi_verify_set after
 
+[ "$slow" -eq 0 ] || echo "WARNING: $slow create(s) answered after ${slow_secs}s or more (SLOW above); each is acked and verified like the rest"
 echo "work dir (ledgers, no key material): $BI_WORK"
 bi_summary diskfull
