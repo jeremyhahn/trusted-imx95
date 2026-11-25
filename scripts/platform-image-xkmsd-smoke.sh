@@ -196,17 +196,37 @@ kill -0 "$pid" 2>/dev/null || die "xkmsd exited after it was ready"
 ok "xkmsd reaches its ready state on the development config (socket served, node sealed)"
 kill -TERM "$pid"
 for ((i = 0; i < 300; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-if kill -0 "$pid" 2>/dev/null; then die "xkmsd did not stop within 30 s of SIGTERM"; fi
-rc=0
-wait "$pid" || rc=$?
+# The stop is checked fail-closed, but its failure is recorded, not fatal here:
+# steps 3b and 4 below are security checks of their own and must run and report
+# whatever the stop does. The script fails after them (see the end).
+sigterm_fail=
+if kill -0 "$pid" 2>/dev/null; then
+	kill -KILL "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	sigterm_fail="xkmsd did not stop within 30 s of SIGTERM"
+else
+	rc=0
+	wait "$pid" || rc=$?
+	# Only a clean stop passes: exit status 0 and the daemon's own
+	# shutdown-complete log line. A status of 143 (the signal killed the
+	# process, nothing shut down) or any other non-zero status fails, and so does
+	# status 0 with no such line.
+	if [ "$rc" -ne 0 ]; then
+		tail -n 20 "$work/run.log" >&2
+		sigterm_fail="xkmsd stopped on SIGTERM with status $rc, not 0"
+	elif grep -q -E 'panic:|^goroutine ' "$work/run.log"; then
+		sigterm_fail="xkmsd panicked on SIGTERM"
+	elif ! grep -q 'Server shutdown complete' "$work/run.log"; then
+		tail -n 20 "$work/run.log" >&2
+		sigterm_fail="xkmsd stopped on SIGTERM without logging 'Server shutdown complete'"
+	fi
+fi
 pid=
-# Only a clean stop passes: exit status 0 and the daemon's own shutdown-complete
-# log line. A status of 143 (the signal killed the process, nothing shut down)
-# or any other non-zero status fails, and so does status 0 with no such line.
-if [ "$rc" -ne 0 ]; then tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on SIGTERM with status $rc, not 0"; fi
-if grep -q -E 'panic:|^goroutine ' "$work/run.log"; then die "xkmsd panicked on SIGTERM"; fi
-if ! grep -q 'Server shutdown complete' "$work/run.log"; then tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on SIGTERM without logging 'Server shutdown complete'"; fi
-ok "xkmsd stops cleanly on SIGTERM (status 0, 'Server shutdown complete' logged)"
+if [ -n "$sigterm_fail" ]; then
+	echo "xkmsd-smoke: FAIL: $sigterm_fail" >&2
+else
+	ok "xkmsd stops cleanly on SIGTERM (status 0, 'Server shutdown complete' logged)"
+fi
 
 # 3b. The packaged (production) config configures no key custody, and go-xkms at
 # the pin has no enclave backend to configure: the daemon must refuse it, exit
@@ -245,5 +265,9 @@ pid=
 [ "$rc" -ne 0 ] || die "xkmsd exited 0 on a read-only state directory"
 if grep -q 'Unix socket server started' "$work/ro/run.log"; then die "xkmsd served its socket on a read-only state directory"; fi
 ok "xkmsd refuses to start on a read-only state directory (status $rc)"
+
+# The SIGTERM stop (step 3) was recorded and the refusal checks above ran either
+# way; a failed stop fails the run here, after they reported.
+[ -z "$sigterm_fail" ] || die "the SIGTERM stop failed ($sigterm_fail); steps 3b and 4 ran and reported above"
 
 echo "xkmsd-smoke: all passed"

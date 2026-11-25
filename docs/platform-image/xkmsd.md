@@ -95,6 +95,14 @@ So **the real smoke run fails at this step** until go-xkms changes, or answers
 that a sealed node should exit this way. This repository keeps the check
 fail-closed rather than accept 143.
 
+A failed stop does not hide the two checks that follow it. The script records
+the failure, prints it as a `FAIL` line, and still runs the production-config
+refusal and the read-only-state refusal, each of which prints its own `ok` or
+fails the script at once. It exits non-zero after them with the stop failure
+named. So against the pinned daemon a run reports the SIGTERM `FAIL`, the two
+`ok` refusal lines, and then fails. The stubbed test has the three stop fixtures
+assert both `ok` lines and a non-zero exit.
+
 Upstream question for go-xkms (to be raised by the coordinator; nothing is
 posted from this repository): does xkmsd handle SIGTERM with a clean shutdown
 (exit 0 and `Server shutdown complete`) when the barrier is still sealed, or

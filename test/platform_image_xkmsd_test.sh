@@ -507,16 +507,25 @@ else
 		"ok   xkmsd refuses the production config" \
 		"ok   xkmsd refuses to start on a read-only state directory"
 	# SIGTERM: only exit status 0 plus the shutdown-complete line passes. The real
-	# daemon at the pin, sealed, is killed by the signal (status 143, no line).
+	# daemon at the pin, sealed, is killed by the signal (status 143, no line). The
+	# failed stop must not hide the two refusal checks: each run still prints their
+	# ok lines (steps 3b and 4 ran) and fails afterwards.
 	smoke_run sigdie FAKE_DAEMON=sigterm-die
-	check "smoke: a daemon the SIGTERM kills (status 143, no shutdown line) fails" nonzero \
-		"FAIL: xkmsd stopped on SIGTERM with status 143, not 0"
+	check "smoke: a daemon the SIGTERM kills (status 143, no shutdown line) fails, after the refusal checks ran" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM with status 143, not 0" \
+		"ok   xkmsd refuses the production config" \
+		"ok   xkmsd refuses to start on a read-only state directory" \
+		"FAIL: the SIGTERM stop failed"
 	smoke_run sigsilent FAKE_DAEMON=sigterm-silent
-	check "smoke: a daemon that stops with status 0 but logs no shutdown fails" nonzero \
-		"FAIL: xkmsd stopped on SIGTERM without logging 'Server shutdown complete'"
+	check "smoke: a daemon that stops with status 0 but logs no shutdown fails, after the refusal checks ran" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM without logging 'Server shutdown complete'" \
+		"ok   xkmsd refuses the production config" \
+		"ok   xkmsd refuses to start on a read-only state directory"
 	smoke_run signonzero FAKE_DAEMON=sigterm-nonzero
-	check "smoke: a daemon that logs the shutdown but exits non-zero fails" nonzero \
-		"FAIL: xkmsd stopped on SIGTERM with status 1, not 0"
+	check "smoke: a daemon that logs the shutdown but exits non-zero fails, after the refusal checks ran" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM with status 1, not 0" \
+		"ok   xkmsd refuses the production config" \
+		"ok   xkmsd refuses to start on a read-only state directory"
 	smoke_run prodserve FAKE_DAEMON=serve-any
 	check "smoke: a daemon that serves the production config (no key custody) fails" nonzero \
 		"FAIL: xkmsd keeps running on the production config"
