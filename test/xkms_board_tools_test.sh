@@ -676,6 +676,70 @@ FAKE_CTL_KEEP=1 CC "$tmp/cc-keep.log"
 ok "concurrency: a key still present after the deletes, FAIL" [ "$RC" != 0 ]
 ok "concurrency: the still-present key is named" out_has "$tmp/cc-keep.log" "still exists"
 
+# --- xkmsd-build.sh pins its toolchain and its environment -----------------------
+# A stub go reports the release in $gobin/release and records the environment
+# it is built in; the go-xkms repository is a local one-commit repository.
+gobin=$tmp/gobin
+mkdir -p "$gobin"
+cat >"$gobin/go" <<EOF
+#!/bin/bash
+case \$1 in
+version) echo "go version \$(cat "$gobin/release") linux/amd64" ;;
+build)
+	env | LC_ALL=C sort >>"$gobin/build.env"
+	while [ \$# -gt 0 ]; do case \$1 in -o) printf 'stub binary\n' >"\$2"; shift ;; esac; shift; done
+	;;
+*) exit 2 ;;
+esac
+EOF
+chmod +x "$gobin/go"
+gx=$tmp/go-xkms
+mkdir -p "$gx"
+git -C "$gx" init -q
+echo 0.1.0 >"$gx/VERSION"
+git -C "$gx" add VERSION
+GIT_AUTHOR_DATE=2026-01-02T03:04:05Z GIT_COMMITTER_DATE=2026-01-02T03:04:05Z \
+	git -C "$gx" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m init
+gxc=$(git -C "$gx" rev-parse HEAD)
+BLD() { # BLD <log> <outdir> <go release> [VAR=value...]: build the fake commit with the stub go; set RC
+	local log=$1 out=$2
+	echo "$3" >"$gobin/release"
+	shift 3
+	: >"$gobin/build.env"
+	set +e
+	env "$@" PATH="$gobin:$PATH" XKMS_REPO="$gx" XKMS_SRC="$tmp/gosrc" XKMS_OUT="$out" \
+		"$here/scripts/xkms/xkmsd-build.sh" "$gxc" >"$log" 2>&1
+	RC=$?
+	set -e
+}
+pin=$(while read -r l; do case $l in go_pin=*) echo "${l#go_pin=}"; break ;; esac; done <"$here/scripts/xkms/xkmsd-build.sh")
+ok "build: the script names one pinned release" [ -n "$pin" ]
+BLD "$tmp/bld-old.log" "$tmp/bld-old" go1.0.1
+ok "build: a go that is not the pinned release is refused" [ "$RC" != 0 ]
+ok "build: the refusal names the pin and the go found" out_has "$tmp/bld-old.log" "pinned to $pin, found: go version go1.0.1"
+ok "build: refused before any build ran" [ ! -s "$gobin/build.env" ]
+ok "build: refused before anything was written" [ ! -e "$tmp/bld-old/$gxc" ]
+BLD "$tmp/bld-1.log" "$tmp/bld-1" "$pin" GOFLAGS=-mod=mod GOEXPERIMENT=boringcrypto GOAMD64=v3 GOARM64=v9.0 CGO_ENABLED=1 GOTOOLCHAIN=auto
+ok "build: the pinned release builds" [ "$RC" = 0 ]
+ok "build: the build ran" [ -s "$gobin/build.env" ]
+ok "build: the caller's GOFLAGS did not reach the build" out_lacks "$gobin/build.env" "mod=mod"
+ok "build: the caller's GOEXPERIMENT did not reach the build" out_lacks "$gobin/build.env" "boringcrypto"
+ok "build: GOFLAGS is empty" out_has "$gobin/build.env" $'\nGOFLAGS=\n'
+ok "build: GOEXPERIMENT is empty" out_has "$gobin/build.env" $'\nGOEXPERIMENT=\n'
+ok "build: GOTOOLCHAIN=local whatever the caller set" out_has "$gobin/build.env" "GOTOOLCHAIN=local"
+ok "build: CGO_ENABLED=0 whatever the caller set" out_has "$gobin/build.env" "CGO_ENABLED=0"
+ok "build: GOAMD64 is the default" out_has "$gobin/build.env" $'\nGOAMD64=v1\n'
+ok "build: GOARM64 is the default" out_has "$gobin/build.env" $'\nGOARM64=v8.0\n'
+ok "build: GOPATH is fixed, outside the source tree" out_has "$gobin/build.env" "GOPATH=$here/build/go-xkms/gopath"
+ok "build: GOCACHE is fixed, outside the source tree" out_has "$gobin/build.env" "GOCACHE=$here/build/go-xkms/gocache"
+ok "build: the manifest records the pin" out_has "$tmp/bld-1/$gxc/manifest.txt" "go-pinned: $pin"
+ok "build: the manifest records GOTOOLCHAIN=local" out_has "$tmp/bld-1/$gxc/manifest.txt" "GOTOOLCHAIN=local"
+ok "build: the manifest records the clean GOFLAGS" out_has "$tmp/bld-1/$gxc/manifest.txt" "GOFLAGS= GOEXPERIMENT="
+ok "build: the manifest holds no host path" out_lacks "$tmp/bld-1/$gxc/manifest.txt" "$here"
+BLD "$tmp/bld-2.log" "$tmp/bld-2" "$pin"
+ok "build: a second build of the commit succeeds" [ "$RC" = 0 ]
+ok "build: two builds of one commit give identical records" cmp -s "$tmp/bld-1/$gxc/manifest.txt" "$tmp/bld-2/$gxc/manifest.txt"
+
 # --- burn-in writers drain at a stop -------------------------------------------
 # Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,
 # and restart-load.sh stops its writers about 2s in: each is mid-request then.

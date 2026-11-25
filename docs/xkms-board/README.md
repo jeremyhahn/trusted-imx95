@@ -19,7 +19,19 @@ The script clones go-xkms read-only into `build/go-xkms/src` (ignored by git)
 and builds with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 -trimpath`, tags
 `codec_cbor codec_json codec_msgpack pkcs8 frost`. The version is the commit
 and the build date is the commit date, so a rebuild at one commit gives the
-same SHA-256. The manifest lists the commit, Go version, flags and hashes.
+same SHA-256 on the same toolchain.
+
+The toolchain is pinned. The script refuses to build, before it clones or
+compiles anything, unless `go version` is the release named by `go_pin` at the
+top of `scripts/xkms/xkmsd-build.sh` (the comment there gives its source).
+Go runs in a clean environment (`env -i`): `GOFLAGS` and `GOEXPERIMENT` empty,
+`GOTOOLCHAIN=local` (go.mod cannot swap the toolchain), `GOAMD64=v1`,
+`GOARM64=v8.0`, `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, `GOFIPS140=off`,
+and a fixed `GOPATH` and `GOCACHE` under `build/go-xkms/`, outside the source
+tree. Nothing from the caller's shell reaches the build except `PATH` and the
+proxy and CA variables the module download needs. The manifest lists the
+commit, the pinned and the actual Go version, the exact environment, the flags
+and the hashes.
 
 ## Deploy
 
