@@ -266,6 +266,54 @@ expect "the PKCS#11 TA is an early TA" has "$optee_line" "CFG_IN_TREE_EARLY_TAS=
 expect "the fTPM TA keeps its NV in REE FS storage" has "$ftpm_line" "CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE"
 expect "PKCS#11 is built" has "$optee_line" "CFG_PKCS11_TA=y"
 
+# The OP-TEE the boot container ships takes its NV storage from the selector
+# the platform image uses (optee-ftpm-flags.inc, owner ruling 1234): for each
+# value, the same OP-TEE flag set on the dev kit and OS builds, and the fTPM
+# TA's storage ID from optee-ftpm_*.bb. A script that hard-codes one set, or
+# ignores the selector, fails here.
+nv_inc=$ROOT/platform-image/recipes-security/optee/optee-ftpm-flags.inc
+nv_bb=$ROOT/platform-image/recipes-security/optee/optee-ftpm_4.10.0.bb
+# flag_value <file> <name> <key>: the quoted value of `name[key] = "..."`.
+flag_value() {
+	local l
+	while IFS= read -r l; do
+		if [[ "$l" == "$2[$3] = \""*\" ]]; then
+			l=${l#*\"}
+			printf '%s\n' "${l%\"}"
+			return 0
+		fi
+	done <"$1"
+	return 1
+}
+# carries_set <make line> <flags>: every K=V of the set, and no other K=.
+carries_set() {
+	local w line=" $1 "
+	[ -n "$2" ] || return 1
+	for w in $2; do
+		[[ "$line" == *" $w "* ]] || return 1
+		[[ "${line//" $w "/ }" != *" ${w%%=*}="* ]] || return 1
+	done
+}
+for nv in reefs rpmb; do
+	nv_set=$(flag_value "$nv_inc" TRUSTED_IMX95_FTPM_NV_FLAGS "$nv" || true)
+	nv_sid=$(flag_value "$nv_bb" FTPM_TA_STORAGE_ID "$nv" || true)
+	expect "optee-ftpm-flags.inc has a $nv flag set" test -n "$nv_set"
+	expect "optee-ftpm_4.10.0.bb has a $nv storage ID" test -n "$nv_sid"
+	fullrun "nv-$nv" "$oklock" TRUSTED_IMX95_FTPM_NV="$nv"
+	check "TRUSTED_IMX95_FTPM_NV=$nv builds and publishes" 0 "secure-world-build: OK"
+	nv_log=$(<"$TMP_ROOT/nv-$nv/make.log")
+	nv_os=$(printf '%s\n' "$nv_log" | while IFS= read -r l; do [[ "$l" == *"/optee "* && "$l" == *" all" ]] && echo "$l"; done | head -n 1 || true)
+	nv_kit=$(printf '%s\n' "$nv_log" | while IFS= read -r l; do [[ "$l" == *ta_dev_kit* ]] && echo "$l"; done | head -n 1 || true)
+	nv_ta=$(printf '%s\n' "$nv_log" | while IFS= read -r l; do [[ "$l" == *"/ftpm "* ]] && echo "$l"; done | head -n 1 || true)
+	expect "$nv: OP-TEE OS carries the inc's flag set ($nv_set)" carries_set "$nv_os" "$nv_set"
+	expect "$nv: the TA dev kit carries the inc's flag set" carries_set "$nv_kit" "$nv_set"
+	expect "$nv: the fTPM TA's storage ID is the recipe's ($nv_sid)" has "$nv_ta" " CFG_FTPM_TA_TEE_STORAGE_ID=$nv_sid"
+	expect "$nv: build-info.txt names the NV selection" has "$(<"$TMP_ROOT/nv-$nv/out/build-info.txt")" "ftpm-nv: $nv"
+done
+fullrun nv-bad "$oklock" TRUSTED_IMX95_FTPM_NV=emmc
+check "an unknown TRUSTED_IMX95_FTPM_NV is refused" nonzero "TRUSTED_IMX95_FTPM_NV must be reefs or rpmb, not emmc"
+expect "nothing is published for an unknown NV selection" nothing_published nv-bad
+
 has_line() {
 	local l
 	while IFS= read -r l; do
@@ -319,9 +367,18 @@ expect "a wrong artefact hash publishes nothing" nothing_published badhash
 # of the script (bl31, optee-devkit, ftpm and optee, with their flags and
 # continuation lines), whitespace squeezed. This check recomputes it from the
 # files, so a changed pin or flag cannot leave old hashes standing.
-# optee_config_digest [lock [script]]: defaults to the committed files.
+# The NV storage selection is part of it: the TRUSTED_IMX95_FTPM_NV lines of
+# optee-ftpm-flags.inc and the FTPM_TA_STORAGE_ID lines of the fTPM recipe,
+# which the script reads its OP-TEE storage flags and TA storage ID from.
+# optee_config_digest [lock [script [inc [recipe]]]]: defaults to the committed files.
 optee_config_digest() {
-	local lk=${1:-$good} sc=${2:-$sw} l on=0 acc=
+	local lk=${1:-$good} sc=${2:-$sw} inc=${3:-$nv_inc} bb=${4:-$nv_bb} l on=0 acc=
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == TRUSTED_IMX95_FTPM_NV* ]] && acc+="${l//[[:space:]]/ }"$'\n'
+	done <"$inc"
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == "FTPM_TA_STORAGE_ID["* || "$l" == "TRUSTED_IMX95_FTPM_NV ?="* ]] && acc+="${l//[[:space:]]/ }"$'\n'
+	done <"$bb"
 	while IFS= read -r l || [ -n "$l" ]; do
 		# TFA_TAG names TFA_COMMIT (checked at fetch) and reaches no build step.
 		[[ -z "${l//[[:space:]]/}" || "$l" == \#* || "$l" == TFA_TAG=* ]] && continue
@@ -358,7 +415,7 @@ expect "build.md records the digest of the lock file and the script's build step
 edit_optee_pin() { [[ "$1" == OPTEE_COMMIT=* ]] && echo OPTEE_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
 edit_ftpm_pin() { [[ "$1" == FTPM_COMMIT=* ]] && echo FTPM_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
 edit_mstpm_pin() { [[ "$1" == MSTPM_COMMIT=* ]] && echo MSTPM_COMMIT=0123456789abcdef0123456789abcdef01234567 || printf '%s\n' "$1"; }
-tied_with() { [ "$(recorded_config_digest)" = "$(optee_config_digest "$1" "$2")" ]; }
+tied_with() { [ "$(recorded_config_digest)" = "$(optee_config_digest "$@")" ]; }
 not_tied_with() { ! tied_with "$@"; }
 for n in optee_pin ftpm_pin mstpm_pin; do
 	lk=$(lockcopy "dg$n" "edit_$n")
@@ -368,11 +425,21 @@ lk=$(lockcopy dgtag edit_rctag)
 expect "the TF-A tag line, which no build step reads, leaves the digest" tied_with "$lk" "$sw"
 lk=$(lockcopy dgtfa edit_unread)
 expect "a changed TF-A commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
-ftpm_script=$TMP_ROOT/ftpm-script.sh
-: >"$ftpm_script"
-while IFS= read -r l; do
-	printf '%s\n' "${l//TEE_STORAGE_PRIVATE_REE/TEE_STORAGE_PRIVATE_RPMB}" >>"$ftpm_script"
-done <"$sw"
-expect "a changed fTPM flag in the script fails the digest guard" not_tied_with "$good" "$ftpm_script"
+# edited_copy <name> <file> <from> <to>: a copy of the file with from -> to.
+edited_copy() {
+	local l c=$TMP_ROOT/$1
+	: >"$c"
+	while IFS= read -r l || [ -n "$l" ]; do
+		printf '%s\n' "${l//"$3"/"$4"}" >>"$c"
+	done <"$2"
+	cmp -s "$c" "$2" && return 1
+	printf '%s\n' "$c"
+}
+ftpm_script=$(edited_copy ftpm-script.sh "$sw" CFG_PKCS11_TA=y CFG_PKCS11_TA=n)
+expect "a changed OP-TEE flag in the script fails the digest guard" not_tied_with "$good" "$ftpm_script"
+dg_inc=$(edited_copy flags.inc "$nv_inc" '[reefs] = "CFG_REE_FS=y CFG_RPMB_FS=n"' '[reefs] = "CFG_REE_FS=y CFG_RPMB_FS=y"')
+expect "a changed NV flag set in optee-ftpm-flags.inc fails the digest guard" not_tied_with "$good" "$sw" "$dg_inc"
+dg_bb=$(edited_copy ftpm.bb "$nv_bb" '[reefs] = "TEE_STORAGE_PRIVATE_REE"' '[reefs] = "TEE_STORAGE_PRIVATE_RPMB"')
+expect "a changed fTPM storage ID in the recipe fails the digest guard" not_tied_with "$good" "$sw" "$nv_inc" "$dg_bb"
 
 finish

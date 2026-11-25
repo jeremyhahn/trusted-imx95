@@ -169,12 +169,16 @@ provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
 every non-comment, non-blank line of `secure-world/bsp.lock` but `TFA_TAG` (it names `TFA_COMMIT`, is checked at
 fetch and reaches no build step), the script's two UUID assignments, its `optee_flags`
-array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed.
+array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed,
+and the fTPM NV storage sets the script reads: the `TRUSTED_IMX95_FTPM_NV` lines of
+`platform-image/recipes-security/optee/optee-ftpm-flags.inc` and the `FTPM_TA_STORAGE_ID` lines of the
+`optee-ftpm` recipe (owner ruling 1234; the boot container's `tee.bin` and the image's OP-TEE select the same
+storage). The hashes above are for the default selection, `reefs`.
 The test fails when any pin, toolchain or wheel line of the lock, or any build argument or flag, differs from the
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66376f3761a23d3`
+Build configuration digest: `6a32b2474943574046030142a2ae5efc257b7ef1acecc89233b8ae00bdea0a4e`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
