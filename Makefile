@@ -43,6 +43,7 @@ SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/in
 PY_SCRIPTS := $(sort $(wildcard scripts/*.py test/okp/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
+PI_TESTS   := $(sort $(wildcard test/platform_image*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
 	deps-check pins-check pins-report lint lint-shell lint-python lint-workflows lint-docs docs-check check-tracked-cst cst-check \
@@ -51,8 +52,9 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
-	okp-policy-check integration-test-oem-key-provisioning \\
-	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
+	okp-policy-check integration-test-oem-key-provisioning \
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify \
+	platform-image-xkmsd-smoke platform-image-xkmsd-target-check integration-test-platform-image
 
 help: ## List the targets
 	@echo "Targets:"
@@ -214,6 +216,22 @@ integration-test-secure-world: ## The secure-world integration test (test/integr
 	@bash test/integration/secure_world_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
+
+integration-test-platform-image: ## The platform-image row's checks: every test/platform_image*_test.sh (no bitbake), then the xkmsd build-and-start smoke test (needs network, Go and a C toolchain; fails, never skips)
+	@[ -n "$(PI_TESTS)" ] || { echo "integration-test-platform-image: no test/platform_image*_test.sh found"; exit 1; }
+	@fail=0; for t in $(PI_TESTS); do \
+		echo "--- $$t"; bash "$$t" || { echo "FAIL $$t"; fail=1; }; \
+	done; \
+	echo "--- make platform-image-xkmsd-smoke"; \
+	$(MAKE) --no-print-directory platform-image-xkmsd-smoke || { echo "FAIL platform-image-xkmsd-smoke"; fail=1; }; \
+	exit $$fail
+
+platform-image-xkmsd-smoke: ## Fetch the go-xkms commit the xkmsd recipe pins, build it with the recipe's build script, start it on the development config dev/xkmsd-dev.yaml (temp dir), check ready and a clean stop, and check it fails closed on a read-only state dir (needs network, Go, gcc, libusb headers; XKMSD_SMOKE_CACHE keeps the checkout and Go caches)
+	@scripts/platform-image-xkmsd-smoke.sh
+
+platform-image-xkmsd-target-check: ## On a booted image over ssh (XKMSD_TARGET_HOST=<ssh destination>, required, root): xkmsd.service active as xkmsd under its sandbox, state on the xkms-state mount, no start on a read-only state mount (stops the unit and remounts for a moment; not in CI, no default host)
+	@[ -n "$${XKMSD_TARGET_HOST:-}" ] || { echo "platform-image-xkmsd-target-check: set XKMSD_TARGET_HOST to the ssh destination of a booted image"; exit 2; }
+	@scripts/platform-image-xkmsd-target-check.sh
 
 platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing; ARGS=--repro builds twice in separate directories and publishes only if the two outputs are identical)
 	@scripts/platform-image-build.sh $(ARGS)

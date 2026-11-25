@@ -1,0 +1,68 @@
+# xkmsd's PRODUCTION configuration on the FRDM-IMX95-PRO image. It is go-xkms's
+# own minimal configuration (configs/xkmsd.yaml at the pinned tag) with every
+# on-disk path under /var/lib/xkms (the persistent xkms-state partition,
+# var-lib-xkms.mount) and the local socket under /run/xkms. A key this file
+# omits takes go-xkms's built-in default; the environment (XKMS_<SECTION>_<KEY>)
+# and flags override it. Not yet run on the board. No key, secret or host name
+# belongs in this file.
+#
+# NO KEY CUSTODY IS CONFIGURED, on purpose. Production keys belong in the
+# enclave, and go-xkms at the pinned tag has no enclave key-custody backend
+# (pkg/backend holds avr, awskms, azurekv, gcpkms, importtoken, phone, pkcs11,
+# software, tpm2 and vault). The software and pkcs8 backends and the software CA
+# keystore would keep keys in files on the state partition, readable by root:
+# they are in dev/xkmsd-dev.yaml, which the image does not install, and
+# test/platform_image_xkmsd_test.sh fails if software custody comes back here.
+# With no enabled backend the daemon refuses this file ("default_backend must be
+# specified") and exits non-zero, so key operations stay unavailable (fail
+# closed) until an enclave backend exists and is provisioned. The CA section
+# returns with it. docs/platform-image/xkmsd.md records the case.
+#
+# The barrier is sealed at start: the passphrase strategy needs an operator to
+# initialise and unseal the node. Hardware-sealed, unattended unseal is the
+# provisioning step (go-trusted-platform), not set here.
+server:
+  host: "127.0.0.1"
+
+protocols:
+  unix: true
+  rest: false
+  grpc: false
+  quic: false
+  mcp: false
+
+unix:
+  socket_path: "/run/xkms/xkms.sock"
+
+logging:
+  level: "info"
+  format: "json"
+
+tls:
+  enabled: true
+
+auth:
+  enabled: true
+  type: "composite"
+
+barrier:
+  enabled: true
+  strategy: "passphrase"
+
+ratelimit:
+  enabled: false
+
+metrics:
+  enabled: false
+
+health:
+  enabled: true
+  path: "/health"
+
+datastore:
+  engine: "pebble"
+  path: "/var/lib/xkms/storage"
+
+rng:
+  mode: "software"
+  fallback_mode: "software"
