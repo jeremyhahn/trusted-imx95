@@ -1,56 +1,6 @@
-# releasability-template: v1 (trusted-imx95, after signatures-template v1) —
-# the private-pattern scan.
-#
-# Why a workflow of its own (security finding on #19, ci.yml's lint step): a
-# `pull_request` run executes the pull request's own ci.yml, so a step there
-# that names the private pattern secret hands it to whatever the pull request
-# writes into that step. This workflow runs on `pull_request_target`, so the
-# forge reads it from the BASE branch, never from the pull request (the same
-# reasoning as signatures.yml's header). It checks out the base only, fetches
-# the pull request's head as git objects, and greps that commit's tree with
-# `git grep <commit>`: nothing from the pull request is checked out, built or
-# run. Its token is `contents: read` and is not persisted in the clone.
-#
-# Where the secret lives (Codex finding on #19): a repository- or
-# organization-scope secret is readable by any same-repository
-# `pull_request` run, whose author can add a step naming it to their own
-# ci.yml. RELEASABILITY_PATTERNS is therefore an ENVIRONMENT secret of the
-# `releasability` environment, which this job declares, and that
-# environment's deployment branch policy allows `main` alone:
-# pull_request_target and push-to-main runs resolve to main and get it; a
-# `pull_request` run resolves to refs/pull/N/merge and is refused the
-# environment. The owner's repository settings (only the owner can change them):
-#   1. create the environment `releasability`;
-#   2. set its deployment branches to selected branches, `main` only;
-#   3. add RELEASABILITY_PATTERNS as a secret of that environment;
-#   4. delete the repository-scope RELEASABILITY_PATTERNS secret (and any
-#      organization-scope one this repository can see).
-# Until steps 1-3 are done the secret is absent here and the job fails
-# closed. test/ci_scripts_test.sh checks that every job naming the secret
-# declares the environment and that no pull_request workflow declares it.
-#
-# The rules are ci.yml v1.33.2's lint step, moved here unchanged: every
-# non-blank, non-`#` line of the secret is `class<TAB>regex`, the class one of
-# coord-host, internal-email, lab-address, lab-host or owner-path (optional
-# `/i`); a malformed line, an unknown class or a regex grep -E refuses fails
-# with its line number only; a match fails, printed as path and line, never
-# the value; a matched line carrying `lab-string-ok: <reason>` is listed as
-# waived (public-hygiene.md). Three changes:
-#   - It fails closed when the secret is absent, on every event (the lint
-#     step passed a pull request with a notice).
-#   - A pull request from a fork fails without a scan: its author could
-#     otherwise probe the private patterns one push at a time.
-#   - Each printed path carries a `match: ` or `waived: ` prefix and is
-#     escaped, so a file name can never be read as a workflow command.
-#   - The waiver is tested against the matched line's text only, parsed
-#     from `git grep -z`, never against the file name.
-#
-# ci.yml's `releasability` job reads this job's commit status on the pull
-# request's head (context `Releasability / Releasability (pull_request_target)`,
-# or `(push)` on main), and CI Gate requires that job as `always`. A pull
-# request can edit ci.yml, so the ruleset also requires the Releasability
-# context itself, beside Signatures (a ruleset change, made by its owner).
-# test/ci_scripts_test.sh runs this step against git fixtures.
+# Private-pattern scan on pull_request_target: checks out the base only and greps the PR head commit's tree.
+# RELEASABILITY_PATTERNS is a secret of the main-only `releasability` environment; the job fails closed without it and on fork PRs.
+# Each secret line is class<TAB>regex; a match fails, printed as path and line only; a line carrying `lab-string-ok: <reason>` is waived.
 name: Releasability
 
 on:
@@ -154,13 +104,7 @@ jobs:
             echo "::error::the private pattern secret holds no class<TAB>regex line"
             exit 1
           fi
-          # git grep -z on a commit prints <commit>:<path> NUL <line> NUL
-          # <text> LF. The fields are split on the NULs, so a ':' or a
-          # waiver-shaped string in a file name never reaches the content,
-          # and the waiver is tested against the line's text only (Codex
-          # finding on #19: a file named `lab-string-ok: x.txt` waived every
-          # match in it). A text holds no LF, so the token after a line
-          # number is <text> LF <next commit:path>.
+          # git grep -z prints <commit>:<path> NUL <line> NUL <text> LF; the waiver is tested against the text only, never the file name.
           rc=0
           git grep -z -n -I -i -E -f "$pf" "$HEAD_SHA" -- > "$pf.out" || rc=$?
           trap 'rm -f "$pf" "$pf.out"' EXIT

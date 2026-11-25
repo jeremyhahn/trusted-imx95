@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
-# srk-hash-check.sh: compare the SRK table hash of a set of public SRK
-# certificates or keys with an expected value (issue #163,
-# docs/oem-key-provisioning/srk-hash-check.md).
-#
-#   srk-hash-check.sh <expected-hash-file> <srk0> <srk1> <srk2> <srk3>
-#
-# <expected-hash-file> holds the expected hash as one hex string (128 digits,
-# any case). The four SRK files are PEM public keys or PEM certificates, in
-# SRK index order. A file that is not PEM, or that holds a private key of any
-# kind, is refused. Prints "match" or "mismatch" and the computed hash.
-# Exit: 0 match, 1 mismatch, 2 refused input or usage.
-#
-# The hash is the one SPSDK 3.13.0 (spsdk-venv.sh) computes for the i.MX 95 B0
-# OEM SRK table. The script loads an AHAB configuration to get it: nothing is
-# signed or exported, no fuse script is written, no fuse or life-cycle tool is
-# called, and no fuse word layout is printed. Programming the hash is the
-# owner's decision and is not done here.
+# srk-hash-check.sh <expected-hash-file> <srk0> <srk1> <srk2> <srk3>: compares the SRK table hash of four PEM keys or certificates; exit 0 match, 1 mismatch, 2 refused input. Nothing is signed or fused.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -66,8 +50,7 @@ for f in "$@"; do
 	i=$((i + 1))
 done
 
-# SPSDK wants a signer to load a configuration; it is never used to sign. A
-# throwaway key, born and deleted in the work directory, stands in.
+# SPSDK needs a signer to load the config; a throwaway key stands in and never signs.
 "$venv/bin/nxpcrypto" key generate -k secp384r1 -o "$work/signer.pem" >/dev/null 2>"$work/keygen.log" ||
 	{ tail -n 3 "$work/keygen.log" >&2; refuse "nxpcrypto key generate failed"; }
 

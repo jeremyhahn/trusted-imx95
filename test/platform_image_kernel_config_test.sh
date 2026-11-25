@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Offline checks of scripts/platform-image-kernel-config.sh (provisional default,
-# pending the owner's answer on #14): a stub bitbake and a fixture .config in a
-# mktemp dir outside the clone, checked against platform-image/kernel-required.txt.
-# No network, no Yocto.
+# Offline checks of scripts/platform-image-kernel-config.sh with a stub bitbake and a fixture .config.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

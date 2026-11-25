@@ -1,3 +1,6 @@
 # Prose false positive, not a credential: the line lists a test case (see
 # docs/plans/161.md, dated entry in slice 11). One exact fingerprint only.
 20e4ca76e845649ae24bed61015a4bdc7ceadfa6:docs/plans/161.md:generic-api-key:69
+# Fake test fixture, not a credential: an earlier value of the okp record-check
+# test (rewritten to a low-entropy value later on the same branch). One exact fingerprint only.
+39545174b6549656f3889111d8eb0bb62a711281:test/okp_record_check_test.sh:generic-api-key:105

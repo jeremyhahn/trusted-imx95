@@ -83,8 +83,8 @@ check_readme() {
 	want=$((want + $(count_questions "$DIR/../ftpm/README.md" '^## Open questions for the owner')))
 	want=$((want + $(count_owner_questions "${2:-$DIR/architecture.md}")))
 	[ "$rows" -eq "$want" ] || echo "question rows $rows, sources $want"
-	grep -E '^\| G1 \|' "$f" | grep -qF '](architecture.md#where-the-life-cycle-closes)' || echo "G1 row does not link architecture.md#where-the-life-cycle-closes"
-	grep -E '^\| [A-G][0-9]+ \|' "$f" | grep -vqE '\]\([^)]*\.md#[^)]+\)' && echo "a row has no anchored source link"
+	grep -E '^\| G1 \|' "$f" | grep -F '](architecture.md#where-the-life-cycle-closes)' >/dev/null || echo "G1 row does not link architecture.md#where-the-life-cycle-closes"
+	grep -E '^\| [A-G][0-9]+ \|' "$f" | grep -vE '\]\([^)]*\.md#[^)]+\)' >/dev/null && echo "a row has no anchored source link"
 	return 0
 }
 

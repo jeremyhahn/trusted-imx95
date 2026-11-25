@@ -1,22 +1,5 @@
 #!/usr/bin/env bash
-# key-import-test.sh: build, parse and verify a key_import TLV blob (a wrapped
-# key) for the i.MX 95 B0 (mimx9596 b0) on throwaway test keys (issue #163,
-# docs/oem-key-provisioning/key-import-tlv.md).
-#
-#   key-import-test.sh          generate, in a mktemp -d work directory outside
-#                               the clone, two P-256 keys (one stands in for the
-#                               device key-agreement key), a fresh 32-byte test
-#                               key and a test MK_SK from their ECDH; build the
-#                               blob with nxpimage signed-msg tlv export, parse
-#                               and verify it with SPSDK, check the CMAC and the
-#                               wrapped key independently, and check that a
-#                               flipped CMAC byte, a flipped ciphertext byte and
-#                               a different MK_SK are rejected. The work
-#                               directory, keys included, is removed on exit.
-#
-# Nothing is sent to a device and nothing here is a production import path: no
-# board, no blhost, no fuse, no life-cycle step. The key-agreement key is a
-# throwaway P-256 key, not a device key. The SPSDK venv comes from spsdk-venv.sh.
+# key-import-test.sh builds, parses and verifies a key_import TLV blob on throwaway test keys and checks tampered blobs and a wrong MK_SK are rejected; nothing is sent to a device.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -95,16 +78,14 @@ else
 fi
 
 size=$(wc -c <"$work/tlv.bin")
-# The blob ends with the wrapped key (a TLV with a 2-byte header; 40 bytes for a
-# 32-byte key under RFC 3394) and the CMAC TLV (2-byte header, 16 bytes).
+# The blob ends with the wrapped-key TLV (40 bytes for a 32-byte key, RFC 3394) and the 16-byte CMAC TLV.
 wrapped_len=40
 cmac_off=$((size - 16))
 ct_off=$((size - 18 - wrapped_len + 2 + 10))
 [ "$ct_off" -gt 0 ] || die "the blob is only $size bytes"
 echo "offsets from the blob layout: ciphertext byte $ct_off, CMAC byte $cmac_off, size $size"
 
-# SPSDK holds no key when it verifies, so the CMAC and the wrapped key are
-# checked independently, with the MK_SK of the test.
+# SPSDK holds no key, so check the CMAC and wrapped key independently with the test MK_SK.
 if tool check "$work/tlv.bin" "$work/mksk.hex" "$work/raw.bin" >"$work/check.log" 2>&1; then
 	ok "CMAC valid and the wrapped key unwraps to the raw key (independent check)"
 else
@@ -132,8 +113,7 @@ rejected "flipped CMAC byte" "$work/tampered-cmac.bin" "$work/mksk.hex"
 tamper "$ct_off" tampered-ciphertext
 rejected "flipped ciphertext byte" "$work/tampered-ciphertext.bin" "$work/mksk.hex"
 rejected "blob under another MK_SK" "$work/tlv.bin" "$work/mksk-other.hex"
-# What SPSDK verify does with the flipped blobs is recorded, not asserted: it
-# holds no key, so it cannot check the CMAC.
+# SPSDK verify's result on the flipped blobs is recorded, not asserted: it cannot check the CMAC.
 for t in tampered-cmac tampered-ciphertext; do
 	if tlv_verify "$t.bin"; then echo "info: SPSDK tlv verify accepts $t (no key to check against)"; else echo "info: SPSDK tlv verify rejects $t"; fi
 done

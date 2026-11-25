@@ -14,7 +14,7 @@ run bash "$sw" --help
 check "help prints the usage" 0 "usage: secure-world-build.sh"
 
 run bash "$sw" --check-lock
-check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "toolchain 15.2.rel1"
+check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "TF-A v2.15.0 da738d5eae93" "toolchain 15.2.rel1"
 
 # Owner ruling 771 and docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
 tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
@@ -55,6 +55,13 @@ edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
 edit_shape() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nnot a pin\n' "$1" || printf '%s\n' "$1"; }
+# Owner ruling 771: the script itself refuses NXP's TF-A fork, a TF-A pin that
+# is not a release tag, and an OP-TEE that is not NXP's BSP OP-TEE.
+edit_imxatf() { [[ "$1" == TFA_REPO=* ]] && echo TFA_REPO=https://github.com/nxp-imx/imx-atf.git || printf '%s\n' "$1"; }
+edit_rctag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=v2.15.0-rc0 || printf '%s\n' "$1"; }
+edit_branchtag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=master || printf '%s\n' "$1"; }
+edit_notag() { [[ "$1" == TFA_TAG=* ]] || printf '%s\n' "$1"; }
+edit_upoptee() { [[ "$1" == OPTEE_REPO=* ]] && echo OPTEE_REPO=https://github.com/OP-TEE/optee_os.git || printf '%s\n' "$1"; }
 
 for c in \
 	"unread|is marked UNREAD" \
@@ -67,7 +74,12 @@ for c in \
 	"missing|MSTPM_COMMIT is missing" \
 	"nowheel|no PYWHEEL line" \
 	"badwheel|PYWHEEL must be" \
-	"shape|not NAME=value"; do
+	"shape|not NAME=value" \
+	"imxatf|is not upstream Arm TF-A (owner ruling 771" \
+	"rctag|TFA_TAG v2.15.0-rc0 is not an upstream release tag" \
+	"branchtag|TFA_TAG master is not an upstream release tag" \
+	"notag|TFA_TAG is missing" \
+	"upoptee|is not NXP's BSP OP-TEE"; do
 	name=${c%%|*} want=${c#*|}
 	f=$(lockcopy "$name" "edit_$name")
 	run bash "$sw" --lock "$f" --check-lock
@@ -146,7 +158,13 @@ cmd=$1
 shift
 case "$cmd" in
 init) mkdir -p "${!#}" ;;
-fetch) echo "${!#}" >"$dir/.stubhead" ;;
+fetch)
+	# A tag fetch moves FETCH_HEAD to the tag's commit: the pinned one, or
+	# another when STUB_TAG_MOVED is set.
+	case "${!#}" in
+	refs/tags/*) echo "${!#}" >"$dir/.stubtag"; [ -z "${STUB_TAG_MOVED:-}" ] || echo 1111111111111111111111111111111111111111 >"$dir/.stubhead" ;;
+	*) echo "${!#}" >"$dir/.stubhead" ;;
+	esac ;;
 checkout) ;;
 rev-parse)
 	if [ "${STUB_GIT_BAD:-}" = "${dir##*/}" ]; then echo 0000000000000000000000000000000000000000; else cat "$dir/.stubhead"; fi ;;
@@ -259,6 +277,14 @@ two_builds() { local n; n=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ 
 expect "TF-A is built twice, once in each clean build directory" two_builds
 expect "the reproducibility result is recorded" has_line 'reproducible: yes' "$TMP_ROOT/ok/out/build-info.txt"
 expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/build-1" -a -d "$TMP_ROOT/ok/work/build-2"
+tag_fetched() { [ "$(<"$TMP_ROOT/ok/work/build-1/src/tfa/.stubtag")" = refs/tags/v2.15.0 ]; }
+expect "the TF-A release tag is fetched from upstream and checked" tag_fetched
+expect "build-info.txt records the TF-A tag" has_line "tfa: da738d5eae93af342fdc4995dd3c05acb4c9d757 tag v2.15.0 PLAT=imx95" "$TMP_ROOT/ok/out/build-info.txt"
+
+# The release tag peels to another commit than TFA_COMMIT: the build stops.
+fullrun tagmoved "$oklock" STUB_TAG_MOVED=1
+check "a TF-A tag that does not peel to TFA_COMMIT stops the build" nonzero "tfa-tag failed" "tag v2.15.0 peels to 1111111111111111111111111111111111111111"
+expect "a moved tag publishes nothing" nothing_published tagmoved
 
 # A difference between the two builds: the second build's tee.bin differs.
 fullrun differ "$oklock" STUB_DIFF_TEE=1
@@ -297,7 +323,8 @@ expect "a wrong artefact hash publishes nothing" nothing_published badhash
 optee_config_digest() {
 	local lk=${1:-$good} sc=${2:-$sw} l on=0 acc=
 	while IFS= read -r l || [ -n "$l" ]; do
-		[[ -z "${l//[[:space:]]/}" || "$l" == \#* ]] && continue
+		# TFA_TAG names TFA_COMMIT (checked at fetch) and reaches no build step.
+		[[ -z "${l//[[:space:]]/}" || "$l" == \#* || "$l" == TFA_TAG=* ]] && continue
 		acc+="$l"$'\n'
 	done <"$lk"
 	while IFS= read -r l; do
@@ -337,6 +364,10 @@ for n in optee_pin ftpm_pin mstpm_pin; do
 	lk=$(lockcopy "dg$n" "edit_$n")
 	expect "a changed ${n%_pin} commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
 done
+lk=$(lockcopy dgtag edit_rctag)
+expect "the TF-A tag line, which no build step reads, leaves the digest" tied_with "$lk" "$sw"
+lk=$(lockcopy dgtfa edit_unread)
+expect "a changed TF-A commit in the lock fails the digest guard" not_tied_with "$lk" "$sw"
 ftpm_script=$TMP_ROOT/ftpm-script.sh
 : >"$ftpm_script"
 while IFS= read -r l; do
