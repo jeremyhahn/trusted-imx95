@@ -429,6 +429,80 @@ ok "mounted state: --rollback says why" out_has "$tmp/m2r.log" "$R/var/lib/xkms 
 ok "mounted state: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
 ok "mounted state: live state byte-identical" restored "$R" "$tmp/snapM2"
 ok "mounted state: the backup still verifies" bash -c "cd '$R/var/backups/xkms/20260101T000008Z' && sha256sum -c --quiet SHA256SUMS"
+# The mount table holds resolved paths: a mount is found when the path to
+# the board's root goes through a symlink too.
+rm -rf "$tmp/boardM3" "$tmp/boardM3l"
+mkboard "$tmp/boardM3"
+ln -s boardM3 "$tmp/boardM3l"
+R=$tmp/boardM3l
+export XKMS_FAKE_ROOT=$R
+FAKE_MOUNTS="$tmp/boardM3/var/lib/xkms" XKMS_STAMP=20260101T000009Z D "$tmp/m3.log" board.invalid "$tmp/b-new"
+ok "mount seen through a linked root: deploy refuses" [ "$RC" != 0 ]
+ok "mount seen through a linked root: says which mount point" out_has "$tmp/m3.log" "$tmp/boardM3/var/lib/xkms is a mount point"
+ok "mount seen through a linked root: xkmsd was never stopped" out_lacks "$R/run/systemctl.log" stop
+
+# --- symlinks: refused before xkmsd is stopped ----------------------------------
+# The backup copies a link as a link, so a rollback would put back the link
+# and not the state it points to. A state path that is a symlink, sits under
+# one or holds one is refused before anything is stopped.
+# linkboard <case>: a fresh board in $R with the symlink of <case>
+linkboard() {
+	R=$tmp/boardL
+	rm -rf "$R"
+	mkboard "$R"
+	export XKMS_FAKE_ROOT=$R
+	case $1 in
+	var-is-link)
+		mv "$R/var/lib/xkms" "$R/data-xkms"
+		ln -s "$R/data-xkms" "$R/var/lib/xkms"
+		;;
+	parent-is-link)
+		mv "$R/var/lib" "$R/var/lib.real"
+		ln -s lib.real "$R/var/lib"
+		;;
+	link-inside)
+		echo "outside the tree" >"$R/elsewhere"
+		ln -s "$R/elsewhere" "$R/etc/xkms/linked"
+		;;
+	bin-is-link)
+		mv "$R/usr/local/bin/xkmsd" "$R/usr/local/bin/xkmsd.real"
+		ln -s "$R/usr/local/bin/xkmsd.real" "$R/usr/local/bin/xkmsd"
+		;;
+	esac
+}
+for c in var-is-link parent-is-link link-inside bin-is-link; do
+	linkboard "$c"
+	snap "$R" "$tmp/snapL"
+	XKMS_STAMP=20260101T000010Z D "$tmp/l.log" board.invalid "$tmp/b-new"
+	ok "$c: deploy refuses" [ "$RC" != 0 ]
+	ok "$c: says it is a symlink" out_has "$tmp/l.log" "is a symlink at, above or inside"
+	ok "$c: xkmsd was never stopped" out_lacks "$R/run/systemctl.log" stop
+	ok "$c: board untouched" restored "$R" "$tmp/snapL"
+	ok "$c: no backup made" [ ! -e "$R/var/backups/xkms/20260101T000010Z" ]
+done
+# A rollback refuses a live tree that became a link, and a backup that
+# holds one (as an older deploy could make).
+linkboard none
+XKMS_STAMP=20260101T000011Z D "$tmp/l2.log" board.invalid "$tmp/b-new"
+ok "linked rollback setup: deployed" [ "$RC" = 0 ]
+mv "$R/var/lib/xkms" "$R/data-xkms"
+ln -s "$R/data-xkms" "$R/var/lib/xkms"
+snap "$R" "$tmp/snapL2"
+: >"$R/run/systemctl.log"
+D "$tmp/l2r.log" --rollback 20260101T000011Z board.invalid
+ok "linked live state: --rollback refuses" [ "$RC" != 0 ]
+ok "linked live state: --rollback says why" out_has "$tmp/l2r.log" "$R/var/lib/xkms is a symlink"
+ok "linked live state: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
+ok "linked live state: board untouched" restored "$R" "$tmp/snapL2"
+rm "$R/var/lib/xkms"
+mv "$R/data-xkms" "$R/var/lib/xkms"
+ln -s /nonexistent "$R/var/backups/xkms/20260101T000011Z/etc-xkms/linked"
+snap "$R" "$tmp/snapL3"
+D "$tmp/l3r.log" --rollback 20260101T000011Z board.invalid
+ok "linked backup: --rollback refuses" [ "$RC" != 0 ]
+ok "linked backup: --rollback says why" out_has "$tmp/l3r.log" "holds symlinks"
+ok "linked backup: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
+ok "linked backup: board untouched" restored "$R" "$tmp/snapL3"
 
 # --- a failing mv or rm stops the restore with the backup intact ---------------
 R=$tmp/boardV

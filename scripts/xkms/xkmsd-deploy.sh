@@ -86,7 +86,12 @@ r_mounted() { # r_mounted <path>...: prints each mount point at or under a path;
 	local m p hit=1
 	while IFS= read -r m; do
 		for p in "$@"; do
-			case $m in "$p" | "$p"/*) echo "$m"; hit=0 ;; esac
+			case $m in "$p" | "$p"/*)
+				echo "$m"
+				hit=0
+				break
+				;;
+			esac
 		done
 	done < <(r_mounts)
 	return "$hit"
@@ -94,8 +99,42 @@ r_mounted() { # r_mounted <path>...: prints each mount point at or under a path;
 
 r_mountcheck() { # r_mountcheck <who>: refuse when a path a rollback swaps is or holds a mount point
 	local m
-	m=$(r_mounted "$BIN" "$ETC" "$VAR") || return 0
+	# The mount table holds resolved paths, so each path is checked as given
+	# and resolved.
+	m=$(r_mounted "$BIN" "$ETC" "$VAR" "$(r_real "$BIN")" "$(r_real "$ETC")" "$(r_real "$VAR")") || return 0
 	echo "$1: ${m//$'\n'/, } is a mount point at or under $BIN, $ETC or $VAR. A rollback replaces those whole and cannot replace a mount point; move the state off the mount (or unmount it) first. xkmsd was not stopped."
+	return 1
+}
+
+r_real() { # r_real <path>: the path with every symlink resolved, or as given when that fails
+	readlink -f -- "$1" 2>/dev/null || printf '%s\n' "$1"
+}
+
+r_links() { # r_links <path>...: prints each symlink that is a path, a directory above it (below $R) or inside it; fails if none
+	local p q hit=1
+	for p in "$@"; do
+		q=$p
+		while [ -n "$q" ] && [ "$q" != "$R" ]; do
+			if [ -L "$q" ]; then
+				echo "$q"
+				hit=0
+			fi
+			q=${q%/*}
+		done
+		if [ -d "$p" ] && [ ! -L "$p" ]; then
+			while IFS= read -r q; do
+				echo "$q"
+				hit=0
+			done < <(find "$p" -type l)
+		fi
+	done
+	return "$hit"
+}
+
+r_linkcheck() { # r_linkcheck <who>: refuse when a path a rollback swaps is, sits under or holds a symlink
+	local l
+	l=$(r_links "$BIN" "$ETC" "$VAR") || return 0
+	echo "$1: ${l//$'\n'/, } is a symlink at, above or inside $BIN, $ETC or $VAR. The backup would copy the link and not what it points to, and a rollback would put back only the link; replace it with the real file or directory first. xkmsd was not stopped."
 	return 1
 }
 
@@ -124,6 +163,7 @@ r_preflight() { # r_preflight <new binary KiB>
 	[ -x "$BIN" ] || { echo "board: $BIN is missing"; return 1; }
 	[ -d "$ETC" ] || { echo "board: $ETC is missing"; return 1; }
 	[ -d "$VAR" ] || { echo "board: $VAR is missing"; return 1; }
+	r_linkcheck "board: refusing to deploy" || return 1
 	r_mountcheck "board: refusing to deploy" || return 1
 	mkdir -p "$BK" && chmod 700 "$BK" || { echo "board: cannot create $BK"; return 1; }
 	# What each filesystem must hold at once: the backup copy in $BK; the staged
@@ -274,6 +314,11 @@ r_restore() { # r_restore <stamp>
 	# The swap below renames $ETC, $VAR and $BIN; a mount point cannot be
 	# renamed, and rm -rf would empty it and then fail. Refuse before stopping.
 	r_mountcheck "restore: refusing; live tree untouched, the backup is in $d" || return 1
+	# A symlink in the live tree would be swapped as a link; one in the
+	# backup (made before deploys refused them) would be restored as one.
+	r_linkcheck "restore: refusing; live tree untouched, the backup is in $d" || return 1
+	t=$(find "$d" -type l)
+	[ -z "$t" ] || { echo "restore: backup $d holds symlinks (${t//$'\n'/, }), not the data they point to; touching nothing"; return 1; }
 	rm -rf "$ETC.restore" "$VAR.restore" "$BIN.restore" "$ETC.old" "$VAR.old" "$BIN.old" || {
 		echo "restore: cannot clear leftovers beside $ETC, $VAR or $BIN; live tree untouched; the backup is in $d"
 		return 1
@@ -428,7 +473,7 @@ board() {
 	[ $# -eq 0 ] || args=$(printf '%q ' "$@")
 	{
 		printf 'R=%q; UNIT=xkmsd; KEEP=%q; WAIT=%q; SETTLE=%q; MINKB=%q; PORT=%q\n' "$fake" "$keep" "$wait_s" "$settle" "$minkb" "${XKMS_PORT:-}"
-		declare -f r_init r_sums r_treesum r_fs r_free r_mounts r_mounted r_mountcheck r_stop r_preflight r_stage r_unstage r_backup r_install r_start \
+		declare -f r_init r_sums r_treesum r_fs r_free r_mounts r_mounted r_mountcheck r_real r_links r_linkcheck r_stop r_preflight r_stage r_unstage r_backup r_install r_start \
 			r_listening r_health r_restore r_backup_commit r_prune
 		echo "r_$action $args"
 	} | ssh "${ssh_opts[@]}" "$target" "bash -s"
