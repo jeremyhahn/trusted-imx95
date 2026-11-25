@@ -11,9 +11,10 @@ root=$(cd "$here/.." && pwd -P)
 init=$root/scripts/board-rescue/init
 restore=$root/scripts/board-rescue/restore.sh
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/board-rescue-test.XXXXXX")
-listener_pid=""
+listener_pid="" proxy_pid=""
 cleanup() {
 	[ -z "$listener_pid" ] || kill "$listener_pid" 2>/dev/null
+	[ -z "$proxy_pid" ] || kill "$proxy_pid" 2>/dev/null
 	rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -74,14 +75,25 @@ while True:
     c.close()
 EOS
 # A client of the rescue protocol: client.py <port> <key file> <line>
-# [payload file] [auth|noauth|othernonce]. "noauth" sends the bare command
-# line; "othernonce" makes the MAC with a nonce the board did not send.
+# [payload file] [mode]. It sends the payload in authenticated chunks (init's
+# header) and prints the reply, or "BADMAC <reply>" when the reply's MAC is
+# wrong, or a line that is not a reply as it came. The modes:
+#   auth          the protocol as restore.sh speaks it
+#   noauth        the bare command line
+#   othernonce    the command MAC made with a nonce the board did not send
+#   subst=<k>     chunk <k> keeps its MAC but one of its bytes is altered
+#   cut=<k>       chunk <k> has its line and MAC but only half its bytes
+#   record=<file> also saves the chunk stream it sent to <file>
+#   replay=<file> sends the chunk stream saved by record (another session's)
 cat >"$tmp/client.py" <<'EOS'
 import hashlib, socket, sys, threading
 port, keyfile, line = sys.argv[1:4]
 payload = sys.argv[4] if len(sys.argv) > 4 else ""
-mode = sys.argv[5] if len(sys.argv) > 5 else "auth"
+mode, _, arg = (sys.argv[5] if len(sys.argv) > 5 else "auth").partition("=")
+CHUNK = 1 << 20
 key = open(keyfile).read().strip()
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
 s = socket.create_connection(("127.0.0.1", int(port)), timeout=30)
 f = s.makefile("rb")
 first = f.readline().decode()
@@ -90,8 +102,32 @@ if len(w) != 2 or w[0] != "nonce":
     sys.stdout.write(first + f.read().decode(errors="replace"))
     sys.exit(0)
 nonce = "0" * 64 if mode == "othernonce" else w[1]
-mac = hashlib.sha256(f"{key}:{nonce}:{line}".encode()).hexdigest()
+mac = sha(f"{key}:{nonce}:{line}".encode())
 msg = line if mode == "noauth" else f"auth {mac} {line}"
+data = open(payload, "rb").read() if payload else b""
+words = line.split()
+total = int(words[2]) if len(words) > 2 and words[2].isdigit() else len(data)
+stream = []
+if mode == "replay":
+    stream.append(open(arg, "rb").read())
+else:
+    off = k = 0
+    while off < total and off < len(data):
+        part = data[off:off + min(CHUNK, total - off)]
+        cm = sha(f"{key}:{nonce}:c:{k + 1}:{k}:{total}:{len(part)}:".encode() + part)
+        head = f"chunk {k} {cm}\n".encode()
+        if mode == "cut" and k == int(arg):
+            stream.append(head + part[:len(part) // 2])
+            break
+        if mode == "subst" and k == int(arg):
+            i = len(part) // 2
+            part = part[:i] + bytes([part[i] ^ 0xFF]) + part[i + 1:]
+        stream.append(head + part)
+        off += len(part)
+        k += 1
+if mode == "record":
+    with open(arg, "wb") as r:
+        r.write(b"".join(stream))
 # The reply is read while the payload is still being sent: a board that
 # refuses a write answers and closes at once, and the reset its close sends
 # for the unread payload would discard a reply read only afterwards.
@@ -109,18 +145,81 @@ t = threading.Thread(target=reader)
 t.start()
 try:
     s.sendall(msg.encode() + b"\n")
-    if payload:
-        with open(payload, "rb") as p:
-            s.sendall(p.read())
+    for b in stream:
+        s.sendall(b)
     s.shutdown(socket.SHUT_WR)
 except OSError:
     pass
 t.join()
-sys.stdout.write(b"".join(reply).decode(errors="replace"))
+out = []
+for l in b"".join(reply).decode(errors="replace").splitlines():
+    p = l.split(" ", 2)
+    if len(p) == 3 and p[0] == "reply":
+        good = p[1] == sha(f"{key}:{w[1]}:b:1:{len(p[2])}:{p[2]}".encode())
+        out.append(p[2] if good else "BADMAC " + p[2])
+    else:
+        out.append(l)
+sys.stdout.write("\n".join(out) + "\n")
+EOS
+# An on-path attacker between restore.sh and the board, without the key:
+# proxy.py <port file> <board port> <mode> <state file>. It relays both ways;
+# "record" saves the board's last reply line to <state file>; "forge" and
+# "replay" alter a byte of every chunk stream that passes and hand the client
+# a bare "OK" (forge) or the reply line recorded from an earlier connection
+# (replay) in place of the board's reply.
+cat >"$tmp/proxy.py" <<'EOS'
+import socket, sys, threading
+portfile, bport, mode, state = sys.argv[1:5]
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(4)
+with open(portfile, "w") as f:
+    f.write(str(s.getsockname()[1]))
+def up(c, b):
+    n = 0
+    try:
+        while True:
+            d = c.recv(65536)
+            if not d:
+                break
+            if mode != "record" and n <= 200000 < n + len(d):
+                i = 200000 - n
+                d = d[:i] + bytes([d[i] ^ 0xFF]) + d[i + 1:]
+            n += len(d)
+            b.sendall(d)
+        b.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+def down(c, b):
+    bf = b.makefile("rb")
+    try:
+        c.sendall(bf.readline())
+        r = bf.readline()
+        if mode == "record":
+            with open(state, "wb") as o:
+                o.write(r)
+        elif mode == "forge":
+            r = b"OK\n"
+        elif mode == "replay":
+            r = open(state, "rb").read()
+        c.sendall(r)
+        c.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+while True:
+    c, _ = s.accept()
+    b = socket.create_connection(("127.0.0.1", int(bport)))
+    ts = [threading.Thread(target=up, args=(c, b)), threading.Thread(target=down, args=(c, b))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    c.close()
+    b.close()
 EOS
 # A client that never lets go: hold.py <port> <out> [<key file> <line>]
 # takes the nonce and goes quiet, or with a key and line authenticates, sends
-# 1000 bytes of the payload and goes quiet. It writes the nonce line to <out>
+# a chunk line and 1000 bytes of the chunk and goes quiet. It writes the nonce line to <out>
 # once connected, then "dropped after N s" when the board closes, or "held"
 # when it gave up after 40 s.
 cat >"$tmp/hold.py" <<'EOS'
@@ -135,7 +234,7 @@ if len(sys.argv) > 4:
     line = sys.argv[4]
     nonce = first.split()[1]
     mac = hashlib.sha256(f"{key}:{nonce}:{line}".encode()).hexdigest()
-    s.sendall(f"auth {mac} {line}\n".encode() + b"\0" * 1000)
+    s.sendall(f"auth {mac} {line}\nchunk 0 {'0' * 64}\n".encode() + b"\0" * 1000)
 with open(out, "w") as o:
     o.write(first)
     o.flush()
@@ -145,7 +244,8 @@ with open(out, "w") as o:
     except OSError:
         o.write("held\n")
 EOS
-RESCUE_AUTH_SECS=2 RESCUE_LIFE_SECS=8 RESCUE_DEV_DIR=$dev RESCUE_SYS_DIR=$sys RESCUE_KEY_FILE=$bkey python3 -I "$tmp/listener.py" "$init" "$tmp/port" 2>"$tmp/listener.err" &
+mkdir -p "$tmp/ram"
+RESCUE_AUTH_SECS=2 RESCUE_LIFE_SECS=8 RESCUE_DEV_DIR=$dev RESCUE_SYS_DIR=$sys RESCUE_KEY_FILE=$bkey RESCUE_TMP_DIR=$tmp/ram python3 -I "$tmp/listener.py" "$init" "$tmp/port" 2>"$tmp/listener.err" &
 listener_pid=$!
 n=0
 while [ ! -s "$tmp/port" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
@@ -180,9 +280,55 @@ ok "a corrupted stream gives MISMATCH" has "$out" "MISMATCH"
 ok "the MISMATCH names the hash read back" has "$out" "$(sha "$dev/mmcblk0")"
 
 reset_devs
+before=$(sha "$dev/mmcblk0")
 head -c 5000 "$dump0" >"$payload"
 out=$(rq "write mmcblk0 $size0 $want" "$payload")
-ok "a short stream gives MISMATCH" has "$out" "MISMATCH"
+ok "a short stream is refused" test "$out" = "ERR write aborted: chunk 0: stream cut short at 5000 of 1048576 bytes"
+ok "a short stream writes nothing" test "$(sha "$dev/mmcblk0")" = "$before"
+
+# --- chunk authentication -------------------------------------------------------
+# The payload goes in 1 MiB chunks, each under its own MAC; size0 is 3 chunks.
+# An on-path attacker who relays the nonce and the command line cannot make
+# the board write a byte the key holder did not send.
+mib=1048576
+logcount() { # logcount <text>: how many lines of the handler's log have it
+	local n=0 l
+	while IFS= read -r l; do has "$l" "$1" && n=$((n + 1)); done <"$tmp/listener.err"
+	echo "$n"
+}
+# same_range <file a> <file b> <from> <count>: the two files agree there.
+same_range() { cmp -s <(tail -c +"$(($3 + 1))" "$1" | head -c "$4") <(tail -c +"$(($3 + 1))" "$2" | head -c "$4"); }
+reset_devs
+cp "$dev/mmcblk0" "$tmp/mmc.before"
+out=$(rq "write mmcblk0 $size0 $want" "$dump0" subst=1)
+ok "a substituted chunk is refused" test "$out" = "ERR write aborted: chunk 1: bad MAC"
+ok "the chunk before it was written" same_range "$dev/mmcblk0" "$dump0" 0 "$mib"
+ok "no byte of the substituted chunk or after it was written" same_range "$dev/mmcblk0" "$tmp/mmc.before" "$mib" "$((size0 - mib))"
+ok "the refusal is logged" test "$(logcount "write mmcblk0 aborted: chunk 1: bad MAC")" -eq 1
+reset_devs
+before=$(sha "$dev/mmcblk0")
+out=$(rq "write mmcblk0 $size0 $want" "$dump0" subst=0)
+ok "a substituted first chunk writes nothing" test "$out$(sha "$dev/mmcblk0")" = "ERR write aborted: chunk 0: bad MAC$before"
+reset_devs
+cp "$dev/mmcblk0" "$tmp/mmc.before"
+out=$(rq "write mmcblk0 $size0 $want" "$dump0" cut=2)
+ok "a chunk cut short is refused" test "$out" = "ERR write aborted: chunk 2: stream cut short at 524288 of 1048576 bytes"
+ok "the cut chunk was not written" same_range "$dev/mmcblk0" "$tmp/mmc.before" "$((2 * mib))" "$mib"
+reset_devs
+cp "$dev/mmcblk0" "$tmp/mmc.before"
+head -c "$((2 * mib))" "$dump0" >"$payload"
+out=$(rq "write mmcblk0 $size0 $want" "$payload")
+ok "a stream that stops at a chunk boundary is refused" test "$out" = "ERR write aborted: chunk 2: no chunk line"
+ok "nothing past the stop was written" same_range "$dev/mmcblk0" "$tmp/mmc.before" "$((2 * mib))" "$mib"
+reset_devs
+out=$(rq "write mmcblk0 $size0 $want" "$dump0" record="$tmp/session1.chunks")
+ok "a recorded session writes OK" test "$out" = OK
+reset_devs
+before=$(sha "$dev/mmcblk0")
+out=$(rq "write mmcblk0 $size0 $want" "" replay="$tmp/session1.chunks")
+ok "chunks replayed from an earlier session are refused" test "$out" = "ERR write aborted: chunk 0: bad MAC"
+ok "the replayed chunks wrote nothing" test "$(sha "$dev/mmcblk0")" = "$before"
+ok "no chunk is left in RAM" test -z "$(ls -A "$tmp/ram")"
 
 wantb=$(sha "$dumpb0")
 out=$(rq "write mmcblk0boot0 $sizeb $wantb" "$dumpb0")
@@ -214,11 +360,6 @@ ok "reboot answers OK (and does not reboot the test host)" test "$out" = OK
 
 # --- authentication -----------------------------------------------------------
 # No host without the session key reaches hash, write or reboot.
-logcount() { # logcount <text>: how many lines of the handler's log have it
-	local n=0 l
-	while IFS= read -r l; do has "$l" "$1" && n=$((n + 1)); done <"$tmp/listener.err"
-	echo "$n"
-}
 reboots() { logcount "reboot (test: not rebooting)"; }
 reboots0=$(reboots)
 reset_devs
@@ -449,6 +590,37 @@ ok "--no-kexec restores without kexec" test "$RC" -eq 0
 ok "--no-kexec deletes the session key at the end" test ! -e "$skey"
 ok "--no-kexec ran no kexec" lacks "$(<"$FAKE_SSH_LOG")" kexec
 ok "--no-kexec result verifies" test "$(sha "$dev/mmcblk0")" = "$(sha "$dump0")"
+
+# an on-path attacker between restore.sh and the board (proxy.py), without
+# the key: it alters a chunk and hands restore.sh an OK of its own
+# with_proxy <mode> <restore arguments...>: run_restore through proxy.py.
+with_proxy() {
+	local mode=$1 n=0
+	shift
+	rm -f "$tmp/pport"
+	python3 -I "$tmp/proxy.py" "$tmp/pport" "$port" "$mode" "$tmp/proxy.state" 2>>"$tmp/proxy.err" &
+	proxy_pid=$!
+	while [ ! -s "$tmp/pport" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+	RESCUE_PORT=$(<"$tmp/pport") run_restore "$@"
+	kill "$proxy_pid" 2>/dev/null
+	wait "$proxy_pid" 2>/dev/null
+	proxy_pid=""
+}
+cp "$tmp/skey.good" "$skey"
+reset_devs
+with_proxy record board "$tmp/bk" --no-kexec --ip 127.0.0.1/8
+ok "a restore through a relaying proxy verifies" test "$RC" -eq 0
+ok "the proxy holds an authenticated OK of that session" has "$(<"$tmp/proxy.state")" "reply "
+for mode in forge replay; do
+	cp "$tmp/skey.good" "$skey"
+	reset_devs
+	cp "$dev/mmcblk0" "$tmp/mmc.before"
+	with_proxy "$mode" board "$tmp/bk" --no-kexec --ip 127.0.0.1/8
+	ok "$mode: the attacker's OK fails the restore" test "$RC" -ne 0
+	ok "$mode: restore.sh refused the reply" has "$OUT" "mmcblk0 UNAUTHENTICATED"
+	ok "$mode: the board wrote nothing of the altered chunk" cmp -s "$dev/mmcblk0" "$tmp/mmc.before"
+done
+rm -f "$skey"
 
 # refusals
 : >"$FAKE_SSH_LOG"

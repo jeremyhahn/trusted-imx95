@@ -89,6 +89,8 @@ command -v zstd >/dev/null || die "zstd not found"
 command -v sha256sum >/dev/null || die "sha256sum not found"
 
 port=${RESCUE_PORT:-7777}
+# The rescue system's chunk size (RESCUE_CHUNK in init): part of the protocol.
+rescue_chunk=1048576
 wait_s=${RESTORE_WAIT:-240}
 io_s=${RESTORE_IO_TIMEOUT:-7200}
 # shellcheck disable=SC2206 # word splitting of the option list is the point
@@ -140,26 +142,78 @@ load_key() {
 	is_hex64 "$key"
 }
 
+# sha_with <prefix> <file>: the SHA-256 of the prefix and then the file's
+# bytes; printf is a builtin, so the key in the prefix is in no argument list.
+sha_with() {
+	local h
+	h=$({ printf '%s' "$1"; cat -- "$2"; } | sha256sum) || return 1
+	echo "${h%% *}"
+}
+
+# reply_mac <nonce> <reply>: the MAC the rescue system puts on a reply
+# (init's header).
+reply_mac() {
+	local h LC_ALL=C
+	h=$(printf '%s:%s:b:1:%s:%s' "$key" "$1" "${#2}" "$2" | sha256sum) || return 1
+	echo "${h%% *}"
+}
+
+# send_chunks <nonce> <bytes> <scratch file>: reads the image from stdin and
+# sends its first <bytes> as the rescue system's chunks (init's header):
+# "chunk <k> <mac>" and then the chunk's bytes, each MAC binding the session
+# key, the nonce, the chunk's place, the total and the chunk's bytes.
+send_chunks() {
+	local nonce=$1 total=$2 t=$3 k=0 off=0 len n mac
+	while [ "$off" -lt "$total" ]; do
+		len=$((total - off))
+		[ "$len" -le "$rescue_chunk" ] || len=$rescue_chunk
+		dd of="$t" bs="$len" count=1 iflag=fullblock 2>/dev/null || return 1
+		n=$(($(wc -c <"$t")))
+		[ "$n" -gt 0 ] || return 1
+		mac=$(sha_with "$key:$nonce:c:$((k + 1)):$k:$total:$n:" "$t") || return 1
+		printf 'chunk %s %s\n' "$k" "$mac"
+		cat -- "$t" || return 1
+		[ "$n" -eq "$len" ] || return 1
+		off=$((off + len))
+		k=$((k + 1))
+	done
+}
+
 # rescue_cmd <command line> [dump file]: one connection: reads the board's
 # nonce, sends "auth <mac> <command line>" (the MAC binds the session key, the
-# nonce and the line; README.md), then streams the dump when given; prints the
-# reply line. A board that sends no nonce has its first line printed instead.
+# nonce and the line; README.md), then streams the dump in authenticated
+# chunks when given; prints the reply when its MAC is right for this key and
+# this nonce. Anything else, a board that sends no nonce, a reply without a
+# MAC or with a wrong one (forged, or replayed from another connection), is
+# printed as "UNAUTHENTICATED <what came>", which no caller takes for OK or
+# for a digest.
 rescue_cmd() {
-	local line=$1 dump=${2:-} reply
+	local line=$1 dump=${2:-}
 	(
 		exec 3<>"/dev/tcp/$rescue_host/$port" || exit 1
 		read -r -t 60 w nonce <&3 || exit 1
 		if [ "$w" != nonce ] || ! is_hex64 "$nonce"; then
-			printf '%s\n' "$w $nonce"
+			printf 'UNAUTHENTICATED %s\n' "$w $nonce"
 			exit 0
 		fi
 		mac=$(printf '%s:%s:%s' "$key" "$nonce" "$line" | sha256sum) || exit 1
 		printf 'auth %s %s\n' "${mac%% *}" "$line" >&3
+		sender="" t=""
 		if [ -n "$dump" ]; then
-			zstd -dc -- "$dump" >&3 || exit 1
+			read -r _ _ total _ <<<"$line"
+			t=$(mktemp "${TMPDIR:-/tmp}/rescue-chunk.XXXXXX") || exit 1
+			trap '[ -z "$sender" ] || kill "$sender" 2>/dev/null; rm -f "$t"' EXIT
+			# The reply is read while the chunks are still going out: a board
+			# that aborts the write answers at once and closes.
+			zstd -dc -- "$dump" | send_chunks "$nonce" "$total" "$t" >&3 &
+			sender=$!
 		fi
-		read -r -t "$io_s" reply <&3 || exit 1
-		printf '%s\n' "$reply"
+		read -r -t "$io_s" w rmac reply <&3 || exit 1
+		if [ "$w" = reply ] && is_hex64 "$rmac" && [ "$rmac" = "$(reply_mac "$nonce" "$reply")" ]; then
+			printf '%s\n' "$reply"
+		else
+			printf 'UNAUTHENTICATED %s\n' "$w $rmac $reply"
+		fi
 	)
 }
 
