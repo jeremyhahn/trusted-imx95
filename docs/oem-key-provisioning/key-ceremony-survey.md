@@ -424,6 +424,9 @@ cycle before and after, date, station and the people present.
    Recommendation: (c) for development boards and (a) for production units.
    Closing a part that fails any item in section 6 leaves it unrecoverable
    [S10].
+   Answered by owner ruling 1234 (2026-11-23): the life cycle is closed only at the
+   provisioning station, never on a development board ([SPEC.md](../SPEC.md),
+   `oem-key-provisioning` row). Still open: the station's transport (question 4).
 6. **Who is present at a ceremony?**
    - (a) One operator.
    - (b) Two people under dual control, each holding part of the go-xkms
