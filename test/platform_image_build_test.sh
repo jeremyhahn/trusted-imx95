@@ -330,6 +330,31 @@ expect "build-info holds checkout_commit" test "${info##*"checkout_commit=$head"
 expect "build-info holds the dirty marker" test "${info##*"platform_image_dirty="*}" != "$info"
 expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_sha256="*}" != "$info"
 
+# An ignored input (.git/info/exclude) that BitBake still loads is dirty. The
+# build runs from a scratch git copy of the script and platform-image/.
+sc=$tmp/scratch-clone
+rm -rf "$sc" "$tmp/d" "$tmp/out"
+mkdir -p "$sc/scripts"
+cp "$script" "$sc/scripts/"
+cp -r "$ROOT/platform-image" "$sc/platform-image"
+git -C "$sc" init -q
+git -C "$sc" add -A
+git -C "$sc" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m scratch
+sbrun() {
+	RC=0
+	OUT=$(PATH=$stub:$tools PLATFORM_IMAGE_FETCH=$tmp/fetch BB_LOG=$tmp/log BB_MACHINE=$want \
+		PLATFORM_IMAGE_OUT=$tmp/out "$real_bash" "$sc/scripts/platform-image-build.sh" "$tmp/d" 2>&1) || RC=$?
+}
+sbrun
+check "scratch clone, clean: build ok" 0 "OK, 6 artefacts"
+expect "scratch clone, clean: dirty=no" grep -q '^platform_image_dirty=no$' "$tmp/out/build-info.txt"
+rm -rf "$tmp/d" "$tmp/out"
+echo "platform-image/hidden.bbappend" >>"$sc/.git/info/exclude"
+echo "# loaded by BBFILES" >"$sc/platform-image/hidden.bbappend"
+sbrun
+check "scratch clone, ignored bbappend: build ok" 0 "OK, 6 artefacts"
+expect "an ignored input records dirty=yes" grep -q '^platform_image_dirty=yes$' "$tmp/out/build-info.txt"
+
 # --repro: two builds in separate directories, compared, published on a match.
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
 BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro

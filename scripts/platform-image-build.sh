@@ -246,7 +246,7 @@ trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 # status and the diff (recorded, not refused).
 checkout_commit=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
 [ -n "$checkout_commit" ] || checkout_commit=unknown
-inputs_status=$(git -C "$root" status --porcelain --untracked-files=all -- platform-image 2>/dev/null || echo unknown)
+inputs_status=$(git -C "$root" status --porcelain --untracked-files=all --ignored -- platform-image 2>/dev/null || echo unknown)
 if [ -z "$inputs_status" ]; then
 	inputs_dirty=no
 	inputs_sha=-
