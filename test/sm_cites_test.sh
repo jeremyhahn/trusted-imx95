@@ -17,13 +17,13 @@ CITES=(
 	"scripts/sm-build.sh|133|144|The source"
 	"scripts/sm-build.sh|140|143|git init"
 	"scripts/sm-build.sh|165|166|clone"
-	"scripts/sm-build.sh|189|190|scripts/sm-perf-check.sh"
-	"scripts/sm-build.sh|196|196|h1=\$(build 1)"
-	"scripts/sm-build.sh|198|198|h2=\$(build 2)"
-	"scripts/sm-build.sh|201|201|reproducible=no"
-	"scripts/sm-build.sh|208|208|m7_perf_m7=ALL"
-	"scripts/sm-build.sh|211|211|reproducible=\$reproducible"
-	"scripts/sm-build.sh|214|214|die \"not reproducible"
+	"scripts/sm-build.sh|191|192|scripts/sm-perf-check.sh"
+	"scripts/sm-build.sh|198|198|h1=\$(build 1)"
+	"scripts/sm-build.sh|200|200|h2=\$(build 2)"
+	"scripts/sm-build.sh|203|203|reproducible=no"
+	"scripts/sm-build.sh|210|210|m7_perf_m7=ALL"
+	"scripts/sm-build.sh|213|213|reproducible=\$reproducible"
+	"scripts/sm-build.sh|216|216|die \"not reproducible"
 	"scripts/sm-perf-placement-check.sh|46|46|variant()"
 	"scripts/sm-perf-placement-check.sh|83|95|run_one()"
 	"scripts/sm-toolchain-check.sh|12|12|make system-manager"
@@ -57,14 +57,14 @@ scratch="$TMP_ROOT/drift"
 mkdir -p "$scratch/scripts"
 mapfile -t src <"$ROOT/scripts/sm-build.sh"
 {
-	printf '%s\n' "${src[@]:0:188}"
+	printf '%s\n' "${src[@]:0:190}"
 	echo "# inserted"
-	printf '%s\n' "${src[@]:188}"
+	printf '%s\n' "${src[@]:190}"
 } >"$scratch/scripts/sm-build.sh"
-if cite_ok "$scratch" scripts/sm-build.sh 189 190 scripts/sm-perf-check.sh >/dev/null; then
-	fail "a line inserted above sm-build.sh:189 is detected" "the cite still held"
+if cite_ok "$scratch" scripts/sm-build.sh 191 192 scripts/sm-perf-check.sh >/dev/null; then
+	fail "a line inserted above sm-build.sh:191 is detected" "the cite still held"
 else
-	pass "a line inserted above sm-build.sh:189 is detected"
+	pass "a line inserted above sm-build.sh:191 is detected"
 fi
 
 finish
