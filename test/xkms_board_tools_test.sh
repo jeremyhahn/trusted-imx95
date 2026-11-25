@@ -696,7 +696,8 @@ ok "concurrency proof: every acked unique key has a proof line" [ "$(ledger_ids 
 ok "concurrency proof: there are acked unique keys" [ "$(ledger_ids "$tmp/bi/ledger.uniq" ack | wc -l)" -gt 0 ]
 VS "$tmp/cc-vs-ok.log" uniq
 ok "concurrency proof: the unchanged keys verify" [ "$RC" = 0 ]
-swapped=$(ledger_ids "$tmp/bi/ledger.uniq" ack | { read -r first; echo "$first"; })
+mapfile -t acked_ids < <(ledger_ids "$tmp/bi/ledger.uniq" ack)
+swapped=${acked_ids[0]:-}
 [ -z "$swapped" ] || echo "mat-replaced" >"$tmp/kms/$swapped"
 VS "$tmp/cc-vs-swap.log" uniq
 ok "concurrency proof: replaced key material with the same metadata, FAIL" [ "$RC" != 0 ]
@@ -717,6 +718,7 @@ case \$1 in
 version) echo "go version \$(cat "$gobin/release") linux/amd64" ;;
 build)
 	env | LC_ALL=C sort >>"$gobin/build.env"
+	find . -type f -not -path './.git/*' | LC_ALL=C sort >>"$gobin/build.files"
 	while [ \$# -gt 0 ]; do case \$1 in -o) printf 'stub binary\n' >"\$2"; shift ;; esac; shift; done
 	;;
 *) exit 2 ;;
@@ -736,6 +738,7 @@ BLD() { # BLD <log> <outdir> <go release> [VAR=value...]: build the fake commit 
 	echo "$3" >"$gobin/release"
 	shift 3
 	: >"$gobin/build.env"
+	: >"$gobin/build.files"
 	set +e
 	env "$@" PATH="$gobin:$PATH" XKMS_REPO="$gx" XKMS_SRC="$tmp/gosrc" XKMS_OUT="$out" \
 		"$here/scripts/xkms/xkmsd-build.sh" "$gxc" >"$log" 2>&1
@@ -782,6 +785,25 @@ same_pinned_records() {
 	cmp -s "$m1" "$m2"
 }
 ok "build: two builds of one commit give identical records that carry the pin and the environment" same_pinned_records
+ok "build: the pinned build lists the files it was built from" out_has "$gobin/build.files" "./VERSION"
+no_build_dirs() { # no build.* checkout is left next to the source cache
+	local d
+	for d in "$tmp"/build.*; do [ ! -e "$d" ] || return 1; done
+}
+ok "build: no temporary checkout is left behind" no_build_dirs
+# The cached source directory holds a stray untracked .go file, an ignored
+# one and a modified tracked file: none may reach the build or the record.
+echo 'package evil' >"$tmp/gosrc/evil.go"
+echo 'package ign' >"$tmp/gosrc/ign.go"
+echo 'ign.go' >>"$tmp/gosrc/.git/info/exclude"
+echo '9.9.9' >"$tmp/gosrc/VERSION"
+BLD "$tmp/bld-3.log" "$tmp/bld-3" "$pin"
+ok "build: a cache with stray files still builds, from the commit alone" [ "$RC" = 0 ]
+ok "build: the build ran" [ -s "$gobin/build.files" ]
+ok "build: the untracked .go file was not in the build tree" out_lacks "$gobin/build.files" "evil.go"
+ok "build: the ignored .go file was not in the build tree" out_lacks "$gobin/build.files" "ign.go"
+ok "build: the modified VERSION did not reach the record" cmp -s "$tmp/bld-2/$gxc/manifest.txt" "$tmp/bld-3/$gxc/manifest.txt"
+ok "build: the record says the source was a fresh checkout" out_has "$tmp/bld-3/$gxc/manifest.txt" "source: fresh checkout of the commit"
 
 # --- burn-in writers drain at a stop -------------------------------------------
 # Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,
@@ -891,7 +913,8 @@ ok "diskfull slow: every acked write verified" out_has "$tmp/df-slow.log" "PASS 
 ok "diskfull proof: the ledger has one proof per ack" [ "$(ledger_ids "$tmp/bi/ledger.full" sym | wc -l)" = "$(ledger_ids "$tmp/bi/ledger.full" ack | wc -l)" ]
 VS "$tmp/df-vs-ok.log" full
 ok "diskfull proof: the unchanged keys verify" [ "$RC" = 0 ]
-swapped=$(ledger_ids "$tmp/bi/ledger.full" ack | { read -r first; echo "$first"; })
+mapfile -t acked_ids < <(ledger_ids "$tmp/bi/ledger.full" ack)
+swapped=${acked_ids[0]:-}
 [ -z "$swapped" ] || echo "mat-replaced" >"$tmp/kms/$swapped"
 VS "$tmp/df-vs-swap.log" full
 ok "diskfull proof: replaced key material with the same metadata, FAIL" [ "$RC" != 0 ]

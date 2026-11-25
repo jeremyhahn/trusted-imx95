@@ -16,7 +16,11 @@ pending owner approval. It is not done.
 ## Build
 
 The script clones go-xkms read-only into `build/go-xkms/src` (ignored by git)
-and builds with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 -trimpath`, tags
+as an object cache only. Every build runs in a fresh checkout of the commit in
+a temporary directory next to it, so an untracked or ignored file left in the
+cache (a stray `.go` file would be compiled in) never reaches the build; the
+script refuses to build if `git status --ignored` of that checkout is not
+empty. It builds with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 -trimpath`, tags
 `codec_cbor codec_json codec_msgpack pkcs8 frost`. The version is the commit
 and the build date is the commit date, so a rebuild at one commit gives the
 same SHA-256 on the same toolchain.

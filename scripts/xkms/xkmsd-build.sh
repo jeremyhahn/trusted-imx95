@@ -6,7 +6,9 @@
 #
 # With no argument the tip of go-xkms main is used. The commit chosen is
 # printed. Output: build/xkms/<commit>/{xkmsd,xkmsctl,manifest.txt}.
-# go-xkms is only read: it is cloned into build/go-xkms/src (gitignored).
+# go-xkms is only read: it is cloned into build/go-xkms/src (gitignored) as an
+# object cache, and every build runs in a fresh checkout of the commit (a
+# temporary directory next to it, removed at the end), refused unless clean.
 #
 # Environment:
 #   XKMS_REPO   go-xkms git URL (default https://github.com/jeremyhahn/go-xkms)
@@ -103,7 +105,7 @@ if [ -z "$want" ]; then
 fi
 
 if [ "$dry" = 1 ]; then
-	echo "plan: clone $repo into $src at $want"
+	echo "plan: clone $repo into $src (object cache), build in a fresh checkout of $want, refused unless git status --ignored is empty"
 	echo "plan: refuse to build unless go version is $go_pin"
 	echo "plan: env -i $buildenv_record go build -trimpath -buildvcs=false -tags '$tags' ./cmd/xkmsd ./cmd/xkmsctl"
 	echo "plan: write $outroot/<commit>/{xkmsd,xkmsctl,manifest.txt}"
@@ -130,22 +132,45 @@ if [ ! -d "$src/.git" ]; then
 	git clone -q "$repo" "$src"
 fi
 git -C "$src" fetch -q origin
-git -C "$src" -c advice.detachedHead=false checkout -q --force "$want"
-commit=$(git -C "$src" rev-parse HEAD)
+commit=$(git -C "$src" rev-parse --verify -q "$want^{commit}" || git -C "$src" rev-parse --verify -q "origin/$want^{commit}") || {
+	echo "xkmsd-build: $want is not a commit of $repo" >&2
+	exit 1
+}
 echo "xkmsd-build: building go-xkms $commit"
 
-short=$(git -C "$src" rev-parse --short=12 HEAD)
-base=$(tr -d '[:space:]' <"$src/VERSION" 2>/dev/null || true)
+# The cached clone is only an object store. A `checkout --force` there leaves
+# untracked and ignored files in place, and a stray .go file would be compiled
+# into a binary whose manifest names only the commit. So build in a fresh
+# directory that holds exactly the commit, and refuse unless git sees it clean,
+# ignored files included.
+work=$(mktemp -d "$(dirname "$src")/build.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+git -C "$work" init -q
+git -C "$work" fetch -q --no-tags "$src" '+refs/*:refs/src/*'
+git -C "$work" -c advice.detachedHead=false checkout -q --detach "$commit"
+[ "$(git -C "$work" rev-parse HEAD)" = "$commit" ] || {
+	echo "xkmsd-build: the fresh checkout is not at $commit" >&2
+	exit 1
+}
+dirty=$(git -C "$work" status --porcelain --ignored)
+[ -z "$dirty" ] || {
+	echo "xkmsd-build: refusing to build: the source tree is not exactly the commit:" >&2
+	printf '%s\n' "$dirty" >&2
+	exit 1
+}
+
+short=$(git -C "$work" rev-parse --short=12 HEAD)
+base=$(tr -d '[:space:]' <"$work/VERSION" 2>/dev/null || true)
 version="${base:-0.0.0}+g$short"
 # The commit date, not the wall clock, so a rebuild is byte-identical.
-bdate=$(TZ=UTC git -C "$src" show -s --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD)
+bdate=$(TZ=UTC git -C "$work" show -s --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD)
 ldflags="-s -w -X main.Version=$version -X main.GitCommit=$commit -X main.BuildDate=$bdate"
 
 out=$outroot/$commit
 mkdir -p "$out" "$root/$gobase_rel/home" "$root/$gobase_rel/gopath" "$root/$gobase_rel/gocache"
 for b in xkmsd xkmsctl; do
 	(
-		cd "$src"
+		cd "$work"
 		cleango build -trimpath -buildvcs=false -tags "$tags" \
 			-ldflags "$ldflags" -o "$out/$b" "./cmd/$b"
 	)
@@ -155,6 +180,7 @@ done
 	echo "go-xkms-commit: $commit"
 	echo "version: $version"
 	echo "build-date: $bdate"
+	echo "source: fresh checkout of the commit, git status --ignored empty"
 	echo "go-pinned: $go_pin"
 	echo "go-version: $goversion"
 	echo "env: $buildenv_record"
