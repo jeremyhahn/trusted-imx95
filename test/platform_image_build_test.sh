@@ -342,8 +342,35 @@ brun "$stub:$tools"
 printf 'EXTRA_IMAGE_FEATURES = "debug-tweaks"\n' >"$tmp/d/build/conf/auto.conf"
 rm -rf "$tmp/out"
 BB_EXTRA_FEATURES=debug-tweaks brun "$stub:$tools"
-check "auto.conf EXTRA_IMAGE_FEATURES=debug-tweaks: refused" nonzero "EXTRA_IMAGE_FEATURES holds debug-tweaks"
-expect "auto.conf debug-tweaks: bitbake built nothing" test -z "$(bbtargets)"
+check "auto.conf: refused before bitbake" nonzero "holds configuration this script did not write (auto.conf)"
+expect "auto.conf: bitbake built nothing" test -z "$(bbtargets)"
+# with ALLOW_DIRTY=1 the effective-value check still refuses debug-tweaks
+rm -rf "$tmp/out"
+ALLOW_DIRTY=1 BB_EXTRA_FEATURES=debug-tweaks brun "$stub:$tools"
+check "auto.conf + ALLOW_DIRTY=1: effective EXTRA_IMAGE_FEATURES still refused" nonzero "EXTRA_IMAGE_FEATURES holds debug-tweaks"
+
+# An auto.conf that sets IMAGE_FEATURES (the effective values look fine) is
+# refused; so is a site.conf; ALLOW_DIRTY=1 builds, records dirty=yes and a hash.
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools"
+printf 'IMAGE_FEATURES = "ssh-server-dropbear"\n' >"$tmp/d/build/conf/auto.conf"
+rm -rf "$tmp/out"
+brun "$stub:$tools"
+check "auto.conf IMAGE_FEATURES: refused" nonzero "auto.conf"
+rm -f "$tmp/d/build/conf/auto.conf"
+printf 'BB_NUMBER_THREADS = "1"\n' >"$tmp/d/build/conf/site.conf"
+rm -rf "$tmp/out"
+brun "$stub:$tools"
+check "site.conf: refused" nonzero "site.conf"
+rm -rf "$tmp/out"
+ALLOW_DIRTY=1 brun "$stub:$tools"
+check "site.conf + ALLOW_DIRTY=1: builds" 0 "OK, 6 artefacts"
+einfo=$(cat "$tmp/out/build-info.txt")
+expect "ALLOW_DIRTY=1 records dirty=yes" test "${einfo##*"platform_image_dirty=yes"*}" != "$einfo"
+sitesha=$(sha256sum <"$tmp/d/build/conf/site.conf" | sed 's/ .*//')
+expect "ALLOW_DIRTY=1 records the site.conf hash" test "${einfo##*"platform_image_extra_conf=site.conf:$sitesha"*}" != "$einfo"
+vout=$(bash "$ROOT/scripts/platform-image-verify.sh" "$tmp/out" 2>&1 || true)
+expect "the verifier rejects that output without --allow-dirty" test "${vout##*"platform_image_dirty=yes"*}" != "$vout"
 rm -rf "$tmp/d" "$tmp/out"
 BB_INIT=other brun "$stub:$tools"
 check "a different effective INIT_MANAGER: refused" nonzero "INIT_MANAGER is 'other'"

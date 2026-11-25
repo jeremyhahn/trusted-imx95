@@ -258,6 +258,24 @@ else
 	} | sha256sum | sed 's/ .*//')
 fi
 
+# BitBake also loads conf/auto.conf, conf/site.conf and any other *.conf next to
+# the generated local.conf and bblayers.conf: configuration this script did not
+# write. Refused, unless ALLOW_DIRTY=1, which records dirty=yes and a hash of
+# each file (so platform-image-verify.sh rejects it without --allow-dirty).
+extra_conf=
+extra_names=
+for f in "$conf"/*.conf; do
+	[ -e "$f" ] || [ -L "$f" ] || continue
+	case ${f##*/} in local.conf | bblayers.conf) continue ;; esac
+	extra_names="$extra_names ${f##*/}"
+	extra_conf="$extra_conf${extra_conf:+
+}platform_image_extra_conf=${f##*/}:$(sha256sum <"$f" | sed 's/ .*//')"
+done
+if [ -n "$extra_conf" ]; then
+	[ "${ALLOW_DIRTY:-}" = 1 ] || die "$conf holds configuration this script did not write (${extra_names# }); remove it, or set ALLOW_DIRTY=1 to build anyway (recorded as platform_image_dirty=yes)"
+	inputs_dirty=yes
+fi
+
 # What bitbake will use, not only the templates: a reused build/conf may hold an
 # auto.conf or site.conf. MACHINE, DISTRO, INIT_MANAGER and the prohibited image
 # features are checked for each target (the checks platform-image-parse.sh runs).
@@ -329,6 +347,7 @@ done
 	echo "checkout_commit=$checkout_commit"
 	echo "platform_image_dirty=$inputs_dirty"
 	echo "platform_image_dirty_sha256=$inputs_sha"
+	[ -z "$extra_conf" ] || printf '%s\n' "$extra_conf"
 	echo "manifest_commit=$(sed -n 's/^manifest_commit=//p' "$lock")"
 	sed -n 's/^\(layer_[A-Za-z0-9_]*_commit=.*\)$/\1/p' "$lock"
 } >"$out/build-info.txt"
