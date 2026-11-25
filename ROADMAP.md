@@ -31,7 +31,7 @@ None yet.
 
 Planned, undated. No issue is filed yet; each line gets its issue once the owner approves this file.
 
-- **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — no issue yet — blocked: owner approval; image build open
+- **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — issue #204 — blocked: owner approval; image build open
 - **secure-world** — the Cortex-A55 secure world of owner ruling 771: upstream TF-A (BL31) and the NXP BSP's OP-TEE with the PKCS#11 TA, hosting the `ftpm` entry's firmware TPM TA, configured and built here — no issue yet — blocked: owner approval; needs platform-image, and boot-container to sign the BL31 and OP-TEE images; go-xkms's PKCS#11 backend and go-trusted-platform consume it
   - (a) Pin the BSP: the NXP Linux BSP release tag, and the OP-TEE and `imx-optee-os` revisions it carries; TF-A is upstream v2.15.0, not the BSP's (ruling 771). State: sources pinned in `secure-world/bsp.lock`, with the BSP release `lf-6.18.37-2.1.0` PROVISIONAL until the owner chooses the baseline (#14 Q2); not complete.
   - (b) Reproducible build: pinned sources, toolchain and build command; a byte-for-byte rebuild check; the OP-TEE configuration flags that enable the PKCS#11 TA (the fTPM TA's flags are the `ftpm` entry's). State: `make secure-world` builds both artefacts with a SHA-256 manifest; `scripts/secure-world-build.sh` builds twice in clean directories and fails unless both outputs are identical, and the `secure-world-build` CI job runs it. Nothing has run on the board.
