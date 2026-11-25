@@ -31,6 +31,28 @@ check_recipe() {
 		if grep -qF "$NAME" "$f"; then echo "no image installs it: $(basename "$f") names it"; fi
 	done
 	grep -rqF "$NAME" "$pi/conf" && echo "no image installs it: conf names it"
+	# every file:// entry of SRC_URI must be found through the recipe's own FILESEXTRAPATHS,
+	# with ${THISDIR} taken as the recipe directory
+	local fx dirs d uri found
+	fx=$(grep -m1 -E '^FILESEXTRAPATHS' "$rec" || true)
+	if [ -z "$fx" ]; then
+		echo "recipe has no FILESEXTRAPATHS line"
+	else
+		fx=${fx#*\"}
+		fx=${fx%\"*}
+		IFS=: read -ra dirs <<<"$fx"
+		while IFS= read -r uri; do
+			uri=${uri#file://}
+			found=0
+			for d in "${dirs[@]}"; do
+				[ -n "$d" ] || continue
+				# shellcheck disable=SC2016  # the text is a literal ${THISDIR}
+				d=${d//'${THISDIR}'/$(dirname "$rec")}
+				if [ -f "$d/$uri" ]; then found=1; fi
+			done
+			if [ "$found" -eq 0 ]; then echo "FILESEXTRAPATHS does not reach file://$uri"; fi
+		done < <(grep -E '^SRC_URI' "$rec" | grep -oE 'file://[^ "]+' || true)
+	fi
 	# wrynose OE-Core: file:// sources unpack into UNPACKDIR, and S = WORKDIR is rejected at parse
 	while IFS= read -r f; do
 		bad_workdir "$f"
@@ -54,14 +76,16 @@ if [ -z "$problems" ]; then pass "collector recipe passes every check"; else fai
 
 # the installed file is the repository's script
 expect "the script the recipe installs exists in the repository" test -f "$ROOT/scripts/device-lifecycle/collect-evidence.sh"
-expect "FILESEXTRAPATHS reaches scripts/device-lifecycle from the recipe directory" \
-	test -f "$PI/recipes-core/device-lifecycle/../../../scripts/device-lifecycle/collect-evidence.sh"
 
 # negatives: each broken copy must be reported
 neg() { # name file-relative-to-layer sed-expression
-	local d out
-	d=$(mktemp -d "$TMP_ROOT/pi.XXXXXX")
+	local b d out
+	# the copy sits beside a copy of scripts/, so ${THISDIR}/../../../scripts resolves as in the repository
+	b=$(mktemp -d "$TMP_ROOT/pi.XXXXXX")
+	d=$b/platform-image
+	mkdir -p "$d" "$b/scripts"
 	cp -R "$PI/." "$d/"
+	cp -R "$ROOT/scripts/device-lifecycle" "$b/scripts/"
 	sed -E -i "$3" "$d/$2"
 	out=$(check_recipe "$d")
 	if [ -n "$out" ]; then pass "negative: $1"; else fail "negative: $1 was not caught"; fi
@@ -77,5 +101,7 @@ neg "BBFILES line removed" conf/layer.conf '/^BBFILES \+= .*\*\.bb"$/d'
 neg "S = WORKDIR" "$REL" 's|^S = .*|S = "${WORKDIR}"|'
 # shellcheck disable=SC2016
 neg "install reads from WORKDIR" "$REL" 's|\$\{S\}/collect-evidence|${WORKDIR}/collect-evidence|'
+neg "FILESEXTRAPATHS line deleted" "$REL" '/^FILESEXTRAPATHS/d'
+neg "FILESEXTRAPATHS points at a wrong directory" "$REL" 's|/scripts/device-lifecycle:|/scripts/nowhere:|'
 
 finish
