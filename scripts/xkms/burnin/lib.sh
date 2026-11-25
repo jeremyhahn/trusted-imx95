@@ -239,6 +239,21 @@ bi_ledger() { echo "$BI_WORK/ledger.${1:-main}"; }
 # (BI_WRITE_FAIL_OK included) can never drop it from the verification.
 bi_ack() { echo "ack|$2||||" >>"$1"; }
 
+# bi_prove <ledger> <id>: right after the acknowledged create of the symmetric
+# key <id>, have xkmsd encrypt a fixed per-key challenge and record the answer
+# in the ledger (a sym line). The ciphertext and its tag are bound to the key
+# material, so bi_verify_set decrypting it later detects a key replaced by
+# another one that keeps the same metadata, which an ack or a metadata
+# fingerprint alone cannot. It fails (and records nothing) when the proof
+# cannot be made: the caller must treat that as a failure, never skip it.
+bi_prove() {
+	local L=$1 id=$2 j ct nonce tag
+	j=$(bi_ctl -o json key encrypt "$id" "proof-$id" 2>/dev/null) || return 1
+	ct=$(bi_jget "$j" ciphertext) nonce=$(bi_jget "$j" nonce) tag=$(bi_jget "$j" tag)
+	[ -n "$ct" ] && [ -n "$nonce" ] && [ -n "$tag" ] || return 1
+	echo "sym|$id|$ct|$nonce|$tag|proof-$id" >>"$L"
+}
+
 # bi_write_set <name> <count> <prefix>: write count keys, a signature or ciphertext each, and a certificate.
 bi_write_set() {
 	local name=$1 n=$2 pfx=$3 i id j ct nonce tag sig L
@@ -344,7 +359,7 @@ bi_stop_writers() {
 
 # bi_verify_set <name>: every ledger entry must still hold; a miss is CRITICAL.
 bi_verify_set() {
-	local name=$1 L kind id a b c d j n=0 bad=0 out
+	local name=$1 L kind id a b c d j n=0 bad=0 out ok
 	L=$(bi_ledger "$name")
 	[ -s "$L" ] || { bi_fail "verify $name: empty ledger"; return 0; }
 	local -A open=()
@@ -369,11 +384,13 @@ bi_verify_set() {
 			fi
 			;;
 		sym)
-			out=$(bi_ctl key decrypt "$id" "$a" --nonce "$b" --tag "$c" 2>&1) || out="error: $out"
-			case $out in
-			*"$d"*) ;;
-			*) bi_crit "key $id: acknowledged ciphertext no longer decrypts to its plaintext"; bad=$((bad + 1)) ;;
-			esac
+			# only a decrypt that succeeds and returns the plaintext passes: an
+			# error, a timeout or a wrong key is a failure, never a pass
+			ok=0
+			if out=$(bi_ctl key decrypt "$id" "$a" --nonce "$b" --tag "$c" 2>&1); then
+				case $out in *"$d"*) ok=1 ;; esac
+			fi
+			[ "$ok" = 1 ] || { bi_crit "key $id: acknowledged ciphertext no longer decrypts to its plaintext"; bad=$((bad + 1)); }
 			;;
 		sig)
 			if ! bi_ctl key verify "$id" "$b" "$a" >/dev/null 2>&1; then

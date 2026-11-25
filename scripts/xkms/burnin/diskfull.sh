@@ -143,6 +143,8 @@ try_write() {
 	if [ "$rc" = 0 ]; then
 		res=ack # from now it is owed
 		bi_ack "$L" "$2"
+		# a key-bound proof, so the verify detects replaced key material
+		bi_prove "$L" "$2" || bi_fail "create $2 was acknowledged but no key-bound proof could be made: its durability cannot be checked"
 		j=$(bi_ctl -o json key get "$2" 2>/dev/null) && echo "meta|$2|$(printf '%s' "$j" | bi_sha)|||" >>"$L"
 	elif [ "$rc" = 124 ]; then
 		res=hung

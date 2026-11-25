@@ -17,7 +17,10 @@ Runs --clients parallel xkmsctl processes against the same key ids, for
   3. all clients delete it at once: the key must be gone afterwards, and
      no client may be told it was deleted while it still exists
 Then every key written by a client with a unique id (acknowledged) is
-verified from the ledger. A lost or changed acknowledged write is CRITICAL.
+verified from the ledger: each is recorded with a ciphertext xkmsd made right
+after the acknowledgement, so key material replaced by another key that keeps
+the metadata fails the decrypt. A lost or changed acknowledged write is CRITICAL;
+an acknowledged create that could not be proved is a FAIL.
 More than one acknowledged create of one id is a FAIL (a lost update).
 
   --clients <n>   parallel clients (default 8)
@@ -67,6 +70,8 @@ for ((r = 1; r <= rounds; r++)); do
 			u="bi-cc-$stamp-u-$r-$c"
 			if bi_ctl key generate "$u" --key-type symmetric --algorithm aes-256-gcm --key-size 256 >/dev/null 2>&1; then
 				bi_ack "$BI_WORK/cc.uniq.$c" "$u"
+				# a key-bound proof, so the verify detects replaced key material
+				bi_prove "$BI_WORK/cc.uniq.$c" "$u" || touch "$BI_WORK/cc.noproof.$c"
 				j=$(bi_ctl -o json key get "$u" 2>/dev/null) && echo "meta|$u|$(printf '%s' "$j" | bi_sha)|||" >>"$BI_WORK/cc.uniq.$c"
 			fi
 		) &
@@ -74,6 +79,8 @@ for ((r = 1; r <= rounds; r++)); do
 	wait
 	cat "$BI_WORK"/cc.uniq.* >>"$L" 2>/dev/null
 	made=$(find "$BI_WORK" -maxdepth 1 -name 'cc.create.*' | wc -l)
+	noproof=$(find "$BI_WORK" -maxdepth 1 -name 'cc.noproof.*' | wc -l)
+	bi_check "round $r: every acknowledged unique create has a key-bound proof ($noproof without)" [ "$noproof" -eq 0 ]
 	bi_check "round $r: at most one create of $id acknowledged ($made)" [ "$made" -le 1 ]
 	bi_check "round $r: $id exists after the race" bi_ctl key get "$id"
 

@@ -144,7 +144,9 @@ generate)
 		echo "$c" >"$k/.full"
 		[ "$c" -le "$FAKE_CTL_NOSPACE_AFTER" ] || { echo "error: write $k/$id: no space left on device" >&2; exit 1; }
 	fi
-	(set -o noclobber; : >"$k/$id") 2>/dev/null || exit 1 # one create of an id wins
+	# one create of an id wins; the file holds the key material, which the
+	# ciphertexts and signatures below are bound to
+	(set -o noclobber; echo "mat-$RANDOM-$RANDOM-$$" >"$k/$id") 2>/dev/null || exit 1
 	# FAKE_CTL_PIDS records this process; FAKE_CTL_SLOW delays the answer after
 	# the create succeeded; FAKE_CTL_ACKED lists each id as it is answered
 	[ -z "${FAKE_CTL_PIDS:-}" ] || echo "$$" >>"$FAKE_CTL_PIDS"
@@ -165,8 +167,8 @@ delete)
 	[ -e "$k/$id" ] || exit 1
 	[ -n "${FAKE_CTL_KEEP:-}" ] || rm -f "$k/$id"
 	;;
-encrypt) [ -e "$k/$id" ] && echo "{\"ciphertext\":\"c-$4\",\"nonce\":\"n\",\"tag\":\"t\"}" ;;
-decrypt) [ -e "$k/$id" ] && echo "${4#c-}" ;;
+encrypt) [ -e "$k/$id" ] && echo "{\"ciphertext\":\"c-$(<"$k/$id")-$4\",\"nonce\":\"n\",\"tag\":\"t\"}" ;;
+decrypt) [ -e "$k/$id" ] && m=$(<"$k/$id") && case $4 in "c-$m-"*) echo "${4#"c-$m-"}" ;; *) echo "error: message authentication failed" >&2; exit 1 ;; esac ;;
 sign)
 	[ -e "$k/$id" ] || exit 1
 	case " ${FAKE_CTL_FAIL:-} " in *" badsig "*) echo '{"error":"none"}' ;; *) echo "{\"signature\":\"s-$id-$4\"}" ;; esac
@@ -675,6 +677,34 @@ ok "concurrency: the connection error text is reported" out_has "$tmp/cc-conn.lo
 FAKE_CTL_KEEP=1 CC "$tmp/cc-keep.log"
 ok "concurrency: a key still present after the deletes, FAIL" [ "$RC" != 0 ]
 ok "concurrency: the still-present key is named" out_has "$tmp/cc-keep.log" "still exists"
+# every acknowledged unique create is recorded with a key-bound proof, and a
+# key replaced by another one with the same metadata is found by the verify
+ledger_ids() { # <ledger> <kind>: the ids of the ledger's lines of that kind
+	local k id
+	while IFS='|' read -r k id _; do [ "$k" != "$2" ] || echo "$id"; done <"$1"
+}
+VS() { # VS <log> <ledger>: bi_verify_set on the ledger and keys a run left behind; set RC
+	set +e
+	FAKE_KMS=$tmp/kms XKMS_CTL=xkmsctl XKMS_WORK=$tmp/bi XKMS_BOARD=board.invalid BI_WRITE_CERT=0 \
+		bash -c 'source "$1"; bi_verify_set "$2"; bi_summary t' _ "$lib" "$2" >"$1" 2>&1
+	RC=$?
+	set -e
+}
+CC "$tmp/cc-proof.log"
+ok "concurrency proof: the run passes" [ "$RC" = 0 ]
+ok "concurrency proof: every acked unique key has a proof line" [ "$(ledger_ids "$tmp/bi/ledger.uniq" sym | wc -l)" = "$(ledger_ids "$tmp/bi/ledger.uniq" ack | wc -l)" ]
+ok "concurrency proof: there are acked unique keys" [ "$(ledger_ids "$tmp/bi/ledger.uniq" ack | wc -l)" -gt 0 ]
+VS "$tmp/cc-vs-ok.log" uniq
+ok "concurrency proof: the unchanged keys verify" [ "$RC" = 0 ]
+swapped=$(ledger_ids "$tmp/bi/ledger.uniq" ack | { read -r first; echo "$first"; })
+[ -z "$swapped" ] || echo "mat-replaced" >"$tmp/kms/$swapped"
+VS "$tmp/cc-vs-swap.log" uniq
+ok "concurrency proof: replaced key material with the same metadata, FAIL" [ "$RC" != 0 ]
+ok "concurrency proof: the replaced key is named CRITICAL" out_has "$tmp/cc-vs-swap.log" "CRITICAL"
+ok "concurrency proof: and named by id" out_has "$tmp/cc-vs-swap.log" "key $swapped: acknowledged ciphertext no longer decrypts"
+CC "$tmp/cc-noproof.log" encrypt
+ok "concurrency proof: acked creates whose proof cannot be made, FAIL" [ "$RC" != 0 ]
+ok "concurrency proof: the missing proofs are counted" out_has "$tmp/cc-noproof.log" "has a key-bound proof (3 without)"
 
 # --- xkmsd-build.sh pins its toolchain and its environment -----------------------
 # A stub go reports the release in $gobin/release and records the environment
@@ -833,7 +863,7 @@ DF() { # DF <log> [<VAR=value>...]: diskfull.sh on the fake board; set RC
 DF "$tmp/df-ok.log" FAKE_CTL_NOSPACE_AFTER=4
 ok "diskfull: no space after 4 writes passes" [ "$RC" = 0 ]
 ok "diskfull: the no-space write is named" out_has "$tmp/df-ok.log" "xkmsd reported no space at write 5"
-ok "diskfull: the writes before it are verified" out_has "$tmp/df-ok.log" "PASS verify full: 8 ledger entries intact"
+ok "diskfull: the writes before it are verified" out_has "$tmp/df-ok.log" "PASS verify full: 12 ledger entries intact"
 ok "diskfull: writes work again" out_has "$tmp/df-ok.log" "PASS writes work again once space is free (5 of 5)"
 ok "diskfull: the filler is gone" [ ! -e "$R/var/lib/xkms/.burnin-filler" ]
 DF "$tmp/df-never.log"
@@ -855,7 +885,21 @@ ok "diskfull slow: passes" [ "$RC" = 0 ]
 ok "diskfull slow: the slow create is acked in the ledger" out_has "$tmp/bi/ledger.full" "ack|$slow_id|"
 ok "diskfull slow: reported as SLOW" out_has "$tmp/df-slow.log" "SLOW: create $slow_id took"
 ok "diskfull slow: not counted as hung" out_has "$tmp/df-slow.log" "0 hung, 1 slow"
-ok "diskfull slow: every acked write verified" out_has "$tmp/df-slow.log" "PASS verify full: 8 ledger entries intact"
+ok "diskfull slow: every acked write verified" out_has "$tmp/df-slow.log" "PASS verify full: 12 ledger entries intact"
+# key material replaced by another key that keeps the metadata (the stub's
+# key get answers from the id alone): the proof recorded at the ack must fail
+ok "diskfull proof: the ledger has one proof per ack" [ "$(ledger_ids "$tmp/bi/ledger.full" sym | wc -l)" = "$(ledger_ids "$tmp/bi/ledger.full" ack | wc -l)" ]
+VS "$tmp/df-vs-ok.log" full
+ok "diskfull proof: the unchanged keys verify" [ "$RC" = 0 ]
+swapped=$(ledger_ids "$tmp/bi/ledger.full" ack | { read -r first; echo "$first"; })
+[ -z "$swapped" ] || echo "mat-replaced" >"$tmp/kms/$swapped"
+VS "$tmp/df-vs-swap.log" full
+ok "diskfull proof: replaced key material with the same metadata, FAIL" [ "$RC" != 0 ]
+ok "diskfull proof: the replaced key is named CRITICAL" out_has "$tmp/df-vs-swap.log" "CRITICAL"
+ok "diskfull proof: and named by id" out_has "$tmp/df-vs-swap.log" "key $swapped: acknowledged ciphertext no longer decrypts"
+DF "$tmp/df-noproof.log" FAKE_CTL_NOSPACE_AFTER=4 FAKE_CTL_FAIL=encrypt
+ok "diskfull proof: acked creates whose proof cannot be made, FAIL" [ "$RC" != 0 ]
+ok "diskfull proof: says the durability cannot be checked" out_has "$tmp/df-noproof.log" "no key-bound proof could be made"
 
 # --- burn-in scripts: --help and --dry-run ------------------------------------
 for s in "$here"/scripts/xkms/burnin/*.sh; do
