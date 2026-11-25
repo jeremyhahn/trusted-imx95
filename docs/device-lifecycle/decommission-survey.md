@@ -3,6 +3,8 @@
 Status: draft survey for the owner (issue #72, row `device-lifecycle`).
 Documentation only: nothing here runs, scripts or recommends running a fuse,
 life-cycle or provisioning step on a board.
+A proposed runbook that orders the steps of section 6 is in
+[decommission-runbook.md](decommission-runbook.md).
 
 ## 1. Scope and method
 

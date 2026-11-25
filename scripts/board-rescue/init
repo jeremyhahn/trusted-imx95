@@ -1,0 +1,390 @@
+#!/bin/sh
+# PID 1 of the rescue initramfs (see README.md). Mounts the pseudo filesystems,
+# brings the network up from the kernel command line, then serves a tiny
+# command protocol on one TCP port. Every message after the nonce is
+# authenticated, in both directions:
+#
+#   board  -> nonce <64 hex, fresh per connection>
+#   client -> auth <mac> <command line>
+#   client -> chunk <k> <mac>, then the chunk's bytes      (write only, k = 0, 1, ...)
+#   board  -> reply <mac> <reply>
+#
+# where every <mac> is a SHA-256 under <key>, the per-session key in
+# /rescue.key:
+#
+#   command  SHA-256 of "<key>:<nonce>:<command line>"
+#   chunk k  SHA-256 of "<key>:<nonce>:c:<k+1>:<k>:<bytes>:<len>:" then the
+#            chunk's <len> bytes (<bytes> is the write's total)
+#   reply    SHA-256 of "<key>:<nonce>:b:1:<length of reply>:<reply>"
+#
+# The number after c: or b: is the message's sequence number in its direction
+# (the command is client message 0, chunk k is message k+1; the reply is the
+# board's message 1), and every length that precedes variable bytes is in the
+# MAC, so a MAC is good for one nonce, one connection, one direction and one
+# message. restore.sh has the board generate that key
+# over the operator's ssh session just before the kexec and append it to the
+# initramfs (README.md), so it exists only in the board's RAM and with the
+# operator, and it never crosses the network. Without the key file every
+# command is refused; a missing or wrong command MAC gets "ERR auth refused"
+# and nothing runs. The commands (the replies are the <reply> above):
+#
+#   hash <dev> <bytes>               -> <sha256 of the first <bytes> of the device>
+#   write <dev> <bytes> <sha256>     -> OK | MISMATCH <sha256 read back> | ERR <why>
+#   reboot                           -> OK, then sync and reboot -f
+#
+# <dev> is mmcblk0, mmcblk0boot0 or mmcblk0boot1; anything else is refused.
+# The payload of `write` follows the auth line on the same connection, in
+# RESCUE_CHUNK-byte chunks (the last one shorter). The board reads a chunk
+# into RAM and checks its MAC before it writes a byte of it; the first chunk
+# with a missing or wrong MAC, or cut short, aborts the write, and the reply
+# is "ERR write aborted: ...". The whole-image digest is still checked by
+# reading the device back.
+# Every step is logged to the console; nothing is read from the eMMC but the
+# bytes a `hash` or a write's read-back hashes, and only their digest is shown.
+#
+# `init --handle` runs one connection from stdin to stdout. The server loop
+# uses it, and the tests run it with RESCUE_DEV_DIR, RESCUE_SYS_DIR,
+# RESCUE_KEY_FILE and RESCUE_TMP_DIR pointing at plain files. The real boot never sets them.
+
+RESCUE_DEV_DIR=${RESCUE_DEV_DIR:-/dev}
+RESCUE_SYS_DIR=${RESCUE_SYS_DIR:-/sys}
+RESCUE_KEY_FILE=${RESCUE_KEY_FILE:-/rescue.key}
+# Where a chunk waits in RAM for its MAC check (/tmp is in the initramfs).
+RESCUE_TMP_DIR=${RESCUE_TMP_DIR:-/tmp}
+# The chunk size is part of the protocol: restore.sh uses the same.
+RESCUE_CHUNK=1048576
+# There is one listener, so one client can shut every other one out: a
+# connection must send its "auth" line within RESCUE_AUTH_SECS of being
+# accepted, and an authenticated one is dropped RESCUE_LIFE_SECS later (6 h
+# covers writing a 64 GB eMMC at 3 MB/s). A watchdog (--watchdog) enforces
+# both, because the shell builtin read has no deadline in every sh.
+RESCUE_AUTH_SECS=${RESCUE_AUTH_SECS:-30}
+RESCUE_LIFE_SECS=${RESCUE_LIFE_SECS:-21600}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH
+export PATH
+
+log() { echo "rescue: $*" >&2; }
+
+is_num() {
+	case $1 in '' | *[!0-9]*) return 1 ;; esac
+	return 0
+}
+
+is_sha() {
+	case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+	[ "${#1}" -eq 64 ]
+}
+
+valid_dev() {
+	case $1 in mmcblk0 | mmcblk0boot0 | mmcblk0boot1) return 0 ;; esac
+	return 1
+}
+
+# dev_size <path>: the size in bytes of a block device or a plain file.
+dev_size() {
+	if [ -b "$1" ]; then
+		blockdev --getsize64 "$1"
+	else
+		wc -c <"$1"
+	fi
+}
+
+# hash_dev <dev> <bytes>: the SHA-256 of the first <bytes> of the device.
+hash_dev() {
+	_h=$(head -c "$2" "$RESCUE_DEV_DIR/$1" | sha256sum) || return 1
+	echo "${_h%% *}"
+}
+
+drop_caches() {
+	# Read back from the medium, not the page cache (never on the test files).
+	[ "$RESCUE_DEV_DIR" = /dev ] || return 0
+	sync
+	echo 3 >/proc/sys/vm/drop_caches 2>/dev/null || true
+}
+
+# say <reply>: sends the reply with its MAC (the header): "reply <mac> <reply>".
+# Only an authenticated handler says anything, so $key and $nonce are set.
+say() {
+	_r=$(sha_of "$key:$nonce:b:1:${#1}:$1") || _r=""
+	echo "reply $_r $1"
+}
+
+# check_args <dev> <bytes>: sets $path, or says ERR and fails.
+check_args() {
+	valid_dev "$1" || { say "ERR refused device $1"; return 1; }
+	is_num "$2" || { say "ERR bad byte count"; return 1; }
+	[ "$2" -gt 0 ] || { say "ERR bad byte count"; return 1; }
+	path=$RESCUE_DEV_DIR/$1
+	[ -e "$path" ] || { say "ERR no such device $1"; return 1; }
+	size=$(dev_size "$path") || { say "ERR cannot size $1"; return 1; }
+	[ "$2" -le "$size" ] || { say "ERR $2 bytes exceed the $size of $1"; return 1; }
+}
+
+cmd_hash() {
+	check_args "$1" "$2" || return 0
+	log "hash $1 $2"
+	if h=$(hash_dev "$1" "$2"); then say "$h"; else say "ERR hash failed"; fi
+}
+
+# receive <bytes>: reads the payload chunk by chunk (the header) and writes
+# each chunk to $path only once its MAC is right. Fails at the first chunk
+# line that is missing or wrong, chunk cut short or bad MAC, with $why set;
+# nothing of that chunk or after it is written.
+receive() {
+	k=0 off=0
+	while [ "$off" -lt "$1" ]; do
+		len=$(($1 - off))
+		[ "$len" -le "$RESCUE_CHUNK" ] || len=$RESCUE_CHUNK
+		if ! read -r cw ck cmac || [ "$cw" != chunk ] || [ "$ck" != "$k" ] || ! is_sha "$cmac"; then
+			why="chunk $k: no chunk line"
+			return 1
+		fi
+		rm -f "$chunk"
+		dd of="$chunk" bs="$len" count=1 iflag=fullblock 2>/dev/null
+		[ -f "$chunk" ] || : >"$chunk"
+		n=$(($(wc -c <"$chunk")))
+		[ "$n" -eq "$len" ] || { why="chunk $k: stream cut short at $n of $len bytes"; return 1; }
+		cm=$({ printf '%s' "$key:$nonce:c:$((k + 1)):$k:$1:$len:"; cat "$chunk"; } | sha256sum) || cm=""
+		cm=${cm%% *}
+		if ! is_sha "$cm" || ! same "$cmac" "$cm"; then
+			why="chunk $k: bad MAC"
+			return 1
+		fi
+		dd if="$chunk" of="$path" bs="$RESCUE_CHUNK" seek="$k" count=1 conv=notrunc 2>/dev/null || { why="chunk $k: write failed"; return 1; }
+		off=$((off + len))
+		k=$((k + 1))
+	done
+}
+
+cmd_write() {
+	check_args "$1" "$2" || return 0
+	is_sha "$3" || { say "ERR bad sha256"; return 0; }
+	dev=$1 bytes=$2 want=$3
+	fro=$RESCUE_SYS_DIR/block/$dev/force_ro
+	oldro=
+	case $dev in
+	mmcblk0boot*)
+		if [ -e "$fro" ]; then
+			read -r oldro <"$fro"
+			log "force_ro $dev $oldro -> 0"
+			echo 0 >"$fro" || { say "ERR cannot unlock $dev"; return 0; }
+		fi
+		;;
+	esac
+	log "write $dev $bytes bytes"
+	rc=0 why=""
+	chunk=$RESCUE_TMP_DIR/rescue.chunk
+	receive "$bytes" || rc=2
+	rm -f "$chunk"
+	if [ "$rc" -eq 0 ]; then
+		drop_caches
+		got=$(hash_dev "$dev" "$bytes") || rc=1
+	fi
+	if [ -n "$oldro" ]; then
+		echo "$oldro" >"$fro" || log "force_ro $dev restore failed"
+		log "force_ro $dev restored to $oldro"
+	fi
+	if [ "$rc" -eq 2 ]; then
+		log "write $dev aborted: $why"
+		say "ERR write aborted: $why"
+	elif [ "$rc" -ne 0 ]; then
+		say "ERR read-back failed"
+	elif [ "$got" = "$want" ]; then
+		log "write $dev OK $got"
+		say OK
+	else
+		log "write $dev MISMATCH want $want got $got"
+		say "MISMATCH $got"
+	fi
+}
+
+cmd_reboot() {
+	say OK
+	if [ "$RESCUE_DEV_DIR" != /dev ]; then
+		log "reboot (test: not rebooting)"
+		return 0
+	fi
+	log "sync, reboot"
+	sync
+	sleep 1
+	reboot -f
+}
+
+# sha_of <string>: the SHA-256 of the string; printf is a builtin, so the
+# string never appears in a process's arguments.
+sha_of() {
+	_h=$(printf '%s' "$1" | sha256sum) || return 1
+	echo "${_h%% *}"
+}
+
+# same <a> <b>: compares two digests through their own digests, so the time a
+# mismatch takes says nothing about how much of the MAC was right.
+same() {
+	_a=$(sha_of "$1") && _b=$(sha_of "$2") && [ "$_a" = "$_b" ]
+}
+
+# authenticate: sends a fresh nonce, reads "auth <mac> <command line>" and
+# sets $line when the MAC is right; prints the refusal and fails otherwise.
+authenticate() {
+	key=""
+	[ -r "$RESCUE_KEY_FILE" ] && read -r key <"$RESCUE_KEY_FILE"
+	is_sha "$key" || { log "no session key: refused"; echo "ERR no session key"; return 1; }
+	nonce=$(head -c 32 /dev/urandom | sha256sum) || nonce=""
+	nonce=${nonce%% *}
+	is_sha "$nonce" || { echo "ERR no nonce"; return 1; }
+	echo "nonce $nonce"
+	read -r word mac line || { echo "ERR no command"; return 1; }
+	if [ "$word" != auth ] || ! is_sha "$mac"; then
+		log "unauthenticated command: refused"
+		echo "ERR auth refused"
+		return 1
+	fi
+	want=$(sha_of "$key:$nonce:$line") || want=""
+	if [ -z "$want" ] || ! same "$mac" "$want"; then
+		log "bad MAC: refused"
+		echo "ERR auth refused"
+		return 1
+	fi
+}
+
+# tree <pid>: <pid> and every process below it, parents first. s, p and pp
+# are shared with the recursive calls, which is safe: the loop list is fixed
+# when the loop starts, and p and pp are not used after the call.
+tree() {
+	echo "$1"
+	for s in /proc/[0-9]*/stat; do
+		read -r p _ _ pp _ 2>/dev/null <"$s" || continue
+		[ "$pp" = "$1" ] && tree "$p"
+	done
+}
+
+# watchdog <secs> <pid> <what>: after <secs>, kill <pid> and everything it
+# started; that closes the socket they hold, so the client is dropped and the
+# listener is free again. A TERM (disarm) ends the watchdog quietly.
+watchdog() {
+	s=""
+	trap '[ -z "$s" ] || kill "$s" 2>/dev/null; exit 0' TERM
+	sleep "$1" &
+	s=$!
+	wait "$s" || exit 0
+	log "$3 after $1 s: dropping the connection"
+	for p in $(tree "$2"); do
+		[ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null
+	done
+}
+
+# arm <secs> <what>: put a watchdog over this handler; disarm takes it off.
+arm() {
+	disarm
+	sh "$0" --watchdog "$1" "$$" "$2" </dev/null >/dev/null &
+	dog=$!
+}
+
+disarm() {
+	[ -z "${dog:-}" ] || kill "$dog" 2>/dev/null
+	dog=""
+}
+
+handle() {
+	arm "$RESCUE_AUTH_SECS" "no auth line"
+	authenticate || return 0
+	arm "$RESCUE_LIFE_SECS" "command still running"
+	read -r cmd a1 a2 a3 extra <<EOF
+$line
+EOF
+	[ -z "$extra" ] || { say "ERR too many arguments"; return 0; }
+	case $cmd in
+	hash) [ -n "$a2" ] && [ -z "$a3" ] || { say "ERR usage: hash <dev> <bytes>"; return 0; }
+		cmd_hash "$a1" "$a2" ;;
+	write) [ -n "$a3" ] || { say "ERR usage: write <dev> <bytes> <sha256>"; return 0; }
+		cmd_write "$a1" "$a2" "$a3" ;;
+	reboot) cmd_reboot ;;
+	*) say "ERR unknown command" ;;
+	esac
+}
+
+cmdline_get() {
+	# cmdline_get <key> <default>
+	read -r cl </proc/cmdline
+	for w in $cl; do
+		case $w in "$1="*) echo "${w#*=}"; return 0 ;; esac
+	done
+	echo "$2"
+}
+
+net_up() {
+	ifc=$(cmdline_get rescue.if eth0)
+	ipa=$(cmdline_get rescue.ip "")
+	gw=$(cmdline_get rescue.gw "")
+	n=0
+	while [ ! -e "/sys/class/net/$ifc" ] && [ "$n" -lt 60 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	[ -e "/sys/class/net/$ifc" ] || { log "no network interface $ifc"; return 1; }
+	ip link set lo up
+	ip link set "$ifc" up
+	if [ -n "$ipa" ]; then
+		log "static $ipa on $ifc gw ${gw:-none}"
+		ip addr add "$ipa" dev "$ifc" || return 1
+		[ -z "$gw" ] || ip route add default via "$gw" dev "$ifc" || return 1
+	else
+		log "dhcp on $ifc"
+		n=0
+		until udhcpc -i "$ifc" -n -q -s /usr/share/udhcpc/default.script; do
+			n=$((n + 1))
+			[ "$n" -lt 15 ] || { log "dhcp failed"; return 1; }
+			sleep 2
+		done
+	fi
+	ip -4 addr show dev "$ifc" | while read -r l; do log "$l"; done
+}
+
+serve() {
+	port=$(cmdline_get rescue.port 7777)
+	while :; do
+		# The port is reachable from the network (the operator's host has no
+		# other way in: there is no sshd here), so every connection must
+		# carry a MAC made with the session key (authenticate).
+		log "listening on port $port"
+		# nc -e starts the handler (bin/rescue-handle: /init --handle) only
+		# once a client is in, with the socket as its stdin and stdout, so its
+		# deadlines count from the accept and its end closes the connection.
+		# The pinned busybox nc has -e (its options are -l -p -w -i -f -e);
+		# its -w bounds only the connect, so the deadlines are the handler's.
+		nc -l -p "$port" -e /bin/rescue-handle || sleep 1
+	done
+}
+
+main() {
+	mount -t proc proc /proc
+	mount -t sysfs sysfs /sys
+	mount -t devtmpfs devtmpfs /dev
+	exec >/dev/console 2>&1 </dev/console
+	log "start"
+	n=0
+	while [ ! -e /dev/mmcblk0 ] && [ "$n" -lt 30 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	if [ -e /dev/mmcblk0 ]; then log "mmcblk0 present"; else log "mmcblk0 absent"; fi
+	until net_up; do
+		log "network not up, retry"
+		sleep 5
+	done
+	serve
+}
+
+case ${1:-} in
+--handle)
+	trap 'disarm; [ -z "${chunk:-}" ] || rm -f "$chunk"' EXIT
+	handle
+	exit 0
+	;;
+--watchdog)
+	shift
+	watchdog "$@"
+	exit 0
+	;;
+esac
+main
