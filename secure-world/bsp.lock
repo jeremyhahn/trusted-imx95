@@ -27,14 +27,18 @@ META_IMX_COMMIT=2eb758f42cfb96042344815b7dd7755b06ba1e3b
 # v2.15.0 of git.trustedfirmware.org/TF-A/trusted-firmware-a.git (its GitHub
 # mirror is the fetch URL), peeled; its tree has plat/imx/imx9/imx95, so the
 # platform name is imx95. NXP's imx-atf fork is not used (docs/secure-world/build.md).
+# TFA_TAG is the release tag: the script takes only an upstream TF-A URL and a
+# vX.Y.Z tag, and the build fetches the tag and fails unless it peels to
+# TFA_COMMIT. The tag names the commit; it is passed to no build step.
 TFA_REPO=https://github.com/ARM-software/arm-trusted-firmware.git
+TFA_TAG=v2.15.0
 TFA_COMMIT=da738d5eae93af342fdc4995dd3c05acb4c9d757
 TFA_PLAT=imx95
 
 # OP-TEE OS 4.10: meta-imx-bsp/dynamic-layers/meta-arm/recipes-security/
 # optee/optee-os_4.10.0.imx.bb (branch lf-6.18.37_2.1.0). The i.MX 95 flavour
 # this tree supports is mx95evk only (core/arch/arm/plat-imx/conf.mk); there
-# is no FRDM-IMX95-PRO flavour.
+# is no FRDM-IMX95-PRO flavour. The script takes only NXP's imx-optee-os here.
 OPTEE_REPO=https://github.com/nxp-imx/imx-optee-os.git
 OPTEE_COMMIT=99f40897dd1fc28b4c792773b167e3db629db2ff
 OPTEE_PLATFORM=imx-mx95evk
