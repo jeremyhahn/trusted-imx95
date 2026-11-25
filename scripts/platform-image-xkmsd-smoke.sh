@@ -184,16 +184,16 @@ wait_for() {
 	return 1
 }
 
-# 3. Start on the packaged config, reach ready, stop on SIGTERM.
+# 3. Start on the development config, reach ready, stop on SIGTERM.
 "$bin" --config "$work/xkmsd.yaml" >"$work/run.log" 2>&1 &
 pid=$!
 if ! wait_for "$work/run.log" 'Unix socket server started' 120; then
 	tail -n 20 "$work/run.log" >&2
-	die "xkmsd did not reach its ready state (the local socket served) on the packaged config"
+	die "xkmsd did not reach its ready state (the local socket served) on the development config"
 fi
 [ -S "$work/run/xkms.sock" ] || die "the ready state is logged but $work/run/xkms.sock is no socket"
 kill -0 "$pid" 2>/dev/null || die "xkmsd exited after it was ready"
-ok "xkmsd reaches its ready state on the packaged config (socket served, node sealed)"
+ok "xkmsd reaches its ready state on the development config (socket served, node sealed)"
 kill -TERM "$pid"
 for ((i = 0; i < 300; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
 if kill -0 "$pid" 2>/dev/null; then die "xkmsd did not stop within 30 s of SIGTERM"; fi

@@ -35,10 +35,15 @@ What the production file does:
   exits 1; with a backend named but none enabled it says `at least one backend
   must be enabled`; with `pkcs11` or `tpm2` enabled and no library or device it
   says so and exits 1. It serves nothing, so no key operation is available.
-- `xkmsd.service` keeps `Restart=on-failure` with `RestartSec=5s`: until the
-  enclave backend exists the unit restarts every five seconds and fails each
-  time. That is the fail-closed behaviour, and it is noisy in the journal.
-  Whether the unit should stay enabled until then is a question for the owner.
+- `xkmsd.service` keeps `Restart=on-failure` with `RestartSec=5s`, bounded by
+  `StartLimitIntervalSec=300` and `StartLimitBurst=5` in `[Unit]`: until the
+  enclave backend exists the daemon refuses to start, the unit is restarted at
+  most five times in 300 seconds, and then it settles in the `failed` state
+  instead of looping and flooding the journal. That is the fail-closed
+  behaviour. `test/platform_image_xkmsd_test.sh` requires both limits, as
+  positive numbers (0 or `infinity` would switch the bound off), and has a
+  fixture for each way to lose it. Whether the unit should stay enabled until
+  the backend exists is a question for the owner.
 
 Checks: `test/platform_image_xkmsd_test.sh` fails when an active line of the
 production file, outside its `rng:` section, names `software` or `pkcs8`
@@ -96,11 +101,26 @@ posted from this repository): does xkmsd handle SIGTERM with a clean shutdown
 only after an unseal? `xkmsd.service` stops the daemon with SIGTERM, so a
 sealed node that dies by the signal reports a failed stop to systemd.
 
-## Boot and reboot persistence: proposed, pending owner approval
+## Checks on the real target: deferred (proposed, pending owner approval)
 
-Boot-and-reboot persistence of `/var/lib/xkms` on a built wic image is deferred
-to the image-build row. Nothing here boots an image: the wic layout is unbuilt
-and the smoke script runs on the build host. Proposed, pending owner approval:
-the image-build row boots the image, writes a marker under `/var/lib/xkms`,
-reboots, and checks the marker and the mount. Until then the guarantee is only
-that the unit refuses to start without the mount (the checks above).
+Three checks need a booted image and are deferred to the image-build row
+(proposed, pending owner approval):
+
+- the unit starts under its sandbox as the `xkmsd` user (the smoke script runs
+  the daemon as the build user, outside the sandbox);
+- the unit refuses to start on a read-only state mount (the smoke script checks
+  the mount's read-only flag with `systemd-analyze condition`, not a real
+  read-only mount of the state partition);
+- state under `/var/lib/xkms` survives a reboot.
+
+Nothing here boots an image: the wic layout is unbuilt and the smoke script runs
+on the build host. Proposed, pending owner approval: the image-build row boots
+the image, starts the unit as `xkmsd`, remounts the state partition read-only
+and checks the unit fails, writes a marker under `/var/lib/xkms`, reboots, and
+checks the marker and the mount. Until then the guarantee is only that the unit
+refuses to start without the mount, or on a read-only one (the checks above).
+
+The bounded restart (`StartLimitBurst=5` in 300 seconds) is checked statically
+only: on a board the production config fails closed, so the enabled unit
+reaches `failed` after five starts. The image-build row confirms that on the
+target.

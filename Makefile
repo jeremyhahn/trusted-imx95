@@ -216,7 +216,7 @@ integration-test-platform-image: ## The platform-image row's checks: every test/
 	$(MAKE) --no-print-directory platform-image-xkmsd-smoke || { echo "FAIL platform-image-xkmsd-smoke"; fail=1; }; \
 	exit $$fail
 
-platform-image-xkmsd-smoke: ## Fetch the go-xkms commit the xkmsd recipe pins, build it with the recipe's build script, start it on the packaged xkmsd.yaml (temp dir), check ready and a clean stop, and check it fails closed on a read-only state dir (needs network, Go, gcc, libusb headers; XKMSD_SMOKE_CACHE keeps the checkout and Go caches)
+platform-image-xkmsd-smoke: ## Fetch the go-xkms commit the xkmsd recipe pins, build it with the recipe's build script, start it on the development config dev/xkmsd-dev.yaml (temp dir), check ready and a clean stop, and check it fails closed on a read-only state dir (needs network, Go, gcc, libusb headers; XKMSD_SMOKE_CACHE keeps the checkout and Go caches)
 	@scripts/platform-image-xkmsd-smoke.sh
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
