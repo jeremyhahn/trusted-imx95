@@ -494,11 +494,13 @@ ok "linked live state: --rollback refuses" [ "$RC" != 0 ]
 ok "linked live state: --rollback says why" out_has "$tmp/l2r.log" "$R/var/lib/xkms is a symlink"
 ok "linked live state: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
 ok "linked live state: board untouched" restored "$R" "$tmp/snapL2"
-rm "$R/var/lib/xkms"
-mv "$R/data-xkms" "$R/var/lib/xkms"
-ln -s /nonexistent "$R/var/backups/xkms/20260101T000011Z/etc-xkms/linked"
+linkboard none
+XKMS_STAMP=20260101T000012Z D "$tmp/l3.log" board.invalid "$tmp/b-new"
+ok "linked backup setup: deployed" [ "$RC" = 0 ]
+ln -s /nonexistent "$R/var/backups/xkms/20260101T000012Z/etc-xkms/linked"
 snap "$R" "$tmp/snapL3"
-D "$tmp/l3r.log" --rollback 20260101T000011Z board.invalid
+: >"$R/run/systemctl.log"
+D "$tmp/l3r.log" --rollback 20260101T000012Z board.invalid
 ok "linked backup: --rollback refuses" [ "$RC" != 0 ]
 ok "linked backup: --rollback says why" out_has "$tmp/l3r.log" "holds symlinks"
 ok "linked backup: --rollback never stopped xkmsd" out_lacks "$R/run/systemctl.log" stop
