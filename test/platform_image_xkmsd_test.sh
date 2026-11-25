@@ -237,7 +237,7 @@ smoke_ok() {
 	for want in 'rev=$(val SRCREV)' 'build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh' \
 		'sh "$build" "$src" "$bin" "$pv" "$rev"' 'conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml' \
 		'"$bin" --config "$work/xkmsd.yaml"' 'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory" \
-		'status --porcelain --ignored' "stat -c '%u %a'"; do
+		'status --porcelain --ignored' "stat -c '%u %a'" 'systemd-analyze verify' 'systemd-analyze condition'; do
 		has "$s" "$want" || { echo "the smoke test lacks '$want'"; return 1; }
 	done
 	has "$mk" '$(MAKE) --no-print-directory platform-image-xkmsd-smoke' || { echo "integration-test-platform-image does not run the smoke test"; return 1; }
@@ -362,7 +362,7 @@ sx=$smk/platform-image/recipes-security/xkmsd
 mkdir -p "$smk/scripts" "$smk/bin" "$sx/files"
 cp "$ROOT/scripts/platform-image-xkmsd-smoke.sh" "$smk/scripts/"
 cp "$ROOT/$recipe_rel" "$sx/"
-cp "$ROOT/$conf_rel" "$sx/files/"
+cp "$ROOT/$conf_rel" "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$sx/files/"
 cat >"$smk/bin/git" <<'EOF'
 #!/bin/sh
 d=.
@@ -419,7 +419,7 @@ smoke_run() {
 	run env PATH="$smk/bin:$PATH" XKMSD_SMOKE_REPO=file:///stub \
 		XKMSD_SMOKE_CACHE="$scratch/cache-$name" FAKE_REV="$srev" FAKE_PV="$spv" \
 		FAKE_DAEMON_SRC="$smk/fake-xkmsd.py" "$@" \
-		bash "$smk/scripts/platform-image-xkmsd-smoke.sh"
+		bash "${SMOKE_TREE:-$smk}/scripts/platform-image-xkmsd-smoke.sh"
 }
 if [ "$(id -u)" = 0 ]; then
 	fail "the smoke script runs under stubs" "run as a non-root user: the script refuses root"
@@ -461,6 +461,36 @@ else
 	want_fetches 4 "smoke: the mode-0755 cache was fetched again"
 	smoke_run cache FAKE_GIT_LOG="$gl" FAKE_FETCH=fail FAKE_STATUS=$'?? planted.go\n'
 	check "smoke: a modified tree whose refetch fails fails, it is not used" nonzero "FAIL: cannot fetch go-xkms"
+	# The unit and the state mount: checked by systemd-analyze when it is there,
+	# offline (the same lines) when not or when XKMSD_SMOKE_OFFLINE_UNITS=1.
+	smoke_run offline XKMSD_SMOKE_OFFLINE_UNITS=1
+	check "smoke: the offline unit check passes on the real unit and mount" 0 "xkmsd-smoke: all passed" "the offline unit check"
+	# unit_tree NAME FILE FROM TO: a tree of its own whose FILE has FROM replaced.
+	unit_tree() {
+		local t=$scratch/smk-$1 f c
+		cp -R "$smk" "$t"
+		f=$t/platform-image/recipes-security/xkmsd/files/$2
+		c=$(<"$f")
+		printf '%s\n' "${c//"$3"/"$4"}" >"$f"
+		printf '%s' "$t"
+	}
+	for mode in online offline; do
+		o=()
+		[ "$mode" = offline ] && o=(XKMSD_SMOKE_OFFLINE_UNITS=1)
+		t=$(unit_tree "nomp-$mode" xkmsd.service 'AssertPathIsMountPoint=/var/lib/xkms' '')
+		SMOKE_TREE=$t smoke_run "nomp-$mode" "${o[@]}"
+		check "smoke ($mode): a unit that does not assert the state mount fails" nonzero "does not assert that /var/lib/xkms is a mount point"
+		t=$(unit_tree "norw-$mode" xkmsd.service 'AssertPathIsReadWrite=/var/lib/xkms' '')
+		SMOKE_TREE=$t smoke_run "norw-$mode" "${o[@]}"
+		check "smoke ($mode): a unit that does not assert a writable state fails" nonzero "does not assert that /var/lib/xkms is writable"
+		t=$(unit_tree "nomount-$mode" var-lib-xkms.mount 'Where=/var/lib/xkms' 'Where=/var/lib/other')
+		SMOKE_TREE=$t smoke_run "nomount-$mode" "${o[@]}"
+		check "smoke ($mode): a state mount that mounts elsewhere fails" nonzero "FAIL:"
+		t=$(unit_tree "nofile-$mode" var-lib-xkms.mount 'x' 'x')
+		rm "$t/platform-image/recipes-security/xkmsd/files/var-lib-xkms.mount"
+		SMOKE_TREE=$t smoke_run "nofile-$mode" "${o[@]}"
+		check "smoke ($mode): a missing state mount unit fails" nonzero "the state mount unit"
+	done
 fi
 
 finish

@@ -24,6 +24,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 recipe=$root/platform-image/recipes-security/xkmsd/xkmsd_git.bb
 build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh
 conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml
+unit=$root/platform-image/recipes-security/xkmsd/files/xkmsd.service
+mountu=$root/platform-image/recipes-security/xkmsd/files/var-lib-xkms.mount
 
 die() { echo "xkmsd-smoke: FAIL: $*" >&2; exit 1; }
 ok() { echo "xkmsd-smoke: ok   $*"; }
@@ -109,6 +111,54 @@ ok "the recipe's build script builds ./cmd/xkmsd"
 vout=$("$bin" -version 2>&1) || die "xkmsd -version failed"
 case $vout in *"$pv"*"$rev"* | *"$pv"*) ;; *) die "xkmsd -version does not report $pv: $vout" ;; esac
 ok "xkmsd -version reports $pv"
+
+# 2b. The unit and the state mount: they load, and the unit refuses to start
+# without the state mount. Not a boot of the unit (that needs a built image,
+# the image-build row's): systemd-analyze verifies both files and evaluates the
+# unit's mount-point assertion against a directory that is no mount point (it
+# must fail) and against a mount point (it must pass). Without systemd-analyze,
+# or with XKMSD_SMOKE_OFFLINE_UNITS=1, the offline check reads the same lines.
+[ -f "$unit" ] || die "the xkmsd unit $unit is missing"
+[ -f "$mountu" ] || die "the state mount unit $mountu is missing: nothing mounts /var/lib/xkms"
+mp='' rw='' l=''
+while IFS= read -r l; do
+	case $l in
+	AssertPathIsMountPoint=/var/lib/xkms) mp=$l ;;
+	AssertPathIsReadWrite=/var/lib/xkms) rw=$l ;;
+	esac
+done <"$unit"
+[ -n "$mp" ] || die "xkmsd.service does not assert that /var/lib/xkms is a mount point: it would start without the state mount"
+[ -n "$rw" ] || die "xkmsd.service does not assert that /var/lib/xkms is writable: it would start on a read-only state"
+mkdir -p "$work/units" "$work/nomount"
+c=$(<"$unit")
+printf '%s\n' "${c//\/usr\/bin\/xkmsd/$bin}" >"$work/units/xkmsd.service"
+cp "$mountu" "$work/units/var-lib-xkms.mount"
+if [ -z "${XKMSD_SMOKE_OFFLINE_UNITS:-}" ] && command -v systemd-analyze >/dev/null 2>&1; then
+	systemd-analyze verify "$work/units/xkmsd.service" "$work/units/var-lib-xkms.mount" || die "systemd-analyze verify rejects xkmsd.service or var-lib-xkms.mount"
+	ok "systemd-analyze verifies xkmsd.service and var-lib-xkms.mount"
+	cond() { systemd-analyze condition "$1" >/dev/null 2>&1; }
+	cond "${mp//\/var\/lib\/xkms//}" || die "the mount-point assertion fails on a mount point: the check proves nothing"
+	cond "${rw//\/var\/lib\/xkms/$work}" || die "the writable assertion fails on a writable directory: the check proves nothing"
+	if cond "${mp//\/var\/lib\/xkms/$work/nomount}"; then die "xkmsd.service starts when /var/lib/xkms is no mount point"; fi
+	ok "xkmsd.service refuses to start when /var/lib/xkms is no mount point"
+	# AssertPathIsReadWrite tests the mount's read-only flag, not a directory's
+	# mode: it is read from the unit above and its positive control run, and a
+	# read-only mount needs a real mount, which only the built image has.
+else
+	echo "xkmsd-smoke: systemd-analyze is not used: the offline unit check" >&2
+	has_line() {
+		local ln
+		while IFS= read -r ln; do [ "$ln" = "$2" ] && return 0; done <"$1"
+		return 1
+	}
+	for l in 'RequiresMountsFor=/var/lib/xkms' 'After=var-lib-xkms.mount' "$mp" "$rw"; do
+		has_line "$unit" "$l" || die "xkmsd.service lacks '$l'"
+	done
+	for l in 'What=/dev/disk/by-label/xkms-state' 'Where=/var/lib/xkms'; do
+		has_line "$mountu" "$l" || die "var-lib-xkms.mount lacks '$l'"
+	done
+	ok "the offline unit check: xkmsd.service asserts the state mount, var-lib-xkms.mount names it"
+fi
 
 # The packaged config with its state and socket paths in the temp dir.
 c=$(<"$conf")
