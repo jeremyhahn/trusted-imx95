@@ -57,4 +57,13 @@ check "make test: a tracked cst-*/ tree fails it" nonzero "third_party/cst-3.1.0
 run make -s -C "$repo" gosec
 check "make gosec: a tracked cst-*/ tree fails it" nonzero "tracked inside a CST tree"
 
+# make integration-test-boot-container drives every boot-container target, the
+# HSM custody test among them (a dry run: the integration image has no SPSDK).
+run make -n -s -C "$ROOT" integration-test-boot-container
+check "make integration-test-boot-container: runs the row's targets in order" 0 \
+	"ahab-sign-test ahab-m7-test ahab-hsm-test ahab-policy-test ahab-tamper-test boot-image-test" \
+	"integration-test-boot-container: OK"
+run make -n -s -C "$ROOT" ahab-hsm-test
+check "make ahab-hsm-test: signs through the test HSM (scripts/ahab/hsm-sign-test.sh)" 0 "scripts/ahab/hsm-sign-test.sh"
+
 finish
