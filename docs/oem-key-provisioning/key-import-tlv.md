@@ -8,7 +8,7 @@ test key, then parses and verifies it.
 
 **This proves nothing about a real device and documents no production import path.** A throwaway P-256 key stands in
 for the device key-agreement key; the wrapping key is derived from it only for this test. Nothing is sent to a board,
-no fuse or life-cycle step is involved, and this file gives no command to import a blob into a device. Keys that
+no fuse or life-cycle step is involved, and this file gives no command to import a blob into a device. `test/okp_host_only_test.sh` reads this exercise's scripts and fails on any device-transport tool or path in them. Keys that
 protect a fleet stay blocked behind the owner's ceremony decisions
 ([key-ceremony-survey.md](key-ceremony-survey.md): wrapping or import keys held in memory or in files are acceptable
 only as disposable development keys, discarded after use).
