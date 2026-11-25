@@ -53,7 +53,7 @@ PI_TESTS   := $(sort $(wildcard test/platform_image*_test.sh))
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
 	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools \
-	platform-image-xkmsd-smoke integration-test-platform-image
+	platform-image-xkmsd-smoke platform-image-xkmsd-target-check integration-test-platform-image
 
 help: ## List the targets
 	@echo "Targets:"
@@ -227,6 +227,10 @@ integration-test-platform-image: ## The platform-image row's checks: every test/
 
 platform-image-xkmsd-smoke: ## Fetch the go-xkms commit the xkmsd recipe pins, build it with the recipe's build script, start it on the development config dev/xkmsd-dev.yaml (temp dir), check ready and a clean stop, and check it fails closed on a read-only state dir (needs network, Go, gcc, libusb headers; XKMSD_SMOKE_CACHE keeps the checkout and Go caches)
 	@scripts/platform-image-xkmsd-smoke.sh
+
+platform-image-xkmsd-target-check: ## On a booted image over ssh (XKMSD_TARGET_HOST=<ssh destination>, required, root): xkmsd.service active as xkmsd under its sandbox, state on the xkms-state mount, no start on a read-only state mount (stops the unit and remounts for a moment; not in CI, no default host)
+	@[ -n "$${XKMSD_TARGET_HOST:-}" ] || { echo "platform-image-xkmsd-target-check: set XKMSD_TARGET_HOST to the ssh destination of a booted image"; exit 2; }
+	@scripts/platform-image-xkmsd-target-check.sh
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock

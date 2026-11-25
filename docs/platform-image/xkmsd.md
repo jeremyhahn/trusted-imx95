@@ -3,7 +3,9 @@
 Every setting here is a provisional default, pending the owner's answer on #14.
 xkmsd is go-xkms's daemon; this repository only packages it (SPEC.md,
 Boundaries). Files: `platform-image/recipes-security/xkmsd/` (recipe, unit, mount
-and config) and `scripts/platform-image-xkmsd-smoke.sh`.
+and config), `scripts/platform-image-xkmsd-smoke.sh` and
+`scripts/platform-image-xkmsd-target-check.sh` (the on-target check, §The
+on-target check).
 
 ## Key custody: which case applied
 
@@ -12,6 +14,10 @@ The production configuration (`files/xkmsd.yaml`, installed as
 where root can read them. The order was: use the enclave key-custody backend if
 go-xkms at the pin has one; if it has none, leave key operations unavailable
 until the enclave is provisioned.
+
+Approved by the owner, 2026-11-25 (queue 339): the production configuration drops
+software key custody, and key operations fail closed until the enclave is
+provisioned.
 
 **Case that applied: go-xkms has no enclave key-custody backend at the pin
 (`v0.64.2-alpha`, commit `9f040cea`), so production fails closed.** Read in the
@@ -109,26 +115,71 @@ posted from this repository): does xkmsd handle SIGTERM with a clean shutdown
 only after an unseal? `xkmsd.service` stops the daemon with SIGTERM, so a
 sealed node that dies by the signal reports a failed stop to systemd.
 
-## Checks on the real target: deferred (proposed, pending owner approval)
+## The on-target check
 
-Three checks need a booted image and are deferred to the image-build row
-(proposed, pending owner approval):
+`scripts/platform-image-xkmsd-target-check.sh` is the on-target check of the
+deployed unit and its state. It is to be run once an image is built and booted;
+nothing here has run it on a board. Its stubbed test,
+`test/platform_image_xkmsd_target_check_test.sh` (in `make test`), answers the
+script's ssh calls from fixtures, with one failing fixture for each property
+below, and runs no board and no network.
 
-- the unit starts under its sandbox as the `xkmsd` user (the smoke script runs
-  the daemon as the build user, outside the sandbox);
-- the unit refuses to start on a read-only state mount (the smoke script checks
-  the mount's read-only flag with `systemd-analyze condition`, not a real
-  read-only mount of the state partition);
-- state under `/var/lib/xkms` survives a reboot.
+Run it with `XKMSD_TARGET_HOST=<ssh destination> make platform-image-xkmsd-target-check`.
+There is no default host: the script and the make target refuse without the
+variable, and the repository names no host. The ssh user must be root;
+`XKMSD_TARGET_SSH_OPTS` adds ssh options. It fails closed: each of these
+that does not hold prints a `FAIL` line and the script exits non-zero.
 
-Nothing here boots an image: the wic layout is unbuilt and the smoke script runs
-on the build host. Proposed, pending owner approval: the image-build row boots
-the image, starts the unit as `xkmsd`, remounts the state partition read-only
-and checks the unit fails, writes a marker under `/var/lib/xkms`, reboots, and
-checks the marker and the mount. Until then the guarantee is only that the unit
-refuses to start without the mount, or on a read-only one (the checks above).
+1. **The unit and its sandbox.** `systemctl show xkmsd.service` reports the
+   unit `active` and `running` with a main process, `User=xkmsd` and
+   `Group=xkmsd`, and the effective sandbox of the unit: `NoNewPrivileges`,
+   `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`, `ProtectProc=invisible`,
+   the `ProtectKernel*`, `ProtectClock` and `ProtectControlGroups` switches,
+   `RestrictNamespaces`, `RestrictRealtime`, `RestrictSUIDSGID`,
+   `LockPersonality`, an empty `CapabilityBoundingSet` and `UMask=0077`. A
+   property that is missing from the output fails, it is not assumed.
+2. **The main process as the kernel sees it.** `/proc/<pid>/status` shows the
+   uid and gid of the image's `xkmsd` user in all four fields (not 0), no
+   capability in any set, `NoNewPrivs: 1` and `Seccomp: 2`. This is what the
+   smoke script cannot show: it runs the daemon as the build user, outside the
+   sandbox.
+3. **The state directory is the persistent state mount.** `findmnt` says
+   `/var/lib/xkms` is a mount point of ext4 labelled `xkms-state`, read-write,
+   `nosuid,nodev,noexec`; `var-lib-xkms.mount` is active with the `What=` and
+   `Where=` of the image layout; and the directory is owned by `xkmsd`, mode
+   0750.
+4. **The daemon refuses to start on a read-only state mount.** The script stops
+   the unit, remounts `/var/lib/xkms` read-only, starts the unit and requires
+   the start to fail and the unit not to be active (the unit's
+   `AssertPathIsReadWrite=`), then remounts read-write and starts the unit
+   again. Both restores must succeed, or the script fails and says to restore the
+   board by hand. A remount the kernel refused fails the check; it does not pass
+   it. This step changes the board for a moment, so it runs only when steps 1 to
+   3 passed.
 
-The bounded restart (`StartLimitBurst=5` in 300 seconds) is checked statically
-only: on a board the production config fails closed, so the enabled unit
-reaches `failed` after five starts. The image-build row confirms that on the
-target.
+**Expected result on a production image today.** The production configuration
+names no key custody (§Key custody), so the real daemon refuses it and the
+enabled unit reaches `failed` after five starts. Step 1 requires the unit to be
+active, so the script fails closed on such an image, at its first line. That is
+a true report, not a script fault: the unit is not serving. A run that passes
+needs a configuration the daemon accepts (the enclave backend, once go-xkms has
+one). Until then the script is checked against its stubs only.
+
+## Owner decisions, 2026-11-25 (queue 339)
+
+Two points of this page were proposals and are now **approved by the owner,
+2026-11-25**:
+
+- (a) **Key custody.** The production configuration drops software key custody,
+  and key operations fail closed until the enclave is provisioned: approved by
+  the owner, 2026-11-25. §Key custody describes what the file does.
+- (b) **Reboot persistence test deferred.** The check that state under
+  `/var/lib/xkms` survives a reboot (write a marker, reboot, read the marker and
+  the mount) is deferred to the image-build row: approved by the owner,
+  2026-11-25. Nothing here boots an image or reboots a board.
+
+Everything else the image-build row is to do on the target stays proposed,
+pending owner approval: boot the image, run the on-target check above, and
+confirm there that the bounded restart (`StartLimitBurst=5` in 300 seconds)
+takes the unit to `failed` on a production config that fails closed. That bound
+is checked statically only until then.
