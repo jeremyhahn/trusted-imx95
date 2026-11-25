@@ -332,4 +332,88 @@ neg "negative: another package named xkmsd-*" image_ok "$scratch/prefix.bb"
 printf '%s\n' 'IMAGE_INSTALL:append = " xkmsd"' >"$scratch/append.bb"
 t "an IMAGE_INSTALL:append installs xkmsd" image_ok "$scratch/append.bb"
 
+# The smoke script itself (scripts/platform-image-xkmsd-smoke.sh), run on a copy
+# of its tree with the fetch, the build and the daemon stubbed: git, go, gcc and
+# pkg-config are stubs on PATH, the tree's build script copies a stub daemon, and
+# the stub daemon serves a socket, stops on SIGTERM and refuses a read-only state
+# directory. The real fetch and build are the integration target's job (make
+# platform-image-xkmsd-smoke). A stubbed failure must fail the script, never skip.
+smk=$scratch/smk
+sx=$smk/platform-image/recipes-security/xkmsd
+mkdir -p "$smk/scripts" "$smk/bin" "$sx/files"
+cp "$ROOT/scripts/platform-image-xkmsd-smoke.sh" "$smk/scripts/"
+cp "$ROOT/$recipe_rel" "$sx/"
+cp "$ROOT/$conf_rel" "$sx/files/"
+cat >"$smk/bin/git" <<'EOF'
+#!/bin/sh
+d=.
+if [ "$1" = -C ]; then d=$2; shift 2; fi
+case $1 in
+init) mkdir -p "$d/.git" ;;
+fetch) if [ "${FAKE_FETCH:-}" = fail ]; then echo "stub: fetch refused" >&2; exit 128; fi ;;
+rev-parse) echo "$FAKE_REV" ;;
+esac
+EOF
+for tool in go gcc pkg-config; do printf '#!/bin/sh\nexit 0\n' >"$smk/bin/$tool"; done
+cat >"$sx/files/xkmsd-build.sh" <<'EOF'
+#!/bin/sh
+if [ "${FAKE_BUILD:-}" = fail ]; then echo "stub: build failed" >&2; exit 1; fi
+cp "$FAKE_DAEMON_SRC" "$2"
+chmod +x "$2"
+EOF
+cat >"$smk/fake-xkmsd.py" <<'EOF'
+#!/usr/bin/env python3
+import os, re, socket, sys, time
+if "-version" in sys.argv:
+    print("xkmsd " + os.environ["FAKE_PV"])
+    sys.exit(0)
+cfg = open(sys.argv[sys.argv.index("--config") + 1]).read()
+state = os.path.dirname(re.search(r'datastore:.*?path: "([^"]+)"', cfg, re.S).group(1))
+sock = re.search(r'socket_path: "([^"]+)"', cfg).group(1)
+mode = os.environ.get("FAKE_DAEMON", "")
+if mode == "noready":
+    print("stub: never ready")
+    sys.exit(1)
+if not os.access(state, os.W_OK):
+    if mode == "ignore-ro":
+        sys.exit(0)
+    print("stub: the state directory is read-only")
+    sys.exit(1)
+s = socket.socket(socket.AF_UNIX)
+s.bind(sock)
+s.listen(1)
+print("Unix socket server started", flush=True)
+while True:
+    time.sleep(1)
+EOF
+chmod +x "$smk/bin/"* "$sx/files/xkmsd-build.sh" "$smk/fake-xkmsd.py"
+spv=$(val "$ROOT/$recipe_rel" PV)
+srev=$(val "$ROOT/$recipe_rel" SRCREV)
+# smoke_run NAME [VAR=value...]: the copied script with a cache of its own.
+smoke_run() {
+	local name=$1
+	shift
+	run env PATH="$smk/bin:$PATH" XKMSD_SMOKE_REPO=file:///stub \
+		XKMSD_SMOKE_CACHE="$scratch/cache-$name" FAKE_REV="$srev" FAKE_PV="$spv" \
+		FAKE_DAEMON_SRC="$smk/fake-xkmsd.py" "$@" \
+		bash "$smk/scripts/platform-image-xkmsd-smoke.sh"
+}
+if [ "$(id -u)" = 0 ]; then
+	fail "the smoke script runs under stubs" "run as a non-root user: the script refuses root"
+else
+	smoke_run clean
+	check "smoke: a stubbed clean build-and-start passes" 0 "xkmsd-smoke: all passed" \
+		"ok   xkmsd reaches its ready state" "ok   xkmsd stops on SIGTERM" \
+		"ok   xkmsd refuses to start on a read-only state directory"
+	smoke_run fetch FAKE_FETCH=fail
+	check "smoke: a failed fetch fails, it does not skip" nonzero "FAIL: cannot fetch go-xkms $srev"
+	smoke_run build FAKE_BUILD=fail
+	check "smoke: a failed build fails, it does not skip" nonzero "FAIL: the recipe's build script failed"
+	smoke_run noready FAKE_DAEMON=noready
+	check "smoke: a daemon that never gets ready fails" nonzero "FAIL: xkmsd did not reach its ready state"
+	smoke_run ro FAKE_DAEMON=ignore-ro
+	check "smoke: a daemon that starts on a read-only state directory fails" nonzero \
+		"FAIL: xkmsd exited 0 on a read-only state directory"
+fi
+
 finish
