@@ -139,9 +139,13 @@ else
 		[ -n "${lk[$k]+x}" ] || fail "$k: in build-info.txt but not in $lock"
 	done
 
-	if [ "${bi[platform_image_dirty]:-}" = yes ] && [ "$allow_dirty" -eq 0 ]; then
-		fail "platform_image_dirty=yes: built from a tree with uncommitted inputs (--allow-dirty accepts it)"
-	fi
+	case ${bi[platform_image_dirty]-<missing>} in
+	no) ;;
+	yes)
+		[ "$allow_dirty" -eq 1 ] || fail "platform_image_dirty=yes: built from a tree with uncommitted inputs (--allow-dirty accepts it)"
+		;;
+	*) fail "platform_image_dirty=${bi[platform_image_dirty]-<missing>}: must be exactly yes or no (--allow-dirty does not accept it)" ;;
+	esac
 
 	# An SBOM for each target, listed in SHA256SUMS.
 	if [ -f "$out/SHA256SUMS" ] && [ -n "${bi[targets]+x}" ]; then

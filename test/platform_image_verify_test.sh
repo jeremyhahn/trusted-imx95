@@ -103,6 +103,22 @@ check "dirty without --allow-dirty" 1 "platform_image_dirty=yes"
 run bash "$script" --allow-dirty "$d"
 check "dirty with --allow-dirty" 0 "OK, 3 artefacts"
 
+# Anything but exactly yes or no fails closed, --allow-dirty or not.
+mk "$d" unknown
+run bash "$script" --allow-dirty "$d"
+check "dirty=unknown fails with --allow-dirty" 1 "platform_image_dirty=unknown: must be exactly yes or no"
+run bash "$script" "$d"
+check "dirty=unknown fails" 1 "platform_image_dirty=unknown: must be exactly yes or no"
+mk "$d"
+sed -i 's/^platform_image_dirty=.*/platform_image_dirty=/' "$d/build-info.txt"
+run bash "$script" "$d"
+check "dirty= (empty) fails" 1 "platform_image_dirty=: must be exactly yes or no"
+mk "$d"
+sed -i '/^platform_image_dirty=/d' "$d/build-info.txt"
+run bash "$script" "$d"
+check "no dirty line fails" 1 "must be exactly yes or no"
+mk "$d" yes
+
 # ALLOW_DIRTY through make: only exactly 1 accepts a dirty build.
 run make -C "$ROOT" platform-image-verify OUT="$d" ALLOW_DIRTY=0
 check "make ALLOW_DIRTY=0 stays strict" 2 "platform_image_dirty=yes"
