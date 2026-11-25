@@ -133,7 +133,40 @@ nv_value() {
 	done <"$1"
 	return 1
 }
-nv=${TRUSTED_IMX95_FTPM_NV:-$(nv_value "$nv_inc" TRUSTED_IMX95_FTPM_NV || true)}
+# conf_nv <file>: the last TRUSTED_IMX95_FTPM_NV assignment of a BitBake conf
+# file that overrides the recipe default (=, := or ?=), or nothing.
+conf_nv() {
+	local l v= re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"'
+	[ -f "$1" ] || return 0
+	while IFS= read -r l || [ -n "$l" ]; do
+		if [[ "$l" =~ $re ]]; then v=${BASH_REMATCH[3]}; fi
+	done <"$1"
+	printf '%s' "$v"
+}
+# The image build's own configuration is a second place the selection can be
+# made: the local.conf template and the conf/*.conf of the build directory
+# (platform-image-build.sh passes the same environment variable to bitbake and
+# refuses a bitbake that uses another value). A selection there that differs from
+# the environment's, or from another file's, fails here: the tee.bin of the boot
+# container and the image's OP-TEE must use the same storage.
+nv_env=${TRUSTED_IMX95_FTPM_NV:-}
+nv_conf=
+nv_conf_src=
+pi_build_conf=${PLATFORM_IMAGE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/trusted-imx95/platform-image}/build/conf
+for f in "$root/platform-image/conf/local.conf.template" "$pi_build_conf"/*.conf; do
+	[ -f "$f" ] || continue
+	v=$(conf_nv "$f")
+	[ -n "$v" ] || continue
+	if [ -n "$nv_conf" ] && [ "$v" != "$nv_conf" ]; then
+		die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$v' in $f but '$nv_conf' in $nv_conf_src; make them equal"
+	fi
+	nv_conf=$v
+	nv_conf_src=$f
+done
+if [ -n "$nv_env" ] && [ -n "$nv_conf" ] && [ "$nv_env" != "$nv_conf" ]; then
+	die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$nv_env' in the environment (this build) but '$nv_conf' in $nv_conf_src (bitbake's image build); make them equal"
+fi
+nv=${nv_env:-${nv_conf:-$(nv_value "$nv_inc" TRUSTED_IMX95_FTPM_NV || true)}}
 { [[ "$nv" =~ ^[a-z]+$ ]] &&
 	nv_set=$(nv_value "$nv_inc" "TRUSTED_IMX95_FTPM_NV_FLAGS[$nv]") &&
 	nv_sid=$(nv_value "$nv_bb" "FTPM_TA_STORAGE_ID[$nv]"); } ||

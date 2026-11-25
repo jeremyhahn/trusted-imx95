@@ -220,7 +220,7 @@ fullrun() {
 	shift 2
 	mkdir -p "$TMP_ROOT/$n"
 	: >"$TMP_ROOT/$n/make.log"
-	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" "$@" \
+	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" PLATFORM_IMAGE_DIR="$TMP_ROOT/pi-none" "$@" \
 		bash "$sw" --lock "$l" --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
 }
 nothing_published() { [ ! -e "$TMP_ROOT/$1/out/SHA256SUMS" ] && [ ! -e "$TMP_ROOT/$1/out/bl31.bin" ] && [ ! -e "$TMP_ROOT/$1/out/tee.bin" ]; }
@@ -313,6 +313,35 @@ done
 fullrun nv-bad "$oklock" TRUSTED_IMX95_FTPM_NV=emmc
 check "an unknown TRUSTED_IMX95_FTPM_NV is refused" nonzero "TRUSTED_IMX95_FTPM_NV must be reefs or rpmb, not emmc"
 expect "nothing is published for an unknown NV selection" nothing_published nv-bad
+
+# One selection for both builds (owner ruling 1234): the image build's own
+# configuration, the conf/*.conf of its build directory, selects the NV backend
+# of this build when the environment does not, and a disagreement with the
+# environment or between two files fails closed before anything is built.
+pi=$TMP_ROOT/pi-conf
+mkdir -p "$pi/build/conf"
+for nv in reefs rpmb; do
+	printf 'MACHINE = "x"\nTRUSTED_IMX95_FTPM_NV = "%s"\n' "$nv" >"$pi/build/conf/local.conf"
+	fullrun "nvconf-$nv" "$oklock" PLATFORM_IMAGE_DIR="$pi"
+	check "$nv in the image build's local.conf reaches this build" 0 "secure-world-build: OK"
+	nvc_log=$(<"$TMP_ROOT/nvconf-$nv/make.log")
+	nvc_set=$(flag_value "$nv_inc" TRUSTED_IMX95_FTPM_NV_FLAGS "$nv" || true)
+	nvc_os=$(printf '%s\n' "$nvc_log" | while IFS= read -r l; do [[ "$l" == *"/optee "* && "$l" == *" all" ]] && echo "$l"; done | head -n 1 || true)
+	expect "$nv in local.conf: OP-TEE OS carries the $nv flag set" carries_set "$nvc_os" "$nvc_set"
+	expect "$nv in local.conf: build-info.txt names $nv" has "$(<"$TMP_ROOT/nvconf-$nv/out/build-info.txt")" "ftpm-nv: $nv"
+	# the same value in the environment agrees
+	fullrun "nvconf-env-$nv" "$oklock" PLATFORM_IMAGE_DIR="$pi" TRUSTED_IMX95_FTPM_NV="$nv"
+	check "$nv in the environment and in local.conf agree" 0 "secure-world-build: OK"
+done
+printf 'TRUSTED_IMX95_FTPM_NV = "rpmb"\n' >"$pi/build/conf/local.conf"
+fullrun nvconf-clash "$oklock" PLATFORM_IMAGE_DIR="$pi" TRUSTED_IMX95_FTPM_NV=reefs
+check "reefs in the environment against rpmb in local.conf fails closed" nonzero "the fTPM NV backends disagree" "'reefs' in the environment" "'rpmb' in $pi/build/conf/local.conf"
+expect "an environment/local.conf NV disagreement publishes nothing" nothing_published nvconf-clash
+expect "an environment/local.conf NV disagreement builds nothing" test ! -s "$TMP_ROOT/nvconf-clash/make.log"
+printf 'TRUSTED_IMX95_FTPM_NV = "reefs"\n' >"$pi/build/conf/auto.conf"
+fullrun nvconf-two "$oklock" PLATFORM_IMAGE_DIR="$pi"
+check "two conf files that select different backends fail closed" nonzero "the fTPM NV backends disagree" "make them equal"
+expect "two disagreeing conf files publish nothing" nothing_published nvconf-two
 
 has_line() {
 	local l

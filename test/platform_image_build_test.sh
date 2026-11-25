@@ -47,9 +47,17 @@ cat >"$stub/bitbake" <<'EOF'
 #!/bin/sh
 case $1 in
 -m) exit 0 ;;
--e) # the effective values (BB_EXTRA_FEATURES: what an auto.conf adds), then SDE
+-e) # the effective values (BB_EXTRA_FEATURES: what an auto.conf adds), then SDE.
+	# TRUSTED_IMX95_FTPM_NV: BB_NV is a conf assignment (it wins); else the
+	# environment's, only when the script passes it through to bitbake; else the
+	# recipe default, reefs.
+	nv=${BB_NV:-}
+	if [ -z "$nv" ]; then
+		case " ${BB_ENV_PASSTHROUGH_ADDITIONS:-} " in *" TRUSTED_IMX95_FTPM_NV "*) nv=${TRUSTED_IMX95_FTPM_NV:-} ;; esac
+	fi
 	printf '%s\n' "MACHINE=\"$BB_MACHINE\"" "DISTRO=\"trusted-imx95\"" "INIT_MANAGER=\"$BB_INIT\"" \
-		"IMAGE_FEATURES=\"ssh-server-dropbear\"" "EXTRA_IMAGE_FEATURES=\"${BB_EXTRA_FEATURES:-}\""
+		"IMAGE_FEATURES=\"ssh-server-dropbear\"" "EXTRA_IMAGE_FEATURES=\"${BB_EXTRA_FEATURES:-}\"" \
+		"TRUSTED_IMX95_FTPM_NV=\"${nv:-reefs}\""
 	printf '%s\n' "${BB_E_OUT-export SOURCE_DATE_EPOCH=\"1700000000\"}"; exit 0 ;;
 esac
 echo "bitbake $*" >>"$BB_LOG"
@@ -377,6 +385,44 @@ check "a different effective INIT_MANAGER: refused" nonzero "INIT_MANAGER is 'ot
 rm -rf "$tmp/d" "$tmp/out"
 brun "$stub:$tools"
 check "no override: build ok again" 0 "OK, 6 artefacts"
+
+# The fTPM NV backend (owner ruling 1234) is one selection for this build and for
+# scripts/secure-world-build.sh. The stub bitbake sees the exported value only
+# when the script passes TRUSTED_IMX95_FTPM_NV through BB_ENV_PASSTHROUGH_ADDITIONS,
+# so a build that succeeds with rpmb or reefs exported shows the value reached
+# bitbake; a bitbake that uses another value fails the build closed.
+for nv in reefs rpmb; do
+	rm -rf "$tmp/d" "$tmp/out"
+	TRUSTED_IMX95_FTPM_NV=$nv brun "$stub:$tools"
+	check "TRUSTED_IMX95_FTPM_NV=$nv exported: reaches bitbake, build ok" 0 "OK, 6 artefacts" "fTPM NV backend $nv"
+done
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools"
+check "no TRUSTED_IMX95_FTPM_NV: the recipe default, reefs" 0 "OK, 6 artefacts" "fTPM NV backend reefs"
+# An exported value that a conf assignment overrides in bitbake: refused before building.
+for pair in rpmb:reefs reefs:rpmb; do
+	rm -rf "$tmp/d" "$tmp/out"
+	TRUSTED_IMX95_FTPM_NV=${pair%%:*} BB_NV=${pair##*:} brun "$stub:$tools"
+	check "exported ${pair%%:*}, bitbake uses ${pair##*:}: fails closed" nonzero "the fTPM NV backends disagree" "'${pair%%:*}' in the environment" "bitbake uses '${pair##*:}'"
+	expect "exported ${pair%%:*}, bitbake uses ${pair##*:}: bitbake built nothing" test -z "$(bbtargets)"
+	expect "exported ${pair%%:*}, bitbake uses ${pair##*:}: nothing published" test ! -e "$tmp/out"
+done
+# A value that is neither backend is refused.
+rm -rf "$tmp/d" "$tmp/out"
+BB_NV=emmc brun "$stub:$tools"
+check "bitbake uses an unknown backend: refused" nonzero "TRUSTED_IMX95_FTPM_NV is 'emmc', not reefs or rpmb"
+# The debug image refuses the effective rpmb, set in the environment or in a conf file.
+rm -rf "$tmp/d" "$tmp/out"
+PI_DEBUG=1 TRUSTED_IMX95_FTPM_NV=rpmb brun "$stub:$tools"
+check "debug image, rpmb exported: refused" nonzero "the debug image is for development boards only"
+expect "debug image, rpmb exported: bitbake built nothing" test -z "$(bbtargets)"
+rm -rf "$tmp/d" "$tmp/out"
+PI_DEBUG=1 BB_NV=rpmb brun "$stub:$tools"
+check "debug image, rpmb in a conf file: refused" nonzero "the debug image is for development boards only"
+rm -rf "$tmp/d" "$tmp/out"
+PI_DEBUG=1 TRUSTED_IMX95_FTPM_NV=reefs brun "$stub:$tools"
+check "debug image, reefs: builds" 0 "OK, 12 artefacts"
+rm -rf "$tmp/d" "$tmp/out"
 
 # An ignored input (.git/info/exclude) that BitBake still loads is dirty. The
 # build runs from a scratch git copy of the script and platform-image/.
