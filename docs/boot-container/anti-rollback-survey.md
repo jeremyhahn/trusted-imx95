@@ -25,15 +25,15 @@ This survey covers the public material on anti-rollback for AHAB containers on t
 
 ### 1.2 Not reached, or not public (unconfirmed)
 
-Requests from the lane to `www.nxp.com/docs/...` returned HTTP 404 for every document tried, including documents that NXP publishes. Nothing below was read. Claims that depend on these documents are marked **unconfirmed** in the text.
+Requests from the survey to `www.nxp.com/docs/...` returned HTTP 404 for every document tried, including documents that NXP publishes. Nothing below was read. Claims that depend on these documents are marked **unconfirmed** in the text.
 
 | Title | Why it matters | State |
 |-------|----------------|-------|
-| AN12312, *Secure Boot on i.MX 8 and i.MX 8X Families using AHAB* | The public explanation of AHAB versions and SRK revocation (for i.MX 8, not i.MX 95) | Not reached (HTTP 404 from the lane) |
+| AN12312, *Secure Boot on i.MX 8 and i.MX 8X Families using AHAB* | The public explanation of AHAB versions and SRK revocation (for i.MX 8, not i.MX 95) | Not reached (HTTP 404 from the survey) |
 | RM00284, *EdgeLock Secure Enclave firmware API reference* (cited by `docs/SPEC.md` §3.24 for the monotonic counter) | The meaning of the `ELE_COMMIT_REQ` index bits, and the monotonic counter | Not reached; public availability not confirmed |
 | IMX95RM, *i.MX 95 Applications Processor Reference Manual* | The fuse map: which fuse words hold the OEM version floor, and how many increments they allow | Listed as missing in `docs/SPEC.md`; not reached |
 | *i.MX 95 Security Reference Manual* | Boot ROM and ELE behaviour on a version mismatch | Listed as missing in `docs/SPEC.md`; NDA document, not public |
-| *i.MX Linux User's Guide* (NXP BSP documentation) | The BSP's documented `ahab_commit` flow | Not reached (HTTP 404 from the lane) |
+| *i.MX Linux User's Guide* (NXP BSP documentation) | The BSP's documented `ahab_commit` flow | Not reached (HTTP 404 from the survey) |
 | SPSDK documentation site, https://spsdk.readthedocs.io/ | User documentation for the AHAB configuration keys | Reachable, but not read in this slice; the survey relies on the SPSDK source (S10) |
 
 ## 2. The two version fields in the container header

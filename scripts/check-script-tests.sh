@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
-# check-script-tests.sh <threshold-percent>
-#
-# `make coverage` for a repository of scripts: the share of the project's own
-# scripts (scripts/, less the CI companions copied from the handbook
-# templates, which the handbook tests) that the tests under test/ execute.
-# Below the threshold it fails and names each untested script.
-#
-# A script counts only when a test runs it: test/*_test.sh run with shims for
-# bash, sh and python3 first on PATH, and each shim records the script it is
-# asked to run (not `-c` code, not a `-n` parse) before it execs the real
-# interpreter. Every project script starts through one of them (`#!/usr/bin/env
-# bash`, `#!/usr/bin/env python3`, or `sh script`). A name in a comment, a
-# string or a parse-only `bash -n` is not a test. A failing test fails this too.
+# check-script-tests.sh <threshold-percent>: share of project scripts the test/*_test.sh suite executes, recorded by interpreter shims; below the threshold it fails naming each untested script.
 set -euo pipefail
 
 threshold=${1:?usage: check-script-tests.sh <threshold-percent>}
@@ -65,6 +53,7 @@ for f in scripts/*.sh scripts/*.py; do
 	base=${f##*/}
 	case "$companions" in *" $base "*) continue ;; esac
 	[ "$base" = tool-pins.sh ] && continue # data, sourced by the others
+	[ "$base" = platform-image-effective.sh ] && continue # sourced by platform-image-parse.sh and -build.sh
 	total=$((total + 1))
 	ran=0
 	while IFS= read -r p; do

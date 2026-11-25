@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
-# platform-image-fetch.sh [LOCK [DIR]]: check out every layer platform-image/
-# manifest.lock pins into DIR, outside this clone, and fail when a layer's
-# checked-out commit differs from the lock. Needs the network; no Yocto build,
-# no key and no board is touched. Provisional default, pending the owner's
-# answer on #14 (docs/platform-image/build.md).
-#
-# DIR defaults to $PLATFORM_IMAGE_DIR, then ${XDG_CACHE_HOME:-$HOME/.cache}/
-# trusted-imx95/platform-image.
+# platform-image-fetch.sh [LOCK [DIR]]: checks out every layer platform-image/manifest.lock pins into DIR (default $PLATFORM_IMAGE_DIR, else the user cache) and fails on a commit mismatch.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)

@@ -1,6 +1,6 @@
 # oem-key-provisioning — architecture
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-12
+> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-24
 > The detail of the `oem-key-provisioning` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Every statement below cites a document and section listed in [references/README.md](../references/README.md).
@@ -47,9 +47,12 @@ The vendor's flow has two steps, in this order ([SPEC.md](../SPEC.md), `oem-key-
 
 - The device's life cycle moves from OEM open to OEM closed through the enclave (RM00284 §3.23).
 - **Irreversible. Needs the owner's explicit approval before it is run on any device.** Closing the life cycle is a
-  one-way step; this project treats it as irreversible, and when it is closed is the owner's question
-  ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
-  No lane and no build target closes it.
+  one-way step; this project treats it as irreversible.
+- **Owner ruling 1234:** the life cycle is closed only at the provisioning station, never on a development board.
+  Provisioning runs at that station. RPMB key programming for the [ftpm](../ftpm/README.md) row follows OEM close
+  at that station; it is the owner's decision alone and nothing in this repository performs it.
+  No lane and no build target closes the life cycle; `test/no_lifecycle_close_test.sh` fails the build if a script,
+  make target or workflow in this repository runs a life-cycle change or a fuse write.
 - What closing the life cycle enforces on the i.MX 95, at boot and in the enclave, comes from IMX95RM and the
   i.MX 95 Security Reference Manual, both missing (see [Missing](#missing)). The boot-side effect on container
   verification is the `boot-container` row's concern ([SPEC.md](../SPEC.md)).
@@ -71,17 +74,52 @@ A host-side check compares the SRK table hash of a public SRK set with an expect
 A host-side test builds and verifies a key-exchange signed message on a test SRK set; it sends nothing to a device
 ([key-exchange-msg.md](key-exchange-msg.md); wrapped-key blob format on test keys: [key-import-tlv.md](key-import-tlv.md), provisional).
 
+A host-side checker reads one station record file and refuses a missing field or a secret
+([record-format.md](record-format.md), proposed, pending owner approval); it touches no device.
+
+## Host-side policy check of a provisioning run
+
+`scripts/okp-policy-check.py` is a host-side test and audit tool for provisioning traces. It is not part of the
+provisioning interface: nothing in the provisioning flow calls it, and the SPEC row does not name it. It reads one
+JSONL trace of one provisioning run, one JSON record per step in the order the steps ran, named by `OKP_TRACE`
+(`make okp-policy-check OKP_TRACE=<file.jsonl>`) or passed as the script's argument. It performs no device step: it
+talks to no enclave, writes no fuse and closes no life cycle. It decides, failing closed, whether a recorded run
+kept this row, and refuses (exit 1) when it did not; a trace it cannot read or parse stops it with exit 2:
+
+- a `key_import` counts only after a `key_exchange` that succeeded earlier in the same run, the vendor's order
+  (AN14861 §2, §5.2, §5.3; RM00284 §3.20, §3.2.6.3), and only of a wrapped key;
+- the import is committed only with the outcome `"status": "ok"` (an absent, null, error or other status is not
+  committed) and when the enclave acknowledged both the strict-operation flag and the
+  monotonic-counter flag, returned no warning and the counter split is configured (RM00284 §2.4.2; owner
+  decision 241); the `warnings` field must be present and a list (empty means none), so an absent, null or
+  non-list `warnings` is not committed;
+- `counter_fuse_config` (RM00284 §3.24) and `lifecycle_close` from OEM open to OEM closed through the enclave
+  (RM00284 §3.23) each carry a recorded owner approval and run at most once, and complete the run only with the outcome
+  `"status": "ok"` (an absent, null, error, unknown or non-string status fails and completes nothing); a fuse write is accepted only when
+  `already_configured` is present and the JSON boolean false, so fuses already configured, or a prior state that
+  is absent, null or not a boolean, are not written;
+- a `counter_fuse_evidence` record (`configured: true` and a non-empty `evidence` reference) is read-only and
+  shows fuses configured before the run; it is refused after a fuse write in the same run;
+- the run must be complete: at the end of the trace the check requires a committed import, the counter fuses
+  configured (written in the run, or shown by `counter_fuse_evidence`) and the life-cycle close, so a trace that
+  stops after the key exchange fails;
+- no record carries a key in the clear, and a step the flow does not have fails.
+
+The relative order of the fuse write, the import and the close is not checked: the row's citations do not give it
+(see [Missing](#missing)). `make integration-test-oem-key-provisioning` drives the check through make on runs that
+keep and break the row.
+
 ## Order of the steps
 
 The steps that cannot be undone are marked; each needs the owner's explicit approval. The row is blocked on that
 approval ([SPEC.md](../SPEC.md), `oem-key-provisioning` row; RM00284 §3.23, §3.24).
 
-| Step | Source | Reversible |
-|---|---|---|
-| Key exchange with the enclave | AN14861 §2, §5.2; RM00284 §3.20 | Not given (see [Missing](#missing)) |
-| Import of the wrapped OEM key into the key store | AN14861 §5.3; RM00284 §3.2.6.3 | Not given (see [Missing](#missing)) |
-| Configure the monotonic counter fuses | RM00284 §3.24 | No: fuse write, owner's explicit approval |
-| Move the life cycle from OEM open to OEM closed | RM00284 §3.23 | No: life-cycle close, owner's explicit approval |
+| Step | Source | Reversible | Where it runs |
+|---|---|---|---|
+| Key exchange with the enclave | AN14861 §2, §5.2; RM00284 §3.20 | Not given (see [Missing](#missing)) | Provisioning station only (ruling 1234); the repository holds a host-side exercise on test keys only ([key-exchange-msg.md](key-exchange-msg.md)) |
+| Import of the wrapped OEM key into the key store | AN14861 §5.3; RM00284 §3.2.6.3 | Not given (see [Missing](#missing)) | Provisioning station only (ruling 1234); the repository holds a host-side exercise on test keys only ([key-import-tlv.md](key-import-tlv.md)) |
+| Configure the monotonic counter fuses | RM00284 §3.24 | No: fuse write, owner's explicit approval | Provisioning station only (ruling 1234); never on a development board; nothing in this repository runs it ([no_lifecycle_close_test.sh](../../test/no_lifecycle_close_test.sh)) |
+| Move the life cycle from OEM open to OEM closed | RM00284 §3.23 | No: life-cycle close, owner's explicit approval | Provisioning station only (ruling 1234); never on a development board; nothing in this repository runs it ([no_lifecycle_close_test.sh](../../test/no_lifecycle_close_test.sh)) |
 
 The order of the last two steps relative to each other, and relative to the key import, is not given by the
 SPEC row's citations (see [Missing](#missing)); the table lists them in the SPEC row's order, not as a decision.
@@ -118,8 +156,8 @@ SPEC row's citations (see [Missing](#missing)); the table lists them in the SPEC
 
 ## Open questions
 
-- When the life cycle is closed: the owner's ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
-- Where provisioning runs: the owner's ([SPEC.md](../SPEC.md), `oem-key-provisioning` row).
-- Whether provisioning uses NXP's SPSDK enclave tools or another path: the owner's.
+- Answered by the owner, 2026-11-23: provisioning at the station uses SPSDK, pinned at 3.13.0 in
+  `scripts/ahab/requirements.txt`. The 3.13.0 floor and the uuu/`libuuu` sub-choice are proposed, pending owner
+  approval ([provisioning-host-survey.md](provisioning-host-survey.md) §8, Q1 and Q7).
 - Which side calls the enclave's HSM API, the Cortex-A55 Linux side or the Cortex-M7: the owner's, under
   `secure-key-handling` ([SPEC.md](../SPEC.md)).

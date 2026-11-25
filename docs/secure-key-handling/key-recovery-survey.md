@@ -61,7 +61,7 @@ A build note matters for the i.MX 95. The library's `ele` build, which serves th
 
 ## 4. Which keys are unrecoverable by design, and which need a path
 
-The key classes below come from SPEC.md's rows. The recovery path for each follows §3. The "Decided by" column marks the classes whose recovery policy is go-xkms's or go-trusted-platform's to set, not this repository's. Neither project's documents were reachable from this lane (§6). So the column names the owner of each decision. It does not report what that owner has decided.
+The key classes below come from SPEC.md's rows. The recovery path for each follows §3. The "Decided by" column marks the classes whose recovery policy is go-xkms's or go-trusted-platform's to set, not this repository's. Neither project's documents were reachable from this survey (§6). So the column names the owner of each decision. It does not report what that owner has decided.
 
 | Key class | Where it lives | Recoverable? | Path (§3) | Decided by |
 |-----------|----------------|--------------|-----------|------------|
@@ -96,13 +96,13 @@ The key classes below come from SPEC.md's rows. The recovery path for each follo
 
 ## 6. What could not be confirmed
 
-- **How the ELE seals the key store files** under `/etc/ele/`: the key, whether it is chip-unique, and whether a copy loads on another i.MX 95. S1's headers, README and its generated API document (`doc/ele_hsm_api_document.rtf`, same tag) do not state it. The ELE firmware API manual (RM00284) is in the repository's private references, not on a public URL: `https://www.nxp.com/docs/en/reference-manual/RM00284.pdf` returned "page not available" from the lane.
+- **How the ELE seals the key store files** under `/etc/ele/`: the key, whether it is chip-unique, and whether a copy loads on another i.MX 95. S1's headers, README and its generated API document (`doc/ele_hsm_api_document.rtf`, same tag) do not state it. The ELE firmware API manual (RM00284) is in the repository's private references, not on a public URL: `https://www.nxp.com/docs/en/reference-manual/RM00284.pdf` returned "page not available" from the survey.
 - **Whether ELE firmware has a key export or migration command** that S1 does not expose. The PSA build of S1 has none at tag `lf-6.18.37-2.1.0`.
 - **Whether the i.MX 95 firmware serves any wrapped key import** usable for re-provisioning. S1's headers declare `hsm_import_key` and `hsm_key_exchange`, but S1's README at the same tag lists the Key Exchange and Key Import APIs as not supported on the i.MX 95 ([algorithm-support-survey.md](algorithm-support-survey.md) §3.2), and whether the OEM import path is a separate service is open (same survey, question 7). Needs NXP confirmation or validation on the board's firmware.
 - **The exact behaviour when an older key store copy is restored** on the same board after the monotonic counter has advanced, and whether a current-version snapshot taken after the latest committed update restores on the same SoC (§3.1). Needs NXP confirmation or validation on the board's firmware.
 - **The i.MX 95 Security Reference Manual and IMX95RM**: they are missing from the references (SPEC.md) and not public.
-- **NXP EdgeLock 2GO** (the service behind the `E2GO_TLV` import input in S1): the public product pages tried returned "page not available" from the lane. Its re-provisioning model for a replacement device is not surveyed.
-- **go-xkms's and go-trusted-platform's decisions** on key custody, device replacement and revocation: no public source was reachable from the lane, and the lane cannot read issues. §4 names who decides; it does not report what was decided.
+- **NXP EdgeLock 2GO** (the service behind the `E2GO_TLV` import input in S1): the public product pages tried returned "page not available" from the survey. Its re-provisioning model for a replacement device is not surveyed.
+- **go-xkms's and go-trusted-platform's decisions** on key custody, device replacement and revocation: no public source was reachable from the survey, and the survey cannot read issues. §4 names who decides; it does not report what was decided.
 - **The upstream Linux kernel and OP-TEE ELE support** were not surveyed. Neither is expected to add an export path beyond the firmware's, but that is not confirmed.
 
 ## 7. Questions for the owner

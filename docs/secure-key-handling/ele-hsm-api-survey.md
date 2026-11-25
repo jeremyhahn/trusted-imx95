@@ -11,7 +11,7 @@ It does not replace RM00284 (the ELE API reference SPEC.md cites). It runs no fu
 
 ## 2. Sources surveyed
 
-All sources are public. Each was reached from the lane on 2026-11-12 unless it is marked unreachable.
+All sources are public. Each was reached from the survey on 2026-11-12 unless it is marked unreachable.
 
 | Id | Source | Version surveyed | URL | What was read |
 |---|---|---|---|---|
@@ -24,9 +24,9 @@ All sources are public. Each was reached from the lane on 2026-11-12 unless it i
 | S7 | NXP, *mcux-secure-subsystem* (SSS API middleware) | branch `main`, commit `0b420d6`, 2026-10-09; SSS API 2.1.4 | https://github.com/nxp-mcuxpresso/mcux-secure-subsystem | `README.md`, `ChangeLog.txt` and the file layout |
 
 What could not be read:
-- The source files of S1 to S7 (C, headers, YAML, Kconfig) were not read. This lane may read code only inside this repository. Each claim above therefore rests on file names, READMEs, change logs, images and commit messages, never on the code itself.
-- S1's PDF API references (`doc/ele_hsm_api_document.pdf`, `doc/hsm_api_document.pdf`) could not be rendered: the lane has no PDF tool.
-- Issue #51 could not be read: the lane's `gh` is not authenticated. This survey works from the lane brief and SPEC.md.
+- The source files of S1 to S7 (C, headers, YAML, Kconfig) were not read. This survey may read code only inside this repository. Each claim above therefore rests on file names, READMEs, change logs, images and commit messages, never on the code itself.
+- S1's PDF API references (`doc/ele_hsm_api_document.pdf`, `doc/hsm_api_document.pdf`) could not be rendered: the survey has no PDF tool.
+- Issue #51 could not be read: the survey's `gh` is not authenticated. This survey works from the survey brief and SPEC.md.
 - lore.kernel.org answered HTTP 403, so the status of any ELE driver series posted to the Linux mailing lists is unknown.
 - RM00284 and the other NXP documents SPEC.md cites are in the private reference set, not public. This survey cites them only through SPEC.md.
 
@@ -40,7 +40,7 @@ Surveyed at tag `lf-6.18.37-2.1.0` [S1]. The library's own version file gives li
 - One source tree builds for several hardware IPs. `PLAT=ele` selects the ELE-HSM build [S1 README §2.2].
 - The README's platform table marks the i.MX 95 as supported for ELE-HSM. It also lists V2X-SHE and V2X-HSM for the i.MX 95, which run on the separate V2X accelerator, not on the EdgeLock enclave [S1 README Table 1].
 - The upstream repository is the GitHub mirror `nxp-imx/imx-secure-enclave`. Its tags follow the NXP Linux BSP release names (`lf-<kernel>-<bsp>`), so a BSP release pins one library version [S1 tag list].
-- It is licensed under BSD-3-Clause [S1 `LICENSE`; **Unconfirmed**: the SPDX identifier was not read from the file headers, because this lane may not read code outside the repository].
+- It is licensed under BSD-3-Clause [S1 `LICENSE`; **Unconfirmed**: the SPDX identifier was not read from the file headers, because this survey may not read code outside the repository].
 
 ### 3.2 The call model
 
@@ -60,7 +60,7 @@ Surveyed at tag `lf-6.18.37-2.1.0` [S1]. The library's own version file gives li
   - device attestation, device information, the monotonic counter, life-cycle update and fuse writes;
   - blobs and root-KEK export;
   - a "generic crypto" set (`hsm_gc_*`).
-- What each file does on the i.MX 95, and which messages the i.MX 95 firmware accepts, was **not confirmed** from the code. The lane may not read code outside the repository, and the PDF API reference (`doc/ele_hsm_api_document.pdf`) could not be rendered in the lane.
+- What each file does on the i.MX 95, and which messages the i.MX 95 firmware accepts, was **not confirmed** from the code. The survey may not read code outside the repository, and the PDF API reference (`doc/ele_hsm_api_document.pdf`) could not be rendered in the survey.
 - The `hsm_gc_*` files are present in the library. SPEC.md records that the Generic Crypto APIs are not available on the i.MX 95 (RM00284 §3.45). The library therefore builds calls that the i.MX 95 firmware is expected to reject; check this before relying on them.
 - The library ships a test program (`test/hsm/hsm_test.c`) and a performance test (`test/hsm/hsm_perf_test.c`) [S1 directory listing].
 
@@ -147,7 +147,7 @@ The M7 side may give better isolation from Linux, which the `hsm-self-defence` r
 5. How the NVM daemon's blob storage and the enclave's monotonic counter work together against a rolled-back `/etc/ele/`.
 6. Whether OP-TEE's use of the enclave (HUK and RNG) and the Linux driver can share the enclave on the same boot, and through which messaging units.
 7. Whether an ELE driver series is under review for mainline Linux (lore.kernel.org was unreachable).
-8. Issue #51's own text (not readable from the lane).
+8. Issue #51's own text (not readable from the survey).
 
 ## 8. Questions for the owner
 
@@ -190,6 +190,6 @@ The M7 side may give better isolation from Linux, which the `hsm-self-defence` r
    - (c) Defer until the secure-world row is decided.
 
    *Recommendation:* (c). The sources read do not show whether the two can share the enclave safely (§7 item 6).
-8. **May the lane obtain the missing documents?** The i.MX 95 edition or section of RM00284 that lists the HSM API messages per revision, IMX95RM for the messaging units, and a rendered copy of S1's API reference.
+8. **May the survey obtain the missing documents?** The i.MX 95 edition or section of RM00284 that lists the HSM API messages per revision, IMX95RM for the messaging units, and a rendered copy of S1's API reference.
 
    *Recommendation:* yes. Items 1–5 of §7 depend on them.

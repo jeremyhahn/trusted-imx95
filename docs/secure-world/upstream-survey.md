@@ -170,7 +170,7 @@ Files read in each tree:
 
 ## Questions for the owner
 
-Owner ruling 771 (2026-11-17) answers question 1 with (a) and question 2 with (b): the A55 secure world is upstream
+docs/SPEC.md (2026-11-17) answers question 1 with (a) and question 2 with (b): the A55 secure world is upstream
 TF-A (BL31) and OP-TEE from NXP's Linux BSP, with the firmware TPM and PKCS#11 TAs
 ([architecture.md](architecture.md#scope-owner-ruling-771)). For question 3 it fixes TF-A as upstream and OP-TEE
 as NXP's; the release is to be pinned, and the U-Boot tree is not settled by it. The questions are kept below as

@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-# platform-image-parse.sh [DIR]: the metadata check of platform-image/. Fetch the
-# layers platform-image/manifest.lock pins into DIR (scripts/platform-image-fetch.sh),
-# write the build directory's conf from the templates (refusing to overwrite a
-# conf that differs, unless PLATFORM_IMAGE_PARSE_FORCE=1), run `bitbake -p`,
-# then `bitbake -e <target>` for both image targets and check the effective
-# MACHINE (the lock's), DISTRO (local.conf.template's), INIT_MANAGER (the
-# distro's) and that IMAGE_FEATURES holds no root-login relaxation. No image is
-# built. Needs the network and a Yocto build host; it is not in CI.
-# Provisional default, pending the owner's answer on #14.
+# platform-image-parse.sh [DIR]: fetches the pinned layers, writes the build conf, runs bitbake -p and -e and checks MACHINE, DISTRO, INIT_MANAGER and IMAGE_FEATURES; needs a Yocto build host, not in CI.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -45,11 +37,7 @@ done
 phys=$(cd "$anc" && pwd -P)$rest
 case "$phys/" in "$root"/*) die "$dir is inside this clone; use a directory outside it" ;; esac
 
-# bitbake writes this generated, git-ignored file into its own tree on a run; the
-# fetch refuses a layer with ignored files, so a repeat run would fail on it.
-# Remove it only when git reports exactly that path as an ignored, untracked file
-# of the bitbake checkout; any other state (tracked, edited, untracked and not
-# ignored, no checkout) fails closed and nothing is deleted.
+# Remove bitbake's generated ignored file only when git reports exactly that path as ignored and untracked; anything else fails closed.
 bb=$phys/sources/bitbake
 pysh=lib/bb/pysh/pyshtables.py
 if [ -e "$bb/$pysh" ] || [ -L "$bb/$pysh" ]; then
@@ -107,27 +95,13 @@ fi
 trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 bitbake -p
 
-# bbval ENV KEY: the value of KEY in `bitbake -e` output (a value may span lines).
-bbval() {
-	printf '%s\n' "$1" | sed -n "/^$2=\"/{/\"\$/!{:a;N;/\"\$/!ba;};p;}" | sed -e "1s/^$2=\"//" -e '$s/"$//'
-}
-# must_equal TARGET KEY GOT WANT WHAT
-must_equal() {
-	[ "$3" = "$4" ] || { echo "platform-image-parse: $1: $2 is '$3', $5 '$4'" >&2; exit 1; }
-}
+# The effective-value checks (bbval, must_equal, effective_check) are shared with the build.
+export effective_who=platform-image-parse
+effective_machine=
+# shellcheck disable=SC1091
+. "$root/scripts/platform-image-effective.sh"
 for t in $targets; do
-	benv=$(bitbake -e "$t")
-	got=$(bbval "$benv" MACHINE)
-	must_equal "$t" MACHINE "$got" "$want" "the lock pins"
-	must_equal "$t" DISTRO "$(bbval "$benv" DISTRO)" "$want_distro" "local.conf.template sets"
-	must_equal "$t" INIT_MANAGER "$(bbval "$benv" INIT_MANAGER)" "$want_init" "the distro sets"
-	feats=$(bbval "$benv" IMAGE_FEATURES)
-	[ -n "$feats" ] || { echo "platform-image-parse: $t: no IMAGE_FEATURES in bitbake -e" >&2; exit 1; }
-	for bad in debug-tweaks empty-root-password allow-empty-password allow-root-login; do
-		case " $feats " in
-		*[[:space:]]"$bad"[[:space:]]*) echo "platform-image-parse: $t: IMAGE_FEATURES holds $bad" >&2; exit 1 ;;
-		esac
-	done
-	echo "platform-image-parse: $t MACHINE=$got DISTRO=$want_distro INIT_MANAGER=$want_init"
+	effective_check "$t" "$want" "$want_distro" "$want_init"
+	echo "platform-image-parse: $t MACHINE=$effective_machine DISTRO=$want_distro INIT_MANAGER=$want_init"
 done
 echo "platform-image-parse: OK"

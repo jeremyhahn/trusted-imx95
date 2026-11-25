@@ -40,17 +40,19 @@ NEED_TOOL = command -v $(1) >/dev/null 2>&1 || { echo "$@: $(1) is not on PATH o
 
 # Every shell script git tracks, and every Python script under scripts/.
 SH_SCRIPTS := $(sort $(wildcard scripts/*.sh scripts/ahab/*.sh test/*.sh test/integration/*.sh))
-PY_SCRIPTS := $(sort $(wildcard scripts/*.py))
+PY_SCRIPTS := $(sort $(wildcard scripts/*.py test/okp/*.py))
 UNIT_TESTS := $(sort $(wildcard test/*_test.sh))
 IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 
 .PHONY: help build test coverage integration-test integration-test-local security gosec \
-	deps-check lint lint-shell lint-workflows lint-docs docs-check check-tracked-cst cst-check \
+	deps-check pins-check pins-report lint lint-shell lint-python lint-workflows lint-docs docs-check check-tracked-cst cst-check \
 	secret-scan-tree secret-scan-history docker-build docker-build-toolchain \
-	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager secure-world ahab-sign-test \
-	sw-image sw-ref docker-build-sw \
-	ahab-m7-test ahab-policy-test ahab-tamper-test srk-hash-check okp-keyexchange-test okp-import-tlv-test \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools
+	docker-run toolchain-image it-image toolchain-ref it-ref tools system-manager integration-test-system-manager-config secure-world ahab-sign-test \
+	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
+	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
+	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
+	okp-policy-check integration-test-oem-key-provisioning \\
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
 help: ## List the targets
 	@echo "Targets:"
@@ -75,6 +77,8 @@ build: ## Build stage: every script parses, the Dockerfile base matches the pin 
 		'ARG SW_DEBIAN_SNAPSHOT=$(SW_DEBIAN_SNAPSHOT)' 'ARG SW_UV_VERSION=$(SW_UV_VERSION)' 'ARG SW_UV_SHA256=$(SW_UV_SHA256)'; do \
 		found=0; while IFS= read -r line; do [ "$$line" != "$$want" ] || found=1; done < $(DOCKERFILE); \
 		[ "$$found" = 1 ] || { echo "build: $(DOCKERFILE) lacks '$$want' (scripts/tool-pins.sh)"; exit 1; }; done
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
 	@echo "build: OK ($(words $(SH_SCRIPTS)) shell and $(words $(PY_SCRIPTS)) Python scripts parse)"
 
 test: check-tracked-cst ## Unit tests: the CST guard first, then every test/*_test.sh
@@ -113,17 +117,33 @@ integration-test-local: ## Integration tests in the current environment (in the 
 
 security: check-tracked-cst secret-scan-tree secret-scan-history ## Security stage: CST guard and secret scans of the tree and the history
 
+pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt are well formed and self-consistent, and no doc or script restates a moved python/alpine version
+	@scripts/pins-check.sh scripts/tool-pins.sh scripts/ahab/requirements.txt
+	@scripts/pins-drift-check.sh scripts/tool-pins.sh .
+
+pins-report: ## Offline: print every pin (tools, images, requirements, workflow actions) from the files in the tree
+	@scripts/pins-report.sh scripts/tool-pins.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt .github/workflows
+
 deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs the network)
 	@scripts/deps-check.sh scripts/tool-pins.sh
 
 ## --- The lint-class gates the canonical ci.yml runs on the PR tier ---
 
-lint: lint-shell lint-workflows lint-docs docs-check ## shellcheck, actionlint, the Markdown link check and docs-check
+lint: lint-shell lint-python lint-workflows lint-docs docs-check ## shellcheck, the Python parse check, actionlint, the Markdown link check and docs-check
 
 lint-shell: ## shellcheck every shell script
 	@$(call NEED_TOOL,shellcheck)
 	@shellcheck -x $(SH_SCRIPTS)
 	@echo "lint-shell: OK ($(words $(SH_SCRIPTS)) scripts)"
+
+# PY_SCRIPTS includes the test-only helpers under test/okp/. ast.parse writes
+# no __pycache__ into the clone.
+lint-python: ## Every Python script and test helper parses (python3 only)
+	@[ -n "$(PY_SCRIPTS)" ] || { echo "lint-python: no Python script found"; exit 1; }
+	@for f in $(PY_SCRIPTS); do \
+		python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$$f" \
+		|| { echo "lint-python: $$f does not parse"; exit 1; }; done
+	@echo "lint-python: OK ($(words $(PY_SCRIPTS)) scripts: $(PY_SCRIPTS))"
 
 lint-workflows: ## actionlint every workflow (with shellcheck of their run steps)
 	@$(call NEED_TOOL,actionlint)
@@ -164,6 +184,9 @@ tools: ## Install the pinned, digest-checked tools of scripts/tool-pins.sh into 
 system-manager: ## Build m33_image.bin from system-manager/sm.lock twice, in clean trees; fail unless identical
 	@scripts/sm-build.sh system-manager/sm.lock
 
+integration-test-system-manager-config: ## The system-manager-config row end to end: make system-manager on a fake imx-sm, the M7 grants, the row's documents (offline)
+	@bash test/integration/system_manager_config_test.sh
+
 sm-toolchain-check: ## In the devcontainer image: build the System Manager with the pinned Arm toolchain, then run its real arm-none-eabi-gcc --version (needs Docker and network)
 	@$(MAKE) docker-run CMD='scripts/sm-toolchain-check.sh'
 
@@ -179,11 +202,21 @@ SW_BASE  ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/secure-world
 SW_WORK  ?= $(SW_BASE)/work
 SW_OUT   ?= $(CURDIR)/.secure-world/out
 SW_CACHE ?= $(SW_BASE)/cache
+SW_LOCK  ?= $(CURDIR)/secure-world/bsp.lock
 
 secure-world: ## Build bl31.bin and tee.bin (fTPM and PKCS#11 early TAs) from secure-world/bsp.lock into SW_OUT, with SHA256SUMS
-	@scripts/secure-world-build.sh --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --work "$(SW_WORK)" --out "$(SW_OUT)" --cache "$(SW_CACHE)"
+
+secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>): its pins and owner ruling 771's sources; no fetch, no build
+	@scripts/secure-world-build.sh --lock "$(SW_LOCK)" --check-lock
+
+integration-test-secure-world: ## The secure-world integration test (test/integration/secure_world_test.sh), offline
+	@bash test/integration/secure_world_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
+
+platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing; ARGS=--repro builds twice in separate directories and publishes only if the two outputs are identical)
+	@scripts/platform-image-build.sh $(ARGS)
 
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock
@@ -196,6 +229,14 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS layer has a conf/layer.conf, its LAYERDEPENDS are provided and its LAYERSERIES_COMPAT has the oe-core series (needs a fetched tree, no bitbake; not in CI)
+	@scripts/platform-image-layer-check.sh
+
+platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 accepts a dirty build) against platform-image/manifest.lock: SHA256SUMS, machine, manifest and layer commits, an SBOM per target (offline, needs no bitbake; not in CI)
+	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
+	@case "$(ALLOW_DIRTY)" in ""|0|1) ;; *) echo "platform-image-verify: ALLOW_DIRTY must be 0, 1 or empty (empty or 0 = off, 1 = on), got '$(ALLOW_DIRTY)'" >&2; exit 2 ;; esac
+	@scripts/platform-image-verify.sh $(if $(filter 1,$(ALLOW_DIRTY)),--allow-dirty) "$(OUT)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
@@ -213,11 +254,58 @@ ahab-policy-test: ## Check a test-PKI container against a policy file written fr
 ahab-tamper-test: ## Tamper a test-PKI container (truncation, entry hash, used SRK id, SRK table) and check nxpimage ahab verify rejects each (no board, no fuse)
 	@test/ahab_tamper_test.sh
 
+ahab-hsm-test: ## Sign the Cortex-M7 container through SPSDK's proxy signer with the key held by a test HSM, never by the build (AN14471 custody model; test PKI, no board, no fuse)
+	@scripts/ahab/hsm-sign-test.sh
+
+# The boot-container row end to end through its make targets (SPEC.md,
+# `boot-container`): sign and verify, the Cortex-M7 container, HSM custody,
+# the policy and anti-rollback floor, tampering, the assembled boot image.
+# It needs the pinned SPSDK (SPSDK_VENV, as in the toolchain image, or the
+# network to install it), so it is not in the integration image's suite.
+integration-test-boot-container: ## The boot-container row end to end: ahab-sign-test, ahab-m7-test, ahab-hsm-test, ahab-policy-test, ahab-tamper-test, boot-image-test (pinned SPSDK; test PKI, no board, no fuse)
+	@for t in ahab-sign-test ahab-m7-test ahab-hsm-test ahab-policy-test ahab-tamper-test boot-image-test; do \
+		echo "--- make $$t"; \
+		$(MAKE) --no-print-directory "$$t" || { echo "integration-test-boot-container: FAIL $$t"; exit 1; }; \
+	done
+	@echo "integration-test-boot-container: OK"
+
+## --- The test-PKI boot image (docs/boot-container/boot-image.md; no board, no flash) ---
+
+BI_OUT ?= $(CURDIR)/out/boot-image
+export BI_M7
+
+boot-image-inputs: ## Collect the boot image inputs into BI_OUT/inputs (stand-ins, labelled, for what is not built; the Cortex-M7 image is trusted-firmware's: BI_M7=<file>, else a stand-in)
+	@scripts/boot-image-inputs.sh --check
+	@scripts/boot-image-inputs.sh --collect "$(BI_OUT)/inputs" $${BI_M7:+--m7 "$$BI_M7"} $${BI_UBOOT:+--uboot "$$BI_UBOOT"} $${BI_ELE:+--ele "$$BI_ELE"}
+
+boot-image-test: boot-image-inputs ## Assemble, sign (test PKI outside the tree, pinned SPSDK), verify every container and tamper-test every payload; image and SHA256SUMS in BI_OUT
+	@scripts/ahab/boot-image.sh --inputs "$(BI_OUT)/inputs" --out "$(BI_OUT)"
+
 okp-keyexchange-test: ## Build and verify a key_exchange_req signed message on a throwaway test SRK set (pinned SPSDK; message format only, sends nothing, no board, no fuse)
 	@test/key_exchange_test.sh
 
 okp-import-tlv-test: ## Build, parse and verify a key_import TLV blob (wrapped key) on throwaway test keys (pinned SPSDK; test only, sends nothing, no board, no fuse, no production import path)
 	@test/key_import_test.sh
+
+skh-policy-check: ## Check a trace of enclave operations against the secure-key-handling row (SKH_TRACE=<file.jsonl>; HSM API only, keys never in the clear, both rollback flags acknowledged; host-side, no enclave)
+	@[ -n "$(SKH_TRACE)" ] || { echo "skh-policy-check: set SKH_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/skh-policy-check.py "$(SKH_TRACE)"
+
+integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
+	@bash test/integration/secure_key_handling_test.sh
+
+# OKP_TRACE reaches the recipe through the environment, never expanded into its shell source.
+export OKP_TRACE
+
+okp-policy-check: ## Check the trace of a provisioning run against the oem-key-provisioning row (OKP_TRACE=<file.jsonl>; key exchange then wrapped-key import with both rollback flags, fuses and the close recorded once and owner-approved; host-side, no enclave)
+	@[ -n "$$OKP_TRACE" ] || { echo "okp-policy-check: set OKP_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/okp-policy-check.py "$$OKP_TRACE"
+
+integration-test-oem-key-provisioning: ## Integration test of the oem-key-provisioning row: make okp-policy-check end to end on provisioning runs that keep and break the row
+	@bash test/integration/oem_key_provisioning_test.sh
+
+integration-test-device-lifecycle: ## Integration test of the device-lifecycle row: the A55 collector, then endorse-01, enroll-01, device-attest-01 (tpm) against a stand-in control plane (no board, no TPM)
+	@bash test/integration/device_lifecycle_test.sh
 
 srk-hash-check: ## Compare the SRK table hash of four public SRK PEMs with an expected-hash file (SRK_EXPECTED=<file> SRK_FILES="<srk0> <srk1> <srk2> <srk3>"; pinned SPSDK; host-side only, no fuse)
 	@[ -n "$$SRK_EXPECTED" ] && [ -n "$$SRK_FILES" ] || { echo "srk-hash-check: set SRK_EXPECTED=<file> and SRK_FILES=\"<srk0> <srk1> <srk2> <srk3>\""; exit 2; }
