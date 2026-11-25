@@ -13,6 +13,8 @@ expect "the lock names a machine" test -n "$want"
 
 tmp=$TMP_ROOT
 real_bash=$(command -v bash)
+BB_INIT=$(sed -n 's/^INIT_MANAGER[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$ROOT/platform-image/conf/distro/trusted-imx95.conf" | sed -n '$p')
+export BB_INIT
 hosttools="gcc g++ make git python3 tar xz bzip2 patch perl unzip wget diffstat chrpath gawk cpio file socat zstd lz4c"
 
 # A PATH with only the tools the script uses; the host tools are stubs.
@@ -45,7 +47,10 @@ cat >"$stub/bitbake" <<'EOF'
 #!/bin/sh
 case $1 in
 -m) exit 0 ;;
--e) printf '%s\n' "${BB_E_OUT-export SOURCE_DATE_EPOCH=\"1700000000\"}"; exit 0 ;;
+-e) # the effective values (BB_EXTRA_FEATURES: what an auto.conf adds), then SDE
+	printf '%s\n' "MACHINE=\"$BB_MACHINE\"" "DISTRO=\"trusted-imx95\"" "INIT_MANAGER=\"$BB_INIT\"" \
+		"IMAGE_FEATURES=\"ssh-server-dropbear\"" "EXTRA_IMAGE_FEATURES=\"${BB_EXTRA_FEATURES:-}\""
+	printf '%s\n' "${BB_E_OUT-export SOURCE_DATE_EPOCH=\"1700000000\"}"; exit 0 ;;
 esac
 echo "bitbake $*" >>"$BB_LOG"
 [ -z "${BB_FAIL:-}" ] || exit 1
@@ -330,12 +335,28 @@ expect "build-info holds checkout_commit" test "${info##*"checkout_commit=$head"
 expect "build-info holds the dirty marker" test "${info##*"platform_image_dirty="*}" != "$info"
 expect "build-info holds the dirty sha256" test "${info##*"platform_image_dirty_sha256="*}" != "$info"
 
+# A conf/auto.conf the templates do not know sets EXTRA_IMAGE_FEATURES: bitbake -e
+# shows it, and the build is refused before bitbake builds anything.
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools"
+printf 'EXTRA_IMAGE_FEATURES = "debug-tweaks"\n' >"$tmp/d/build/conf/auto.conf"
+rm -rf "$tmp/out"
+BB_EXTRA_FEATURES=debug-tweaks brun "$stub:$tools"
+check "auto.conf EXTRA_IMAGE_FEATURES=debug-tweaks: refused" nonzero "EXTRA_IMAGE_FEATURES holds debug-tweaks"
+expect "auto.conf debug-tweaks: bitbake built nothing" test -z "$(bbtargets)"
+rm -rf "$tmp/d" "$tmp/out"
+BB_INIT=other brun "$stub:$tools"
+check "a different effective INIT_MANAGER: refused" nonzero "INIT_MANAGER is 'other'"
+rm -rf "$tmp/d" "$tmp/out"
+brun "$stub:$tools"
+check "no override: build ok again" 0 "OK, 6 artefacts"
+
 # An ignored input (.git/info/exclude) that BitBake still loads is dirty. The
 # build runs from a scratch git copy of the script and platform-image/.
 sc=$tmp/scratch-clone
 rm -rf "$sc" "$tmp/d" "$tmp/out"
 mkdir -p "$sc/scripts"
-cp "$script" "$sc/scripts/"
+cp "$script" "$ROOT/scripts/platform-image-effective.sh" "$sc/scripts/"
 cp -r "$ROOT/platform-image" "$sc/platform-image"
 git -C "$sc" init -q
 git -C "$sc" add -A

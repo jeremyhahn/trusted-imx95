@@ -95,27 +95,12 @@ fi
 trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 bitbake -p
 
-# bbval ENV KEY: the value of KEY in `bitbake -e` output (a value may span lines).
-bbval() {
-	printf '%s\n' "$1" | sed -n "/^$2=\"/{/\"\$/!{:a;N;/\"\$/!ba;};p;}" | sed -e "1s/^$2=\"//" -e '$s/"$//'
-}
-# must_equal TARGET KEY GOT WANT WHAT
-must_equal() {
-	[ "$3" = "$4" ] || { echo "platform-image-parse: $1: $2 is '$3', $5 '$4'" >&2; exit 1; }
-}
+# The effective-value checks (bbval, must_equal, effective_check) are shared with the build.
+effective_who=platform-image-parse
+# shellcheck source=platform-image-effective.sh
+. "$root/scripts/platform-image-effective.sh"
 for t in $targets; do
-	benv=$(bitbake -e "$t")
-	got=$(bbval "$benv" MACHINE)
-	must_equal "$t" MACHINE "$got" "$want" "the lock pins"
-	must_equal "$t" DISTRO "$(bbval "$benv" DISTRO)" "$want_distro" "local.conf.template sets"
-	must_equal "$t" INIT_MANAGER "$(bbval "$benv" INIT_MANAGER)" "$want_init" "the distro sets"
-	feats=$(bbval "$benv" IMAGE_FEATURES)
-	[ -n "$feats" ] || { echo "platform-image-parse: $t: no IMAGE_FEATURES in bitbake -e" >&2; exit 1; }
-	for bad in debug-tweaks empty-root-password allow-empty-password allow-root-login; do
-		case " $feats " in
-		*[[:space:]]"$bad"[[:space:]]*) echo "platform-image-parse: $t: IMAGE_FEATURES holds $bad" >&2; exit 1 ;;
-		esac
-	done
-	echo "platform-image-parse: $t MACHINE=$got DISTRO=$want_distro INIT_MANAGER=$want_init"
+	effective_check "$t" "$want" "$want_distro" "$want_init"
+	echo "platform-image-parse: $t MACHINE=$effective_machine DISTRO=$want_distro INIT_MANAGER=$want_init"
 done
 echo "platform-image-parse: OK"

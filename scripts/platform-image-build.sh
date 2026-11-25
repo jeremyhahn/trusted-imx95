@@ -258,6 +258,19 @@ else
 	} | sha256sum | sed 's/ .*//')
 fi
 
+# What bitbake will use, not only the templates: a reused build/conf may hold an
+# auto.conf or site.conf. MACHINE, DISTRO, INIT_MANAGER and the prohibited image
+# features are checked for each target (the checks platform-image-parse.sh runs).
+want_init=$(sed -n 's/^INIT_MANAGER[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$root/platform-image/conf/distro/trusted-imx95.conf" | sed -n '$p')
+[ -n "$want_init" ] || die "no INIT_MANAGER in the distro conf"
+effective_who=platform-image-build
+# shellcheck source=platform-image-effective.sh
+. "$root/scripts/platform-image-effective.sh"
+for t in $targets; do
+	effective_check "$t" "$machine" "$distro" "$want_init"
+done
+distro=$effective_distro
+
 start=$(date +%s)
 # PLATFORM_IMAGE_BITBAKE_ARGS (for example -k) goes before the targets.
 # shellcheck disable=SC2086
