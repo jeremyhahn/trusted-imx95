@@ -263,8 +263,9 @@ fi
 # features are checked for each target (the checks platform-image-parse.sh runs).
 want_init=$(sed -n 's/^INIT_MANAGER[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$root/platform-image/conf/distro/trusted-imx95.conf" | sed -n '$p')
 [ -n "$want_init" ] || die "no INIT_MANAGER in the distro conf"
-effective_who=platform-image-build
-# shellcheck source=platform-image-effective.sh
+export effective_who=platform-image-build
+effective_distro=
+# shellcheck disable=SC1091
 . "$root/scripts/platform-image-effective.sh"
 for t in $targets; do
 	effective_check "$t" "$machine" "$distro" "$want_init"

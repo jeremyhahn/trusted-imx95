@@ -96,8 +96,9 @@ trap 'bitbake -m >/dev/null 2>&1 || true' EXIT
 bitbake -p
 
 # The effective-value checks (bbval, must_equal, effective_check) are shared with the build.
-effective_who=platform-image-parse
-# shellcheck source=platform-image-effective.sh
+export effective_who=platform-image-parse
+effective_machine=
+# shellcheck disable=SC1091
 . "$root/scripts/platform-image-effective.sh"
 for t in $targets; do
 	effective_check "$t" "$want" "$want_distro" "$want_init"
