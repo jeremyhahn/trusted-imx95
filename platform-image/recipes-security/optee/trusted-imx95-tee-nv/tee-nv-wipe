@@ -25,7 +25,8 @@
 # non-zero; a sector or record that cannot be written exits non-zero (after the
 # wipe, so no old NV is left); tee-supplicant, which requires this unit, then
 # does not start. A saved record that exists but cannot be read also stops the
-# unit and touches nothing.
+# unit and touches nothing, as do a read-only /data and a rebind whose root
+# device is read-only (both checked before the wipe).
 #
 # TEE_NV_DATA, TEE_NV_ROOTFS_ID, TEE_NV_ROOTDEV (the root partition's device),
 # TEE_NV_MOUNTINFO, TEE_NV_SYS, TEE_NV_DEV and TEE_NV_RANDOM exist for the test
@@ -46,6 +47,14 @@ die() { echo "tee-nv-wipe: $*" >&2; exit 1; }
 cur=$(cat "$idfile") || die "cannot read $idfile"
 [ -n "$cur" ] || die "$idfile is empty"
 [ -d "$data" ] || die "$data is not a directory"
+# No temporary file outlives the run, whatever stops it.
+trap 'rm -f "$data/.root-token.read" "$data/.root-token.check" "$data/.tee-root-token.new" "$data/.tee-rootfs-id.new" "$data/.tee-nv-wipe.probe"' EXIT
+# /data must take a file: the token sector is read through it, and a rebind
+# writes the records there. A read-only /data stops here and touches nothing
+# (it would otherwise fail the read and wipe what it can of the NV).
+probe=$data/.tee-nv-wipe.probe
+true >"$probe" || die "$data is read-only or full: the token cannot be checked nor the records written; leaving $data/tee alone"
+rm -f "$probe"
 
 # The device that holds /, from the major:minor of the last mount on / and sysfs.
 if [ -z "$rootdev" ]; then
@@ -127,6 +136,22 @@ if [ "$valid" = 1 ] && [ "$rtok" = "$stok" ] && [ "$saved" = "$cur" ]; then
 	exit 0
 fi
 
+# A rebind writes the root device, so it is checked before anything is touched
+# (/data was checked at the start). The image mounts / read-only, and the root
+# device may refuse writes (its sysfs ro flag set, a write-protected medium, a
+# kernel that will not open a mounted device for writing). Wiping first would leave
+# a wiped NV and no token, and every later boot would wipe again; a read-only
+# target therefore exits non-zero and changes nothing. tee-supplicant then does
+# not start, so the old NV stays unused, and the first boot with writable
+# targets rebinds. A bound root needs no write and boots on a read-only device.
+rofile=$sys/class/block/${rootdev##*/}/ro
+if [ -e "$rofile" ]; then
+	rof=$(cat "$rofile") || die "cannot read $rofile; leaving $data/tee alone"
+	[ "$rof" = 0 ] || die "$rootdev is read-only ($rofile is $rof): the root token cannot be written; leaving $data/tee alone"
+fi
+true 1<>"$rootdev" ||
+	die "$rootdev cannot be opened for writing (a read-only medium, or the kernel refuses writes to a mounted device): the root token cannot be written; leaving $data/tee alone"
+
 echo "tee-nv-wipe: root token or rootfs identity changed, missing or unequal: wiping $data/tee" >&2
 wipe
 
@@ -145,11 +170,11 @@ rm -f "$tmp"
 [ "$back" = "$tok" ] || die "the token sector of $rootdev did not keep the token"
 
 tmp=$data/.tee-root-token.new
-printf '%s\n' "$tok" >"$tmp"
+printf '%s\n' "$tok" >"$tmp" || die "cannot write $tmp"
 sync
-mv -f "$tmp" "$data/tee-root-token"
+mv -f "$tmp" "$data/tee-root-token" || die "cannot rename $tmp to $data/tee-root-token"
 tmp=$data/.tee-rootfs-id.new
-printf '%s\n' "$cur" >"$tmp"
+printf '%s\n' "$cur" >"$tmp" || die "cannot write $tmp"
 sync
-mv -f "$tmp" "$data/tee-rootfs-id"
+mv -f "$tmp" "$data/tee-rootfs-id" || die "cannot rename $tmp to $data/tee-rootfs-id"
 sync

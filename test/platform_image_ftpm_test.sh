@@ -604,6 +604,72 @@ expect "real layout: a file-system-only rewrite runs ok" test "$(wipe_run)" -eq 
 expect "real layout: a file-system-only rewrite wipes the NV" test ! -e "$wt/data/tee/obj"
 rootdev=$rootdev_small
 rm -f "$real" "$wt/image.real"
+
+# A read-only target (Codex P1, PR #158 round 3, tee-nv-wipe:138). The image mounts / read-only;
+# a root device that refuses writes (its sysfs ro flag, a write-protected medium, a kernel that
+# will not open a mounted device for writing) or a /data that takes no file must stop the unit
+# before anything is touched: non-zero, a clear error, the NV, both token copies and the record
+# as they were, and no temporary file left behind.
+ro_setup() { # a bound root, then the same image written again: the next boot must rebind
+	rm -rf "$wt/data/tee" "$wt/data/tee-rootfs-id" "$wt/data/tee-root-token" "$wt/sys"
+	mkdir -p "$wt/data/tee"
+	printf 'id-A\n' >"$wt/rootfs-id"
+	mkroot "$rootdev" 2
+	wipe_run >/dev/null
+	mkroot "$rootdev" 2
+	printf 'seed\n' >"$wt/data/tee/obj"
+	ro_tok=$(cat "$wt/data/tee-root-token" 2>/dev/null || true)
+	cp "$rootdev" "$wt/root.before"
+}
+ro_run() { # ro_run [VAR=value...]: the wipe's exit status in ro_rc, its stderr in ro_err
+	ro_rc=0
+	ro_err=$(env TEE_NV_DATA="$wt/data" TEE_NV_ROOTFS_ID="$wt/rootfs-id" TEE_NV_ROOTDEV="$rootdev" "$@" \
+		bash "$wipe" 2>&1 >/dev/null) || ro_rc=$?
+}
+holds() { [ -f "$1" ] && [ "$(cat "$1" 2>/dev/null)" = "$2" ]; } # holds FILE TEXT
+ro_untouched() {
+	holds "$wt/data/tee/obj" seed && holds "$wt/data/tee-root-token" "$ro_tok" &&
+		holds "$wt/data/tee-rootfs-id" id-A && cmp -s "$rootdev" "$wt/root.before" &&
+		[ "$(LC_ALL=C ls -A "$wt/data" | tr '\n' ' ')" = "tee tee-root-token tee-rootfs-id " ]
+}
+ro_flag() { mkdir -p "$wt/sys/class/block/${rootdev##*/}" && printf '%s\n' "$1" >"$wt/sys/class/block/${rootdev##*/}/ro"; }
+ro_setup
+ro_flag 1
+ro_run TEE_NV_SYS="$wt/sys"
+expect "read-only root device (sysfs ro=1): the unit fails (supplicant does not start)" test "$ro_rc" -ne 0
+expect "read-only root device (sysfs ro=1): nothing wiped or half-written" ro_untouched
+expect "read-only root device (sysfs ro=1): the error names the read-only device" has_in "$ro_err" "$rootdev is read-only"
+if [ "$(id -u)" -ne 0 ]; then
+	ro_setup
+	chmod 0444 "$rootdev"
+	ro_run
+	chmod 0644 "$rootdev"
+	expect "root device not writable: the unit fails" test "$ro_rc" -ne 0
+	expect "root device not writable: nothing wiped or half-written" ro_untouched
+	expect "root device not writable: the error says it cannot be opened for writing" has_in "$ro_err" "cannot be opened for writing"
+	ro_setup
+	chmod 0555 "$wt/data"
+	ro_run
+	chmod 0755 "$wt/data"
+	expect "read-only /data: the unit fails" test "$ro_rc" -ne 0
+	expect "read-only /data: nothing wiped or half-written" ro_untouched
+	expect "read-only /data: the error names /data" has_in "$ro_err" "$wt/data is read-only"
+fi
+# Read-only is refused only when a write is due: a bound root on a read-only device boots.
+ro_setup
+wipe_run >/dev/null
+printf 'seed\n' >"$wt/data/tee/obj"
+ro_flag 1
+ro_run TEE_NV_SYS="$wt/sys"
+expect "read-only root device, already bound: the unit succeeds" test "$ro_rc" -eq 0
+expect "read-only root device, already bound: the NV is kept" holds "$wt/data/tee/obj" seed
+ro_flag 0
+ro_setup
+ro_flag 0
+ro_run TEE_NV_SYS="$wt/sys"
+expect "writable root device (sysfs ro=0): the rebind runs" test "$ro_rc" -eq 0
+expect "writable root device (sysfs ro=0): the root carries the new token" holds "$wt/data/tee-root-token" "$(tokat)"
+rm -rf "$wt/sys" "$wt/root.before"
 expect "unit: Before tee-supplicant" ncstr "$unit" 'Before=tee-supplicant@teepriv0.service'
 expect "unit: RequiredBy tee-supplicant" ncstr "$unit" 'RequiredBy=tee-supplicant@teepriv0.service'
 expect "unit: runs after the /data mount service" ncstr "$unit" 'After=tee-data-mount.service'
