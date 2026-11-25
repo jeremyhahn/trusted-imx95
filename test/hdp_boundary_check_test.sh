@@ -175,6 +175,56 @@ for f in stray.go build/stray.go build/xkms/go.mod build/go-xkms-other/go.mod go
 		"FAIL B3 no-protocol" "$f implements xkmsd"
 done
 
+# The artefact exclusions are paths from the tree root, never directory names:
+# the same names deeper in the tree are tracked content and are inspected.
+t="$TMP_ROOT/b3-root-artefacts"
+tree "$t"
+mkdir -p "$t/out/sm" "$t/.tools/bin"
+: >"$t/out/sm/wire.proto"
+: >"$t/out/sm/main.go"
+: >"$t/.tools/bin/go.mod"
+run python3 "$CHK" "$t"
+check "B3: the root out/ and .tools/ artefact directories are not inspected" 0 "ok B3 no-protocol"
+
+for f in scripts/out/wire.proto scripts/out/main.go system-manager/out/go.mod scripts/.tools/main.go node_modules/x/main.go; do
+	t="$TMP_ROOT/b3-nested-${f//\//-}"
+	tree "$t"
+	mkdir -p "$t/$(dirname "$f")"
+	: >"$t/$f"
+	run python3 "$CHK" "$t"
+	check "B3: $f, an artefact directory name below the root, is inspected and fails" 1 \
+		"FAIL B3 no-protocol" "$f"
+done
+
+# A directory symlink is not followed by the walk: the check refuses it (exit 2)
+# and does not report success over a subtree it did not inspect.
+t="$TMP_ROOT/b3-symlink"
+tree "$t"
+mkdir -p "$t/real"
+: >"$t/real/wire.proto"
+mkdir -p "$t/scripts"
+ln -s ../real "$t/scripts/linked"
+run python3 "$CHK" "$t"
+check "B3: a directory symlink to a tree holding a protocol schema exits 2" 2 \
+	"hdp-boundary-check:" "scripts/linked is a directory symlink"
+
+t="$TMP_ROOT/b4-symlink"
+tree "$t"
+mkdir -p "$t/elsewhere"
+printf '# A linked trace\n\nNo owner named.\n' >"$t/elsewhere/new.md"
+ln -s ../../elsewhere "$t/docs/hsm-device-protocol/design"
+run python3 "$CHK" "$t"
+check "B4: a directory symlink under docs/hsm-device-protocol exits 2" 2 \
+	"hdp-boundary-check:" "docs/hsm-device-protocol/design is a directory symlink"
+
+t="$TMP_ROOT/b4-folder-symlink"
+tree "$t"
+mv "$t/docs/hsm-device-protocol" "$t/elsewhere"
+ln -s ../elsewhere "$t/docs/hsm-device-protocol"
+run python3 "$CHK" "$t"
+check "B4: docs/hsm-device-protocol itself a directory symlink exits 2" 2 \
+	"hdp-boundary-check:" "docs/hsm-device-protocol is a directory symlink"
+
 # An unreadable subtree must fail closed (exit 2), not read as "no protocol here".
 # chmod 000 does not deny reads to root, so the case is skipped there.
 if [ "$(id -u)" = 0 ]; then

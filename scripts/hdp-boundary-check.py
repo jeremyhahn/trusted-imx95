@@ -38,11 +38,13 @@ import os
 import re
 import sys
 
-SKIP_DIRS = {".git", ".tools", "out", "node_modules", "__pycache__"}
-# Skipped by path from the tree root: the upstream go-xkms checkout, module cache
-# and build directories that scripts/xkms/xkmsd-build.sh keeps (gobase_rel there,
-# gitignored). A .go file or go.mod anywhere else, build/ included, still fails B3.
-SKIP_PATHS = {"build/go-xkms"}
+# Skipped by path from the tree root, never by directory name (a tracked
+# scripts/out/wire.proto must still be seen): .git, the pinned tools `make tools`
+# installs (.tools/), the artefacts of `make sm-build` (/out/) and the upstream
+# go-xkms checkout, module cache and build directories that
+# scripts/xkms/xkmsd-build.sh keeps (gobase_rel there). All are gitignored at the
+# root. A .go file or go.mod anywhere else, build/ included, still fails B3.
+SKIP_PATHS = {".git", ".tools", "out", "build/go-xkms"}
 PROTOCOL_SUFFIXES = (".proto", ".thrift", ".capnp", ".fbs", ".avsc", ".asn1")
 PROTOCOL_NAME = re.compile(r"^(openapi|asyncapi|swagger)[^/]*\.(ya?ml|json)$", re.IGNORECASE)
 RECIPE_NAME = re.compile(r"^(xkmsd|go-xkms)[^/]*\.bb(append)?$")
@@ -102,15 +104,24 @@ def unreadable(err):
 
 
 def skipped(tree, top, d):
-    if d in SKIP_DIRS:
-        return True
     rel = os.path.relpath(os.path.join(top, d), tree)
     return rel.replace(os.sep, "/") in SKIP_PATHS
+
+
+def refuse_dir_symlinks(tree, top, dirs):
+    # os.walk does not follow a directory symlink, so the subtree behind it would
+    # go uninspected while the check reports success: refuse it (exit 2).
+    for d in dirs:
+        path = os.path.join(top, d)
+        if os.path.islink(path):
+            rel = os.path.relpath(path, tree).replace(os.sep, "/")
+            raise OSError(f"{rel} is a directory symlink: the check does not follow it, so it would not inspect it")
 
 
 def walk(tree):
     for top, dirs, files in os.walk(tree, onerror=unreadable):
         dirs[:] = sorted(d for d in dirs if not skipped(tree, top, d))
+        refuse_dir_symlinks(tree, top, dirs)
         for name in sorted(files):
             yield os.path.relpath(os.path.join(top, name), tree), name
         for d in dirs:
@@ -135,8 +146,11 @@ def b4_owner(tree):
     if not os.path.isdir(folder):
         raise FileNotFoundError(f"{folder} is not a directory")
     docs = []
+    if os.path.islink(folder):
+        raise OSError("docs/hsm-device-protocol is a directory symlink: the check does not follow it, so it would not inspect it")
     for top, dirs, files in os.walk(folder, onerror=unreadable):
         dirs.sort()
+        refuse_dir_symlinks(tree, top, dirs)
         docs.extend(os.path.join(top, n) for n in sorted(files) if n.endswith(".md"))
     if not docs:
         return ["docs/hsm-device-protocol/ holds no document"]
