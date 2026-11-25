@@ -81,7 +81,46 @@ printf '%s\n' 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;branch=ma
 	>"$t/platform-image/recipes-xkms/xkmsd/xkmsd_git.bb"
 run python3 "$CHK" "$t"
 check "B5: an xkmsd recipe that follows a branch fails" 1 \
-	"FAIL B5 release" "no tag= in SRC_URI" "follows a branch"
+	"FAIL B5 release" "no tag= in the go-xkms SRC_URI entry" "follows a branch"
+
+# b5_recipe <name> <recipe text, printf format>: a tree whose xkmsd recipe is that text.
+b5_recipe() {
+	t="$TMP_ROOT/b5-$1"
+	tree "$t"
+	mkdir -p "$t/platform-image/recipes-xkms/xkmsd"
+	printf "$2" >"$t/platform-image/recipes-xkms/xkmsd/xkmsd_git.bb"
+	run python3 "$CHK" "$t"
+}
+
+b5_recipe comment-only 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;branch=main"\n# tag=v1.2.3 is planned\nSRCREV = "0123"\n'
+check "B5: tag= only in a comment fails" 1 "FAIL B5 release" "no tag= in the go-xkms SRC_URI entry"
+
+b5_recipe trailing-comment 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;nobranch=1" # tag=v1.2.3\nSRCREV = "0123"\n'
+check "B5: tag= only in a trailing comment fails" 1 "FAIL B5 release" "no tag= in the go-xkms SRC_URI entry"
+
+b5_recipe other-var 'XKMS_NOTE = "tag=v1.2.3"\nSRC_URI = "git://example.invalid/go-xkms;protocol=https;nobranch=1"\nSRCREV = "0123"\n'
+check "B5: tag= only in another variable fails" 1 "FAIL B5 release" "no tag= in the go-xkms SRC_URI entry"
+
+b5_recipe other-entry 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;nobranch=1 file://x.patch;tag=1"\nSRCREV = "0123"\n'
+check "B5: tag= on another SRC_URI entry fails" 1 "FAIL B5 release" "no tag= in the go-xkms SRC_URI entry"
+
+b5_recipe untagged-nobranch 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;nobranch=1"\nSRCREV = "0123456789abcdef"\n'
+check "B5: an untagged SRCREV with nobranch=1 fails" 1 "FAIL B5 release" "no tag= in the go-xkms SRC_URI entry"
+
+b5_recipe indirection 'XKMS_URI = "git://example.invalid/go-xkms;tag=v1.2.3;nobranch=1"\nSRC_URI = "${XKMS_URI}"\nSRCREV = "0123"\n'
+check "B5: a variable indirection in SRC_URI fails as unresolvable" 1 "FAIL B5 release" "variable indirection"
+
+b5_recipe indirection-in-uri 'SRC_URI = "git://example.invalid/go-xkms;protocol=https;tag=${XKMS_TAG};nobranch=1"\nSRCREV = "0123"\n'
+check "B5: a variable inside the go-xkms entry fails as unresolvable" 1 "FAIL B5 release" "cannot be resolved"
+
+b5_recipe no-fetch 'SRC_URI = "file://x.patch"\nSRCREV = "0123"\n'
+check "B5: a recipe with no go-xkms fetch entry fails" 1 "FAIL B5 release" "no go-xkms fetch entry"
+
+b5_recipe autorev-tagged 'SRC_URI = "git://example.invalid/go-xkms;tag=v1.2.3;nobranch=1"\nSRCREV = "${AUTOREV}"\n'
+check "B5: a tag with SRCREV AUTOREV fails" 1 "FAIL B5 release" "SRCREV is AUTOREV"
+
+b5_recipe continued 'SRC_URI = "file://x.patch \\\\\n    git://example.invalid/go-xkms;protocol=https;tag=v1.2.3;nobranch=1 \\\\\n    file://y.patch"\n# SRCREV = "${AUTOREV}"\nSRCREV = "0123"\n'
+check "B5: a tag on a continued SRC_URI line passes; a commented AUTOREV is ignored" 0 "ok B5 release: xkmsd recipes fetch a tagged go-xkms release"
 
 run python3 "$CHK" "$TMP_ROOT/absent"
 check "an unreadable tree exits 2" 2 "hdp-boundary-check:"

@@ -23,7 +23,8 @@ Checks, each one line of output:
 - B4 owner: every document under docs/hsm-device-protocol/ names go-xkms
   #1521, the issue where go-xkms owns the protocol.
 - B5 release: every image recipe of xkmsd or go-xkms fetches a tagged go-xkms
-  release (a `tag=` in SRC_URI, no `branch=` and no AUTOREV), as
+  release (a `tag=` in the go-xkms entry of SRC_URI, comments and other
+  variables not counted, no `branch=`, no AUTOREV), as
   docs/hsm-device-protocol/xkmsd-node.md section 2 proposes. With no recipe
   the check holds and says the recipe is missing.
 
@@ -119,17 +120,70 @@ def b4_owner(tree):
             for n in docs if "go-xkms #1521" not in read(os.path.join(folder, n))]
 
 
+def strip_comment(line):
+    """The line without a trailing # comment (a # inside quotes is text)."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+    return line
+
+
+def recipe_statements(text):
+    """The recipe's logical lines: comments stripped, continuations joined."""
+    lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    joined = re.sub(r"\\[ \t]*\n", " ", "\n".join(lines) + "\n")
+    return [strip_comment(ln).strip() for ln in joined.splitlines() if strip_comment(ln).strip()]
+
+
+ASSIGN = r"^(?:export\s+)?{var}((?::[A-Za-z0-9_.${{}}-]+)*)\s*(?:\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*(?:\"(.*)\"|'(.*)')\s*$"
+
+
+def assignments(statements, var):
+    """The values assigned to var (a :remove assignment is not a fetch)."""
+    pattern = re.compile(ASSIGN.format(var=var))
+    values = []
+    for stmt in statements:
+        m = pattern.match(stmt)
+        if m and ":remove" not in m.group(1):
+            values.append(m.group(2) if m.group(2) is not None else m.group(3))
+    return values
+
+
+def b5_recipe(rel, text):
+    """The faults of one xkmsd recipe: its go-xkms fetch entry must carry tag=."""
+    statements = recipe_statements(text)
+    entries = [e for value in assignments(statements, "SRC_URI") for e in value.split()]
+    fetch = [e for e in entries if "go-xkms" in e]
+    faults = []
+    if not fetch:
+        why = "a variable indirection" if any(e.startswith("${") for e in entries) else "no go-xkms fetch entry"
+        faults.append(f"{rel} has no go-xkms fetch entry in SRC_URI that can be resolved ({why})")
+    for entry in fetch:
+        if "${" in entry:
+            faults.append(f"{rel} go-xkms fetch entry uses a variable indirection, which cannot be resolved: {entry}")
+            continue
+        params = dict(p.partition("=")[::2] for p in entry.split(";")[1:])
+        if not params.get("tag"):
+            faults.append(f"{rel} does not fetch a tagged go-xkms release (no tag= in the go-xkms SRC_URI entry)")
+        if params.get("branch"):
+            faults.append(f"{rel} follows a branch, not a tagged go-xkms release")
+    if any("AUTOREV" in v for v in assignments(statements, "SRCREV")):
+        faults.append(f"{rel} follows a branch, not a tagged go-xkms release (SRCREV is AUTOREV)")
+    return faults
+
+
 def b5_release(tree):
     faults, recipes = [], []
     for rel, name in walk(tree):
         if RECIPE_NAME.match(name):
             recipes.append(rel)
-            text = read(os.path.join(tree, rel))
-            src = " ".join(ln for ln in text.splitlines() if "go-xkms" in ln or "SRC_URI" in ln or "SRCREV" in ln)
-            if "tag=" not in src:
-                faults.append(f"{rel} does not fetch a tagged go-xkms release (no tag= in SRC_URI)")
-            if re.search(r"(^|[;\s\"])branch=", src) or "AUTOREV" in src:
-                faults.append(f"{rel} follows a branch, not a tagged go-xkms release")
+            faults.extend(b5_recipe(rel, read(os.path.join(tree, rel))))
     return faults, recipes
 
 
