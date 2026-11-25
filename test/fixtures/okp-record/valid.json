@@ -1,0 +1,25 @@
+{
+  "device_uid": "FAKE-UID-0001",
+  "board_serial": "FAKE-BOARD-0001",
+  "soc_revision": "A1",
+  "srk_hash_algorithm": "sha256",
+  "srk_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "srk_lock_states": {"ELE_OEM_SRKH0_LOCK": true, "ELE_OEM_SRKH1_LOCK": true},
+  "life_cycle_before": "fake-state-before",
+  "life_cycle_after": "fake-state-after",
+  "ahab_events": [],
+  "enclave_fw_version": "fake-fw-0",
+  "spsdk_version": "3.13.0",
+  "enclave_lib_version": "fake-lib-0",
+  "public_keys": [
+    {"key_id": "fake-key-1", "public_key_hash": "1111111111111111111111111111111111111111111111111111111111111111"}
+  ],
+  "key_policy": [
+    {"key_id": "fake-key-1", "algorithm": "fake-alg", "usage": "fake-usage"}
+  ],
+  "monotonic_counter": 0,
+  "step_times": {"key_exchange": "2026-01-01T00:00:00Z", "key_import": "2026-01-01T00:01:00Z"},
+  "station_id": "fake-station-1",
+  "operator_role": "fake-role",
+  "outcome": "success"
+}
