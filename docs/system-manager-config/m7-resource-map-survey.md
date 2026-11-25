@@ -98,7 +98,7 @@ could not read (§8).
 
 ### 3.4 Performance domains
 
-- `PERF_M7`: granted with `M7P` (S2). The M7 sets its own operating level through the SCMI Performance domain
+- `PERF_M7`: granted with `M7P` (S2); provisional, see scmi-permissions-survey.md section 8 (#167). The M7 sets its own operating level through the SCMI Performance domain
   management protocol on this domain. The levels and their frequencies come from imx-sm's device code and
   IMX95RM; **unconfirmed** here.
 
@@ -170,7 +170,7 @@ reference). For this device (S10), only the LMM rows are confirmed (`LMM_2` with
 
 | Action | Protocol (id) | Message (id) | Right needed (S5) | M7 has it in S1 (reference)? |
 |---|---|---|---|---|
-| Set an M7 performance level | Performance domain management (0x13) | `PERFORMANCE_LEVEL_SET` (0x7) | PRIV | Through `M7P` ownership of `PERF_M7` (S2); the PRIV level is **unconfirmed** |
+| Set an M7 performance level | Performance domain management (0x13) | `PERFORMANCE_LEVEL_SET` (0x7) | PRIV | Through `M7P` ownership of `PERF_M7` (S2); provisional, see scmi-permissions-survey.md section 8 (#167); the PRIV level is **unconfirmed** |
 | Read M7 performance level | Performance (0x13) | `PERFORMANCE_LEVEL_GET` (0x8) | none | yes |
 | Enable or gate a clock the M7 owns | Clock management (0x14) | `CLOCK_CONFIG_SET` (0x7) | SET | for clocks of owned resources |
 | Set a clock rate | Clock management (0x14) | `CLOCK_RATE_SET` (0x5) | EXCLUSIVE | for clocks of owned resources |
@@ -194,7 +194,7 @@ domain and clock IDs are not given: they are in headers this lane could not read
 | M7 power domain | `PD_M7` | Power (0x11); set by the SM at LM start and stop | M7 run time | **unconfirmed** | SM-managed; `test` on M7 | S1, S2 |
 | M7MIX TCM power | `PD_WAKEUP` | Power (0x11) | M7 run time | **unconfirmed** | not to the M7 | S2 |
 | M7 CPU | `CPU_M7P` | CPU, NXP vendor (0x82); SM starts it | M7 run time | **unconfirmed** (LM1 "M7" exists) | yes (`M7P` owner) | S1, S2, S7, S10 |
-| M7 performance level | `PERF_M7` | Performance (0x13) | M7 run time | **unconfirmed** | yes (with `M7P`) | S2, S5 |
+| M7 performance level | `PERF_M7` | Performance (0x13) | M7 run time | **unconfirmed** | yes (with `M7P`); provisional, see scmi-permissions-survey.md section 8 (#167); level values **unconfirmed** | S2, S5 |
 | M7 core clock | `CLK_M7` | via Performance (0x13), not Clock | M7 run time | **unconfirmed** | through `PERF_M7` | S1 |
 | M7 bus clock | `CLK_BUSM7` | via Performance (0x13) | M7 run time | **unconfirmed** | through PERF (**unconfirmed** which domain) | S1 |
 | M7 SysTick clock | `CLK_M7SYSTICK` | Clock (0x14) | M7 run time | **unconfirmed** | yes (with `M7P`) | S2 |
@@ -258,12 +258,14 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
 
 1. **S10's grants beyond what is recorded.** The board file is settled: this device uses
    `configs/other/mx95frdm-pro.cfg` (S10), not the 15x15 `mx95frdm.cfg` (S1). This lane did not read S10 itself.
-   Its M7 ownership of `M7P`, `PERF_M7` and `MU_ELE5`, its `SYS` grant, the owners of `PD_NETC`, `NETC_EMDIO0` and
+   Its M7 ownership of `M7P`, `PERF_M7` and `MU_ELE5` is **unconfirmed** for `MU_ELE5`; for `M7P` and `PERF_M7` it is
+   provisional, see scmi-permissions-survey.md section 8 (#167). Its `SYS` grant, the owners of `PD_NETC`, `NETC_EMDIO0` and
    the ENET pins, and what GPIO_IO36/37 are wired to on the PRO are **unconfirmed** until S10 is read for them.
 2. **Ethernet PHYs.** Part numbers, which NETC port each serves, their reset and supply-enable pins, and whether a
    supply is SM-controlled. Needs UM12527 §1.2 Table 1 and §2.18 (S9, unreachable from this lane).
 3. **Numeric identifiers.** The SCMI power-domain, clock, performance-domain and reset-domain IDs (for example the
-   number behind `PD_NETC` or `PERF_M7`). They are in imx-sm's generated `configs/mx95frdm-pro/config_*.h` (generated from S10) and device
+   number behind `PD_NETC` or `PERF_M7`; scmi-permissions-survey.md section 8 (#167) gives a provisional and open answer on the `PERF_M7` grant and none on its
+   numeric ID, which stays open here). They are in imx-sm's generated `configs/mx95frdm-pro/config_*.h` (generated from S10) and device
    headers, and in Linux's `imx95-power.h` and `imx95-clock.h` (S8). This lane's read guard does not allow reading
    C headers outside the repository, so they were not read.
 4. **Reset domains.** Whether the M7 needs any SCMI reset domain, and which. Needs the device headers (item 3) and
@@ -272,7 +274,7 @@ In S1 (reference; S10 **unconfirmed**), the A55 non-secure agent (`AP-NS`) owns 
    and whether the TCM content is retained across `PD_M7` off, an M7 LM stop or reset, and each low-power mode
    (§3.1; low-power-survey.md §"Cortex-M7" row). Needs IMX95RM (missing).
 6. **`PERFORMANCE_LEVEL_SET` rights.** S5 marks the message PRIV; whether owning `M7P` gives the M7 that right on
-   `PERF_M7` without a `PERF_M7` API line is the permission model of #107.
+   `PERF_M7` without a `PERF_M7` API line is provisional, see scmi-permissions-survey.md section 8 (#167); the permission model stays with #107.
 7. **The M7's SCMI mailbox.** S1 and S10 bind the M7 agent to MU index 9 (S1 also names test MU index 8), while Zephyr's M7 device tree
    (S7) points its SCMI node at `mu5`; and S7 declares only the Power, Clock, Pin control and CPU protocols, not
    Performance, System or LMM. How S1's MU index maps to the MU names is **unconfirmed**; the imx-sm source survey

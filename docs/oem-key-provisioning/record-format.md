@@ -1,0 +1,80 @@
+# Station record format
+
+> **Status: proposed, pending owner approval** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-24
+> A station-side proposal. The record schema and the registry belong to go-trusted-platform
+> ([SPEC.md](../SPEC.md), Boundaries). Nothing here is a device fact.
+
+The provisioning station (owner ruling 1234) leaves one record per device. This page proposes the
+fields of that record; [provisioning-records-survey.md](provisioning-records-survey.md) §3 says what it
+holds and §4 what it must never hold. Until the owner answers §8, the checker uses the survey's own
+recommendations: Q1 (a) the enclave UID is the key, with the board serial alongside; Q3 (a) only a hash
+of each wrapped blob, never the blob; Q4 (a) the SRK lock state and the life-cycle state before and
+after are mandatory. They sit in one table at the top of the test-only checker
+`test/okp/record-check.py` (`OWNER_ANSWERS`), so another answer is a one-line edit.
+
+The envelope (survey §8 Q6) is not chosen. The checker reads the plain JSON payload; the signature
+envelope is go-trusted-platform's.
+
+## Fields
+
+JSON object; every field cites the survey §3 row. "Optional" marks a field the survey §7 lists as unconfirmed.
+
+| JSON name | Type | Required | Survey |
+| --- | --- | --- | --- |
+| `device_uid` | string | yes | §3 device identifier |
+| `board_serial` | string | yes (Q1 a) | §3 board identifier |
+| `soc_revision` | string (`A0`, `A1`, `B0`) | yes | §3 SRK hash row |
+| `srk_hash_algorithm` | string | yes | §3 SRK hash row |
+| `srk_hash` | hex string, 64 characters on A0/A1, 128 on B0 | yes | §3 SRK hash row |
+| `pqc_srk_hash` | hex string, same width | optional (B0 only) | §3 SRK hash row |
+| `srk_lock_states` | non-empty object, lock name to boolean (true locked) | yes (Q4 a) | §3 SRK fuse lock state |
+| `life_cycle_before`, `life_cycle_after` | string | yes (Q4 a) | §3 life-cycle state |
+| `ahab_events` | list, expected empty | yes | §3 AHAB event status |
+| `enclave_fw_version` | string | yes | §3 enclave firmware version |
+| `spsdk_version` | string | yes | §3 station software |
+| `enclave_lib_version` | string | optional (§7) | §3 library version |
+| `public_keys` | list of `{key_id, public_key_hash}` | yes | §3 public keys |
+| `key_policy` | list of `{key_id, algorithm, usage}` | optional (§7) | §3 key policy |
+| `monotonic_counter` | integer | yes | §3 monotonic counter |
+| `step_times` | object, step name to RFC 3339 timestamp with a zone | yes | §3 time |
+| `station_id`, `operator_role` | string | yes | §3 station and operator |
+| `outcome` | string | yes | §3 outcome |
+| `payload_hashes` | list of lowercase hex strings, 64 or 128 characters | optional (Q3 a) | §4 wrapped blobs |
+| `secure_object_ids` | list of strings | optional | §4 EdgeLock 2GO objects |
+
+Public keys are carried as a key ID and a hash, not as key material. A device ID that looks like
+hex or base64 of 32 bytes or more is refused, so write the UID in its reported text form.
+
+## What the checker refuses
+
+> **Internal and test-only (owner default, ASK 5).** The checker is a test helper under `test/okp/`:
+> nothing installs it, no Makefile target runs it, no SPEC row names it, and it is not a command of
+> this repository. `make test` runs it on the fixtures (test/okp_record_check_test.sh).
+
+The checker reads one record and touches no device. Valid, or each problem named by file and JSON
+path (never the value), or not JSON. It refuses (survey §4):
+
+- a PEM or OpenSSH private-key header in any string or key name;
+- a key name on the deny list: private key, secret, session key, wrapped key, blob, token, password,
+  API key, secure-object contents, names for a station credential, and names for an operator's
+  personal data (operator name, full name, email, phone; a value is never judged, so use a role);
+- a string of plain hex or base64 of 32 bytes or more outside the declared hash fields;
+- a hash field whose width is wrong (256-bit on A0/A1, 512-bit on B0);
+- malformed nested evidence: a lock state that is not true or false (or an empty lock object), a step
+  time that is not an RFC 3339 timestamp with a zone, and a payload hash that is null, not a string, or
+  not lowercase hex of 64 or 128 characters. Each is named by its path; the member's name and value are
+  not printed.
+
+## Pre-close mode
+
+> **Internal and test-only; no public surface.** A second mode of the same test helper, used only by
+> `test/okp_pre_close_test.sh`, reads one JSON file and runs nothing against a device. It checks a record written before the irreversible step, against
+> [key-ceremony-survey.md](key-ceremony-survey.md) §6: `life_cycle_before` is OEM open (case and spacing
+> ignored), `ahab_events` is an empty list, and `srk_hash`, `srk_lock_states`, `enclave_fw_version`,
+> `spsdk_version`, `public_keys` and `soc_revision` are present. `life_cycle_after`, `outcome` and
+> `step_times` are not required, since such a record cannot hold them. The ordinary field, hash-width and
+> secret checks still run. That test ties each numbered §6 item to a
+> field, or says why it is not a record field.
+
+There is no public target and no public invocation. Owner question (proposed, pending owner approval):
+whether the SPEC row should name this record; this lane does not edit SPEC.md.
