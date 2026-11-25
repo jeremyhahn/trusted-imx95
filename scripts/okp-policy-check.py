@@ -15,8 +15,9 @@ Each record has a "step":
 - key_import (AN14861 section 5.3; RM00284 section 3.2.6.3): the OEM key,
   "wrapped": true, imported into the enclave's key store. It must follow a
   key_exchange that succeeded earlier in the same run (the vendor's order).
-  It is committed only when the request sent, and the enclave acknowledged,
-  both the strict-operation flag and the monotonic-counter flag, the enclave
+  It is committed only with the outcome "status": "ok" (absent, null,
+  "error" or any other value is not committed), when the request sent, and
+  the enclave acknowledged, both the strict-operation flag and the monotonic-counter flag, the enclave
   returned no warning and the counter split is configured (RM00284 section
   2.4.2; owner decision 241). The "warnings" field must be present and a
   list of strings (empty means none); absent, null or any other type is not
@@ -47,8 +48,9 @@ key_exchange alone included, fails.
 No record carries a key in the clear ("plaintext_key"). Any other step fails:
 the check knows no other step, so it fails closed. The relative order of the
 fuse write, the import and the close is not given by the row's citations, so
-it is not checked; when the close runs and where provisioning runs are the
-owner's open questions.
+it is not checked. When the life cycle closes and where provisioning runs are
+decided by owner ruling 1234 (docs/SPEC.md, oem-key-provisioning row); this
+tool only reads a trace and runs no step.
 
 Prints one line per record and a summary. Exit status: 0 when every record
 holds, 1 when one does not, 2 when the trace cannot be read.
@@ -79,6 +81,9 @@ def flag_list(rec, field):
 def commit_faults(rec):
     """Why a key_import is not committed; empty if it is."""
     faults = []
+    if rec.get("status") != "ok":
+        faults.append(f"import outcome: status {rec.get('status')!r}, not the string 'ok': "
+                      "an import that did not succeed is not committed")
     sent = flag_list(rec, "request_flags")
     acked = flag_list(rec, "ack_flags")
     for flag in ROLLBACK_FLAGS:

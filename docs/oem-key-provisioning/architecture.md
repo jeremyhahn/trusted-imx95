@@ -88,7 +88,8 @@ kept this row, and refuses (exit 1) when it did not; a trace it cannot read or p
 
 - a `key_import` counts only after a `key_exchange` that succeeded earlier in the same run, the vendor's order
   (AN14861 §2, §5.2, §5.3; RM00284 §3.20, §3.2.6.3), and only of a wrapped key;
-- the import is committed only when the enclave acknowledged both the strict-operation flag and the
+- the import is committed only with the outcome `"status": "ok"` (an absent, null, error or other status is not
+  committed) and when the enclave acknowledged both the strict-operation flag and the
   monotonic-counter flag, returned no warning and the counter split is configured (RM00284 §2.4.2; owner
   decision 241); the `warnings` field must be present and a list (empty means none), so an absent, null or
   non-list `warnings` is not committed;
