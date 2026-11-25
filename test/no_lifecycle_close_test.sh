@@ -21,6 +21,10 @@ ALLOW=$'scripts/ahab/key-exchange-test.sh\tfixture: builds a key-exchange messag
 scripts/ahab/key-import-test.sh\tfixture: builds a wrapped-key blob on test keys, sends nothing
 test/okp_host_only_test.sh\tthe host-only guard: its tool list and fixtures name the device tools it rejects
 test/okp_guard_coverage_test.sh\tthe coverage check: its tool-name filter and fixtures name the spellings it feeds to this guard, and run none of them
+scripts/okp-policy-check.py\thost-side trace reader: names the lifecycle_close step and the oem_open/oem_closed states of a recorded trace, reads one JSONL file, talks to no enclave and runs no close
+test/okp_policy_check_test.sh\ttest data for the trace reader: trace records that name the lifecycle_close step; run no close
+test/integration/oem_key_provisioning_test.sh\ttest data for the trace reader through make: trace records that name the lifecycle_close step; run no close
+test/oem_key_provisioning_docs_test.sh\tdoc-consistency check: its expected phrases quote the SPEC row text on OEM open to OEM closed; reads two files
 test/no_lifecycle_close_test.sh\tthis guard: it holds the patterns it searches for'
 
 # Commands that change the life cycle or write a fuse. Matched per line, case

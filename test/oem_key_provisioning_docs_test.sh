@@ -3,7 +3,7 @@
 # every requirement the row states, and docs/oem-key-provisioning/
 # architecture.md names the policy check and its integration target, marks the
 # fuse write and the life-cycle close irreversible and owner-approved, and
-# keeps both open questions.
+# records owner ruling 1234 (the close and provisioning run at the station only).
 set -uo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -23,7 +23,7 @@ for want in \
 	"from OEM open to OEM closed through the enclave (RM00284 §3.23)" \
 	"monotonic counter fuses are configured once (RM00284 §3.24)" \
 	"IMX95RM and the i.MX 95 Security Reference Manual, both missing" \
-	"When the life cycle is closed, and where provisioning runs, are open questions for the owner" \
+	"the life cycle is closed only at the provisioning station, never on a development board" \
 	"(oem-key-provisioning/architecture.md)"; do
 	expect "SPEC row states: $want" test "${row/"$want"/}" != "$row"
 done
@@ -36,7 +36,7 @@ for want in \
 	"acknowledged both the strict-operation flag and the monotonic-counter flag" \
 	"each carry a recorded owner approval and run at most once" \
 	"Irreversible. Needs the owner's explicit approval before it is run on any device." \
-	"When the life cycle is closed: the owner's" "Where provisioning runs: the owner's"; do
+	"Owner ruling 1234:** the life cycle is closed only at the provisioning station"; do
 	expect "architecture.md states: $want" test "${arch/"$want"/}" != "$arch"
 done
 
