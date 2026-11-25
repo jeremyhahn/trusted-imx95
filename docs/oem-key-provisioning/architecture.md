@@ -1,6 +1,6 @@
 # oem-key-provisioning — architecture
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-12
+> **Status: NORMATIVE** · Scope: trusted-imx95 `oem-key-provisioning` · Last verified: 2026-11-24
 > The detail of the `oem-key-provisioning` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Every statement below cites a document and section listed in [references/README.md](../references/README.md).
@@ -76,6 +76,38 @@ A host-side test builds and verifies a key-exchange signed message on a test SRK
 
 A host-side checker reads one station record file and refuses a missing field or a secret
 ([record-format.md](record-format.md), proposed, pending owner approval); it touches no device.
+
+## Host-side policy check of a provisioning run
+
+`scripts/okp-policy-check.py` is a host-side test and audit tool for provisioning traces. It is not part of the
+provisioning interface: nothing in the provisioning flow calls it, and the SPEC row does not name it. It reads one
+JSONL trace of one provisioning run, one JSON record per step in the order the steps ran, named by `OKP_TRACE`
+(`make okp-policy-check OKP_TRACE=<file.jsonl>`) or passed as the script's argument. It performs no device step: it
+talks to no enclave, writes no fuse and closes no life cycle. It decides, failing closed, whether a recorded run
+kept this row, and refuses (exit 1) when it did not; a trace it cannot read or parse stops it with exit 2:
+
+- a `key_import` counts only after a `key_exchange` that succeeded earlier in the same run, the vendor's order
+  (AN14861 §2, §5.2, §5.3; RM00284 §3.20, §3.2.6.3), and only of a wrapped key;
+- the import is committed only with the outcome `"status": "ok"` (an absent, null, error or other status is not
+  committed) and when the enclave acknowledged both the strict-operation flag and the
+  monotonic-counter flag, returned no warning and the counter split is configured (RM00284 §2.4.2; owner
+  decision 241); the `warnings` field must be present and a list (empty means none), so an absent, null or
+  non-list `warnings` is not committed;
+- `counter_fuse_config` (RM00284 §3.24) and `lifecycle_close` from OEM open to OEM closed through the enclave
+  (RM00284 §3.23) each carry a recorded owner approval and run at most once, and complete the run only with the outcome
+  `"status": "ok"` (an absent, null, error, unknown or non-string status fails and completes nothing); a fuse write is accepted only when
+  `already_configured` is present and the JSON boolean false, so fuses already configured, or a prior state that
+  is absent, null or not a boolean, are not written;
+- a `counter_fuse_evidence` record (`configured: true` and a non-empty `evidence` reference) is read-only and
+  shows fuses configured before the run; it is refused after a fuse write in the same run;
+- the run must be complete: at the end of the trace the check requires a committed import, the counter fuses
+  configured (written in the run, or shown by `counter_fuse_evidence`) and the life-cycle close, so a trace that
+  stops after the key exchange fails;
+- no record carries a key in the clear, and a step the flow does not have fails.
+
+The relative order of the fuse write, the import and the close is not checked: the row's citations do not give it
+(see [Missing](#missing)). `make integration-test-oem-key-provisioning` drives the check through make on runs that
+keep and break the row.
 
 ## Order of the steps
 

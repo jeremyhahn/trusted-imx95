@@ -51,6 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
+	okp-policy-check integration-test-oem-key-provisioning \\
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
 help: ## List the targets
@@ -292,6 +293,16 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
+
+# OKP_TRACE reaches the recipe through the environment, never expanded into its shell source.
+export OKP_TRACE
+
+okp-policy-check: ## Check the trace of a provisioning run against the oem-key-provisioning row (OKP_TRACE=<file.jsonl>; key exchange then wrapped-key import with both rollback flags, fuses and the close recorded once and owner-approved; host-side, no enclave)
+	@[ -n "$$OKP_TRACE" ] || { echo "okp-policy-check: set OKP_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/okp-policy-check.py "$$OKP_TRACE"
+
+integration-test-oem-key-provisioning: ## Integration test of the oem-key-provisioning row: make okp-policy-check end to end on provisioning runs that keep and break the row
+	@bash test/integration/oem_key_provisioning_test.sh
 
 integration-test-device-lifecycle: ## Integration test of the device-lifecycle row: the A55 collector, then endorse-01, enroll-01, device-attest-01 (tpm) against a stand-in control plane (no board, no TPM)
 	@bash test/integration/device_lifecycle_test.sh
