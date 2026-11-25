@@ -84,11 +84,19 @@ repo="$TMP_ROOT/imx-sm"
 cfg "$repo/configs/other/fakepro.cfg" 'BRD_SM_CTRL_TEST ALL' 'PD_M7 test'
 # shellcheck disable=SC2016 # make's $(...), not the shell's
 printf '%s\n' 'cfg:' \
-	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h' \
+	'	mkdir -p configs/$(config) && cp configs/other/$(config).cfg configs/$(config)/config.h && cp configs/other/scmi.h configs/$(config)/config_scmi.h' \
 	'all:' \
 	'	mkdir -p build/$(config)' \
 	'	{ $(SM_CROSS_COMPILE)gcc; echo $(M) $(SOURCE_DATE_EPOCH); cat configs/$(config)/config.h; } >build/$(config)/m33_image.bin' \
 	>"$repo/Makefile"
+# What `make cfg` generates for scripts/sm-perf-check.sh: the M7 agent's record
+# holds the one PERF_M7 line, ALL, and no other agent holds that domain.
+printf '%s\n' \
+	'/* SCMI AGENT0 Config (AP) */' \
+	'	.perfPerms[DEV_SM_PERF_A55] = SM_SCMI_PERM_ALL,' \
+	'/* SCMI AGENT1 Config (M7) */' \
+	'	.perfPerms[DEV_SM_PERF_M7] = SM_SCMI_PERM_ALL,' \
+	>"$repo/configs/other/scmi.h"
 g() { git -C "$repo" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
 git -C "$repo" init -q
 g add -A
