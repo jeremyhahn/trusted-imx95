@@ -41,7 +41,7 @@ Step 3 (survey [section 4.1](decommission-survey.md#41-where-the-enclave-key-sto
 
 - Delete every key in the enclave key store with a deletion the enclave acknowledges for both the strict (sync) flag and the monotonic flag, as SPEC row `secure-key-handling` (owner decision 241) requires; close the store; remove the `nvm_daemon` storage directory.
 - **Unresolved validation.** No source read shows the enclave rejecting a restored pre-deletion blob after a reset (survey section 4.1 and [section 7](decommission-survey.md#7-what-could-not-be-confirmed), item 6). Until that is validated on hardware, the wipe is treated as recoverable, and a board is not called sanitised, and is not released as sanitised, after step 3 alone.
-- The firmware TPM's NV and the PKCS#11 state live in the root file system and go with it, as [docs/SPEC.md](../SPEC.md) and [docs/ftpm/README.md](../ftpm/README.md#nv-storage) state; they are not restated here. A cleared or erased root file system also ends the board's TPM identity (ftpm re-provisioning, B6).
+- The firmware TPM's NV and the PKCS#11 state live in the root file system and go with it, as [docs/SPEC.md](../SPEC.md) and [docs/ftpm/README.md](../ftpm/README.md#nv-storage) state; they are not restated here. On a board whose TPM data lives in the root file system, a cleared or erased root file system also ends the board's TPM identity (ftpm re-provisioning, B6). A board with RPMB-backed fTPM storage ([docs/ftpm/README.md](../ftpm/README.md)) keeps its TPM identity across a root file system erase, and is not called sanitised until an owner-approved RPMB disposal procedure exists (proposed, pending owner approval); this runbook describes no RPMB step.
 
 Step 6a (the rest of the storage):
 
