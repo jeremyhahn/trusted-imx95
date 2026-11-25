@@ -630,7 +630,15 @@ holds() { [ -f "$1" ] && [ "$(cat "$1" 2>/dev/null)" = "$2" ]; } # holds FILE TE
 ro_untouched() {
 	holds "$wt/data/tee/obj" seed && holds "$wt/data/tee-root-token" "$ro_tok" &&
 		holds "$wt/data/tee-rootfs-id" id-A && cmp -s "$rootdev" "$wt/root.before" &&
-		[ "$(LC_ALL=C ls -A "$wt/data" | tr '\n' ' ')" = "tee tee-root-token tee-rootfs-id " ]
+		only_records
+}
+only_records() { # /data holds tee, tee-root-token and tee-rootfs-id and nothing else
+	local f n=0
+	for f in "$wt/data"/* "$wt/data"/.[!.]* "$wt/data"/..?*; do
+		[ -e "$f" ] || [ -L "$f" ] || continue
+		case ${f##*/} in tee | tee-root-token | tee-rootfs-id) n=$((n + 1)) ;; *) return 1 ;; esac
+	done
+	[ "$n" -eq 3 ]
 }
 ro_flag() { mkdir -p "$wt/sys/class/block/${rootdev##*/}" && printf '%s\n' "$1" >"$wt/sys/class/block/${rootdev##*/}/ro"; }
 ro_setup
