@@ -179,7 +179,7 @@ grep_line() {
 # StartLimitIntervalSec and StartLimitBurst are plain positive integers (0
 # would switch the limit off, so the unit would restart for ever).
 unit_limits_ok() {
-	local l sec= iv= burst=
+	local l sec='' iv='' burst=''
 	while IFS= read -r l; do
 		case $l in
 		'['*) sec=$l ;;
