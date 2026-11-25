@@ -170,9 +170,14 @@ expected_layers=' sources/openembedded-core/meta sources/meta-openembedded/meta-
 #   sources/meta-clang, meta-freescale-ml, meta-qt6, meta-browser, meta-security,
 #   meta-timesys, meta-virtualization, meta-nxp-connectivity, meta-nxp-demo-experience
 #                                   optional, not in LAYERDEPENDS of meta-imx-bsp/meta-imx-sdk
-#                                   (a claim from the manifest's layer set, NOT checked
-#                                   against the pinned conf/layer.conf files: no fetched
-#                                   copy is available offline)
+#                                   (a claim from the manifest's layer set; this offline
+#                                   test does not read the pinned conf/layer.conf files.
+#                                   The build-host check is scripts/platform-image-layer-check.sh
+#                                   (make platform-image-layer-check) on a fetched tree: it
+#                                   checks LAYERDEPENDS and LAYERSERIES_COMPAT of the
+#                                   listed layers, not that the optional ones are unneeded.
+#                                   Run on the tree make platform-image-fetch
+#                                   checked out (2026-11-24): OK, 16 layers, series wrynose.)
 # sources/meta-yocto is not exempt: its meta-poky sublayer is listed.
 notlisted=' sources/bitbake sources/base sources/meta-clang sources/meta-freescale-ml sources/meta-qt6 sources/meta-browser sources/meta-security sources/meta-timesys sources/meta-virtualization sources/meta-nxp-connectivity sources/meta-nxp-demo-experience '
 # check_layers BBLAYERS: the listed set is exactly expected_layers (full paths),

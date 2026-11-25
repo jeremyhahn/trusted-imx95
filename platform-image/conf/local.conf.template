@@ -1,13 +1,11 @@
 # local.conf template for the FRDM-IMX95-PRO image.
-# Provisional default, pending the owner's answer on #14. Not built yet: no
-# bitbake run has used this file. Copy it to <build>/conf/local.conf.
+# Provisional default. Copy it to <build>/conf/local.conf.
 
 MACHINE = "imx95-19x19-lpddr5-frdm-pro"
 DISTRO = "trusted-imx95"
 
-# NXP's EULA for the i.MX firmware and GPU userland blobs is the owner's to
-# accept (#14); it is left unset here.
-# (ACCEPT_FSL_EULA stays unset.)
+# The owner accepted NXP's EULA for this project's builds on 2026-11-24 (#14).
+ACCEPT_FSL_EULA = "1"
 
 PACKAGE_CLASSES = "package_ipk"
 # Images are built unsigned. AHAB signing is a separate step after the build.

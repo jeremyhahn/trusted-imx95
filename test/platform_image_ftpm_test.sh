@@ -201,12 +201,12 @@ expect "SPEC row ftpm carries the owner's NV lifecycle clause" ncstr "$ROOT/docs
 expect "SPEC row ftpm no longer says a reflash loses the NV" none 'loses the NV when the root file system is reflashed' "$ROOT/docs/SPEC.md"
 expect "README says the NV cannot live on the read-only root" ncstr "$ROOT/docs/ftpm/README.md" 'why the NV cannot live on it'
 
-# The EULA is the owner's: not accepted, and imx-boot (-> imx-m7-demos) is not an image dependency.
+# The owner accepted the EULA on 2026-11-24 (#14, local.conf.template); imx-boot (-> imx-m7-demos) is still not an image dependency.
 expect "the image drops imx-boot from the wks dependencies" ncstr "$img" 'WKS_FILE_DEPENDS:remove = "imx-boot"'
 expect "the boot partition lists no imx-m7-demos binary" ncstr "$img" 'IMAGE_BOOT_FILES:remove = "mcore-demos/'
 expect "the image depends on optee-os:do_deploy (the firmware with the fTPM TA)" ncstr "$img" 'do_image_complete[depends] += "optee-os:do_deploy"'
 expect "optee-os depends on the fTPM TA deploy" ncstr "$os_app" 'do_compile[depends] += "optee-ftpm:do_deploy"'
-expect "ACCEPT_FSL_EULA is not set in the layer" tree_none 'ACCEPT_FSL_EULA = ' 'platform-image/conf'
+expect "the layer carries the owner's EULA acceptance of 2026-11-24 (#14)" ncstr "$ROOT/platform-image/conf/local.conf.template" 'ACCEPT_FSL_EULA = "1"'
 # NV storage selector (owner ruling 1234): reefs by default, rpmb for production.
 sel=TRUSTED_IMX95_FTPM_NV
 expect "the selector defaults to reefs" ncstr "$flags" "$sel ?= \"reefs\""

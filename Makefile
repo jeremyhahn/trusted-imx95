@@ -52,7 +52,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
 	okp-policy-check integration-test-oem-key-provisioning \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools platform-image-repro-check
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify platform-image-repro-check
 
 help: ## List the targets
 	@echo "Targets:"
@@ -215,6 +215,9 @@ integration-test-secure-world: ## The secure-world integration test (test/integr
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
+platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing; ARGS=--repro builds twice in separate directories and publishes only if the two outputs are identical)
+	@scripts/platform-image-build.sh $(ARGS)
+
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock
 
@@ -226,6 +229,14 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS layer has a conf/layer.conf, its LAYERDEPENDS are provided and its LAYERSERIES_COMPAT has the oe-core series (needs a fetched tree, no bitbake; not in CI)
+	@scripts/platform-image-layer-check.sh
+
+platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 accepts a dirty build) against platform-image/manifest.lock: SHA256SUMS, machine, manifest and layer commits, an SBOM per target (offline, needs no bitbake; not in CI)
+	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
+	@case "$(ALLOW_DIRTY)" in ""|0|1) ;; *) echo "platform-image-verify: ALLOW_DIRTY must be 0, 1 or empty (empty or 0 = off, 1 = on), got '$(ALLOW_DIRTY)'" >&2; exit 2 ;; esac
+	@scripts/platform-image-verify.sh $(if $(filter 1,$(ALLOW_DIRTY)),--allow-dirty) "$(OUT)"
 
 platform-image-repro-check: ## Reproducible-build check on a build host: REPRO_A=<dir> REPRO_B=<dir> are the deploy directories of two clean builds; compares firmware, kernel, boot and tee-data partitions and the rootfs archive (needs no network; not in CI)
 	@test -n "$(REPRO_A)" -a -n "$(REPRO_B)" || { echo "usage: make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>" >&2; exit 2; }

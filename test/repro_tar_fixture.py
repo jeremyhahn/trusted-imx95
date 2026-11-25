@@ -1,4 +1,4 @@
-"""Write a PAX tar fixture for test/platform_image_repro_test.sh.
+"""Write a PAX tar fixture for test/platform_image_repro_check_test.sh.
 
 usage: repro_tar_fixture.py OUT.tar KEY=VALUE ...
 Keys: xattr, cap, lcap, acl (PAX header values on usr/bin/tool), dev (MAJOR:MINOR of dev/null).

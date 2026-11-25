@@ -1,207 +1,234 @@
 #!/usr/bin/env bash
-# Offline tests of scripts/platform-image-repro-check.sh and its make target, on synthetic deploy
-# directories (no bitbake, no board). sfdisk is a stand-in that prints a fixed GPT as JSON.
+# Offline checks of scripts/platform-image-repro-compare.sh (provisional,
+# pending the owner's answer on #14): synthetic output directories in
+# $TMP_ROOT. No network, no bitbake.
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+export LC_ALL=C
 
-chk=$ROOT/scripts/platform-image-repro-check.sh
-wt=$(mktemp -d)
-trap 'rm -rf "$wt"' EXIT
-mkdir -p "$wt/bin"
-# 512-byte sectors: boot 2048+2048, root 4096+2048, tee-data 6144+2048
-cat >"$wt/geom.json" <<'JSON'
-{"partitiontable": {"label": "gpt", "id": "X", "device": "x", "unit": "sectors", "sectorsize": 512,
- "partitions": [
-  {"node": "x1", "start": 2048, "size": 2048, "type": "T", "uuid": "U1", "name": "boot"},
-  {"node": "x2", "start": 4096, "size": 2048, "type": "T", "uuid": "U2", "name": "root"},
-  {"node": "x3", "start": 6144, "size": 2048, "type": "T", "uuid": "U3", "name": "tee-data"}]}}
-JSON
-# shellcheck disable=SC2016 # the stand-in's own $ words
-printf '#!/bin/sh\n[ "$1" = --json ] && [ -f "$2" ] && cat "%s"\n' "$wt/geom.json" >"$wt/bin/sfdisk"
-chmod +x "$wt/bin/sfdisk"
+script=$ROOT/scripts/platform-image-repro-compare.sh
+tmp=$TMP_ROOT
 
-has() { grep -qF -- "$2" "$1"; }
-
-# mk DIR [VAR=value ...]: one synthetic deploy directory. Knobs: TEE TA IMG DTB BOOT DATA MEMBER MODE ETC ROOT
-# (the content of each; ROOT, the wic root partition, is the allowed difference), WICZ=gz|plain, NOTEE=1 (omit tee.bin).
+# mk DIR [SECONDS] [SDE]: two artefacts, SHA256SUMS and build-info.txt.
 mk() {
-	local d=$1 k v
-	shift
-	local TEE=tee TA=ta IMG=img DTB=dtb BOOT=boot DATA=data MEMBER=hello MODE=644 ETC=etc-A ROOT=root-A WICZ=plain TARZ=gz NOTEE=0
-	for kv in "$@"; do k=${kv%%=*}; v=${kv#*=}; printf -v "$k" '%s' "$v"; done
-	rm -rf "$d"
-	mkdir -p "$d/optee-ftpm" "$wt/stage"
-	printf '%s' "$TA" >"$d/optee-ftpm/bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
-	[ "$NOTEE" = 1 ] || printf '%s' "$TEE" >"$d/tee.bin"
-	printf '%s' "$IMG" >"$d/Image"
-	printf '%s' "$DTB" >"$d/imx95-19x19-frdm-pro.dtb"
-	local w=$d/img.rootfs-20250101.wic
-	truncate -s 5M "$w"
-	printf 'EFI PART' | dd of="$w" bs=1 seek=512 conv=notrunc 2>/dev/null
-	printf '%s' "$BOOT" | dd of="$w" bs=1 seek=$((2048 * 512)) conv=notrunc 2>/dev/null
-	printf '%s' "$ROOT" | dd of="$w" bs=1 seek=$((4096 * 512)) conv=notrunc 2>/dev/null
-	printf '%s' "$DATA" | dd of="$w" bs=1 seek=$((6144 * 512)) conv=notrunc 2>/dev/null
-	if [ "$WICZ" = gz ]; then gzip -n "$w"; fi
-	if [ "$WICZ" = both ]; then gzip -nk "$w"; fi
-	rm -rf "$wt/stage"
-	mkdir -p "$wt/stage/etc" "$wt/stage/usr/bin"
-	printf '%s' "$ETC" >"$wt/stage/etc/issue"
-	printf '%s' "$MEMBER" >"$wt/stage/usr/bin/tool"
-	chmod "$MODE" "$wt/stage/usr/bin/tool"
-	ln -s tool "$wt/stage/usr/bin/link"
-	tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$wt/stage" -cf "$d/img.rootfs-20250101.tar" .
-	if [ "$TARZ" = both ]; then gzip -nk "$d/img.rootfs-20250101.tar"; elif [ "$TARZ" = gz ]; then gzip -n "$d/img.rootfs-20250101.tar"; fi
+	rm -rf "$1"
+	mkdir -p "$1"
+	echo wic >"$1/img-m.wic.zst"
+	echo tar >"$1/img-m.rootfs.tar.zst"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+	printf '%s\n' "# build-info" "machine=m" "targets=img" "SOURCE_DATE_EPOCH=${3:-1700000000}" \
+		"build_seconds=${2:-10}" "checkout_commit=abc" "layer_x_commit=def" >"$1/build-info.txt"
 }
-# run DIR_A DIR_B: sets rc and the output file
-run() { rc=0; PATH="$wt/bin:$PATH" bash "$chk" "$1" "$2" >"$wt/out" 2>&1 || rc=$?; [ -z "${REPRO_TEST_DEBUG:-}" ] || cp "$wt/out" "/tmp/repro-out.$((++nrun))"; }
-nrun=0
+# rehash DIR: rewrite DIR/SHA256SUMS from the files.
+rehash() { (cd "$1" && sha256sum -- img-m.* >SHA256SUMS); }
+sum() { local s; s=$(sha256sum <"$1"); echo "${s%% *}"; }
 
-mk "$wt/a"
-mk "$wt/b"
-run "$wt/a" "$wt/b"
-expect "identical inputs: exit 0" test "$rc" -eq 0
-expect "identical inputs: one line per artefact" test "$(grep -c '^OK ' "$wt/out")" -ge 7
-mk "$wt/b" ROOT=root-B
-run "$wt/a" "$wt/b"
-expect "only the wic root partition differs (compared from the archive): exit 0" test "$rc" -eq 0
-# No member is exempt: the image carries no per-build identity file.
-mk "$wt/b" ETC=etc-B
-run "$wt/a" "$wt/b"
-expect "an /etc member differs: exit nonzero" test "$rc" -ne 0
-expect "an /etc member differs: names the member" has "$wt/out" "first differing member: etc/issue"
-mk "$wt/b" WICZ=gz
-run "$wt/a" "$wt/b"
-expect "a compressed wic on one side still matches" test "$rc" -eq 0
+a=$tmp/a
+b=$tmp/b
 
-# diffcase NAME VAR=value NEEDLE: B differs from A in one knob; must fail and name NEEDLE with both digests.
-diffcase() {
-	mk "$wt/b" "$2"
-	run "$wt/a" "$wt/b"
-	expect "$1: exit nonzero" test "$rc" -ne 0
-	expect "$1: names the artefact" has "$wt/out" "$3"
-	expect "$1: prints both digests" grep -Eq 'A=[0-9a-f]{64} B=[0-9a-f]{64}' "$wt/out"
+mk "$a"
+mk "$b" 99
+run bash "$script" "$a" "$b"
+check "identical dirs (build_seconds differs only)" 0 "platform-image-repro: OK, 2 artefacts identical"
+
+mk "$a"
+mk "$b"
+echo other >"$b/img-m.wic.zst"
+rehash "$b"
+ha=$(sum "$a/img-m.wic.zst")
+hb=$(sum "$b/img-m.wic.zst")
+run bash "$script" "$a" "$b"
+check "one artefact differs" 1 "img-m.wic.zst differs" "$ha" "$hb"
+expect "the identical artefact is not named" test "${OUT##*img-m.rootfs.tar.zst*}" = "$OUT"
+
+run bash "$script" --allow img-m.wic.zst "$a" "$b"
+check "--allow is an unknown option" 2 "unknown option --allow"
+
+mk "$a"
+mk "$b"
+echo more >"$b/img-m.extra.zst"
+rehash "$b"
+run bash "$script" "$a" "$b"
+check "an artefact only in one dir" 1 "img-m.extra.zst: only in $b"
+
+mk "$a"
+mk "$b"
+echo tampered >"$b/img-m.wic.zst"
+run bash "$script" "$a" "$b"
+check "bytes no longer match the dir's SHA256SUMS" 1 "img-m.wic.zst: bytes do not match"
+
+mk "$a"
+mk "$b"
+echo loose >"$b/unlisted.bin"
+run bash "$script" "$a" "$b"
+check "a file not listed in SHA256SUMS" 1 "unlisted.bin: in $b but not listed"
+
+mk "$a"
+mk "$b"
+rm "$b/img-m.rootfs.tar.zst"
+run bash "$script" "$a" "$b"
+check "a listed file is missing" 1 "img-m.rootfs.tar.zst: listed in"
+
+mk "$a"
+mk "$b" 10 1700000001
+run bash "$script" "$a" "$b"
+check "SOURCE_DATE_EPOCH differs" 1 "build-info SOURCE_DATE_EPOCH differs" "1700000000" "1700000001"
+
+mk "$a"
+mk "$b"
+printf 'layer_y_commit=zzz\n' >>"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info has an extra line" 1 "build-info.txt has"
+
+# build-info.txt that cannot be read or lacks a required key fails the compare
+# (it never skips the metadata comparison and prints OK).
+noinfo() { expect "$1: no OK printed" test "${OUT##*OK*}" = "$OUT"; }
+mk "$a"
+mk "$b"
+rm "$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt missing" 1 "$b/build-info.txt: missing"
+noinfo "build-info.txt missing"
+mkdir "$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt is a directory" 1 "$b/build-info.txt: not a regular file"
+noinfo "build-info.txt is a directory"
+mk "$b"
+chmod 000 "$b/build-info.txt"
+if [ "$(id -u)" -eq 0 ]; then
+	echo "SKIP: build-info.txt chmod 000 (running as root, chmod cannot deny the read; the directory case covers the path)"
+else
+	run bash "$script" "$a" "$b"
+	check "build-info.txt unreadable" 1 "$b/build-info.txt: cannot be read"
+	noinfo "build-info.txt unreadable"
+fi
+chmod 644 "$b/build-info.txt"
+: >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt empty" 1 "$b/build-info.txt: empty"
+noinfo "build-info.txt empty"
+mk "$b"
+printf '%s\n' "# build-info" "build_seconds=1" "layer_x_commit=def" >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt without SOURCE_DATE_EPOCH" 1 "$b/build-info.txt: no SOURCE_DATE_EPOCH"
+noinfo "build-info.txt without SOURCE_DATE_EPOCH"
+printf '%s\n' "# build-info" "SOURCE_DATE_EPOCH=1700000000" "checkout_commit=abc" >"$b/build-info.txt"
+run bash "$script" "$a" "$b"
+check "build-info.txt without a layer revision" 1 "$b/build-info.txt: no layer_<name>_commit"
+noinfo "build-info.txt without a layer revision"
+mk "$a"
+chmod 000 "$a/build-info.txt"
+mk "$b"
+if [ "$(id -u)" -ne 0 ]; then
+	run bash "$script" "$a" "$b"
+	check "first dir's build-info.txt unreadable" 1 "$a/build-info.txt: cannot be read"
+fi
+chmod 644 "$a/build-info.txt"
+
+# Yocto's names carry the build timestamp (.rootfs-<14 digits>.<ext>): two
+# builds made at different times compare by the name without it.
+# mkts DIR TIMESTAMP [TAR-CONTENT]
+mkts() {
+	rm -rf "$1"
+	mkdir -p "$1"
+	echo wic >"$1/img-m.rootfs-$2.wic.zst"
+	echo "${3:-tar}" >"$1/img-m.rootfs-$2.tar.zst"
+	echo ext4 >"$1/img-m.rootfs-$2.ext4"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+	printf '%s\n' "# build-info" "machine=m" "targets=img" "SOURCE_DATE_EPOCH=1700000000" "layer_x_commit=def" >"$1/build-info.txt"
 }
-diffcase "tee.bin" TEE=other "DIFF  tee.bin"
-diffcase "TA ELF" TA=other "bc50d971-d4c9-42c4-82cb-343fb7f37896.stripped.elf"
-diffcase "Image" IMG=other "DIFF  Image"
-diffcase "dtb" DTB=other "imx95-19x19-frdm-pro.dtb"
-diffcase "boot partition byte" BOOT=bXot "wic partition boot"
-diffcase "tee-data partition byte" DATA=dXta "wic partition tee-data"
-mk "$wt/b" MEMBER=other
-run "$wt/a" "$wt/b"
-expect "rootfs member content: exit nonzero" test "$rc" -ne 0
-expect "rootfs member content: names the member" has "$wt/out" "first differing member: usr/bin/tool"
-mk "$wt/b" MODE=755
-run "$wt/a" "$wt/b"
-expect "rootfs member mode: exit nonzero" test "$rc" -ne 0
-expect "rootfs member mode: names the member" has "$wt/out" "first differing member: usr/bin/tool"
-mk "$wt/b" NOTEE=1
-run "$wt/a" "$wt/b"
-expect "missing artefact: exit nonzero" test "$rc" -ne 0
-expect "missing artefact: named" has "$wt/out" "tee.bin: missing in B"
-run "$wt/b" "$wt/a"
-expect "missing artefact on side A: named" has "$wt/out" "tee.bin: missing in A"
 
-# a corrupt compressed archive: the gzip trailer CRC is wrong
-mk "$wt/b"
-f=$wt/b/img.rootfs-20250101.tar.gz
-sz=$(stat -c %s "$f")
-printf '\377\377\377\377' | dd of="$f" bs=1 seek=$((sz - 8)) conv=notrunc 2>/dev/null
-run "$wt/a" "$wt/b"
-expect "corrupt archive: exit nonzero" test "$rc" -ne 0
-expect "corrupt archive: refused by name" has "$wt/out" "img.rootfs-20250101.tar.gz) cannot be decompressed"
-
-# several formats of one build are one build; two builds in one directory are not
-fmtcase() { # fmtcase NAME "mk knob for A" "mk knob for B" EXPECT (match, or text the output must hold)
-	mk "$wt/a" "$2"
-	mk "$wt/b" "$3"
-	run "$wt/a" "$wt/b"
-	if [ "$4" = match ]; then
-		expect "$1: exit 0" test "$rc" -eq 0
-	else
-		expect "$1: exit nonzero" test "$rc" -ne 0
-		expect "$1: says why" has "$wt/out" "$4"
-	fi
+# mksbom DIR TIMESTAMP [SPDX-CONTENT]: mkts, plus the package manifest and the
+# SPDX SBOM under the same timestamped names, listed in SHA256SUMS.
+mksbom() {
+	mkts "$1" "$2"
+	echo mf >"$1/img-m.rootfs-$2.manifest"
+	echo "${3:-spdx}" >"$1/img-m.rootfs-$2.spdx.json"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
 }
-fmtcase "wic and wic.gz of equal content" "WICZ=both" "WICZ=plain" match
-fmtcase "wic and wic.gz on both sides" "WICZ=both" "WICZ=both" match
-fmtcase "rootfs tar and tar.gz of equal content" "TARZ=both" "TARZ=gz" match
-fmtcase "rootfs tar and tar.gz on both sides" "TARZ=both" "TARZ=both" match
-mk "$wt/a" WICZ=both
-mk "$wt/b"
-printf 'X' | dd of="$wt/a/img.rootfs-20250101.wic" bs=1 seek=100 conv=notrunc 2>/dev/null
-run "$wt/a" "$wt/b"
-expect "wic and wic.gz of different content: exit nonzero" test "$rc" -ne 0
-expect "wic and wic.gz of different content: names the files" has "$wt/out" "img.rootfs-20250101.wic.gz"
-expect "wic and wic.gz of different content: says they differ" has "$wt/out" "differ after decompression"
-mk "$wt/a"
-mk "$wt/b"
-cp "$wt/a/img.rootfs-20250101.wic" "$wt/a/other.rootfs-20250102.wic"
-run "$wt/a" "$wt/b"
-expect "two wic builds in one directory: exit nonzero" test "$rc" -ne 0
-expect "two wic builds in one directory: not exactly one" has "$wt/out" "wic: not exactly one image in"
-mk "$wt/a" TARZ=both
-mk "$wt/b"
-printf 'X' | dd of="$wt/a/img.rootfs-20250101.tar" bs=1 seek=100 conv=notrunc 2>/dev/null
-run "$wt/a" "$wt/b"
-expect "tar and tar.gz of different content: exit nonzero" test "$rc" -ne 0
-expect "tar and tar.gz of different content: says they differ" has "$wt/out" "differ after decompression"
-mk "$wt/a" TARZ=plain
-mk "$wt/b"
-cp "$wt/a/img.rootfs-20250101.tar" "$wt/a/other.rootfs-20250102.tar"
-run "$wt/a" "$wt/b"
-expect "two rootfs archives in one directory: exit nonzero" test "$rc" -ne 0
-expect "two rootfs archives in one directory: not exactly one" has "$wt/out" "rootfs archive: not exactly one in"
-mk "$wt/a"
+mkts "$a" 20261123000001
+mkts "$b" 20261123000002
+run bash "$script" "$a" "$b"
+check "identical bytes, different timestamps" 0 "3 artefacts identical"
+mkts "$b" 20261123000002 other
+run bash "$script" "$a" "$b"
+check "different bytes, different timestamps: names the member" 1 "img-m.rootfs.tar.zst differs"
+mkts "$b" 20261123000002
+rm "$b/img-m.rootfs-20261123000002.ext4"
+(cd "$b" && sha256sum -- img-m.* >SHA256SUMS)
+run bash "$script" "$a" "$b"
+check "a member missing from one build: named" 1 "img-m.rootfs.ext4: only in $a"
 
-# PAX metadata and device numbers (python tarfile fixtures): identical but for one attribute
-fx=$ROOT/test/repro_tar_fixture.py
-# ptcase NAME "A-args" "B-args" EXPECT: EXPECT is "match" or the member that must be named
-ptcase() {
-	mk "$wt/a"; mk "$wt/b"
-	# shellcheck disable=SC2086 # word lists of KEY=VALUE
-	python3 -I "$fx" "$wt/a/img.rootfs-20250101.tar" $2
-	# shellcheck disable=SC2086
-	python3 -I "$fx" "$wt/b/img.rootfs-20250101.tar" $3
-	rm -f "$wt/a/img.rootfs-20250101.tar.gz" "$wt/b/img.rootfs-20250101.tar.gz"
-	run "$wt/a" "$wt/b"
-	if [ "$4" = match ]; then
-		expect "$1: exit 0" test "$rc" -eq 0
-	else
-		expect "$1: exit nonzero" test "$rc" -ne 0
-		expect "$1: names the member" has "$wt/out" "first differing member: $4"
-	fi
-}
-ptcase "pax fixtures, identical" "xattr=a cap=c acl=u::rw-" "xattr=a cap=c acl=u::rw-" match
-ptcase "xattr value" "xattr=one" "xattr=two" usr/bin/tool
-ptcase "security.capability value" "cap=AQAA" "cap=AQAB" usr/bin/tool
-ptcase "libarchive security.capability value" "lcap=AQAA" "lcap=AQAB" usr/bin/tool
-ptcase "xattr present on one side only" "dev=1:3" "xattr=one" usr/bin/tool
-ptcase "ACL value" "acl=u::rw-" "acl=u::rwx" usr/bin/tool
-ptcase "device major" "dev=1:3" "dev=2:3" dev/null
-ptcase "device minor" "dev=1:3" "dev=1:5" dev/null
-mk "$wt/a"
+# The SBOM and the package manifest are compared like any artefact.
+mksbom "$a" 20261123000001
+mksbom "$b" 20261123000002
+run bash "$script" "$a" "$b"
+check "identical SBOM and manifest, different timestamps" 0 "5 artefacts identical"
+mksbom "$b" 20261123000002 spdx-changed
+run bash "$script" "$a" "$b"
+check "an SBOM with one changed byte: names the .spdx.json member" 1 "img-m.rootfs.spdx.json differs"
 
-# the checker writes nothing to either directory
-mk "$wt/b"
-before=$(cd "$wt/a" && find . -exec stat -c '%n %a %s %Y' {} + | sort | md5sum)
-run "$wt/a" "$wt/b"
-after=$(cd "$wt/a" && find . -exec stat -c '%n %a %s %Y' {} + | sort | md5sum)
-expect "the checker leaves the deploy directory untouched" test "$before" = "$after"
+# Nothing to compare is a failure, never "0 artefacts identical".
+mk "$a"
+mk "$b"
+: >"$a/SHA256SUMS"
+rm -f "$a"/img-m.*
+: >"$b/SHA256SUMS"
+rm -f "$b"/img-m.*
+run bash "$script" "$a" "$b"
+check "both SHA256SUMS empty" 1 "no artefact to compare: both SHA256SUMS are empty" "$a" "$b"
+noinfo "both SHA256SUMS empty"
+mk "$b"
+run bash "$script" "$a" "$b"
+check "one SHA256SUMS empty, the other populated" 1 "only in $b"
+noinfo "one SHA256SUMS empty"
 
-# the make target
-mrun() { rc=0; PATH="$wt/bin:$PATH" make -s -C "$ROOT" platform-image-repro-check "$@" >"$wt/out" 2>&1 || rc=$?; }
-mrun REPRO_A="$wt/a" REPRO_B="$wt/b"
-expect "make target: a match exits 0" test "$rc" -eq 0
-mk "$wt/b" TEE=other
-mrun REPRO_A="$wt/a" REPRO_B="$wt/b"
-expect "make target: a mismatch exits nonzero" test "$rc" -ne 0
-mrun REPRO_A="$wt/a"
-expect "make target: a missing REPRO_B fails" test "$rc" -ne 0
-expect "make target: ... with a usage line" has "$wt/out" "usage:"
-mrun REPRO_B="$wt/a"
-expect "make target: a missing REPRO_A fails" test "$rc" -ne 0
-expect "make target: ... with a usage line (A)" has "$wt/out" "usage:"
+# A target with only a bmap, manifest and SBOM (identical in both) is no image.
+for d in "$a" "$b"; do
+	mk "$d"
+	rm "$d"/img-m.*
+	echo bmap >"$d/img-m.rootfs-20261123000001.wic.bmap"
+	echo mf >"$d/img-m.rootfs-20261123000001.manifest"
+	echo spdx >"$d/img-m.rootfs-20261123000001.spdx.json"
+	(cd "$d" && sha256sum -- img-m.* >SHA256SUMS)
+done
+run bash "$script" "$a" "$b"
+check "metadata only, no image: fails" 1 "no wic or rootfs image listed for target img"
+# A .rootfs-<ts>.testdata.json in place of the bmap is no image either.
+for d in "$a" "$b"; do
+	rm "$d/img-m.rootfs-20261123000001.wic.bmap"
+	echo td >"$d/img-m.rootfs-20261123000001.testdata.json"
+	(cd "$d" && sha256sum -- img-m.* >SHA256SUMS)
+done
+run bash "$script" "$a" "$b"
+check "testdata.json, manifest and SBOM, no image: fails" 1 "no wic or rootfs image listed for target img"
+# A requested debug target with no image at all, though the production one has.
+for d in "$a" "$b"; do
+	mk "$d"
+	printf '%s\n' "# build-info" "machine=m" "targets=img img-debug" "SOURCE_DATE_EPOCH=1700000000" \
+		"layer_x_commit=def" >"$d/build-info.txt"
+done
+run bash "$script" "$a" "$b"
+check "a requested target with no image: fails" 1 "no wic or rootfs image listed for target img-debug"
+# An empty targets= line.
+for d in "$a" "$b"; do
+	mk "$d"
+	printf '%s\n' "# build-info" "machine=m" "targets=" "SOURCE_DATE_EPOCH=1700000000" \
+		"layer_x_commit=def" >"$d/build-info.txt"
+done
+run bash "$script" "$a" "$b"
+check "empty targets=: fails" 1 "targets= is empty or missing"
+
+run bash "$script" "$a"
+check "a missing argument" 2 "need exactly two output directories"
+run bash "$script"
+check "no arguments" 2 "usage:"
+run bash "$script" --allow
+check "--allow without a name" 2 "unknown option --allow"
+run bash "$script" --bogus "$a" "$b"
+check "an unknown option" 2 "unknown option --bogus"
+run bash "$script" "$a" "$tmp/nodir"
+check "a missing directory" 2 "is not a directory"
 
 finish

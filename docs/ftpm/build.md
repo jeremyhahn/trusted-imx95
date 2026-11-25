@@ -119,7 +119,7 @@ and so erases it (SPEC row `ftpm`, owner, 2026-11-25).
 
 ROADMAP `ftpm` (b) asks for a byte-for-byte rebuild check. `make platform-image-repro-check REPRO_A=<dir> REPRO_B=<dir>`
 ([what it compares](../platform-image/build.md)) is that check. It was tested only on synthetic
-deploy directories (`test/platform_image_repro_test.sh`); **no two-build run was made** (no bitbake in this lane).
+deploy directories (`test/platform_image_repro_check_test.sh`); **no two-build run was made** (no bitbake in this lane).
 Unconfirmed until one is:
 
 - The deploy paths: `optee-ftpm/<uuid>.stripped.elf` (from the recipe's `do_deploy`), `tee.bin`, `Image` and
