@@ -1,6 +1,6 @@
 # system-manager-config — architecture
 
-> **Status: NORMATIVE** · Scope: trusted-imx95 `system-manager-config` · Last verified: 2026-11-12
+> **Status: NORMATIVE** · Scope: trusted-imx95 `system-manager-config` · Last verified: 2026-11-24
 > The detail of the `system-manager-config` row of [SPEC.md](../SPEC.md). Conflicts with SPEC.md are defects in this file.
 
 Every statement below cites a document and section listed in [references/README.md](../references/README.md).
@@ -14,6 +14,18 @@ NXP's System Manager runs on the Cortex-M33 and stays NXP's code; this repositor
 `imx95` row its clocks, power and resources through SCMI, and the power domains and PHYs that the
 `hsm-self-defence` row acts on ([SPEC.md](../SPEC.md), `system-manager-config` row). That firmware, its board
 profile and its use of these resources are trusted-firmware's `imx95` row and are not restated here.
+
+## Approval
+
+- The configuration change is approved after the survey of #167 (owner rulings 1243 and 1244) and follows that survey
+  ([SPEC.md](../SPEC.md), `system-manager-config` row). The survey asks whether the Cortex-M7 needs a `PERF_M7` line
+  to set its own clock or performance level; its record is section 8 of
+  [scmi-permissions-survey.md](scmi-permissions-survey.md), which the #167 row's PR adds.
+- What rulings 1243 and 1244 do not decide stays proposed, pending owner approval: the
+  [M7 grant delta](#m7-grant-delta-patch-0002) below (#13).
+- `make integration-test-system-manager-config` checks this row end to end, offline: `make system-manager` on a fake
+  imx-sm whose patched M7 block is the committed allowlist, the grants that allowlist gives the Cortex-M7, and the
+  statements of this file and of SPEC.md that the row rests on (`test/integration/system_manager_config_test.sh`).
 
 ## The cores and the System Manager
 
