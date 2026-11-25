@@ -75,7 +75,7 @@ check_readme() {
 	done
 	want=$((want + $(count_questions "$DIR/../ftpm/README.md" '^## Open questions for the owner')))
 	[ "$rows" -eq "$want" ] || echo "question rows $rows, sources $want"
-	grep -E '^\| [A-F][0-9]+ \|' "$f" | grep -vqE '\]\([^)]*\.md#[^)]+\)' && echo "a row has no anchored source link"
+	grep -E '^\| [A-F][0-9]+ \|' "$f" | grep -vE '\]\([^)]*\.md#[^)]+\)' >/dev/null && echo "a row has no anchored source link"
 	return 0
 }
 
