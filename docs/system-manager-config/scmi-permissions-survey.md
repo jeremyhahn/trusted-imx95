@@ -460,3 +460,342 @@ states it.
    review only.
    Recommendation: (a), which shares one configtool run with #55's
    TRDC check and leaves TRDC rules to #55.
+
+## 8. Does the M7 need a `PERF_M7` API line? (#167; provisional)
+
+Status: provisional and open. The PRO generated table gives ALL
+(`configs/mx95frdm-pro/config_scmi.h:96`, by the command in 8.0), and
+`make system-manager` now checks that on every build
+(`scripts/sm-perf-check.sh`); the other vendor-cited items (1 and 3-7 of
+8.2) stay cited and open, because reviewers cannot confirm them under the
+cite-only rule (8.0). No `.cfg` patch is made. Rulings 1243 and 1244 approved row 167 after
+this survey; whatever they do not decide (the rest of the #13 delta, TENANT
+ASK 1) stays proposed, pending owner approval. This section's status word
+is "provisional and open" throughout: it states what the repository checks
+(8.0 (i)) and what is cited only (8.0 (ii)), and decides neither the
+cited items nor the numeric ID of `PERF_M7`.
+
+Source: NXP `imx-sm` at the revision pinned in `system-manager/sm.lock`
+(tag `lf-6.18.37-2.1.0`, commit `eec232878ab7`). It was fetched as
+`scripts/sm-build.sh` fetches it: the commit and the SHA-256 of
+`configs/other/mx95frdm-pro.cfg` both matched the lock. Line numbers
+below are that revision's; imx-sm text is cited, not copied. This
+section answers the open `PERF_M7` question of
+`m7-resource-map-survey.md` (section 8 item 6) and of the matching row
+in `build.md`.
+
+### 8.0 What a reviewer can and cannot confirm
+
+**Review inputs.** Vendor documents and source are never copied into this
+repository or supplied as review inputs; a claim about them cites the file
+and line at the pinned revision (`lf-6.18.37-2.1.0`, `eec232878ab7`).
+Proposed, pending owner approval (TENANT ASK 1: may vendor sources be review
+inputs?). Under it, what decides the answer is made checkable by this
+repository's own CI, and the rest is marked as cited only.
+
+Every upstream claim below cites a path under the imx-sm tree and a
+line at commit `eec232878ab7` (tag `lf-6.18.37-2.1.0`, pinned in
+`system-manager/sm.lock`). The imx-sm source is not in this repository,
+and no vendor text is copied here. To check a claim, fetch that tag
+the way `scripts/sm-build.sh` does (lines 133-144, which fail closed if
+the commit differs) and open the cited line.
+
+(i) **Checked by this repository on every build.** Item 2 of 8.2: the
+generated PRO `config_scmi.h` gives the M7 agent ALL on `PERF_M7`, and no
+other agent holds it. `scripts/sm-perf-check.sh` (expected value at line
+21, checks at lines 72-79) reads the file that `make cfg` writes in each of
+the two build trees, and `scripts/sm-build.sh` (lines 189-190) fails the
+build when it does not hold. It prints `sm-perf-check: M7 PERF_M7=ALL, no
+other agent` and the manifest gets the line `m7_perf_m7=ALL` (line 208).
+The CI job "System Manager build with the pinned Arm toolchain"
+(`system-manager-build` in `.github/workflows/ci.yml`) runs it through
+`scripts/sm-toolchain-check.sh`, the script behind `make sm-toolchain-check`,
+which builds with `make system-manager`. That job runs only when the PR is
+not a draft; no CI run on the head that carries this text has run it yet,
+so no CI result is claimed. What was run is a lane run of 2026-11-24 on the real pinned source
+and not in CI. `bash test/sm_build_test.sh`
+covers the check offline, on synthetic tables written in the test.
+
+Also checked by this repository: item 7 of 8.2, where a `PERF_M7  PRIV`
+line must go. `scripts/sm-perf-placement-check.sh`, called by
+`scripts/sm-toolchain-check.sh` after `make system-manager`, regenerates
+the table for two scratch variants of the built tree (the tree and
+`m33_image.bin` are untouched) and reads the M7 grant back.
+
+(ii) **Cited, not confirmable by review under the cite-only rule.** Items 1
+and 3-6 of 8.2 (item 7's outcome is checked, its reading of `configtool.pl`
+is not) and the citations of 8.3 and 8.4: the `rpc_scmi_perf.c`,
+`lmm_perf.c`, `configtool.pl`, `m7mix.cfg`, `mx95frdm-pro.cfg` and
+`mx95evk.cfg` lines. They were read by the lane twice (8.2, then the note below) and have not
+been reviewed independently; they stay provisional and open. The note
+below lists each runtime claim with its file and line.
+
+**Reproduce the vendor read.** Upstream: `https://github.com/nxp-imx/imx-sm`,
+tag `lf-6.18.37-2.1.0`, commit `eec232878ab7dd460f5a8f3767d39dc7e9412efa`.
+Fetch it as `scripts/sm-build.sh` does (lines 140-143, 165-166), into the
+git-ignored `out/` (create the parent first), never into a tracked path:
+
+```
+mkdir -p out/cache
+git init -q --bare out/cache/imx-sm.git
+git -C out/cache/imx-sm.git fetch -q --depth 1 https://github.com/nxp-imx/imx-sm \
+    +refs/tags/lf-6.18.37-2.1.0:refs/tags/lf-6.18.37-2.1.0
+git -C out/cache/imx-sm.git rev-parse 'refs/tags/lf-6.18.37-2.1.0^{commit}'
+git -c advice.detachedHead=false clone -q --no-checkout out/cache/imx-sm.git out/tree
+git -C out/tree checkout -q --detach eec232878ab7dd460f5a8f3767d39dc7e9412efa
+```
+
+The `rev-parse` must print the commit above. Runtime claims, re-read against
+that tree on 2026-11-24 (**read twice**: the first reading is the one
+8.2 records; the second is this one, by line number, and agreed):
+
+- Level set needs PRIV, else `SM_ERR_DENIED`, then `LMM_PerfLevelSet`:
+  `sm/rpc/scmi/rpc_scmi_perf.c:1098-1111` (compare at `:1101`, call at `:1109`).
+- Limits set needs SET, then `SM_ERR_NOT_SUPPORTED`: `rpc_scmi_perf.c:955-967`.
+- Domain attributes report PRIV and SET rights: `rpc_scmi_perf.c:743-755`;
+  Level Indexing Mode: `:740`.
+- Index range check, `SM_ERR_INVALID_PARAMETERS`: `sm/lmm/lmm_perf.c:130-132`.
+- Aggregation (highest request across LMs, a `MAX` over per-LM levels):
+  `sm/lmm/lmm_perf.c:139-153` (the `MAX` at `:148`).
+- Precedence and derivation of the grant: `configs/configtool.pl:2410`
+  (`get_perms`), the write of `SM_SCMI_PERM_<PERM>` at `:2506`;
+  `devices/MIMX95/configtool/m7mix.cfg:39` (`PERF_M7` bundled with `M7P`);
+  `configs/other/mx95frdm-pro.cfg:396` (`M7P  OWNER`).
+- Second reading of the remaining vendor lines that 8.2 cites, by line
+  number, on 2026-11-24 (all **agreed**, one cite corrected):
+  `configs/configtool.pl:85-86` (permission names, `ALL` last);
+  `:244-257` (the `api=<perm>` word expanded to every protocol);
+  `:2461-2463` (the `<proto>=<perm>` word read per line) and `:2474` (one
+  value kept per resource, a later line replaces an earlier one);
+  `:2486-2506` (the `<proto>Perms[...] = SM_SCMI_PERM_<PERM>` write);
+  `configs/other/mx95frdm-pro.cfg:57-58` (dictionary `PRIV` and `ALL`),
+  `:344` (`OWNER`), `:377-392` (the API list, no `PERF_*` entry),
+  `:394-396` (Resources, then `M7P  OWNER`);
+  `sm/rpc/scmi/rpc_scmi_perf.c:870` (`levelIndex` set per described level),
+  `:1098-1104` (the PRIV check) and `:1107-1111` (the `LMM_PerfLevelSet`
+  call; the first reading cited `:1106`, a blank line, now `:1107`);
+  `configs/mx95evk/config_scmi.h:95` (`perfPerms[DEV_SM_PERF_M7]` is ALL;
+  not relied on).
+
+- Confirmable from this repository alone: the lock pins, the patch
+  contents, that `system-manager/patches/` leaves `M7P` and `PERF_M7`
+  alone, and (i).
+- Level values, read twice on 2026-11-24 (the first by symbol search with
+  context, the second by line number; **agreed**):
+  `devices/MIMX95/sm/dev_sm_perf.h:66` (domain 3), `:82-85` (indices 0-3);
+  `devices/MIMX95/sm/dev_sm_perf.c:49` (4 levels), `:415-441` (the M7
+  table), `:1204-1211` (the M7 domain entry), `:1347` and `:1525` (count);
+  `devices/MIMX95/MIMX95_elec_spec.h:134-136` (the three rates);
+  `sm/lmm/lmm_perf.c:100-160` (`LMM_PerfLevelSet`, checks at `:129-132`,
+  `MAX` at `:148`).
+- Callers of `LMM_PerfLevelSet` (grep of the tree, 2026-11-24):
+  `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` (LM start
+  list) and `:1272` (LM stop list), `sm/utilities/monitor/monitor_cmds.c:1809`
+  (monitor write), and the unit test `sm/test/lmm/test_lmm_perf.c`.
+- Second reading of the remaining new cites, by line number, on 2026-11-24
+  (all **agreed**): `devices/MIMX95/sm/dev_sm_perf.c:2677`, `:2683` and
+  `:2706` (the ARM supply's level count, three cases; not the M7's);
+  `configs/other/mx95frdm-pro.cfg:461`, `:475` and `:489` (the only
+  start-list `PERF_*` entries, all `PERF_A55`); the caller lines
+  `sm/rpc/scmi/rpc_scmi_perf.c:1108`, `sm/lmm/lmm_sys.c:1161` and `:1272`,
+  `sm/utilities/monitor/monitor_cmds.c:1809`.
+- Second reading of the cites of 8.2 and 8.3 not listed above, by line
+  number, on 2026-11-24 (all **agreed**): `sm/rpc/scmi/rpc_scmi_perf.c:691-763`
+  (domain attributes handler), `:810-900` (describe levels), `:990-1055`
+  (limits get) and `:1134-1161` (level get), each from the line after the
+  signature to the closing brace plus one blank line; none of the four
+  denies the call (`SM_ERR_DENIED` is only at `:960` and `:1103`, in the two
+  set handlers), and the domain attributes handler only reads the grant to
+  report it (`:743-755`); `configs/other/mx95frdm-pro.cfg:149` (the comment
+  "Modified via PERF protocol"), `:161` (`CLK_BUSM7`) and `:180` (`CLK_M7`),
+  both inside that block; `:57` (dictionary `PRIV`); and
+  `configs/configtool.pl:2461-2474` (the `<proto>=<perm>` match at `:2461`,
+  the resource words at `:2467-2468`, one value saved per resource at
+  `:2474`; the block closes at `:2476`).
+- Sub-ranges that 8.2 cites inside ranges listed above (same reading, so
+  also **agreed**): `mx95frdm-pro.cfg:379-392` and `:394` (inside `:377-396`),
+  `dev_sm_perf.c:417-419`, `:423-425`, `:429-431` and `:435-437` (the four
+  rows inside `:415-441`), `rpc_scmi_perf.c:955-961` and `:963-967` (inside
+  `:955-967`), `:1098-1104` (inside `:1098-1111`).
+- **Not read**: the generated `configs/mx95frdm-pro/config_scmi.h:57` (the
+  agent 0 record header) and `:96` (the `PERF_M7` line) are not in the
+  fetched tree; they exist only after `make cfg`, so this lane did not
+  re-read them. They are covered by `scripts/sm-perf-check.sh` on every
+  build, not by a vendor read.
+- **Not read**: whether the M7 domain's supply index is the one set at
+  `dev_sm_perf.c:1347`; whether the monitor utility is built into the
+  image.
+
+To regenerate the PRO table by hand, from a checkout of the pinned commit
+with `system-manager/patches/*.patch` applied in name order (`git apply`,
+as `scripts/sm-build.sh` does): run `make config=mx95frdm-pro cfg`. The
+file is then `configs/mx95frdm-pro/config_scmi.h`; it is generated output
+and is not copied here. Its SHA-256 is not pinned, so the check compares
+what it matches, not a digest. The real table at the pinned revision
+matched the check's expectations as written: the record header, the single
+line and the value ALL (line 96); it differed from this section nowhere.
+
+### 8.1 Answer
+
+**Provisional, open: no `PERF_M7` API line appears to be needed for the
+M7 to set its own performance level.** The answer rests on (i) of 8.0:
+the PRO's generated table, from the pinned, patched file, gives the M7
+agent ALL on `PERF_M7` and no other agent holds it, and every
+`make system-manager` checks that (`scripts/sm-perf-check.sh`, item 2).
+The `PERF_M7  PRIV` line is therefore not required on this reading.
+It stays provisional and open for (ii): why the table says ALL
+(ownership of `M7P`, item 1), that `PERFORMANCE_LEVEL_SET` needs only
+PRIV (item 3), and that an explicit line would not lower the grant
+(item 7) are cited at the pinned revision, not confirmable by review
+under the cite-only rule (the placement outcome of item 7 is checked by
+`scripts/sm-perf-placement-check.sh`, run by the non-draft CI job named in
+8.0 and by a lane run on the pinned source).
+
+### 8.2 Evidence
+
+1. The M7 LM defines its `OWNER` macro as `perm=rw, api=all`
+   (`configs/other/mx95frdm-pro.cfg:344`) and lists `M7P OWNER` under
+   Resources (`:396`). The SoC device file bundles `PERF_M7` with `M7P`
+   (`devices/MIMX95/configtool/m7mix.cfg:39`). Per section 2.3 (S2),
+   `api=all` on a resource gives full rights on every SCMI object in
+   its bundle. The M7 LM's API list (`:379-392`) has no `PERF_*`
+   entry, and neither patch under `system-manager/patches/` touches
+   `M7P` or `PERF_M7`.
+2. The PRO's generated `config_scmi.h` is built from the `.cfg` by the
+   configuration tool (`make config=mx95frdm-pro cfg`, 8.0), and was
+   read after generating it from the pinned file with this repository's
+   two patches applied. Its agent 0 record, headed "SCMI AGENT0 Config
+   (M7)" (`configs/mx95frdm-pro/config_scmi.h:57`, generated, not re-read
+   in the fetched tree: **unconfirmed** by vendor read, checked by the build
+   below), sets `perfPerms[DEV_SM_PERF_M7]` to `SM_SCMI_PERM_ALL` (line 96). That is
+   the only line naming `PERF_M7` in the file, so no other agent holds
+   it. This is checked by this repository on every build:
+   `scripts/sm-perf-check.sh` (lines 21 and 72-79), called from
+   `scripts/sm-build.sh` (lines 189-190), fails unless the M7 record
+   holds the one line at ALL; the CI job named in 8.0 runs it when the PR is
+   not a draft (no CI run of it is claimed here; a lane run on the pinned
+   source passed it); the manifest line is `m7_perf_m7=ALL`. The rest of this item is
+   cited only (ii). The tool derives such a line in `get_perms`
+   (`configs/configtool.pl:2410`): it takes each protocol's `perf=<perm>`
+   word on the agent's lines (`:2461-2463`), keeps one value per
+   resource (`:2474`) and writes `<proto>Perms[<resource>] =
+   SM_SCMI_PERM_<PERM>` (`:2486-2506`). The `perf=all` comes from
+   `api=all` of the `OWNER` macro (`mx95frdm-pro.cfg:344`), expanded to
+   every protocol (`configtool.pl:244-257`; permission names `:85-86`;
+   dictionary `ALL`, `mx95frdm-pro.cfg:58`).
+   The EVK's generated table gives the same answer
+   (`configs/mx95evk/config_scmi.h:95`) and is no longer relied on.
+3. Function `PerformanceLevelSet` rejects the call with `SM_ERR_DENIED`
+   when the agent's `perfPerms[domain]` is below `SM_SCMI_PERM_PRIV`
+   (`sm/rpc/scmi/rpc_scmi_perf.c:1098-1104`), otherwise it calls
+   `LMM_PerfLevelSet` (`:1107-1111`). No other permission is read.
+
+   Reproduce the vendor read: the imx-sm repository is
+   `https://github.com/nxp-imx/imx-sm`, pinned at commit
+   `eec232878ab7dd460f5a8f3767d39dc7e9412efa`. A shallow fetch of that commit
+   gives the same tree (`git init imx-sm && cd imx-sm`, then
+   `git fetch --depth 1 https://github.com/nxp-imx/imx-sm.git eec232878ab7dd460f5a8f3767d39dc7e9412efa`
+   and `git checkout FETCH_HEAD`). Every vendor line cited in this section
+   is a line of that tree; no vendor code is copied here.
+4. `PerformanceLimitsSet` needs SET (`:955-961`) but then returns
+   `SM_ERR_NOT_SUPPORTED` whatever the permission (`:963-967`). The M7
+   cannot narrow a domain's limits at this revision, line or not.
+5. `PerformanceDomainAttributes` reports to the caller whether it may
+   set the level (PRIV or above) and the limits (SET or above)
+   (`rpc_scmi_perf.c:743-755`). The M7 can read this at run time.
+6. The domain uses Level Indexing Mode (`:740`) and
+   `PerformanceDescribeLevels` returns an index per level (`:870`), so
+   the level argument is an index. `LMM_PerfLevelSet` rejects an index
+   at or above the number of levels with `SM_ERR_INVALID_PARAMETERS`
+   (`sm/lmm/lmm_perf.c:130-132`). The levels are in the MIMX95 device
+   code (cited only, read twice, 2026-11-24): `DEV_SM_PERF_M7` is domain 3
+   (`devices/MIMX95/sm/dev_sm_perf.h:66`); the domain uses the SoC level
+   table `s_perfDescM7` (`devices/MIMX95/sm/dev_sm_perf.c:415-441`) and
+   the count is `DEV_SM_NUM_PERF_LVL_SOC`, 4 (`dev_sm_perf.c:49`, stored
+   at `:1347`, returned by `:1525`). Index 0 is `DEV_SM_PERF_LVL_PRK`
+   (24 MHz, `dev_sm_perf.c:417-419`), 1 is `LOW` (`ES_LOW_KHZ_M7`,
+   `:423-425`), 2 is `NOM` (`:429-431`), 3 is `ODV` (`:435-437`)
+   (`dev_sm_perf.h:82-85`). The three rates are 400000, 666667 and 800000
+   KHz (`devices/MIMX95/MIMX95_elec_spec.h:134-136`). No level of this table
+   is marked reserved. Not read, so **unconfirmed**: that the M7
+   domain's supply index (`s_psCfgSoc`, `dev_sm_perf.c:1208`) is the one
+   `:1347` sets, and whether any build option or the board `.cfg` changes
+   the count (the only count adjustment seen, `:2677-2706`, is for the
+   ARM supply).
+7. An explicit API line does not lower an owned resource's grant. In
+   `get_perms` the last `perf=` word seen for a resource wins
+   (`configs/configtool.pl:2461-2474`, lines in file order). A line
+   `PERF_M7  PRIV` becomes `perf=priv` by the dictionary
+   (`mx95frdm-pro.cfg:57`) and `configtool.pl:244-257`. In the M7 LM the
+   API list (`:377-392`) comes before the Resources list (`:394`) and
+   `M7P  OWNER` (`:396`), whose `perf=all` is therefore read later and
+   wins. So a `PERF_M7  PRIV` line in the API list would change nothing;
+   only a line after `M7P  OWNER` could lower the grant. This is
+   checked by this repository: `scripts/sm-perf-placement-check.sh`
+   (`variant`, line 46; `run_one`, lines 83-95), called from
+   `scripts/sm-toolchain-check.sh` (line 25), generates the table for two
+   scratch copies of the built tree. A `PERF_M7  PRIV` line at the end of
+   the M7 API list must still leave ALL, and the same line right after
+   `M7P  OWNER` must give PRIV, read back with `scripts/sm-perf-check.sh
+   --want` (line 31). The anchors are found by content in the M7 block, and
+   a missing one fails the check. The variants are not patches and are
+   never committed. The CI job named in 8.0 runs the check when the PR is not
+   a draft; no CI run of it is claimed yet, and a lane run on the pinned
+   source observed ALL and PRIV. Reading `configtool.pl` stays cited only (ii). These `.cfg` line numbers are the upstream file's; the patches shift
+   later lines by two (0002 removes two test grants from the API list),
+   which does not alter any entry cited here.
+
+### 8.3 What the M7 can do with the grant it has
+
+- Set its `PERF_M7` level by index: yes (items 1 and 3). The SM keeps
+  one request per LM and applies the highest across LMs
+  (`sm/lmm/lmm_perf.c:139-153`). The M7 can raise the domain but cannot
+  hold it below a level another LM requests. Whether any other LM
+  requests `PERF_M7`: no external LM can. Another LM's level set is
+  refused by item 3 unless it holds `PERF_M7` at PRIV or above, and this
+  `.cfg` gives the domain only to the M7's LM; the build fails if any other
+  agent holds it (`scripts/sm-perf-check.sh:72-79`, cited by
+  `scripts/sm-build.sh:189-190`). SM-internal callers of `LMM_PerfLevelSet`
+  (cited only, listed in 8.0): the LM start and stop lists
+  (`sm/lmm/lmm_sys.c:1161`, `:1272`) and the monitor write command
+  (`sm/utilities/monitor/monitor_cmds.c:1809`). The PRO `.cfg` carries
+  start-list `PERF` entries only for `PERF_A55`
+  (`mx95frdm-pro.cfg:461,475,489`), none for `PERF_M7`, so no boot-time
+  request on the M7 domain was found. The M7 cannot hold the domain below
+  a request an internal caller makes; the monitor is a debug path, and
+  whether it is built into the image is **unconfirmed** (not read).
+- Read the level, the limits, the described levels and the domain
+  attributes: these handlers check no permission
+  (`rpc_scmi_perf.c:691-763`, `:810-900`, `:990-1055`, `:1134-1161`).
+- Set limits: no (item 4).
+- Set `CLK_M7` or `CLK_BUSM7` through the Clock protocol: no. Both are
+  in LM0's clock list (`mx95frdm-pro.cfg:161,180`, in the block headed
+  "Modified via PERF protocol" at `:149`), and the M7's generated clock
+  rights list only its own peripheral clocks (the generated PRO
+  `config_scmi.h` has no `CLK_M7` or `CLK_BUSM7` entry at all). The core clock moves only as a
+  result of the performance level.
+
+### 8.4 Without ownership of `M7P`
+
+If a configuration did not give `M7P` to the M7, it would have no
+`PERF_M7` entry: level set would fail with `SM_ERR_DENIED` (item 3)
+while the read messages above still worked. A `PERF_M7` API line would
+then be the way to give the level. This does not apply to the pinned
+file.
+
+### 8.5 Follow-ups (proposed, pending owner approval)
+
+- Text only, no patch: if the owner wants the grant lower than ALL, a
+  `PERF_M7  PRIV` line must come after `M7P  OWNER` in the M7 LM; in the
+  API list it changes nothing. Both placements are tested by
+  `scripts/sm-perf-placement-check.sh` (item 7), which the non-draft CI job
+  named in 8.0 runs and a lane run on the pinned source ran. Proposed, pending owner
+  approval, and not needed for the M7 to set its level.
+- Check for the image build: done by #167 (`scripts/sm-perf-check.sh`,
+  run by `scripts/sm-build.sh` on every build, 8.0 (i)). It asserts that
+  the M7 agent's `perfPerms[DEV_SM_PERF_M7]` is ALL and that no other
+  agent holds one, so item 2 stays true across an imx-sm bump; the
+  expected value is one named variable, to change if the owner chooses
+  another.
+- Open, for the M7 firmware rather than the SM: whether the firmware
+  needs to change its level at all.
