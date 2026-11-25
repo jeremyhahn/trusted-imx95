@@ -189,7 +189,7 @@ check_runbook() {
 		grep -qE "^\| $n \|" "$f" || echo "missing step $n"
 	done
 	# a step row (table row starting with a step number) must not move the life cycle
-	if grep -E '^\| [0-9][abc]? \|' "$f" | grep -qiE 'life[ -]cycle'; then echo "life cycle in a step row"; fi
+	if grep -E '^\| [0-9][abc]? \|' "$f" | grep -iE 'life[ -]cycle' >/dev/null; then echo "life cycle in a step row"; fi
 	grep -qF 'verb: none yet' -i "$f" || echo "no 'verb: none yet'"
 	grep -qE '/home/' "$f" && echo "contains a /home path"
 	return 0
@@ -229,12 +229,12 @@ DENY_TOKENS=(nvm_write fuse lifecycle life-cycle ahab_ spsdk nxpele rpmb /dev/mm
 check_closing() {
 	local arch=$1 readme=$2 sdir=$3 re f
 	grep -qxF '## Where the life cycle closes' "$arch" || echo "architecture.md lacks the heading"
-	awk '/^## Where the life cycle closes$/ {on=1; next} /^## / {on=0} on' "$arch" | grep -q '1234' \
+	awk '/^## Where the life cycle closes$/ {on=1; next} /^## / {on=0} on' "$arch" | grep '1234' >/dev/null \
 		|| echo "the section does not cite ruling 1234"
 	grep -qF 'where the life cycle closes' "$readme" || echo "README row lacks the cell text"
 	re=$(IFS='|'; printf '%s' "${DENY_TOKENS[*]}")
 	while IFS= read -r f; do
-		if grep -vE '^[[:space:]]*#' "$f" | grep -qiE "$re"; then
+		if grep -vE '^[[:space:]]*#' "$f" | grep -iE "$re" >/dev/null; then
 			echo "deny-list token in non-comment line of ${f#"$sdir"/}"
 		fi
 	done < <(find "$sdir" -type f | sort)
