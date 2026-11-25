@@ -12,6 +12,7 @@ recipe_rel=platform-image/recipes-security/xkmsd/xkmsd_git.bb
 image_rel=platform-image/recipes-core/images/trusted-imx95-image.bb
 unit_rel=platform-image/recipes-security/xkmsd/files/xkmsd.service
 conf_rel=platform-image/recipes-security/xkmsd/files/xkmsd.yaml
+dev_rel=platform-image/recipes-security/xkmsd/dev/xkmsd-dev.yaml
 build_rel=platform-image/recipes-security/xkmsd/files/xkmsd-build.sh
 mount_rel=platform-image/recipes-security/xkmsd/files/var-lib-xkms.mount
 wks_rel=platform-image/wic/trusted-imx95.wks.in
@@ -148,6 +149,8 @@ install_ok() {
 	has "$f" 'install -m 0640 -g xkmsd ${UNPACKDIR}/xkmsd.yaml ${D}${sysconfdir}/xkms/xkmsd.yaml' ||
 		{ echo "the config is not installed 0640 root:xkmsd"; return 1; }
 	[ "$(val "$f" 'CONFFILES:${PN}')" = '${sysconfdir}/xkms/xkmsd.yaml' ] || { echo "the config is not a conffile"; return 1; }
+	# The development config (software key custody) is never packaged.
+	if has "$f" 'xkmsd-dev'; then echo "the recipe names the development config: it must not be packaged"; return 1; fi
 	return 0
 }
 
@@ -197,6 +200,24 @@ config_ok() {
 	return 0
 }
 
+# custody_ok FILE: the production config configures no software key custody. An
+# active line outside the rng section that names `software` or `pkcs8` (the file
+# backends of go-xkms, whatever the key: default_backend, a backends entry, a
+# keystore-type) fails. The rng section is the entropy source, not custody. With
+# no enclave backend at the pinned tag, production configures no backend at all
+# and the daemon refuses it (the smoke test runs that).
+custody_ok() {
+	local l s sect=
+	while IFS= read -r l; do
+		s=${l#"${l%%[![:space:]]*}"}
+		case $s in '#'* | '') continue ;; esac
+		case $l in [!\ ]*) sect=${l%%:*} ;; esac
+		[ "$sect" != rng ] || continue
+		case ${l,,} in *software* | *pkcs8*) echo "the config sets software key custody: '$l'"; return 1 ;; esac
+	done <"$1"
+	return 0
+}
+
 # image_ok FILE: an active IMAGE_INSTALL line installs xkmsd (a word, not a
 # substring of another package name).
 image_ok() {
@@ -227,7 +248,10 @@ t "the production image installs xkmsd" image_ok "$ROOT/$image_rel"
 t "the xkmsd recipe adds the xkmsd system user" user_ok "$ROOT/$recipe_rel"
 t "the xkmsd recipe installs and enables the unit and the config" install_ok "$ROOT/$recipe_rel"
 t "the xkmsd unit" unit_ok "$ROOT/$unit_rel"
-t "the xkmsd default config" config_ok "$ROOT/$conf_rel"
+t "the xkmsd production config" config_ok "$ROOT/$conf_rel"
+t "the xkmsd production config holds no software key custody" custody_ok "$ROOT/$conf_rel"
+t "the xkmsd development config" config_ok "$ROOT/$dev_rel"
+neg "negative: the development config is software custody (the check is not vacuous)" custody_ok "$ROOT/$dev_rel"
 t "the xkmsd build script" build_ok "$ROOT/$build_rel"
 # smoke_ok SCRIPT MAKEFILE: the smoke test reads the pin from the recipe, builds
 # with the recipe's script, starts the packaged config, checks the read-only
@@ -236,7 +260,9 @@ smoke_ok() {
 	local s=$1 mk=$2 want
 	for want in 'rev=$(val SRCREV)' 'build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh' \
 		'sh "$build" "$src" "$bin" "$pv" "$rev"' 'conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml' \
-		'"$bin" --config "$work/xkmsd.yaml"' 'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory" \
+		'devconf=$root/platform-image/recipes-security/xkmsd/dev/xkmsd-dev.yaml' \
+		'"$bin" --config "$work/xkmsd.yaml"' '"$bin" --config "$work/prod/xkmsd.yaml"' 'refuses the production config' \
+		'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory" \
 		'status --porcelain --ignored' "stat -c '%u %a'" 'systemd-analyze verify' 'systemd-analyze condition'; do
 		has "$s" "$want" || { echo "the smoke test lacks '$want'"; return 1; }
 	done
@@ -337,8 +363,22 @@ printf '%s\n' "${c0//datastore:/datastor:}" >"$scratch/nods.yaml"
 neg "negative: config without its datastore section" config_ok "$scratch/nods.yaml"
 printf '%s\n' "${c0//\"\/run\/xkms\/xkms.sock\"/\"\/tmp\/xkms.sock\"}" >"$scratch/sock.yaml"
 neg "negative: config socket outside /run/xkms" config_ok "$scratch/sock.yaml"
-printf '%s\n' "${c0//\"\/var\/lib\/xkms\/keys\/pkcs8\"/\"\/etc\/keys\"}" >"$scratch/keys.yaml"
+d0=$(<"$ROOT/$dev_rel")
+printf '%s\n' "${d0//\"\/var\/lib\/xkms\/keys\/pkcs8\"/\"\/etc\/keys\"}" >"$scratch/keys.yaml"
 neg "negative: config key path off the state mount" config_ok "$scratch/keys.yaml"
+# Software key custody in the production file: each form fails custody_ok.
+printf '%s\n' "$c0" 'default_backend: "software"' >"$scratch/cust-default.yaml"
+neg "negative: production config selects the software backend" custody_ok "$scratch/cust-default.yaml"
+printf '%s\n' "$c0" 'backends:' '  software:' '    enabled: true' >"$scratch/cust-backends.yaml"
+neg "negative: production config enables the software backend" custody_ok "$scratch/cust-backends.yaml"
+printf '%s\n' "$c0" 'backends:' '  pkcs8:' '    enabled: true' >"$scratch/cust-pkcs8.yaml"
+neg "negative: production config enables the pkcs8 backend" custody_ok "$scratch/cust-pkcs8.yaml"
+printf '%s\n' "$c0" 'ca:' '  identity:' '    - keystore-type: "Software"' >"$scratch/cust-ca.yaml"
+neg "negative: production config has a software CA keystore" custody_ok "$scratch/cust-ca.yaml"
+neg "negative: the pre-split config (software custody in the production file)" custody_ok "$ROOT/$dev_rel"
+printf '%s\n' "$c0" '# software custody is not configured here' >"$scratch/cust-comment.yaml"
+t "a comment that names software custody is not a setting" custody_ok "$scratch/cust-comment.yaml"
+neg "negative: the recipe packages the development config" install_ok "$(rcopy 'file://xkmsd.yaml' 'file://xkmsd.yaml file://xkmsd-dev.yaml' devpkg)"
 printf '%s\n' "$c0" 'auth:' '  password: x' >"$scratch/secret.yaml"
 neg "negative: config holds a password" config_ok "$scratch/secret.yaml"
 
@@ -359,10 +399,11 @@ t "an IMAGE_INSTALL:append installs xkmsd" image_ok "$scratch/append.bb"
 # platform-image-xkmsd-smoke). A stubbed failure must fail the script, never skip.
 smk=$scratch/smk
 sx=$smk/platform-image/recipes-security/xkmsd
-mkdir -p "$smk/scripts" "$smk/bin" "$sx/files"
+mkdir -p "$smk/scripts" "$smk/bin" "$sx/files" "$sx/dev"
 cp "$ROOT/scripts/platform-image-xkmsd-smoke.sh" "$smk/scripts/"
 cp "$ROOT/$recipe_rel" "$sx/"
 cp "$ROOT/$conf_rel" "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$sx/files/"
+cp "$ROOT/$dev_rel" "$sx/dev/"
 cat >"$smk/bin/git" <<'EOF'
 #!/bin/sh
 d=.
@@ -397,6 +438,9 @@ mode = os.environ.get("FAKE_DAEMON", "")
 if mode == "noready":
     print("stub: never ready")
     sys.exit(1)
+if mode != "serve-any" and not re.search(r"^default_backend:", cfg, re.M):
+    print("stub: default_backend must be specified")
+    sys.exit(1)
 if not os.access(state, os.W_OK):
     if mode == "ignore-ro":
         sys.exit(0)
@@ -427,7 +471,11 @@ else
 	smoke_run clean
 	check "smoke: a stubbed clean build-and-start passes" 0 "xkmsd-smoke: all passed" \
 		"ok   xkmsd reaches its ready state" "ok   xkmsd stops on SIGTERM" \
+		"ok   xkmsd refuses the production config" \
 		"ok   xkmsd refuses to start on a read-only state directory"
+	smoke_run prodserve FAKE_DAEMON=serve-any
+	check "smoke: a daemon that serves the production config (no key custody) fails" nonzero \
+		"FAIL: xkmsd keeps running on the production config"
 	smoke_run fetch FAKE_FETCH=fail
 	check "smoke: a failed fetch fails, it does not skip" nonzero "FAIL: cannot fetch go-xkms $srev"
 	smoke_run build FAKE_BUILD=fail

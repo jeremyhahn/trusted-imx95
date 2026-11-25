@@ -3,11 +3,13 @@
 # What the static checks of test/platform_image_xkmsd_test.sh cannot show:
 #   1. the pinned go-xkms commit the recipe names builds with the recipe's own
 #      build script (files/xkmsd-build.sh, the one do_compile runs);
-#   2. the daemon starts on the packaged xkmsd.yaml (state and socket paths
-#      redirected into a temp dir), reaches its ready state (the local socket is
-#      served; the node is sealed until an operator unseals it) and stops on
-#      SIGTERM;
-#   3. it refuses to start when its state directory is read-only.
+#   2. the daemon starts on the development config (dev/xkmsd-dev.yaml, software
+#      key custody, never installed; state and socket paths redirected into a
+#      temp dir), reaches its ready state (the local socket is served; the node
+#      is sealed until an operator unseals it) and stops on SIGTERM;
+#   3. it refuses the packaged production config (files/xkmsd.yaml), which
+#      configures no key custody: no enclave backend exists at the pin;
+#   4. it refuses to start when its state directory is read-only.
 # It fails, never skips: a source that cannot be fetched, a build that fails or
 # a missing tool is a failure. It needs network (the pinned commit and its Go
 # modules), git, a C compiler, libusb headers and a Go toolchain that meets the
@@ -24,6 +26,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 recipe=$root/platform-image/recipes-security/xkmsd/xkmsd_git.bb
 build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh
 conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml
+devconf=$root/platform-image/recipes-security/xkmsd/dev/xkmsd-dev.yaml
 unit=$root/platform-image/recipes-security/xkmsd/files/xkmsd.service
 mountu=$root/platform-image/recipes-security/xkmsd/files/var-lib-xkms.mount
 
@@ -160,8 +163,10 @@ else
 	ok "the offline unit check: xkmsd.service asserts the state mount, var-lib-xkms.mount names it"
 fi
 
-# The packaged config with its state and socket paths in the temp dir.
-c=$(<"$conf")
+# The development config (software key custody, never installed in the image: it
+# is what lets the real daemon run at all, since it refuses a config with no
+# enabled key backend) with its state and socket paths in the temp dir.
+c=$(<"$devconf")
 c=${c//\/var\/lib\/xkms/$work/state}
 c=${c//\/run\/xkms/$work/run}
 mkdir -p "$work/state" "$work/run"
@@ -198,9 +203,28 @@ case $rc in 0 | 143) ;; *) tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on
 if grep -q -E 'panic:|^goroutine ' "$work/run.log"; then die "xkmsd panicked on SIGTERM"; fi
 ok "xkmsd stops on SIGTERM (status $rc)"
 
-# 4. Fails closed on a read-only state directory.
-mkdir -p "$work/ro/state" "$work/ro/run"
+# 3b. The packaged (production) config configures no key custody, and go-xkms at
+# the pin has no enclave backend to configure: the daemon must refuse it, exit
+# non-zero and serve nothing, so key operations stay unavailable (fail closed).
+mkdir -p "$work/prod/state" "$work/prod/run"
 c=$(<"$conf")
+c=${c//\/var\/lib\/xkms/$work/prod/state}
+c=${c//\/run\/xkms/$work/prod/run}
+printf '%s\n' "$c" >"$work/prod/xkmsd.yaml"
+"$bin" --config "$work/prod/xkmsd.yaml" >"$work/prod/run.log" 2>&1 &
+pid=$!
+for ((i = 0; i < 300; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "$pid" 2>/dev/null; then die "xkmsd keeps running on the production config, which configures no key custody"; fi
+rc=0
+wait "$pid" || rc=$?
+pid=
+[ "$rc" -ne 0 ] || die "xkmsd exited 0 on the production config, which configures no key custody"
+if grep -q 'Unix socket server started' "$work/prod/run.log" || [ -S "$work/prod/run/xkms.sock" ]; then die "xkmsd served its socket on the production config, which configures no key custody"; fi
+ok "xkmsd refuses the production config, which configures no key custody (status $rc)"
+
+# 4. Fails closed on a read-only state directory (development config).
+mkdir -p "$work/ro/state" "$work/ro/run"
+c=$(<"$devconf")
 c=${c//\/var\/lib\/xkms/$work/ro/state}
 c=${c//\/run\/xkms/$work/ro/run}
 printf '%s\n' "$c" >"$work/ro/xkmsd.yaml"

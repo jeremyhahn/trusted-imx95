@@ -107,7 +107,8 @@ Open, MISSING, and deliberately not set: the `BBFILES += recipes-*/*/*.bbappend`
 line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, hash equivalence, the
 `SPDX_INCLUDE_*`, `SPDX_INVOKED_BY` and `SPDX_ON_BEHALF_OF` fields
 (reproducible-build-survey question 6 has no recommendation), the xkmsd
-package (go-xkms has no recipe yet; hardening-survey question 7), and any
+package's key custody (no enclave backend at the pin; see
+[xkmsd.md](xkmsd.md)), and any
 login-policy image feature in the production image.
 
 ## Kernel hardening fragment

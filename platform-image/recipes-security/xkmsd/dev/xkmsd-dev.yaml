@@ -1,0 +1,87 @@
+# xkmsd's DEVELOPMENT configuration. It is go-xkms's own minimal configuration
+# (configs/xkmsd.yaml at the pinned tag): software key custody, the software
+# and pkcs8 key backends, and a software CA keystore, every key a file under
+# /var/lib/xkms. Keys held in files are readable by root, so this file is NOT in
+# the recipe's SRC_URI, not installed and not in FILES: the production image
+# never carries it (files/xkmsd.yaml is the production configuration, and
+# test/platform_image_xkmsd_test.sh rejects software custody in that one). It
+# exists so the smoke test (scripts/platform-image-xkmsd-smoke.sh) can start
+# the real daemon, which refuses a configuration with no enabled key backend,
+# and to be copied by hand onto a development board. See
+# docs/platform-image/xkmsd.md. No key, secret or host name belongs in this file.
+#
+# The barrier is sealed at start: the passphrase strategy needs an operator to
+# initialise and unseal the node. Hardware-sealed, unattended unseal is the
+# provisioning step (go-trusted-platform), not set here.
+server:
+  host: "127.0.0.1"
+
+protocols:
+  unix: true
+  rest: false
+  grpc: false
+  quic: false
+  mcp: false
+
+unix:
+  socket_path: "/run/xkms/xkms.sock"
+
+logging:
+  level: "info"
+  format: "json"
+
+tls:
+  enabled: true
+
+auth:
+  enabled: true
+  type: "composite"
+
+barrier:
+  enabled: true
+  strategy: "passphrase"
+
+ratelimit:
+  enabled: false
+
+metrics:
+  enabled: false
+
+health:
+  enabled: true
+  path: "/health"
+
+datastore:
+  engine: "pebble"
+  path: "/var/lib/xkms/storage"
+
+rng:
+  mode: "software"
+  fallback_mode: "software"
+
+default_backend: "software"
+
+backends:
+  software:
+    enabled: true
+    path: "/var/lib/xkms/keys/software"
+  pkcs8:
+    enabled: true
+    path: "/var/lib/xkms/keys/pkcs8"
+
+ca:
+  identity:
+    - subject:
+        cn: "xkms Root CA"
+        organization: "go-xkms"
+      valid: 10
+      keys:
+        - algorithm: "ECDSA"
+          ecc:
+            curve: "P-256"
+          hash: "SHA-256"
+          key-type: "CA"
+      keystore-type: "software"
+      is-root: true
+  selected-ca: 0
+  default-validity-days: 365
