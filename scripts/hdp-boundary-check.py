@@ -26,7 +26,9 @@ Checks, each one line of output:
   release (a `tag=` in the go-xkms entry of SRC_URI, comments and other
   variables not counted, no `branch=`, no AUTOREV), as
   docs/hsm-device-protocol/xkmsd-node.md section 2 proposes. With no recipe
-  the check holds and says the recipe is missing.
+  the check holds and says the recipe is missing. The policy is proposed and
+  pending owner approval: a B5 violation prints a NOTICE and does not fail
+  the run; B1 to B4 fail closed.
 
 Exit status: 0 when every check holds, 1 when one does not, 2 when the tree
 cannot be read.
@@ -205,7 +207,9 @@ def main(argv):
         print(f"hdp-boundary-check: {err}", file=sys.stderr)
         return 2
     note = "" if recipes else " (no xkmsd recipe yet: missing, go-xkms has no tagged release to pin)"
-    results.append(("B5 release: xkmsd recipes fetch a tagged go-xkms release" + note, b5))
+    # B5 is the tagged-release-only policy, proposed in xkmsd-node.md and not yet
+    # approved by the owner: a violation is a notice, every other check fails closed.
+    b5_title = "B5 release: xkmsd recipes fetch a tagged go-xkms release" + note
     for title, faults in results:
         if faults:
             failed += 1
@@ -214,10 +218,19 @@ def main(argv):
                 print(f"  - {fault}")
         else:
             print(f"ok {title}")
+    if b5:
+        print(f"NOTICE B5 (proposed, pending owner approval): {b5_title}")
+        for fault in b5:
+            print(f"  - {fault}")
+    else:
+        print(f"ok {b5_title}")
     if failed:
-        print(f"hdp-boundary-check: {failed} of {len(results)} checks break the hsm-device-protocol row")
+        print(f"hdp-boundary-check: {failed} of {len(results)} enforced checks break the hsm-device-protocol row")
         return 1
-    print(f"hdp-boundary-check: OK ({len(results)} checks keep the hsm-device-protocol row)")
+    if b5:
+        print(f"hdp-boundary-check: OK ({len(results)} enforced checks keep the hsm-device-protocol row; B5 is a notice, proposed and pending owner approval)")
+        return 0
+    print(f"hdp-boundary-check: OK ({len(results) + 1} checks keep the hsm-device-protocol row)")
     return 0
 
 
