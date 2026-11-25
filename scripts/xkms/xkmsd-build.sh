@@ -61,7 +61,7 @@ buildenv=(
 	GOAMD64=v1 GOARM64=v8.0
 	GOFLAGS= GOEXPERIMENT= GODEBUG= GOFIPS140=off
 	GOTOOLCHAIN=local GOWORK=off GOENV=off
-	GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org
+	"GOPROXY=https://proxy.golang.org,direct" GOSUMDB=sum.golang.org
 	GOPATH="$root/$gobase_rel/gopath" GOCACHE="$root/$gobase_rel/gocache"
 )
 buildenv_record=$(printf '%s ' "${buildenv[@]}")
