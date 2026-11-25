@@ -73,6 +73,29 @@ assertion. When `systemd-analyze` is absent (some CI images), or
 mount file for the same lines (`RequiresMountsFor=`, `After=`, both Asserts,
 and the mount's `What=` and `Where=`).
 
+## Stopping on SIGTERM: an upstream question for go-xkms
+
+The smoke script accepts a stop only when the daemon exits with status 0 **and**
+logs `Server shutdown complete`. A status of 143 (the signal killed the process),
+any other non-zero status, or status 0 with no such line fails the script; it
+never skips. The string is in the binary built from the pin. The stubbed test
+has a fixture for each of the three failures (`FAKE_DAEMON=sigterm-die`,
+`sigterm-nonzero`, `sigterm-silent`).
+
+What the real daemon does at the pin, run on the development config with the
+barrier sealed (how it starts, §Key custody), SIGTERM sent after the ready line,
+three seconds or immediately after it: it exits with status 143 and logs
+nothing after `barrier sealed; sealed-window listener up, waiting for unseal`.
+So **the real smoke run fails at this step** until go-xkms changes, or answers
+that a sealed node should exit this way. This repository keeps the check
+fail-closed rather than accept 143.
+
+Upstream question for go-xkms (to be raised by the coordinator; nothing is
+posted from this repository): does xkmsd handle SIGTERM with a clean shutdown
+(exit 0 and `Server shutdown complete`) when the barrier is still sealed, or
+only after an unseal? `xkmsd.service` stops the daemon with SIGTERM, so a
+sealed node that dies by the signal reports a failed stop to systemd.
+
 ## Boot and reboot persistence: proposed, pending owner approval
 
 Boot-and-reboot persistence of `/var/lib/xkms` on a built wic image is deferred

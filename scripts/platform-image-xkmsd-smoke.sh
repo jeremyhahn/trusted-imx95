@@ -6,7 +6,8 @@
 #   2. the daemon starts on the development config (dev/xkmsd-dev.yaml, software
 #      key custody, never installed; state and socket paths redirected into a
 #      temp dir), reaches its ready state (the local socket is served; the node
-#      is sealed until an operator unseals it) and stops on SIGTERM;
+#      is sealed until an operator unseals it) and stops cleanly on SIGTERM
+#      (exit status 0 and its "Server shutdown complete" log line);
 #   3. it refuses the packaged production config (files/xkmsd.yaml), which
 #      configures no key custody: no enclave backend exists at the pin;
 #   4. it refuses to start when its state directory is read-only.
@@ -199,9 +200,13 @@ if kill -0 "$pid" 2>/dev/null; then die "xkmsd did not stop within 30 s of SIGTE
 rc=0
 wait "$pid" || rc=$?
 pid=
-case $rc in 0 | 143) ;; *) tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on SIGTERM with status $rc" ;; esac
+# Only a clean stop passes: exit status 0 and the daemon's own shutdown-complete
+# log line. A status of 143 (the signal killed the process, nothing shut down)
+# or any other non-zero status fails, and so does status 0 with no such line.
+if [ "$rc" -ne 0 ]; then tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on SIGTERM with status $rc, not 0"; fi
 if grep -q -E 'panic:|^goroutine ' "$work/run.log"; then die "xkmsd panicked on SIGTERM"; fi
-ok "xkmsd stops on SIGTERM (status $rc)"
+if ! grep -q 'Server shutdown complete' "$work/run.log"; then tail -n 20 "$work/run.log" >&2; die "xkmsd stopped on SIGTERM without logging 'Server shutdown complete'"; fi
+ok "xkmsd stops cleanly on SIGTERM (status 0, 'Server shutdown complete' logged)"
 
 # 3b. The packaged (production) config configures no key custody, and go-xkms at
 # the pin has no enclave backend to configure: the daemon must refuse it, exit

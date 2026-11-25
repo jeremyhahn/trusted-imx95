@@ -261,7 +261,7 @@ smoke_ok() {
 	for want in 'rev=$(val SRCREV)' 'build=$root/platform-image/recipes-security/xkmsd/files/xkmsd-build.sh' \
 		'sh "$build" "$src" "$bin" "$pv" "$rev"' 'conf=$root/platform-image/recipes-security/xkmsd/files/xkmsd.yaml' \
 		'devconf=$root/platform-image/recipes-security/xkmsd/dev/xkmsd-dev.yaml' \
-		'"$bin" --config "$work/xkmsd.yaml"' '"$bin" --config "$work/prod/xkmsd.yaml"' 'refuses the production config' \
+		'"$bin" --config "$work/xkmsd.yaml"' '"$bin" --config "$work/prod/xkmsd.yaml"' 'refuses the production config' 'Server shutdown complete' \
 		'chmod 0555 "$work/ro/state"' "refuses to start on a read-only state directory" \
 		'status --porcelain --ignored' "stat -c '%u %a'" 'systemd-analyze verify' 'systemd-analyze condition'; do
 		has "$s" "$want" || { echo "the smoke test lacks '$want'"; return 1; }
@@ -427,7 +427,7 @@ chmod +x "$2"
 EOF
 cat >"$smk/fake-xkmsd.py" <<'EOF'
 #!/usr/bin/env python3
-import os, re, socket, sys, time
+import os, re, signal, socket, sys, time
 if "-version" in sys.argv:
     print("xkmsd " + os.environ["FAKE_PV"])
     sys.exit(0)
@@ -449,6 +449,14 @@ if not os.access(state, os.W_OK):
 s = socket.socket(socket.AF_UNIX)
 s.bind(sock)
 s.listen(1)
+def term(*_):
+    # sigterm-silent: stops with status 0 but never logs the shutdown;
+    # sigterm-nonzero: logs the shutdown but stops with status 1.
+    if mode != "sigterm-silent":
+        print("Server shutdown complete", flush=True)
+    sys.exit(1 if mode == "sigterm-nonzero" else 0)
+if mode != "sigterm-die":  # sigterm-die: no handler, the signal kills it (status 143)
+    signal.signal(signal.SIGTERM, term)
 print("Unix socket server started", flush=True)
 while True:
     time.sleep(1)
@@ -470,9 +478,20 @@ if [ "$(id -u)" = 0 ]; then
 else
 	smoke_run clean
 	check "smoke: a stubbed clean build-and-start passes" 0 "xkmsd-smoke: all passed" \
-		"ok   xkmsd reaches its ready state" "ok   xkmsd stops on SIGTERM" \
+		"ok   xkmsd reaches its ready state" "ok   xkmsd stops cleanly on SIGTERM" \
 		"ok   xkmsd refuses the production config" \
 		"ok   xkmsd refuses to start on a read-only state directory"
+	# SIGTERM: only exit status 0 plus the shutdown-complete line passes. The real
+	# daemon at the pin, sealed, is killed by the signal (status 143, no line).
+	smoke_run sigdie FAKE_DAEMON=sigterm-die
+	check "smoke: a daemon the SIGTERM kills (status 143, no shutdown line) fails" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM with status 143, not 0"
+	smoke_run sigsilent FAKE_DAEMON=sigterm-silent
+	check "smoke: a daemon that stops with status 0 but logs no shutdown fails" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM without logging 'Server shutdown complete'"
+	smoke_run signonzero FAKE_DAEMON=sigterm-nonzero
+	check "smoke: a daemon that logs the shutdown but exits non-zero fails" nonzero \
+		"FAIL: xkmsd stopped on SIGTERM with status 1, not 0"
 	smoke_run prodserve FAKE_DAEMON=serve-any
 	check "smoke: a daemon that serves the production config (no key custody) fails" nonzero \
 		"FAIL: xkmsd keeps running on the production config"
