@@ -91,8 +91,14 @@ def b2_missing(tree):
     return faults
 
 
+def unreadable(err):
+    # os.walk drops a directory it cannot read unless given onerror: raise, so a
+    # check never reports success over a subtree it did not inspect (exit 2).
+    raise err
+
+
 def walk(tree):
-    for top, dirs, files in os.walk(tree):
+    for top, dirs, files in os.walk(tree, onerror=unreadable):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
         for name in sorted(files):
             yield os.path.relpath(os.path.join(top, name), tree), name
@@ -115,11 +121,20 @@ def b3_no_protocol(tree):
 
 def b4_owner(tree):
     folder = os.path.join(tree, "docs", "hsm-device-protocol")
-    docs = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+    if not os.path.isdir(folder):
+        raise FileNotFoundError(f"{folder} is not a directory")
+    docs = []
+    for top, dirs, files in os.walk(folder, onerror=unreadable):
+        dirs.sort()
+        docs.extend(os.path.join(top, n) for n in sorted(files) if n.endswith(".md"))
     if not docs:
         return ["docs/hsm-device-protocol/ holds no document"]
-    return [f"docs/hsm-device-protocol/{n} does not name go-xkms #1521"
-            for n in docs if "go-xkms #1521" not in read(os.path.join(folder, n))]
+    faults = []
+    for path in docs:
+        if "go-xkms #1521" not in read(path):
+            rel = os.path.relpath(path, tree).replace(os.sep, "/")
+            faults.append(f"{rel} does not name go-xkms #1521")
+    return faults
 
 
 def strip_comment(line):

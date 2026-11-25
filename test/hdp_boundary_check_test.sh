@@ -134,6 +134,46 @@ check "B5 together with B1, B3 and B4 violations exits non-zero" 1 \
 	"FAIL B1 row" "FAIL B3 no-protocol" "FAIL B4 owner" "NOTICE B5 (proposed, pending owner approval)" \
 	"3 of 4 enforced checks break"
 
+t="$TMP_ROOT/b4-nested"
+tree "$t"
+mkdir -p "$t/docs/hsm-device-protocol/design"
+printf '# A nested trace\n\nNo owner named.\n' >"$t/docs/hsm-device-protocol/design/new.md"
+run python3 "$CHK" "$t"
+check "B4: a nested document that does not name go-xkms #1521 fails" 1 \
+	"FAIL B4 owner" "docs/hsm-device-protocol/design/new.md does not name go-xkms #1521"
+
+t="$TMP_ROOT/b4-nested-ok"
+tree "$t"
+mkdir -p "$t/docs/hsm-device-protocol/design"
+printf '# A nested trace\n\nOwned by go-xkms #1521.\n' >"$t/docs/hsm-device-protocol/design/new.md"
+run python3 "$CHK" "$t"
+check "B4: a nested document that names go-xkms #1521 passes" 0 "ok B4 owner"
+
+# An unreadable subtree must fail closed (exit 2), not read as "no protocol here".
+# chmod 000 does not deny reads to root, so the case is skipped there.
+if [ "$(id -u)" = 0 ]; then
+	echo "note: running as root, chmod 000 does not deny reads: the unreadable-subtree cases are skipped"
+else
+	t="$TMP_ROOT/b3-unreadable"
+	tree "$t"
+	mkdir -p "$t/vendor/deep"
+	: >"$t/vendor/deep/wire.proto"
+	chmod 000 "$t/vendor/deep"
+	run python3 "$CHK" "$t"
+	check "B3: an unreadable subtree exits 2 and does not report success" 2 \
+		"hdp-boundary-check:" "Permission denied"
+	chmod 755 "$t/vendor/deep"
+
+	t="$TMP_ROOT/b4-unreadable"
+	tree "$t"
+	mkdir -p "$t/docs/hsm-device-protocol/design"
+	chmod 000 "$t/docs/hsm-device-protocol/design"
+	run python3 "$CHK" "$t"
+	check "B4: an unreadable document subtree exits 2 and does not report success" 2 \
+		"hdp-boundary-check:" "Permission denied"
+	chmod 755 "$t/docs/hsm-device-protocol/design"
+fi
+
 run python3 "$CHK" "$TMP_ROOT/absent"
 check "an unreadable tree exits 2" 2 "hdp-boundary-check:"
 
