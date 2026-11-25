@@ -53,6 +53,7 @@ for f in scripts/*.sh scripts/*.py; do
 	base=${f##*/}
 	case "$companions" in *" $base "*) continue ;; esac
 	[ "$base" = tool-pins.sh ] && continue # data, sourced by the others
+	[ "$base" = platform-image-effective.sh ] && continue # sourced by platform-image-parse.sh and -build.sh
 	total=$((total + 1))
 	ran=0
 	while IFS= read -r p; do
