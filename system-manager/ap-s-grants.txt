@@ -1,0 +1,66 @@
+# AP-S agent (secure, LM2 "AP") grants of the pinned mx95frdm-pro.cfg: pinned imx-sm (system-manager/sm.lock), patches 0001 and 0002 applied (they do not touch AP-S).
+# Proposed, pending owner approval. Checked by scripts/sm-grants-check.sh --ap-s in every scripts/sm-build.sh build.
+# Written from `scripts/sm-grants-check.sh --ap-s --print` of the patched file, each line reviewed: the table in docs/secure-world/tfa-scmi-survey.md
+# section 2.2.2 gives, per line, the config file:line (unpatched, at the pinned commit), the decision and the reason. The reason comments below are short.
+# It holds no LMM_*, CPU_M7P or PD_M7 line: that absence is what makes the TF-A SiP calls for the M7 refuse (docs/secure-world/tfa-scmi-survey.md, 2.2.1).
+# Never add an LMM_*, CPU_M7P or PD_M7 line, and never a wildcard: a grant is listed whole or the build stops.
+
+# The AP LM's defines that apply to AP-S (they precede its SCMI_AGENT line): the A55 masters' DFMT0 is bypass, so the secure/non-secure
+# attribute comes from the core itself; the secure rights are secure-only (sec_rw, sec_rwx), never non-secure (memory-protection-survey section 4).
+DFMT0: sa=bypass
+DFMT1: sa=secure, pa=privileged
+OWNER: perm=sec_rw, api=all
+EXEC: perm=sec_rwx
+DATA: perm=sec_rw
+
+# AP-S's own SCMI transport on MU1 (BL31 talks to the SM here, tfa-scmi-survey 2.4). `test=0` names a unit-test client MU that the pinned
+# build leaves out: make is run without t=, so T=NONE and sm/test is not built (imx-sm Makefile:47-59,156-158; the key is documented at sm/doc/config.md:744).
+MAILBOX type=mu, mu=1, test=0
+CHANNEL db=0, xport=smt, rpc=scmi, type=a2p
+CHANNEL db=1, xport=smt, rpc=scmi, type=p2a_notify
+
+# PSCI system reset and off go through TF-A (tfa-scmi-survey 2.3; scmi-permissions-survey 3.3).
+SYS ALL
+# A55 operating points; shared with Linux, so open question (scmi-permissions-survey 3.3: lower to priv, not possible without a patch).
+PERF_A55 ALL
+# Wake-up (low-power interface) of the A55 side's CAN2-5, GPIO2-5, LPUART1,4,5,6,8 and WDOG3,4 for suspend (scmi-permissions-survey 3.3; low-power-survey, AP-S row). None is the M7's (M7: CAN_FD1, LPUART3, LPUART7, WDOG5).
+PERLPI_CAN2 ALL
+PERLPI_CAN3 ALL
+PERLPI_CAN4 ALL
+PERLPI_CAN5 ALL
+PERLPI_GPIO2 ALL
+PERLPI_GPIO3 ALL
+PERLPI_GPIO4 ALL
+PERLPI_GPIO5 ALL
+PERLPI_LPUART1 ALL
+PERLPI_LPUART4 ALL
+PERLPI_LPUART5 ALL
+PERLPI_LPUART6 ALL
+PERLPI_LPUART8 ALL
+PERLPI_WDOG3 ALL
+PERLPI_WDOG4 ALL
+
+# The six A55 cores and the cluster: PSCI CPU on and off, suspend (tfa-scmi-survey 2.3). The semaphore is the cluster's own (sm/doc/config.md:807).
+A55C0 OWNER
+A55C1 OWNER
+A55C2 OWNER
+A55C3 OWNER
+A55C4 OWNER
+A55C5 OWNER
+A55P OWNER, sema=0x442313F8
+# The Arm PLL the A55 clocks come from.
+ARM_PLL OWNER
+# The A side of AP-S's own MU1, and the two ELE messaging units of the secure side (tfa-scmi-survey section 4; attack-surface-survey MU table).
+MU1_A OWNER
+MU_ELE1 OWNER
+MU_ELE2 OWNER
+
+# Secure-only execute windows: OCRAM 256 KiB, and DDR 0x8A000000-0x8DFFFFFF that holds BL31 (0x8A200000) and the BL32 window (secure-world/bsp.lock).
+OCRAM EXEC, begin=0x020480000, size=256K
+DDR EXEC, begin=0x08A000000, end=0x08DFFFFFF
+
+# Faults that reset the AP LM only: the `lm` key defaults to the LM the fault sits in (sm/doc/config.md:810), so the M7 keeps running and supervises
+# the restart (fault-recovery-survey, "A55 watchdog faults"; tfa-scmi-survey 4).
+FAULT_SW2 OWNER, reaction=lm_reset
+FAULT_WDOG3 OWNER, reaction=lm_reset
+FAULT_WDOG4 OWNER, reaction=lm_reset

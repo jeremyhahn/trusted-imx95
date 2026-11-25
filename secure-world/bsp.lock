@@ -23,16 +23,23 @@ MANIFEST_COMMIT=0c44ab18abe471b4326037b61893f4e69b6fc182
 META_IMX_REPO=https://github.com/nxp-imx/meta-imx.git
 META_IMX_COMMIT=2eb758f42cfb96042344815b7dd7755b06ba1e3b
 
-# TF-A: upstream Arm TF-A, as owner ruling 771 says. The newest release tag,
-# v2.15.0 of git.trustedfirmware.org/TF-A/trusted-firmware-a.git (its GitHub
-# mirror is the fetch URL), peeled; its tree has plat/imx/imx9/imx95, so the
-# platform name is imx95. NXP's imx-atf fork is not used (docs/secure-world/build.md).
-# TFA_TAG is the release tag: the script takes only an upstream TF-A URL and a
-# vX.Y.Z tag, and the build fetches the tag and fails unless it peels to
-# TFA_COMMIT. The tag names the commit; it is passed to no build step.
-TFA_REPO=https://github.com/ARM-software/arm-trusted-firmware.git
-TFA_TAG=v2.15.0
-TFA_COMMIT=da738d5eae93af342fdc4995dd3c05acb4c9d757
+# TF-A BL31: NXP's imx-atf at the commit the BSP release's recipe names
+# (owner ruling 1234, which supersedes the part of ruling 771 that excluded
+# imx-atf). meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb at the meta-imx
+# commit above sets SRCBRANCH=lf_v2.14 and SRCREV to the commit below; the pin
+# is the commit, not the branch. Its tree has plat/imx/imx9/imx95, so the
+# platform name is imx95.
+# TFA_TAG is the release tag: the script takes only an imx-atf URL with an
+# lf-X.Y.Z-A.B.C tag (or an upstream Arm TF-A URL with a vX.Y.Z tag), and the
+# build fetches the tag and fails unless it peels to TFA_COMMIT. The tag names
+# the commit; it is passed to no build step. lf-6.18.37-2.1.0 is the imx-atf
+# tag of this BSP release as docs/secure-world/upstream-survey.md (S2) and
+# memory-protection-survey.md (S2) name it. That it peels to the commit below
+# was NOT established offline (no vendor source here); until a build runs, the
+# tag check is the guard, and it fails closed if the tag points elsewhere.
+TFA_REPO=https://github.com/nxp-imx/imx-atf.git
+TFA_TAG=lf-6.18.37-2.1.0
+TFA_COMMIT=af9eb2c1748ee3abc0ead7dc76e462f50c573036
 TFA_PLAT=imx95
 
 # OP-TEE OS 4.10: meta-imx-bsp/dynamic-layers/meta-arm/recipes-security/
@@ -42,6 +49,31 @@ TFA_PLAT=imx95
 OPTEE_REPO=https://github.com/nxp-imx/imx-optee-os.git
 OPTEE_COMMIT=99f40897dd1fc28b4c792773b167e3db629db2ff
 OPTEE_PLATFORM=imx-mx95evk
+
+# The secure DRAM window of BL31 (BL32_BASE, BL32_SIZE) and OP-TEE
+# (CFG_TZDRAM_START, CFG_TZDRAM_SIZE): one pair, passed to both builds, which
+# must agree or OP-TEE runs in memory the normal world can reach. PROPOSED,
+# PENDING OWNER APPROVAL: these are NXP's vendor defaults (0x8C000000, 32 MiB,
+# ending 0x8DFFFFFF, matching the SM's secure window), read from
+# docs/secure-world/memory-protection-survey.md sections 5 and 6, not from the
+# vendor source (absent here). Base and size are 2 MiB aligned.
+BL32_BASE=0x8C000000
+BL32_SIZE=0x02000000
+
+# The BL31 window (resident EL3 firmware): 0x8A200000-0x8A240000, 256 KiB, from
+# docs/secure-world/memory-protection-survey.md section 5 (imx95
+# platform_def.h in both TF-A trees). The BL32 window must not intersect it;
+# it must also lie inside the SM secure window below.
+BL31_BASE=0x8A200000
+BL31_SIZE=0x00040000
+
+# The SM's secure window for the A55 (SM_SECURE_BASE, SM_SECURE_END inclusive):
+# the BL32 window above must lie inside it. Read from
+# docs/secure-world/memory-protection-survey.md sections 4 and 6. PROPOSED,
+# PENDING OWNER APPROVAL, unverified against the SM configuration (vendor
+# source absent here); the first `make system-manager` is the real check.
+SM_SECURE_BASE=0x8A000000
+SM_SECURE_END=0x8DFFFFFF
 
 # The fTPM TA: OP-TEE's optee_ftpm at its tag 4.10.0 (peeled), matching the
 # OP-TEE 4.10 above; OP-TEE 4.10 carries no fTPM TA of its own. Its

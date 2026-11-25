@@ -49,8 +49,9 @@ every value below from the new release's manifest and recipes and editing the lo
 |---|---|---|
 | NXP Linux BSP release | `lf-6.18.37-2.1.0`; `imx-manifest` commit `0c44ab18abe471b4326037b61893f4e69b6fc182` | The tag, peeled |
 | meta-imx | `rel_imx_6.18.37_2.1.0`, commit `2eb758f42cfb96042344815b7dd7755b06ba1e3b` | `imx-6.18.37-2.1.0.xml` in that manifest |
-| TF-A | Upstream Arm TF-A, tag `v2.15.0`, peeled commit `da738d5eae93af342fdc4995dd3c05acb4c9d757`, fetched from the GitHub mirror `ARM-software/arm-trusted-firmware` | The newest release tag of `git.trustedfirmware.org/TF-A/trusted-firmware-a.git`; its tree has `plat/imx/imx9/imx95`. The lock pins the tag too (`TFA_TAG`), and the build fetches it and fails unless it peels to the commit |
+| TF-A BL31 | `nxp-imx/imx-atf`, commit `af9eb2c1748ee3abc0ead7dc76e462f50c573036` (branch `lf_v2.14`; the pin is the commit) | `meta-imx-bsp/recipes-bsp/imx-atf/imx-atf_2.14.bb` in meta-imx: its `SRCREV`. The release manifest itself lists no imx-atf entry. Its tree has `plat/imx/imx9/imx95`. The lock pins the release tag too (`TFA_TAG`, `lf-6.18.37-2.1.0`, as the surveys name it), and the build fetches it and fails unless it peels to the commit; that it does was not established offline |
 | OP-TEE OS 4.10 | `nxp-imx/imx-optee-os`, branch `lf-6.18.37_2.1.0`, commit `99f40897dd1fc28b4c792773b167e3db629db2ff` | `optee-os_4.10.0.imx.bb` in meta-imx |
+| `SM_SECURE_BASE` `0x8A000000`, `SM_SECURE_END` `0x8DFFFFFF` (inclusive; the A55 secure window) | Proposed, pending owner approval; unverified against the SM configuration (vendor source absent here) | [Survey](memory-protection-survey.md) sections 4 and 6. TF-A assumes the SM made the window secure-only and does not check it (section 5). The script refuses a `BL32_BASE`/`BL32_SIZE` window that is not inside this one, so a BL32 move outside it is an offline error. Whether the real SM configuration still has this window is checked only at the first `make system-manager` |
 | fTPM TA | `OP-TEE/optee_ftpm`, tag `4.10.0`, commit `a09269b15de635e1816fe832e26adfbfb44c5455` | The tag, peeled |
 | TPM 2.0 reference | `microsoft/ms-tpm-20-ref`, commit `98b60a44aba79b15fcce1c0d1e46cf5918400f6a` | The commit `optee_ftpm`'s README names |
 | Toolchain | Arm GNU Toolchain 15.2.Rel1 (GCC 15.2.1), `aarch64-none-linux-gnu`, tarball SHA-256 `9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43` | Arm's published `.sha256asc`. GCC 15 matches the release's Yocto (`GCCVERSION 15.%`) |
@@ -63,15 +64,10 @@ wheels.
 
 Two choices here differ from the wording elsewhere:
 
-- **TF-A is upstream Arm TF-A**, as owner ruling 771 says, at the release tag `v2.15.0` with `PLAT=imx95 SPD=opteed`.
-  It is not the BSP release's `imx-atf` fork, whose revision the release carries. `make secure-world` builds this
-  BL31 with the pinned OP-TEE. That the BL31 boots and starts this OP-TEE on the board is not checked: upstream's
-  `BL32_BASE` (`0x8C000000`) and the OP-TEE flavour's secure memory start were read as the same address, not run.
-  **Known gap:** NXP's fork adds SiP services that upstream `v2.15.0` lacks on the i.MX 95: the Cortex-M7 (SRC) and
-  logical-machine (LMM) calls in `imx95_m7.c` and `imx95_lmm.c`. Linux's remoteproc for the M7 may depend on them, and
-  a System Manager SCMI path that starts or stops another logical machine from Linux needs them. Whether the
-  board needs them is open ([tfa-scmi-survey.md](tfa-scmi-survey.md), section 2.2 and the questions on NXP's SiP
-  services); until it is answered, those calls are absent from the build.
+- **BL31 is NXP's `imx-atf`** at the commit the BSP release's recipe names, with `PLAT=imx95 SPD=opteed`. Owner
+  ruling 1234 counts `imx-atf` as upstream TF-A; it supersedes the part of ruling 771 that pinned upstream
+  `v2.15.0` and excluded `imx-atf`. `make secure-world` builds this BL31 with the pinned OP-TEE. That the BL31 boots and starts this
+  OP-TEE on the board is not checked. The pin is a commit on NXP's `lf_v2.14` branch; the tag `TFA_TAG` only names it, and the build checks that the tag peels to it.
 - **The OP-TEE platform is `imx-mx95evk`.** This OP-TEE tree has no FRDM-IMX95-PRO flavour: `mx95evk` is the only
   i.MX 95 flavour in `core/arch/arm/plat-imx/conf.mk`, and the release's OP-TEE recipe maps the `mx95` machines to
   it. The FRDM-Pro machine is one of them through the shared `imx95-evk.inc`; that this mapping applies was not
@@ -81,21 +77,23 @@ Two choices here differ from the wording elsewhere:
 ### BSP-only TF-A services
 
 What NXP's `imx-atf` carries that upstream `v2.15.0` lacks on the i.MX 95, from the public sources in
-[tfa-scmi-survey.md](tfa-scmi-survey.md) section 2.2, each with its consumer:
+[tfa-scmi-survey.md](tfa-scmi-survey.md) section 2.2, each with its consumer. The pinned BL31 is `imx-atf`, so the
+first three are now **provided by the pin** (the tree has `imx95_m7.c` and `imx95_lmm.c`); that a consumer needs them
+on the board is not checked:
 
 | Service | Consumer | State |
 |---|---|---|
-| SRC SiP call for the Cortex-M7 (`imx95_m7.c`: set reset address, prepare, start, stop, query) | Linux remoteproc for the M7, on NXP's BSP (by the fork's code comments; not checked against the kernel) | **Open** |
-| LMM SiP call (`imx95_lmm.c`: boot or force-shutdown a logical machine) | A Linux-side start or stop of another logical machine over the secure SCMI agent; no consumer found in this repository | **Open** |
-| SCMI base protocol compiled in | Agent discovery for the M7 code; no other consumer found | **Open** (follows the M7 call) |
+| SRC SiP call for the Cortex-M7 (`imx95_m7.c`: set reset address, prepare, start, stop, query) | Linux remoteproc for the M7, on NXP's BSP (by the fork's code comments; not checked against the kernel) | Provided by the pin; use on the board open |
+| LMM SiP call (`imx95_lmm.c`: boot or force-shutdown a logical machine) | A Linux-side start or stop of another logical machine over the secure SCMI agent; no consumer found in this repository | Provided by the pin; use on the board open |
+| SCMI base protocol compiled in | Agent discovery for the M7 code; no other consumer found | Provided by the pin; use on the board open |
 | FF-A shared-memory helper with `SPD=trusty` | none found: this build uses `SPD=opteed` | Not needed |
 
-The three open rows are one question for the owner (survey question 3): whether the M7 is driven from Linux. Until it
-is answered, the build omits them.
+Still open: whether the M7 is driven from Linux (survey question 3), and that this BL31 boots and starts OP-TEE on the
+board.
 
 ## The flags
 
-TF-A: `PLAT=imx95 SPD=opteed bl31`, the upstream TF-A imx95 platform build arguments this repository uses.
+TF-A: `PLAT=imx95 SPD=opteed BL32_BASE=0x8C000000 BL32_SIZE=0x02000000 bl31`, the `imx-atf` platform `imx95` build arguments this repository uses (owner ruling 1234). The `BL32_BASE`/`BL32_SIZE` pair is the lock's, and OP-TEE gets the same values below as `CFG_TZDRAM_START`/`CFG_TZDRAM_SIZE`.
 
 OP-TEE, set on each OP-TEE make:
 
@@ -106,6 +104,7 @@ OP-TEE, set on each OP-TEE make:
 | `CFG_REE_FS=y CFG_RPMB_FS=n` | Secure storage on the REE file system by default. RPMB needs its key programmed, once and irreversibly: the owner's decision ([ftpm/README.md](../ftpm/README.md#nv-storage)) |
 | `CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n` | No TA is loaded from the file system. The PTA that installs TAs into REE FS storage needs REE FS TA support and would not link |
 | `CFG_PKCS11_TA=y` | The PKCS#11 TA (already the default; stated) |
+| `CFG_TZDRAM_START=0x8C000000 CFG_TZDRAM_SIZE=0x02000000` | OP-TEE's secure DRAM window, from the lock's `BL32_BASE` and `BL32_SIZE`, the same pair the BL31 make call gets as `BL32_BASE=` and `BL32_SIZE=`. Proposed, pending owner approval: NXP's vendor defaults, so no built byte changes. The two builds must agree, or OP-TEE would run in memory the normal world can reach ([survey](memory-protection-survey.md) section 5); the unit test checks every make call carries the lock's pair. The window end `0x8DFFFFFF` and the SM's non-secure start `0x8E000000` are kept in step with the SM configuration by hand and are checked at the first `make system-manager`, not offline |
 | `CFG_EARLY_TA=y` | Early TAs, linked into `tee.bin` |
 | `EARLY_TA_PATHS=<fTPM TA's stripped ELF>` | The fTPM TA, UUID `bc50d971-d4c9-42c4-82cb-343fb7f37896`, as an early TA (ruling 927) |
 | `CFG_IN_TREE_EARLY_TAS=pkcs11/fd02c9da-306c-48c7-a49c-bbd827ae86ee` | The PKCS#11 TA as an early TA too, so `tee.bin` carries both and neither depends on the root file system |
@@ -155,16 +154,17 @@ secure-world-build: reproducible, two clean builds identical, <out>:
 ```
 
 `test/secure_world_build_test.sh` covers a match and a difference with stubbed builds (no network). The hashes below
-were first matched by hand on 2026-11-21, at the upstream TF-A v2.15.0 pin (`da738d5e`; the earlier hashes were of the
-imx-atf pin and are superseded), on a Debian 13 (trixie) x86_64 host with the pinned toolchain, each build with an
-empty work, output and cache directory and the default `SOURCE_DATE_EPOCH`; the scripted check has not yet been run
-against the real sources and toolchain (provisional until a host with network access runs it). The BSP stays
-provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
+of the earlier upstream-TF-A pin (ruling 771, now superseded) were first matched by hand on 2026-11-21 and
+are withdrawn: BL31 is now built from NXP's `imx-atf` (owner ruling 1234), so they no longer describe this
+configuration. The imx-atf BL31 and the pinned OP-TEE have not been built in this lane (it has no Arm toolchain); the
+`make secure-world` run on a host with the toolchain and network access, or the `secure-world-build` CI job, records
+the new hashes. Until then the scripted check is unrun against the real sources, and the BSP stays provisional exactly
+as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 
 | Build | `bl31.bin` SHA-256 | `tee.bin` SHA-256 |
 |---|---|---|
-| 1 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
-| 2 | `5a81a6f5d98f21724c578a9034f4dba29a14cf3aaccd63f12d493eb3e88be6d8` | `224b0a6a71532fe63429ab3e6430bca85d3b39a4fa3981fd2796f0c7f1535fb0` |
+| 1 | not yet recorded | not yet recorded |
+| 2 | not yet recorded | not yet recorded |
 
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
 every non-comment, non-blank line of `secure-world/bsp.lock` but `TFA_TAG` (it names `TFA_COMMIT`, is checked at
@@ -174,7 +174,7 @@ The test fails when any pin, toolchain or wheel line of the lock, or any build a
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66376f3761a23d3`
+Build configuration digest: `01216e12714a4e5beb6429cef99a49d410d51bbc82783d7174f09e7cc4f9a867`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
@@ -194,9 +194,10 @@ all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the 
 build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
 `make test` runs only the offline lock check and the script's unit tests.
 
-*Owner ruling 771 in the script.* The lock check refuses a `TFA_REPO` other than upstream Arm TF-A
-(`git.trustedfirmware.org` or its `ARM-software` GitHub mirror), so NXP's `imx-atf` cannot be pinned; a `TFA_TAG` that
-is not a release tag `vX.Y.Z` (no `-rc`, no branch); and an `OPTEE_REPO` other than NXP's
+*Owner rulings 771 and 1234 in the script.* The lock check refuses a `TFA_REPO` other than NXP's `imx-atf`
+(`github.com/nxp-imx/imx-atf.git`, ruling 1234) or upstream Arm TF-A (`git.trustedfirmware.org` or its `ARM-software`
+GitHub mirror, ruling 771's sources); a `TFA_TAG` that is not that source's release tag (`lf-X.Y.Z-A.B.C` for `imx-atf`,
+`vX.Y.Z` for upstream; no `-rc`, no branch, no tag of the other source); and an `OPTEE_REPO` other than NXP's
 `github.com/nxp-imx/imx-optee-os.git`. `make secure-world-check-lock` (`SW_LOCK=<file>`) runs that check alone, offline,
 and `make integration-test-secure-world` drives it and `make secure-world` end to end on a fixture copy of the
 repository, offline: the committed lock passes, and each such lock is refused before any fetch, with no work directory

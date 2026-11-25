@@ -61,8 +61,9 @@ path and shares the upstream structure, memory map and SCMI client; its
 - **Extra SiP calls that drive other cores.** `imx95_m7.c` adds an SRC SiP
   service that lets the normal world set the Cortex-M7 reset address, prepare
   it, start it, stop it and query it. Depending on the SM configuration, it does
-  this by core control or by booting and shutting down the M7 logical machine,
-  and on stop it resets the M7 agent's SCMI configuration. `imx95_lmm.c` adds
+  this by core control (two LMs) or by booting and shutting down the M7 logical
+  machine (any other count); only the core-control stop also resets the M7
+  agent's SCMI configuration (section 2.2.1). `imx95_lmm.c` adds
   an LMM SiP service that boots or force-shuts down a logical machine whose
   number the caller passes, without an allow-list in TF-A [S4]. Both act with
   the rights of the secure SCMI agent (section 2.4), so whatever bounds them is
@@ -77,6 +78,123 @@ A normal-world kernel that starts the M7 through Linux remoteproc on NXP's
 BSP depends on the SRC SiP call, according to the fork's own code comments
 and function names; that dependency was not checked against the kernel (see
 section 6).
+
+#### 2.2.1 SiP handlers built for `imx95`, and what the SM decides
+
+Traced 2026-11-24 against the pins: imx-atf `af9eb2c1748ee3abc0ead7dc76e462f50c573036`
+(`secure-world/bsp.lock`), built as `scripts/secure-world-build.sh` builds it
+(`make PLAT=imx95 SPD=opteed bl31`, no other option), and imx-sm
+`eec232878ab7dd460f5a8f3767d39dc7e9412efa` with `configs/other/mx95frdm-pro.cfg`
+(`system-manager/sm.lock`). "atf" and "sm" below are those two commits; line
+numbers are 1-based. `platform.mk` (atf `plat/imx/imx9/imx95/platform.mk:30-31,42-43`)
+compiles the SiP dispatcher, `imx95_m7.c` and `imx95_lmm.c` unconditionally:
+no build option removes them. Every request goes out on MU1 (atf
+`plat/imx/imx9/common/scmi/scmi_client.c:36-37`, doorbell `IMX9_MU1_BASE`),
+which the pinned configuration gives to agent `AP-S`, secure, in LM 2 "AP"
+(sm `configs/other/mx95frdm-pro.cfg:496-497`). `AP-S`'s API list (same file,
+`:503-519`) grants no `LMM_*`, `CPU_M7P` or `PD_M7` right, and the
+configuration tool's output for that file (`configtool.pl`, run outside the
+repo) gives the `AP-S` entry no `lmmPerms` and no `cpuPerms[DEV_SM_CPU_M7P]`,
+so both are `SM_SCMI_PERM_NONE`. Every `scripts/sm-build.sh` build now checks
+that API list against `system-manager/ap-s-grants.txt` (a grant that opens the
+M7 or an LM fails the build until the list is changed in a reviewed diff); the
+refusal itself is read from source, not observed on a board. This repository's patches 0001 and 0002
+(`system-manager/patches/`) change only lines of the M7 LM, not `AP-S`. The
+configuration has three LMs (generated `SM_NUM_LM 3U`), so `imx95_m7.c` takes
+its LMM path, not its core path, for start, stop and prepare.
+
+| handler (SMC FID, sub-call) | enabling option | argument checks | agent | SM decision | verdict |
+|---|---|---|---|---|---|
+| `IMX_SIP_AARCH32` `0xC20000FD` (atf `plat/imx/common/imx_sip_svc.c:34`) | none (always built) | n/a: switches the calling A55 to AArch32, touches no other core | none, no SCMI | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_BUILDINFO` `0xC2000003` (atf `imx_sip_svc.c:95`) | none | n/a, read-only | none | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_GET_SOC_INFO` `0xC2000006` (atf `imx_sip_svc.c:97-100`) | none | n/a, read-only | none (ELE) | n/a | allowed, no M7 or LM effect |
+| `IMX_SIP_SRC` `0xC2000005`, `RESET_ADDR_SET` (atf `imx_sip_svc.c:110-114`, `plat/imx/imx9/imx95/imx95_m7.c:72`) | none | none on `x2` (vector) or `x3` (flags) | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_cpu.c:873-899` `CpuResetVectorSet` needs `cpuPerms[cpu] >= EXCLUSIVE`; `AP-S` has none for `CPU_M7P`: `SM_ERR_DENIED` | refused |
+| `IMX_SIP_SRC`, `START` (atf `imx95_m7.c:80-104`) | none | none | `AP-S` | the pinned config has three LMs, so the LMM path runs (atf `imx95_m7.c:83-93`): set LM 1's reset vector (sm `rpc_scmi_lmm.c:1490-1527` `LmmResetVectorSet`: foreign LM needs `lmmPerms >= EXCLUSIVE`), then boot LM 1 (as `LMM_BOOT` below): both denied | refused |
+| `IMX_SIP_SRC`, `STARTED` (atf `imx95_m7.c:107`) | none | none | `AP-S` | sm `rpc_scmi_cpu.c:1362-1385` `CpuInfoGet` has no permission check: answered (run mode, sleep mode, reset vector of the M7) | allowed, read-only, no control |
+| `IMX_SIP_SRC`, `STOP` (atf `imx95_m7.c:117-132`) | none | none | `AP-S` | LMM path (three LMs): force shutdown of LM 1 (atf `imx95_m7.c:119`), same check as `LMM_SHUTDOWN` below: denied | refused |
+| `IMX_SIP_SRC`, `STOP`, the agent reset after a stop: `scmi_base_reset_agent_config(M7 agent, 0)` (atf `imx95_m7.c:128`; client `drivers/arm/css/scmi/scmi_base_proto.c:92`) | none | none; the M7 agent id comes from base discovery (atf `imx95_m7.c:40-60`, agent named `M7`) | `AP-S` | **not reached under the pinned config.** The call sits after the `num_lm != 2` block (atf `imx95_m7.c:117-124`), which ends in `break` at `:123`, so it runs only in the core-control path, taken when the SM reports exactly two LMs; the pinned config has three (`SM_NUM_LM 3U`, answered by `LmmProtocolAttributes`, sm `rpc_scmi_lmm.c:614-634`). In the core path it is also guarded: `scmi_core_stop` is checked (`:125-127`, `return ret` on error) before the reset, so a denied stop never reaches it. If it were reached, sm `rpc_scmi_base.c:912-964` `BaseResetAgentConfiguration` needs `basePerms[agent] >= PRIV` (`:941-945`); `mx95frdm-pro.cfg` has no `BASE_AGENT_n` line, so `AP-S` holds `SM_SCMI_PERM_NONE` (0, sm `rpc_scmi_config.h:82`) over the M7 agent: `SM_ERR_DENIED` | refused (unreached, and denied if reached) |
+| `IMX_SIP_SRC`, every subcommand: SCMI calls made before the switch (atf `imx95_m7.c:40-68`): base protocol attributes, base discover agent (once, cached in statics), LMM protocol attributes (once) | none | none | `AP-S` | sm `rpc_scmi_base.c:453-477` `BaseProtocolAttributes`, `:731-784` `BaseDiscoverAgent` and `rpc_scmi_lmm.c:614-634` `LmmProtocolAttributes` have no permission check: answered; an error is returned to the caller (atf `:45`, `:66`) before any control call | allowed, read-only, no control |
+| `IMX_SIP_SRC`, `PREP` (atf `imx95_m7.c:134-136`) | none | none | `AP-S` | LMM power-on of LM id 1 (atf passes the CPU id `1` as the LM id); sm `rpc_scmi_lmm.c:1400-1430` `LmmPowerOn`: foreign LM needs `lmmPerms >= EXCLUSIVE`: denied | refused |
+| `IMX_SIP_SRC`, `PREPED` (atf `imx95_m7.c:142`) | none | none | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_power.c:689-710` `PowerStateGet` has no permission check: answered | allowed, read-only, no control |
+| `IMX_SIP_LMM` `0xC200000F`, `LMM_BOOT` (atf `imx_sip_svc.c:120-124`, `plat/imx/imx9/imx95/imx95_lmm.c:19`) | none | none: `x2` (LM id) passed as is, no allow-list | `AP-S` | sm `sm/rpc/scmi/rpc_scmi_lmm.c:813-843` `LmmBoot`: a foreign LM needs `lmmPerms[lm] >= EXCLUSIVE`, its own LM needs `PRIV`, else `SM_ERR_DENIED`. `AP-S` grants no `LMM_*` (sm `configs/other/mx95frdm-pro.cfg:503-519`), so LM 0, 1 and 2 are denied and any other id is rejected as out of range (`lmId < SM_NUM_LM`) | refused |
+| `IMX_SIP_LMM`, `LMM_SHUTDOWN` (atf `imx95_lmm.c:24`) | none | none | `AP-S` | sm `rpc_scmi_lmm.c:969-1000` `LmmShutdown`: same check as boot: denied | refused |
+| any other FID (atf `imx_sip_svc.c:139`) | n/a | n/a | none | n/a | refused (`SMC_UNK`) |
+
+Result: under the pinned configuration, no SiP handler lets the normal world
+start, stop, reset, prepare or retarget the M7 or any LM; only two read-only
+queries (M7 CPU info, `PD_M7` power state) are answered. The refusal rests
+entirely on the SM configuration's grants to `AP-S` (no `LMM_*` and no
+`CPU_M7P` line in `configs/other/mx95frdm-pro.cfg:503-519`), not on TF-A,
+which forwards every argument unchecked. A configuration that grants `AP-S`
+`LMM_1` at `EXCLUSIVE` or `CPU_M7P` would open this path to any Linux caller
+(section 6).
+
+#### 2.2.2 The grants of `AP-S`, reviewed one by one
+
+`system-manager/ap-s-grants.txt` was first written from this survey, before any
+build. The first CI build of the pinned configuration reported 41 `UNLISTED`
+lines. They were read against imx-sm `eec232878ab7dd460f5a8f3767d39dc7e9412efa`
+(`configs/other/mx95frdm-pro.cfg`, line numbers 1-based and of the file before
+patches 0001 and 0002, which touch no `AP-S` line; the patched file has the
+`AP-S` lines three lines earlier) with `scripts/sm-grants-check.sh --ap-s --print`.
+Six of the 41 were not `AP-S` grants: the `DFMT0:` to `DATA:` defines at `:552-559`
+open the next agent, `AP-NS`, and the check ran them into the `AP-S` section; the
+check was fixed (it now ends the section there, and lists the `LM2` defines at
+`:445-450` that do apply to `AP-S`). The rest are `AP-S`'s own, and every one is
+listed. The test for each: does it let `AP-S` start, stop, reset or own anything of
+another logical machine (the M7's or the SM's)? None does: `AP-S` holds no `LMM_*`,
+`CPU_M7P` or `PD_M7` (`:503-519`), and every resource it owns (`:523-533`) is the
+A55 side's own; no other LM owns those (the SM's LM lists `MU1_A` as `TEST_MU`,
+a TRDC right for its unit tests, with no API grant). Nothing is a refused grant, so nothing
+needed an overlay (`bsp.lock` pins none).
+
+| grant | config line | decision | reason |
+|---|---|---|---|
+| `DFMT0: sa=bypass`, `DFMT1: sa=secure, pa=privileged`, `OWNER: perm=sec_rw, api=all`, `EXEC: perm=sec_rwx`, `DATA: perm=sec_rw` | `:445-450` | listed | `LM2` defines before the `AP-S` line, secure-only rights; memory-protection-survey section 4 |
+| `MAILBOX type=mu, mu=1, test=0` | `:497` | listed, finding F1 | MU1 is BL31's SCMI transport (section 2.4); `test=0` is inert in this build, see F1 |
+| `CHANNEL db=0 ... a2p`, `CHANNEL db=1 ... p2a_notify` | `:498-499` | listed | the request and notification channels of that mailbox |
+| `PERF_A55 ALL` | `:503` | listed, finding F2 | A55 operating points, which PSCI suspend and BL31 use; shared with Linux |
+| `PERLPI_CAN2-5`, `PERLPI_GPIO2-5`, `PERLPI_LPUART1,4,5,6,8`, `PERLPI_WDOG3,4` all `ALL` | `:504-518` | listed, finding F3 | wake-up through the low-power interface for suspend (scmi-permissions-survey 3.3); the M7's CAN, UARTs and watchdog (`CAN_FD1`, `LPUART3`, `LPUART7`, `WDOG5`) are not among them |
+| `SYS ALL` | `:519` | listed | PSCI system reset and off (section 2.3) |
+| `A55C0-5 OWNER`, `A55P OWNER, sema=0x442313F8` | `:523-529` | listed | the A55 cores and cluster, for PSCI CPU on and off (section 2.3); `sema` is the cluster's semaphore (`sm/doc/config.md:807`) |
+| `ARM_PLL OWNER` | `:530` | listed | the A55 clock source |
+| `MU1_A OWNER` | `:531` | listed | the A side of MU1, the transport above |
+| `MU_ELE1 OWNER`, `MU_ELE2 OWNER` | `:532-533` | listed, finding F4 | the secure side's ELE channels (section 4; attack-surface-survey MU table); `GET_SOC_INFO` in section 2.2.1 uses the ELE |
+| `OCRAM EXEC, begin=0x020480000, size=256K` | `:539` | listed | secure-only OCRAM, memory-protection-survey section 4 |
+| `DDR EXEC, begin=0x08A000000, end=0x08DFFFFFF` | `:540` | listed | holds BL31 and the BL32 window; equals `SM_SECURE_BASE` and `SM_SECURE_END` in `secure-world/bsp.lock`, which that file still calls unverified |
+| `FAULT_SW2`, `FAULT_WDOG3`, `FAULT_WDOG4`, each `OWNER, reaction=lm_reset` | `:544-546` | listed, finding F5 | reset the `AP` LM only, see F5 |
+
+Findings (none blocks the build; all are in the list on purpose):
+
+- **F1, `test=0`.** The key names a unit-test client MU (`sm/doc/config.md:744`).
+  The pinned build runs `make` without `t=`, so `T=NONE` and `sm/test` is not
+  built (imx-sm `Makefile:47-59,156-158`). Risk: a build with `t=` set would
+  compile the SM's SCMI unit tests, which drive the SM through that test MU as
+  if they were this agent. `sm-build.sh` passes no `t=`. Patch 0002 drops the
+  `test` keys of the M7 LM; dropping this one needs a new patch and a new lock
+  pin, which this review does not make.
+- **F2, `PERF_A55 ALL`.** `ALL` lets `AP-S` set levels; Linux holds the same, in one
+  LM, so priv calls from the two overwrite each other. scmi-permissions-survey 3.3
+  proposes priv, or none if BL31 sets no levels; neither is confirmed, and it
+  needs a patch to the file. Left as is.
+- **F3, `PERLPI_*`.** The purpose of each is not confirmed (scmi-permissions-survey 3.3).
+  Every one is a peripheral `AP-NS` owns (`CAN_FD2-5` `:620-623`, `GPIO2-5`
+  `:747-750`, `LPUART1,4,5,6,8` `:791-795`, `WDOG3,4` `:890-891`), so `AP-S` can
+  set the wake-up of devices Linux drives; no other LM is reached.
+- **F4, `MU_ELE1`, `MU_ELE2`.** A compromised BL31 or OP-TEE can send any request to
+  the ELE over these. That is the secure world's job (keys, entropy, SoC
+  information); what limits it is the ELE's own request checks (not read here),
+  not the SM. It cannot
+  reach `MU_ELE0` (the SM's) or `MU_ELE5` (the M7's).
+- **F5, `lm_reset` on the A55 faults.** The `lm` key defaults to the LM the fault is
+  listed in (`sm/doc/config.md:810`), here `AP`: a secure-world agent can restart
+  the A55 LM, not the M7 or the SM. This is the reaction the fault-recovery survey
+  accepts for the A55 watchdogs, with the M7 supervising the restart; whether
+  `FAULT_SW2` should instead be `sys_reset` is open there (question 2).
+
+What this review did not run: the full build with the pinned toolchain (the
+check runs on the patched file before the compile, `scripts/sm-build.sh`), and
+nothing was observed on a board.
 
 ### 2.3 PSCI
 
@@ -156,10 +274,10 @@ the `system-manager-config` row.
 NXP's SM repository ships a configuration for the FRDM board,
 `configs/mx95frdm.cfg` [S5]. That file is for the 15x15 FRDM-IMX95 board, not
 the FRDM-IMX95-PRO (machine `imx95-19x19-lpddr5-frdm-pro`), which names an SM
-configuration `mx95frdm-pro` whose source is unconfirmed
-([upstream-survey.md](upstream-survey.md)). Everything in this section is
-therefore **unverified for the PRO** until that configuration is read. As
-published in `mx95frdm.cfg`:
+configuration `mx95frdm-pro`; its source is `configs/other/mx95frdm-pro.cfg`
+at the pinned `imx-sm` commit (section 2.2.1). The list below was read from
+`mx95frdm.cfg` and is **unverified for the PRO** except where section 2.2.1
+cites the PRO file. As published in `mx95frdm.cfg`:
 
 - The Cortex-A55 side is one logical machine, `LM2` "AP", holding two SCMI
   agents: `AP-S`, marked secure, on MU1 (the MU BL31 uses, section 2.4), and
@@ -261,9 +379,32 @@ sources above:
 - **Cortex-A55 architecture level.** Armv8.2-A (hence no PAuth, BTI or
   S-EL2) is stated from the Arm product page [S10], which returned HTTP 403
   to the lane; **unconfirmed** here.
-- **SiP surface.** The full list of SiP calls the i.MX 95 build answers, and
-  how each checks its arguments, was not traced call by call. Section 2.2
-  covers only the M7 and LMM services.
+- **SiP surface.** Traced call by call for the pinned build in section 2.2.1
+  (2026-11-24). Still not confirmed there: (a) the refusal was read from SM
+  source and generated configuration, not observed on a board; (b) imx-atf's error
+  handling is traced for the SRC handler (`imx95_m7.c`): every SCMI call's
+  return value is tested and returned at once (`:44-45`, `:65-66`, `:75-76`,
+  `:84-85`, `:90-91`, `:120-121`, `:126-127`), so nothing follows a denied
+  call, and the M7 agent reset (`:128`) is in the two-LM core-control path
+  only, after a checked `scmi_core_stop`; the pinned config also gives `AP-S`
+  no right over the M7 agent's base protocol (section 2.2.1). Not traced:
+  the LMM handler `imx95_lmm.c` and `imx_sip_svc.c` beyond the single call each
+  makes, and how the returned SCMI status maps to the SMC result seen by
+  Linux; (c) the `AP-S` API list is pinned by `system-manager/ap-s-grants.txt`
+  (proposed, pending owner approval) in every `scripts/sm-build.sh` build, so a
+  grant that opens the M7 or an LM to Linux becomes a reviewed diff; the
+  refusal itself is still read from source, not observed on a board.
+  `test/secure_world_build_test.sh` runs without network, so the list is
+  checked by the `system-manager` build and by `test/sm_build_test.sh` on
+  invented configurations, not against the real file offline; the list was
+  written from this survey and is to be confirmed with
+  `scripts/sm-grants-check.sh --ap-s --print` on the first real build. The
+  configuration is also pinned by `sm_config_sha256` and
+  `sm_patched_config_sha256` in `system-manager/sm.lock`; (d) `AP-S` holds `SYS ALL` (`mx95frdm-pro.cfg:519`), so the secure
+  side can reset the whole system, M7 included; that is reached by PSCI system
+  reset, not by a SiP call, and is not an M7-only control; (e) the two
+  read-only queries leak the M7's run state and reset vector to Linux, judged
+  harmless but not reviewed by the owner.
 - **Linux dependency on NXP SiP calls** (remoteproc for the M7) was not
   checked against kernel source.
 - **`SYS_PWR_FULL_CTRL`.** Its exact effect was not traced.
@@ -271,16 +412,34 @@ sources above:
   i.MX 95 port's sources as listed in `platform.mk` [S2]. That suggests
   `ENABLE_STACK_PROTECTOR` needs a platform addition first; not confirmed by a
   build.
-- **SM configuration audit.** Only the A55 secure agent's section of
-  `mx95frdm.cfg` was read in full; the non-secure resource list was skimmed.
+- **SM configuration audit.** In `configs/other/mx95frdm-pro.cfg` (the pinned
+  configuration) the `AP-S` agent's section (`:496-519`) was read in full and
+  checked for `BASE_AGENT_n`, `LMM_*`, `CPU_*` and `PD_M7` lines; the rest of
+  the file, including the non-secure `AP-NS` agent, was skimmed.
 - **OP-TEE on FRDM.** Upstream OP-TEE has only `mx95evk`; whether its DDR and
   UART values fit the FRDM-IMX95 was not checked.
 - **SPMD/FF-A on i.MX 95.** No source shows `SPD=spmd` built or run on this
   SoC.
-- **Release alignment.** The NXP branch heads surveyed (`imx-atf`
-  `lf_v2.14`, `imx-sm` `master`) were not matched to one NXP BSP release
-  tag. `imx-mkimage` was read at release tag `lf-6.12.49_2.2.0`. Matching
-  versions across the three repositories is for #32.
+- **Release alignment.** The sections above that cite branch heads (`imx-atf`
+  `lf_v2.14` at `af9eb2c`, `imx-sm` at `eec2328`) predate the pins. The pins
+  are now set: `imx-atf` at the `SRCREV` of the `imx-atf_2.14.bb` recipe of
+  BSP release `lf-6.18.37-2.1.0` (`secure-world/bsp.lock`, `TFA_COMMIT`) and
+  `imx-sm` at the commit that release tag points to (`system-manager/sm.lock`),
+  both for that one release, which is provisional (#14 Q2). `imx-mkimage` was
+  read at release tag `lf-6.12.49_2.2.0`, which is not that release; matching
+  it is for #32.
+- **No vendor snapshot is attached.** Vendor source is never copied into this
+  repository, so the read-only trees reviewers asked for are not here. To read
+  the same trees (into a new, empty directory outside the clone):
+  `git init imx-atf && cd imx-atf && git fetch --depth 1
+  https://github.com/nxp-imx/imx-atf.git
+  af9eb2c1748ee3abc0ead7dc76e462f50c573036 && git checkout FETCH_HEAD`, and
+  the same with `https://github.com/nxp-imx/imx-sm.git` and
+  `eec232878ab7dd460f5a8f3767d39dc7e9412efa` (tag `lf-6.18.37-2.1.0`). The
+  files cited in section 2.2.1 are then at the paths given there
+  (`plat/imx/imx9/imx95/imx95_m7.c`, `configs/other/mx95frdm-pro.cfg`, and
+  so on); the configuration's SHA-256 must equal `sm_config_sha256` in
+  `system-manager/sm.lock`.
 
 ## Sources
 

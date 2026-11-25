@@ -13,8 +13,9 @@ references give about the cores and the enclave the secure world runs beside, an
 Owner ruling 771 (2026-11-17) settles the secure world's scope ([SPEC.md](../SPEC.md), Boundaries, `secure-world`
 row, Release criteria). The SPEC.md text that records it was approved by the owner on 2026-11-21 (PR #138).
 
-- **Cortex-A55.** The secure world is upstream Arm Trusted Firmware-A (BL31), at a tagged upstream release (ruling
-  771), and NXP's BSP OP-TEE OS, at the revision one named NXP Linux BSP release carries. It is not this repository's own code: this repository
+- **Cortex-A55.** The secure world is Trusted Firmware-A (BL31) from NXP's `imx-atf`, at the revision the
+  named NXP Linux BSP release carries (ruling 1234, `bsp.lock`), and NXP's BSP OP-TEE OS, at the revision that same
+  release carries (ruling 771). It is not this repository's own code: this repository
   configures it, builds it reproducibly, and puts its images in the boot container that AHAB verifies
   ([SPEC.md](../SPEC.md), `boot-container` row).
 - **Trusted applications.** OP-TEE runs the PKCS#11 TA, which go-xkms's PKCS#11 backend uses, and hosts the
@@ -36,8 +37,8 @@ What the ruling leaves in force or does not settle:
   clear (RM00284 §2.4, §3.2), so those keys are not where the board's enclave-held keys go
   ([ta-options-survey.md](ta-options-survey.md), question 1).
 - The NXP Linux BSP release, and with it the TF-A and OP-TEE revisions, are **to be pinned**. No version is named
-  here. Whether upstream TF-A boots on the FRDM-IMX95-PRO is not confirmed; the public trees surveyed have an i.MX
-  95 BL31 port but no board-specific build for the PRO ([upstream-survey.md](upstream-survey.md), TF-A).
+  here. Whether the BSP release's `imx-atf` revision boots on the FRDM-IMX95-PRO is not confirmed here; the
+  public trees surveyed have an i.MX 95 BL31 port but no board-specific build for the PRO ([upstream-survey.md](upstream-survey.md), TF-A).
 - Which side calls the enclave's HSM API is not settled by the ruling (see [Open questions](#open-questions)).
 - No document in the references gives the i.MX 95's TrustZone configuration; the one that does is missing
   ([references/README.md](../references/README.md), "Still missing").

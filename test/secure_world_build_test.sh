@@ -9,21 +9,52 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 sw=$ROOT/scripts/secure-world-build.sh
 good=$ROOT/secure-world/bsp.lock
+# The boot container description, and a copy of it whose tee.bin entry loads and
+# enters at <base>: the window-logic cases below use other bases than the
+# container's, and give the script a container that matches (container_for).
+ctr=$ROOT/scripts/ahab/boot-image.yaml
+container_for() { # <base> -> path of a copy of $ctr with the tee.bin address <base>
+	local t o=$TMP_ROOT/container-$1.yaml
+	t=$(<"$ctr")
+	printf '%s\n' "${t//\'0x8C000000\'/\'$1\'}" >"$o"
+	echo "$o"
+}
 
 run bash "$sw" --help
 check "help prints the usage" 0 "usage: secure-world-build.sh"
 
 run bash "$sw" --check-lock
-check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "TF-A v2.15.0 da738d5eae93" "toolchain 15.2.rel1"
+check "the committed bsp.lock checks" 0 "bsp.lock OK" "lf-6.18.37-2.1.0" "TF-A lf-6.18.37-2.1.0 af9eb2c1748e" "toolchain 15.2.rel1"
 
-# Owner ruling 771 and docs/SPEC.md: TF-A is upstream Arm TF-A, not NXP's fork.
+# Owner ruling 1234 and docs/SPEC.md: BL31 is NXP's imx-atf, which counts as upstream TF-A.
 tfa_repo=$(sed -n 's/^TFA_REPO=//p' "$good")
 case "$tfa_repo" in
-https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
+https://github.com/nxp-imx/imx-atf.git)
 	tfa_ok=0 ;;
 *) tfa_ok=1 ;;
 esac
-expect "bsp.lock's TFA_REPO is upstream TF-A (ruling 771), not NXP's imx-atf: $tfa_repo" test "$tfa_ok" -eq 0
+expect "bsp.lock's TFA_REPO is NXP's imx-atf (ruling 1234): $tfa_repo" test "$tfa_ok" -eq 0
+
+# The documents follow ruling 1234: no tag of upstream Arm TF-A pins BL31, and the
+# release criterion names imx-atf and the ruling.
+file_has() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == *$2* ]] && return 0; done <"$1"; return 1; }
+file_lacks() { ! file_has "$@"; }
+criterion_ok() { # <file>: the BL31 release criterion line names imx-atf and ruling 1234
+	local l
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == "- BL31 is pinned"* && "$l" == *imx-atf* && "$l" == *"ruling 1234"* && "$l" != *"tagged upstream"* ]] && return 0
+	done <"$1"
+	return 1
+}
+expect "docs/SPEC.md has no 'tagged upstream Arm TF-A' text" file_lacks "$ROOT/docs/SPEC.md" "tagged upstream Arm TF-A"
+expect "docs/SPEC.md's BL31 release criterion names imx-atf and ruling 1234" criterion_ok "$ROOT/docs/SPEC.md"
+expect "docs/secure-world/architecture.md has no 'tagged upstream release'" file_lacks "$ROOT/docs/secure-world/architecture.md" "tagged upstream release"
+expect "ROADMAP.md has no 'tagged upstream release'" file_lacks "$ROOT/ROADMAP.md" "tagged upstream release"
+planted=$TMP_ROOT/planted-spec.md
+printf '%s\n' '- BL31 is pinned to a tagged upstream Arm TF-A release (owner ruling 771), imx-atf ruling 1234.' >"$planted"
+expect "a planted 'tagged upstream Arm TF-A' criterion is flagged by the wording check" file_has "$planted" "tagged upstream Arm TF-A"
+criterion_flagged() { ! criterion_ok "$1"; }
+expect "a planted 'tagged upstream' criterion fails the criterion check" criterion_flagged "$planted"
 
 run bash "$sw" --frobnicate
 check "an unknown argument fails" nonzero "unknown argument: --frobnicate"
@@ -45,26 +76,88 @@ lockcopy() {
 	printf '%s\n' "$f"
 }
 edit_unread() { [[ "$1" == TFA_COMMIT=* ]] && echo TFA_COMMIT=UNREAD || printf '%s\n' "$1"; }
+edit_branch() { [[ "$1" == TFA_COMMIT=* ]] && echo TFA_COMMIT=lf_v2.14 || printf '%s\n' "$1"; }
 edit_short() { [[ "$1" == OPTEE_COMMIT=* ]] && echo OPTEE_COMMIT=99f40897 || printf '%s\n' "$1"; }
 edit_digest() { [[ "$1" == TOOLCHAIN_SHA256=* ]] && echo TOOLCHAIN_SHA256=abc || printf '%s\n' "$1"; }
 edit_url() { [[ "$1" == FTPM_REPO=* ]] && echo FTPM_REPO=http://example.org/x.git || printf '%s\n' "$1"; }
 edit_chars() { [[ "$1" == TFA_PLAT=* ]] && echo 'TFA_PLAT=imx95;true' || printf '%s\n' "$1"; }
 edit_unknown() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nEXTRA_FLAG=y\n' "$1" || printf '%s\n' "$1"; }
 edit_twice() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\n%s\n' "$1" "$1" || printf '%s\n' "$1"; }
+edit_b32missing() { [[ "$1" == BL32_BASE=* ]] || printf '%s\n' "$1"; }
+edit_b32hex() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=8C000000 || printf '%s\n' "$1"; }
+edit_b32zero() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x0 || printf '%s\n' "$1"; }
+edit_b32align() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8C000001 || printf '%s\n' "$1"; }
+edit_b32sizealign() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x02000001 || printf '%s\n' "$1"; }
+edit_b32wrap() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x7FFFFFFFFFE00000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x00400000; else printf '%s\n' "$1"; fi; }
+
+edit_smabove() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8E000000 || printf '%s\n' "$1"; }
+edit_smbelow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x89E00000 || printf '%s\n' "$1"; }
+edit_smlong() { [[ "$1" == BL32_SIZE=* ]] && echo BL32_SIZE=0x02200000 || printf '%s\n' "$1"; }
+edit_smbasemissing() { [[ "$1" == SM_SECURE_BASE=* ]] || printf '%s\n' "$1"; }
+edit_smendmissing() { [[ "$1" == SM_SECURE_END=* ]] || printf '%s\n' "$1"; }
+edit_smbasehex() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=8A000000 || printf '%s\n' "$1"; }
+edit_smendhex() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFFFZ || printf '%s\n' "$1"; }
+edit_smorder() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8E000000 || printf '%s\n' "$1"; }
+edit_smbasealign() { [[ "$1" == SM_SECURE_BASE=* ]] && echo SM_SECURE_BASE=0x8A000001 || printf '%s\n' "$1"; }
+edit_smendalign() { [[ "$1" == SM_SECURE_END=* ]] && echo SM_SECURE_END=0x8DFFFFFE || printf '%s\n' "$1"; }
+# Inside the SM window: the exact fit, and the lowest base with the default size.
+edit_smexact() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; elif [[ "$1" == BL32_SIZE=* ]]; then echo BL32_SIZE=0x03C00000; else printf '%s\n' "$1"; fi; }
+edit_smlow() { [[ "$1" == BL32_BASE=* ]] && echo BL32_BASE=0x8A400000 || printf '%s\n' "$1"; }
+
+# The lock's SM window against the System Manager's DDR EXEC grant (the reviewer's
+# example: the lock's end raised to 0x8FFFFFFF with BL32 at 0x8E000000 stays inside
+# the pinned window, but not inside what the System Manager grants).
+edit_grantend() {
+	if [[ "$1" == SM_SECURE_END=* ]]; then echo SM_SECURE_END=0x8FFFFFFF
+	elif [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8E000000
+	else printf '%s\n' "$1"; fi
+}
+# A grants file with the DDR EXEC line replaced by $2 (one line, or none when empty).
+grantscopy() {
+	local f=$TMP_ROOT/grants-$1.txt line
+	: >"$f"
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [[ "$line" == "DDR EXEC"* ]]; then
+			[ -z "$2" ] || printf '%b\n' "$2" >>"$f"
+		else
+			printf '%s\n' "$line" >>"$f"
+		fi
+	done <"$sm_grants"
+	printf '%s\n' "$f"
+}
+
+# BL32 against BL31 (default BL31 window 0x8A200000, 256 KiB). W holds the
+# values a fixture overrides; lockset applies them to a lock line.
+declare -A W=()
+lockset() { local k=${1%%=*}; if [[ "$1" == *=* && -n "${W[$k]:-}" ]]; then echo "$k=${W[$k]}"; else printf '%s\n' "$1"; fi; }
+edit_ovstart() { lockset "$1"; }
+edit_ovend() { lockset "$1"; }
+edit_ovcontain() { lockset "$1"; }
+edit_ovdefault() { lockset "$1"; }
+edit_ovadjacent() { lockset "$1"; }
+edit_b31zero() { lockset "$1"; }
+edit_b31wrap() { lockset "$1"; }
+edit_b31outside() { lockset "$1"; }
+edit_b31missing() { [[ "$1" == BL31_BASE=* ]] || printf '%s\n' "$1"; }
+edit_b31moved() { lockset "$1"; }
+edit_b31size() { lockset "$1"; }
 edit_missing() { [[ "$1" == MSTPM_COMMIT=* ]] || printf '%s\n' "$1"; }
 edit_nowheel() { [[ "$1" == PYWHEEL=* ]] || printf '%s\n' "$1"; }
 edit_badwheel() { [[ "$1" == PYWHEEL=cffi* ]] && echo PYWHEEL=cffi==2.1.1 || printf '%s\n' "$1"; }
 edit_shape() { [[ "$1" == TFA_PLAT=* ]] && printf '%s\nnot a pin\n' "$1" || printf '%s\n' "$1"; }
-# Owner ruling 771: the script itself refuses NXP's TF-A fork, a TF-A pin that
-# is not a release tag, and an OP-TEE that is not NXP's BSP OP-TEE.
-edit_imxatf() { [[ "$1" == TFA_REPO=* ]] && echo TFA_REPO=https://github.com/nxp-imx/imx-atf.git || printf '%s\n' "$1"; }
-edit_rctag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=v2.15.0-rc0 || printf '%s\n' "$1"; }
+# Owner rulings 771 and 1234: the script itself refuses a TF-A source that is
+# neither upstream Arm TF-A nor NXP's imx-atf, a TF-A pin whose tag is not that
+# source's release tag, and an OP-TEE that is not NXP's BSP OP-TEE.
+edit_forkrepo() { [[ "$1" == TFA_REPO=* ]] && echo TFA_REPO=https://github.com/example/atf.git || printf '%s\n' "$1"; }
+edit_rctag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=lf-6.18.37-rc0 || printf '%s\n' "$1"; }
 edit_branchtag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=master || printf '%s\n' "$1"; }
+edit_uptag() { [[ "$1" == TFA_TAG=* ]] && echo TFA_TAG=v2.15.0 || printf '%s\n' "$1"; }
 edit_notag() { [[ "$1" == TFA_TAG=* ]] || printf '%s\n' "$1"; }
 edit_upoptee() { [[ "$1" == OPTEE_REPO=* ]] && echo OPTEE_REPO=https://github.com/OP-TEE/optee_os.git || printf '%s\n' "$1"; }
 
 for c in \
 	"unread|is marked UNREAD" \
+	"branch|must be a 40-hex commit" \
 	"short|must be a 40-hex commit" \
 	"digest|must be a 64-hex SHA-256" \
 	"url|must be an https URL" \
@@ -75,9 +168,26 @@ for c in \
 	"nowheel|no PYWHEEL line" \
 	"badwheel|PYWHEEL must be" \
 	"shape|not NAME=value" \
-	"imxatf|is not upstream Arm TF-A (owner ruling 771" \
-	"rctag|TFA_TAG v2.15.0-rc0 is not an upstream release tag" \
-	"branchtag|TFA_TAG master is not an upstream release tag" \
+	"b32missing|BL32_BASE is missing" \
+	"b32hex|BL32_BASE must be hex with a 0x prefix" \
+	"b32zero|BL32_SIZE must be nonzero" \
+	"b32align|BL32_BASE must be 2 MiB aligned" \
+	"b32sizealign|BL32_SIZE must be 2 MiB aligned" \
+	"b32wrap|wraps past 64 bits" \
+	"smabove|is not inside the SM secure window" \
+	"smbelow|is not inside the SM secure window" \
+	"smlong|is not inside the SM secure window" \
+	"smbasemissing|SM_SECURE_BASE is missing" \
+	"smendmissing|SM_SECURE_END is missing" \
+	"smbasehex|SM_SECURE_BASE must be hex with a 0x prefix" \
+	"smendhex|SM_SECURE_END must be hex with a 0x prefix" \
+	"smorder|SM_SECURE_BASE 0x8E000000 must be below SM_SECURE_END" \
+	"smbasealign|SM_SECURE_BASE must be 2 MiB aligned" \
+	"smendalign|SM_SECURE_END + 1 must be 2 MiB aligned" \
+	"forkrepo|is neither upstream Arm TF-A nor NXP's imx-atf" \
+	"rctag|TFA_TAG lf-6.18.37-rc0 is not an imx-atf release tag" \
+	"branchtag|TFA_TAG master is not an imx-atf release tag" \
+	"uptag|TFA_TAG v2.15.0 is not an imx-atf release tag" \
 	"notag|TFA_TAG is missing" \
 	"upoptee|is not NXP's BSP OP-TEE"; do
 	name=${c%%|*} want=${c#*|}
@@ -85,6 +195,121 @@ for c in \
 	run bash "$sw" --lock "$f" --check-lock
 	check "a lock with $name fails" nonzero "$want"
 done
+
+ovmsg="overlaps the BL31 window"
+# BL32 starts inside BL31 (BL31 moved to 0x8A100000, 2 MiB, so 0x8A200000 is inside it).
+W=([BL31_BASE]=0x8A100000 [BL31_SIZE]=0x00200000 [BL32_BASE]=0x8A200000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovstart edit_ovstart)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window starting inside BL31 fails" nonzero "$ovmsg"
+# BL32 ends inside BL31.
+W=([BL31_BASE]=0x8A100000 [BL31_SIZE]=0x00200000 [BL32_BASE]=0x8A000000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovend edit_ovend)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window ending inside BL31 fails" nonzero "$ovmsg"
+# BL32 contains BL31 (the case a containment-only check accepted).
+W=([BL32_BASE]=0x8A000000 [BL32_SIZE]=0x04000000)
+f=$(lockcopy ovcontain edit_ovcontain)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL32 window containing BL31 fails" nonzero "$ovmsg"
+# The reviewer's case: BL32_BASE 0x8A000000 with the default 32 MiB size.
+W=([BL32_BASE]=0x8A000000)
+f=$(lockcopy ovdefault edit_ovdefault)
+run bash "$sw" --lock "$f" --check-lock
+check "BL32_BASE 0x8A000000 with the default size fails" nonzero "$ovmsg"
+# BL32 ending exactly at BL31_BASE does not intersect: passes.
+W=([BL32_BASE]=0x8A000000 [BL32_SIZE]=0x00200000)
+f=$(lockcopy ovadjacent edit_ovadjacent)
+run bash "$sw" --lock "$f" --container "$(container_for 0x8A000000)" --check-lock
+check "a BL32 window ending exactly at BL31_BASE passes" 0 "OK"
+# The BL31 pins are validated like BL32's.
+W=([BL31_SIZE]=0x0)
+f=$(lockcopy b31zero edit_b31zero)
+run bash "$sw" --lock "$f" --check-lock
+check "BL31_SIZE zero fails" nonzero "BL31_SIZE must be nonzero"
+W=([BL31_BASE]=0x7FFFFFFFFFFFF000 [BL31_SIZE]=0x00002000)
+f=$(lockcopy b31wrap edit_b31wrap)
+run bash "$sw" --lock "$f" --check-lock
+check "a wrapping BL31 window fails" nonzero "BL31_BASE 0x7FFFFFFFFFFFF000 + BL31_SIZE 0x00002000 wraps"
+W=([BL31_BASE]=0x90000000)
+f=$(lockcopy b31outside edit_b31outside)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL31 window outside the SM window fails" nonzero "BL31 window (BL31_BASE 0x90000000"
+f=$(lockcopy b31missing edit_b31missing)
+run bash "$sw" --lock "$f" --check-lock
+check "a lock without BL31_BASE fails" nonzero "BL31_BASE is missing"
+# The reviewer's case: a BL31 window that is sane, inside the SM window and clear
+# of BL32, but not where the pinned TF-A links BL31 (0x8A200000). BL32 at
+# 0x8A000000 (default 32 MiB) then covers the resident BL31.
+bl31msg="differs from the BL31 the pinned TF-A links at"
+W=([BL31_BASE]=0x8D000000 [BL32_BASE]=0x8A000000)
+f=$(lockcopy b31moved edit_b31moved)
+run bash "$sw" --lock "$f" --check-lock
+check "BL31_BASE 0x8D000000 with BL32_BASE 0x8A000000 is refused" nonzero "$bl31msg"
+W=([BL31_SIZE]=0x00200000)
+f=$(lockcopy b31size edit_b31size)
+run bash "$sw" --lock "$f" --check-lock
+check "a BL31_SIZE other than the platform's is refused" nonzero "$bl31msg"
+W=()
+
+for c in "smexact|a BL32 window from above BL31 to the SM window end" "smlow|BL32_BASE just above BL31 with the default size"; do
+	name=${c%%|*}
+	f=$(lockcopy "$name" "edit_$name")
+	run bash "$sw" --lock "$f" --container "$(container_for 0x8A400000)" --check-lock
+	check "$name: ${c#*|} passes" 0 "OK"
+done
+
+# The boot container loads and enters tee.bin at one fixed address; a BL32_BASE
+# that differs from it would send BL31 to an address where OP-TEE was not loaded.
+# The committed lock and container agree (the committed lock passes above). With
+# the committed container, another BL32_BASE is refused, and a container whose
+# tee.bin load address or entry point is not BL32_BASE is refused.
+ctrmsg="differs from the boot container's tee.bin"
+f=$(lockcopy smlow edit_smlow)
+run bash "$sw" --lock "$f" --check-lock
+check "BL32_BASE 0x8A400000 against the committed container (tee.bin at 0x8C000000) is refused" nonzero "$ctrmsg"
+ctr_t=$(<"$ctr")
+printf '%s\n' "${ctr_t//\'0x8C000000\'/\'0x8A400000\'}" >"$TMP_ROOT/ctr-moved.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-moved.yaml" --check-lock
+check "a container moved to 0x8A400000 against the committed lock (BL32_BASE 0x8C000000) is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t/entry_point: \'0x8C000000\'/entry_point: \'0x8C200000\'}" >"$TMP_ROOT/ctr-entry.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-entry.yaml" --check-lock
+check "a container whose tee.bin entry point alone differs from BL32_BASE is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t/load_address: \'0x8C000000\'/load_address: \'0x8C200000\'}" >"$TMP_ROOT/ctr-load.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-load.yaml" --check-lock
+check "a container whose tee.bin load address alone differs from BL32_BASE is refused" nonzero "$ctrmsg"
+printf '%s\n' "${ctr_t//image_path: tee.bin/image_path: tee-other.bin}" >"$TMP_ROOT/ctr-notee.yaml"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/ctr-notee.yaml" --check-lock
+check "a container with no tee.bin entry is refused" nonzero "0 tee.bin entries"
+run bash "$sw" --lock "$good" --container "$TMP_ROOT/no-such-container.yaml" --check-lock
+check "a missing container description is refused" nonzero "cannot read the boot container description"
+
+sm_grants=$ROOT/system-manager/ap-s-grants.txt
+f=$(lockcopy grantend edit_grantend)
+run bash "$sw" --lock "$f" --check-lock
+check "the lock's SM window raised to 0x8FFFFFFF with BL32 at 0x8E000000 fails" nonzero "differs from the System Manager's DDR EXEC grant"
+run bash "$sw" --lock "$good" --grants "$sm_grants" --check-lock
+check "the committed lock passes against the committed DDR EXEC grant" 0 "OK"
+for c in \
+	"missing|" \
+	"dup|DDR EXEC, begin=0x08A000000, end=0x08DFFFFFF\nDDR EXEC, begin=0x08A000000, end=0x08DFFFFFF" \
+	"junk|DDR EXEC, begin=0x08A000000" \
+	"size|DDR EXEC, begin=0x08A000000, size=64M" \
+	"low|DDR EXEC, begin=0x089E00000, end=0x08DFFFFFF" \
+	"high|DDR EXEC, begin=0x08A000000, end=0x08FFFFFFF"; do
+	name=${c%%|*}
+	g=$(grantscopy "$name" "${c#*|}")
+	run bash "$sw" --lock "$good" --grants "$g" --check-lock
+	case $name in
+	missing) want="no DDR EXEC grant line" ;;
+	dup) want="2 DDR EXEC grant lines" ;;
+	junk | size) want="the DDR EXEC grant is not" ;;
+	*) want="differs from the System Manager's DDR EXEC grant" ;;
+	esac
+	check "a grants file with the DDR EXEC line '$name' fails" nonzero "$want"
+done
+run bash "$sw" --lock "$good" --grants "$TMP_ROOT/no-such-grants.txt" --check-lock
+check "a missing grants file fails" nonzero "no such AP-S grants file"
 
 # The host and the work directory: stubs make the host look like x86_64
 # Linux with every tool, and curl fail, so a run stops at the first fetch.
@@ -206,6 +431,13 @@ cat >"$fs/cp" <<'EOF'
 last=${!#}
 if [ -n "${STUB_CORRUPT_CP:-}" ] && [[ "$last" == */stage/bl31.bin ]]; then echo corrupt >>"$last"; fi
 EOF
+# bash: logs its arguments when STUB_BASH_LOG is set, then runs the real bash, so
+# the test can see how the driver starts its two --single children.
+cat >"$fs/bash" <<'EOF'
+#!/bin/bash
+[ -z "${STUB_BASH_LOG:-}" ] || echo "$*" >>"$STUB_BASH_LOG"
+exec /bin/bash "$@"
+EOF
 chmod +x "$fs"/*
 fp=$fs:$PATH
 
@@ -220,8 +452,10 @@ fullrun() {
 	shift 2
 	mkdir -p "$TMP_ROOT/$n"
 	: >"$TMP_ROOT/$n/make.log"
-	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" "$@" \
-		bash "$sw" --lock "$l" --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
+	: >"$TMP_ROOT/$n/bash.log"
+	run env PATH="$fp" STUB_TARBALL="$TMP_ROOT/fix/toolchain.tar.xz" STUB_LOG="$TMP_ROOT/$n/make.log" \
+		STUB_BASH_LOG="$TMP_ROOT/$n/bash.log" "$@" \
+		bash "$sw" --lock "$l" ${FR_GRANTS:+--grants "$FR_GRANTS"} ${FR_CONTAINER:+--container "$FR_CONTAINER"} --work "$TMP_ROOT/$n/work" --out "$TMP_ROOT/$n/out" --cache "$TMP_ROOT/$n/cache"
 }
 nothing_published() { [ ! -e "$TMP_ROOT/$1/out/SHA256SUMS" ] && [ ! -e "$TMP_ROOT/$1/out/bl31.bin" ] && [ ! -e "$TMP_ROOT/$1/out/tee.bin" ]; }
 
@@ -277,14 +511,130 @@ two_builds() { local n; n=$(printf '%s\n' "$mlog" | while IFS= read -r l; do [[ 
 expect "TF-A is built twice, once in each clean build directory" two_builds
 expect "the reproducibility result is recorded" has_line 'reproducible: yes' "$TMP_ROOT/ok/out/build-info.txt"
 expect "the work directory holds both clean builds" test -d "$TMP_ROOT/ok/work/build-1" -a -d "$TMP_ROOT/ok/work/build-2"
-tag_fetched() { [ "$(<"$TMP_ROOT/ok/work/build-1/src/tfa/.stubtag")" = refs/tags/v2.15.0 ]; }
-expect "the TF-A release tag is fetched from upstream and checked" tag_fetched
-expect "build-info.txt records the TF-A tag" has_line "tfa: da738d5eae93af342fdc4995dd3c05acb4c9d757 tag v2.15.0 PLAT=imx95" "$TMP_ROOT/ok/out/build-info.txt"
+lock_value() { local l; while IFS= read -r l || [ -n "$l" ]; do [[ "$l" == "$2="* ]] && { printf '%s\n' "${l#"$2="}"; return 0; }; done <"$1"; return 1; }
+tag_fetched() { [ "$(<"$TMP_ROOT/ok/work/build-1/src/tfa/.stubtag")" = "refs/tags/$(lock_value "$good" TFA_TAG)" ]; }
+expect "the TF-A release tag is fetched from the pinned repository and checked" tag_fetched
+expect "build-info.txt records the TF-A tag" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=imx95 SPD=opteed BL32_BASE=$(lock_value "$good" BL32_BASE) BL32_SIZE=$(lock_value "$good" BL32_SIZE)" "$TMP_ROOT/ok/out/build-info.txt"
 
 # The release tag peels to another commit than TFA_COMMIT: the build stops.
 fullrun tagmoved "$oklock" STUB_TAG_MOVED=1
-check "a TF-A tag that does not peel to TFA_COMMIT stops the build" nonzero "tfa-tag failed" "tag v2.15.0 peels to 1111111111111111111111111111111111111111"
+check "a TF-A tag that does not peel to TFA_COMMIT stops the build" nonzero "tfa-tag failed" "tag $(lock_value "$good" TFA_TAG) peels to 1111111111111111111111111111111111111111"
 expect "a moved tag publishes nothing" nothing_published tagmoved
+
+# The BL31 build call (the only make call in the TF-A tree): its platform is the
+# TFA_PLAT of the lock (read here with the script's NAME=value rule, not typed
+# twice), the dispatcher is OP-TEE, the target is bl31, the output is under the
+# build directory, and each clean build makes exactly one such call.
+# lock_value <lock> <NAME>: the value of the one NAME=value line.
+# tfa_call_ok <log> <work> <plat>: one correct BL31 call in each of build-1 and build-2
+tfa_call_ok() {
+	local log=$1 work=$2 plat=$3 base=${4:-$bl32_base} size=${5:-$bl32_size} n l c w
+	for n in 1 2; do
+		c=0 w=$work/build-$n
+		while IFS= read -r l; do
+			[[ "$l" == *"-C $w/src/tfa "* ]] || continue
+			c=$((c + 1))
+			[[ " $l " == *" PLAT=$plat "* && " $l " == *" SPD=opteed "* ]] || return 1
+			[[ "$l" == *" BUILD_BASE=$w/build/"* && "$l" == *" bl31" ]] || return 1
+			[[ "$l" != *" PLAT="*" PLAT="* && "$l" != *" SPD="*" SPD="* ]] || return 1
+			[[ " $l " == *" BL32_BASE=$base "* && " $l " == *" BL32_SIZE=$size "* ]] || return 1
+			[[ "$l" != *" BL32_BASE="*" BL32_BASE="* && "$l" != *" BL32_SIZE="*" BL32_SIZE="* ]] || return 1
+		done <<<"$log"
+		[ "$c" -eq 1 ] || return 1
+	done
+}
+tfa_plat=$(lock_value "$good" TFA_PLAT)
+bl32_base=$(lock_value "$good" BL32_BASE)
+bl32_size=$(lock_value "$good" BL32_SIZE)
+tfa_log_ok() { tfa_call_ok "$mlog" "$TMP_ROOT/ok/work" "$tfa_plat"; }
+tfa_log_ok_with() { tfa_call_ok "$1" "$TMP_ROOT/ok/work" "$tfa_plat"; }
+tfa_log_bad() { ! tfa_log_ok_with "$1"; }
+expect "the BL31 build is one make call per clean build: PLAT=$tfa_plat (from bsp.lock) SPD=opteed bl31, output under the build dir" tfa_log_ok
+bl31_line="-C $TMP_ROOT/ok/work/build-1/src/tfa -j1 BUILD_BASE=$TMP_ROOT/ok/work/build-1/build/tfa PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size bl31"
+bl31_line2=${bl31_line//build-1/build-2}
+expect "the TF-A call check accepts a planted good log" tfa_log_ok_with "$(printf '%s\n%s\n' "$bl31_line" "$bl31_line2")"
+expect "a planted SPD=trusty fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//SPD=opteed/SPD=trusty}" "$bl31_line2")"
+expect "a planted other PLAT fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "$bl31_line" "${bl31_line2//PLAT=$tfa_plat/PLAT=imx8mp}")"
+expect "a planted missing bl31 target fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line% bl31}" "$bl31_line2")"
+expect "a planted BUILD_BASE outside the build dir fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line//\/build\/tfa//elsewhere}" "$bl31_line2")"
+expect "a planted second TF-A call fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n%s\n' "$bl31_line" "$bl31_line" "$bl31_line2")"
+expect "a planted missing TF-A call fails the TF-A call check" tfa_log_bad "$bl31_line"
+expect "a planted bl31 call without BL32_BASE fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "${bl31_line// BL32_BASE=$bl32_base/}" "$bl31_line2")"
+expect "a planted other BL32_SIZE fails the TF-A call check" tfa_log_bad "$(printf '%s\n%s\n' "$bl31_line" "${bl31_line2//BL32_SIZE=$bl32_size/BL32_SIZE=0x04000000}")"
+
+# The secure DRAM window: every OP-TEE make call (dev kit and image, in both
+# clean builds) carries CFG_TZDRAM_START and CFG_TZDRAM_SIZE equal to the lock's
+# BL32_BASE and BL32_SIZE, which the BL31 calls carry too (tfa_call_ok above).
+# all_optee_window <log> <base> <size>: each OP-TEE call has the pair once.
+all_optee_window() {
+	local l n=0
+	while IFS= read -r l; do
+		[[ "$l" == *"/optee "* ]] || continue
+		n=$((n + 1))
+		[[ " $l " == *" CFG_TZDRAM_START=$2 "* && " $l " == *" CFG_TZDRAM_SIZE=$3 "* ]] || return 1
+		[[ "$l" != *" CFG_TZDRAM_START="*" CFG_TZDRAM_START="* && "$l" != *" CFG_TZDRAM_SIZE="*" CFG_TZDRAM_SIZE="* ]] || return 1
+	done <<<"$1"
+	[ "$n" -ge 4 ]
+}
+optee_window_bad() { ! all_optee_window "$@"; }
+expect "every OP-TEE make call carries CFG_TZDRAM_START/SIZE equal to the lock's BL32_BASE/BL32_SIZE" all_optee_window "$mlog" "$bl32_base" "$bl32_size"
+expect "a planted other CFG_TZDRAM_START fails the OP-TEE window check" optee_window_bad "${mlog//CFG_TZDRAM_START=$bl32_base/CFG_TZDRAM_START=0x8E000000}" "$bl32_base" "$bl32_size"
+expect "the published build-info records the window" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
+
+# A lock with another BL32_BASE changes the BL31 calls and the OP-TEE calls.
+edit_altbase() { if [[ "$1" == BL32_BASE=* ]]; then echo BL32_BASE=0x8A400000; else edit_tcsum "$1"; fi; }
+baselock=$(lockcopy altbase edit_altbase)
+FR_CONTAINER=$(container_for 0x8A400000) fullrun altbase "$baselock"
+check "a build with another BL32_BASE and a container that loads there reaches publication" 0 "secure-world-build: OK"
+baselog=$(<"$TMP_ROOT/altbase/make.log")
+base_tfa_ok() { tfa_call_ok "$baselog" "$TMP_ROOT/altbase/work" "$tfa_plat" 0x8A400000 "$bl32_size"; }
+expect "another BL32_BASE is passed to the BL31 calls" base_tfa_ok
+expect "another BL32_BASE is passed to every OP-TEE call" all_optee_window "$baselog" 0x8A400000 "$bl32_size"
+expect "another BL32_BASE no longer matches the committed window" optee_window_bad "$baselog" "$bl32_base" "$bl32_size"
+expect "the published build-info records the lock's platform" has_line "tfa: $(lock_value "$good" TFA_COMMIT) tag $(lock_value "$good" TFA_TAG) PLAT=$tfa_plat SPD=opteed BL32_BASE=$bl32_base BL32_SIZE=$bl32_size" "$TMP_ROOT/ok/out/build-info.txt"
+
+# A non-default System Manager grant with a matching lock: the whole two-build
+# driver must pass --grants to both --single children, or the children check the
+# lock against the default grants file and refuse it.
+edit_altsm() { if [[ "$1" == SM_SECURE_END=* ]]; then echo SM_SECURE_END=0x8FFFFFFF; else edit_tcsum "$1"; fi; }
+altsmlock=$(lockcopy altsm edit_altsm)
+altsmgrants=$(grantscopy altsm "DDR EXEC, begin=0x08A000000, end=0x08FFFFFFF")
+FR_GRANTS=$altsmgrants fullrun altsm "$altsmlock"
+check "a build with a non-default grants file and the matching lock reaches publication" 0 "secure-world-build: OK"
+grants_passed() { # <bash.log> <grants>: two --single children, each given --grants <grants>
+	local l n=0
+	while IFS= read -r l; do
+		[[ "$l" == *" --single "* ]] || continue
+		n=$((n + 1))
+		[[ "$l" == *" --grants $2 "* ]] || return 1
+	done <"$1"
+	[ "$n" -eq 2 ]
+}
+expect "both --single children got the driver's grants file" grants_passed "$TMP_ROOT/altsm/bash.log" "$altsmgrants"
+grants_not_passed() { ! grants_passed "$@"; }
+expect "the default lock's driver run gives the children another grants file than the alternative" grants_not_passed "$TMP_ROOT/ok/bash.log" "$altsmgrants"
+# The lock alone, without the matching grants file, is refused by the driver.
+fullrun altsmnog "$altsmlock"
+check "the alternative lock against the default grants is refused" nonzero "differs from the System Manager's DDR EXEC grant"
+expect "that refusal publishes nothing" nothing_published altsmnog
+
+# The same for the boot container: the lock with another BL32_BASE, run with the
+# committed container (tee.bin at 0x8C000000), is refused by the driver.
+fullrun altbasenoctr "$baselock"
+check "another BL32_BASE against the committed boot container is refused by the build" nonzero "$ctrmsg"
+expect "that refusal publishes nothing too" nothing_published altbasenoctr
+
+# A lock with another TFA_PLAT: the stub writes bl31.bin under that platform's
+# release directory, so publication shows the script stages from the matching path.
+edit_altplat() { if [[ "$1" == TFA_PLAT=* ]]; then echo TFA_PLAT=imx95x; else edit_tcsum "$1"; fi; }
+altlock=$(lockcopy altplat edit_altplat)
+fullrun altplat "$altlock"
+check "a build with another TFA_PLAT reaches publication" 0 "secure-world-build: OK"
+altlog=$(<"$TMP_ROOT/altplat/make.log")
+alt_ok() { tfa_call_ok "$altlog" "$TMP_ROOT/altplat/work" imx95x; }
+expect "another TFA_PLAT is passed to the TF-A make call" alt_ok
+expect "the other platform's bl31.bin is published" test -s "$TMP_ROOT/altplat/out/bl31.bin"
+expect "bl31.bin was staged from the other platform's release path" test -s "$TMP_ROOT/altplat/work/build-1/build/tfa/imx95x/release/bl31.bin" -a ! -e "$TMP_ROOT/altplat/work/build-1/build/tfa/imx95/release/bl31.bin"
 
 # A difference between the two builds: the second build's tee.bin differs.
 fullrun differ "$oklock" STUB_DIFF_TEE=1
@@ -374,5 +724,42 @@ while IFS= read -r l; do
 	printf '%s\n' "${l//TEE_STORAGE_PRIVATE_REE/TEE_STORAGE_PRIVATE_RPMB}" >>"$ftpm_script"
 done <"$sw"
 expect "a changed fTPM flag in the script fails the digest guard" not_tied_with "$good" "$ftpm_script"
+
+# --- build.md's pin rows follow bsp.lock ----------------------------------------
+# The pin table of build.md states each source's repository and commit as prose.
+# pin_row_ok <md> <row-prefix> <REPO name> <COMMIT name>: the one row starting with
+# the prefix names the repository path of the lock's REPO (github.com/<path>.git)
+# and the lock's whole 40-hex commit. The lock is read with the script's rule.
+pin_row_ok() {
+	local md=$1 pre=$2 repo commit path l n=0 row=
+	repo=$(lock_value "$good" "$3") commit=$(lock_value "$good" "$4") || return 1
+	path=${repo#https://github.com/}
+	path=${path%.git}
+	[[ -n "$path" && "$path" != "$repo" && "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+	while IFS= read -r l || [ -n "$l" ]; do
+		[[ "$l" == "$pre"* ]] && { n=$((n + 1)); row=$l; }
+	done <"$md"
+	[ "$n" -eq 1 ] || return 1
+	[[ "$row" == *"\`$path\`"* && "$row" == *"\`$commit\`"* ]]
+}
+md=$ROOT/docs/secure-world/build.md
+expect "build.md's TF-A BL31 row names TFA_REPO's path and TFA_COMMIT" pin_row_ok "$md" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "build.md's OP-TEE OS row names OPTEE_REPO's path and OPTEE_COMMIT" pin_row_ok "$md" "| OP-TEE OS" OPTEE_REPO OPTEE_COMMIT
+expect "build.md's fTPM TA row names FTPM_REPO's path and FTPM_COMMIT" pin_row_ok "$md" "| fTPM TA |" FTPM_REPO FTPM_COMMIT
+# scratch copies of build.md: the TF-A commit changed by one digit; a branch named instead
+tfa_commit=$(lock_value "$good" TFA_COMMIT)
+md_copy() { # <name> <from> <to>
+	local f=$TMP_ROOT/$1.md l
+	: >"$f"
+	while IFS= read -r l || [ -n "$l" ]; do printf '%s\n' "${l//"$2"/"$3"}" >>"$f"; done <"$md"
+	printf '%s\n' "$f"
+}
+off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}0")
+[ "${tfa_commit: -1}" != 0 ] || off_by_one=$(md_copy md-onedigit "$tfa_commit" "${tfa_commit%?}1")
+branch_only=$(md_copy md-branch "\`$tfa_commit\`" "\`lf_v2.14\`")
+pin_row_bad() { ! pin_row_ok "$@"; }
+expect "a build.md with the TF-A commit changed by one digit fails the pin row check" pin_row_bad "$off_by_one" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "a build.md naming a branch only fails the pin row check" pin_row_bad "$branch_only" "| TF-A BL31 |" TFA_REPO TFA_COMMIT
+expect "a build.md without the TF-A row fails the pin row check" pin_row_bad "$md" "| TF-A BL31X |" TFA_REPO TFA_COMMIT
 
 finish

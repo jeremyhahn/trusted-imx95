@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR]
-#                       [--jobs N] [--check-lock]
+# secure-world-build.sh [--lock FILE] [--grants FILE] [--work DIR] [--out DIR]
+#                       [--cache DIR] [--jobs N] [--check-lock]
 #
 # `make secure-world`: builds the Cortex-A secure world from the pins in
 # secure-world/bsp.lock (docs/secure-world/build.md): TF-A BL31 for i.MX 95
@@ -29,6 +29,8 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 lock=$root/secure-world/bsp.lock
+grants=$root/system-manager/ap-s-grants.txt
+container=$root/scripts/ahab/boot-image.yaml
 # The sources and build trees stay outside the checkout: the tree secret scan
 # reads every file under it, and the fetched trees carry test keys.
 base=${XDG_CACHE_HOME:-${HOME:?HOME is unset}/.cache}/trusted-imx95/secure-world
@@ -47,6 +49,8 @@ die() {
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--lock) lock=${2:?--lock needs a file} && shift 2 ;;
+	--grants) grants=${2:?--grants needs a file} && shift 2 ;;
+	--container) container=${2:?--container needs a file} && shift 2 ;;
 	--work) work=${2:?--work needs a directory} && shift 2 ;;
 	--out) out=${2:?--out needs a directory} && shift 2 ;;
 	--cache) cache=${2:?--cache needs a directory} && shift 2 ;;
@@ -54,7 +58,7 @@ while [ $# -gt 0 ]; do
 	--check-lock) check_only=1 && shift ;;
 	--single) single=1 && shift ;;
 	-h | --help)
-		echo "usage: secure-world-build.sh [--lock FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
+		echo "usage: secure-world-build.sh [--lock FILE] [--grants FILE] [--container FILE] [--work DIR] [--out DIR] [--cache DIR] [--jobs N] [--check-lock]"
 		exit 0
 		;;
 	*) die "unknown argument: $1" ;;
@@ -66,7 +70,7 @@ done
 
 declare -A pin=()
 wheels=()
-names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_TAG TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
+names=" LF_RELEASE MANIFEST_REPO MANIFEST_COMMIT META_IMX_REPO META_IMX_COMMIT TFA_REPO TFA_TAG TFA_COMMIT TFA_PLAT OPTEE_REPO OPTEE_COMMIT OPTEE_PLATFORM BL32_BASE BL32_SIZE BL31_BASE BL31_SIZE SM_SECURE_BASE SM_SECURE_END FTPM_REPO FTPM_COMMIT MSTPM_REPO MSTPM_COMMIT TOOLCHAIN_VERSION TOOLCHAIN_URL TOOLCHAIN_SHA256 "
 
 [ -f "$lock" ] || die "$lock: no such lock file"
 n=0
@@ -88,6 +92,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	*_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || die "$lock:$n: $name must be a 40-hex commit, not $value" ;;
 	*_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "$lock:$n: $name must be a 64-hex SHA-256, not $value" ;;
 	*_REPO | *_URL) [[ "$value" =~ ^https://[A-Za-z0-9./_-]+$ ]] || die "$lock:$n: $name must be an https URL, not $value" ;;
+	BL32_BASE | BL32_SIZE | BL31_BASE | BL31_SIZE | SM_SECURE_BASE | SM_SECURE_END) [[ "$value" =~ ^0x[0-9A-Fa-f]{1,16}$ ]] || die "$lock:$n: $name must be hex with a 0x prefix (at most 16 digits), not $value" ;;
 	*) [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]] || die "$lock:$n: $name has characters outside [A-Za-z0-9._-]: $value" ;;
 	esac
 	pin[$name]=$value
@@ -97,15 +102,120 @@ for name in $names; do
 done
 [ "${#wheels[@]}" -gt 0 ] || die "$lock: no PYWHEEL line"
 
-# Owner ruling 771 (docs/SPEC.md, secure-world row): BL31 is upstream Arm
-# TF-A at a tagged release, never NXP's imx-atf fork; OP-TEE OS is NXP's BSP
-# OP-TEE. The lock may name nothing else.
+# The secure DRAM window of BL31 and OP-TEE is one pair, passed to both builds.
+# Each value is a hand-kept pin (docs/secure-world/memory-protection-survey.md,
+# section 5): size nonzero, both 2 MiB aligned, base+size within 64 bits.
+bl32_base=$((pin[BL32_BASE]))
+bl32_size=$((pin[BL32_SIZE]))
+[ "$bl32_size" -gt 0 ] || die "$lock: BL32_SIZE must be nonzero, not ${pin[BL32_SIZE]}"
+[ $((bl32_base % 0x200000)) -eq 0 ] || die "$lock: BL32_BASE must be 2 MiB aligned, not ${pin[BL32_BASE]}"
+[ $((bl32_size % 0x200000)) -eq 0 ] || die "$lock: BL32_SIZE must be 2 MiB aligned, not ${pin[BL32_SIZE]}"
+[ "$bl32_base" -ge 0 ] && [ "$bl32_size" -ge 0 ] && [ $((bl32_base + bl32_size)) -gt "$bl32_base" ] ||
+	die "$lock: BL32_BASE ${pin[BL32_BASE]} + BL32_SIZE ${pin[BL32_SIZE]} wraps past 64 bits"
+
+# The BL32 window must lie inside the SM's secure window (SM_SECURE_END is
+# inclusive). The window is pinned in the lock, and the lock's pin must equal
+# the System Manager's own secure memory grant: the `DDR EXEC` line of the
+# AP-S allowlist (system-manager/ap-s-grants.txt, checked against the built
+# configuration by scripts/sm-build.sh). A pin that drifts from the grant would
+# put BL31 or BL32 outside what the System Manager protects.
+sm_base=$((pin[SM_SECURE_BASE]))
+sm_end=$((pin[SM_SECURE_END]))
+[ "$sm_base" -ge 0 ] && [ "$sm_end" -ge 0 ] && [ "$sm_base" -lt "$sm_end" ] ||
+	die "$lock: SM_SECURE_BASE ${pin[SM_SECURE_BASE]} must be below SM_SECURE_END ${pin[SM_SECURE_END]}"
+[ $((sm_base % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_BASE must be 2 MiB aligned, not ${pin[SM_SECURE_BASE]}"
+[ $(((sm_end + 1) % 0x200000)) -eq 0 ] || die "$lock: SM_SECURE_END + 1 must be 2 MiB aligned, not ${pin[SM_SECURE_END]}"
+[ -f "$grants" ] || die "$grants: no such AP-S grants file"
+ddr_n=0 ddr_line=
+while IFS= read -r line || [ -n "$line" ]; do
+	if [[ "$line" =~ ^DDR[[:space:]]+EXEC([[:space:]]|,|$) ]]; then
+		ddr_n=$((ddr_n + 1))
+		ddr_line=$line
+	fi
+done <"$grants"
+[ "$ddr_n" -ne 0 ] || die "$grants: no DDR EXEC grant line"
+[ "$ddr_n" -eq 1 ] || die "$grants: $ddr_n DDR EXEC grant lines, want one"
+[[ "$ddr_line" =~ ^DDR[[:space:]]+EXEC,[[:space:]]*begin=(0x[0-9A-Fa-f]{1,16}),[[:space:]]*end=(0x[0-9A-Fa-f]{1,16})[[:space:]]*$ ]] ||
+	die "$grants: the DDR EXEC grant is not 'DDR EXEC, begin=0x..., end=0x...': $ddr_line"
+ddr_base_s=${BASH_REMATCH[1]} ddr_end_s=${BASH_REMATCH[2]}
+{ [ "$sm_base" -eq $((ddr_base_s)) ] && [ "$sm_end" -eq $((ddr_end_s)) ]; } ||
+	die "$lock: SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]} differs from the System Manager's DDR EXEC grant $ddr_base_s to $ddr_end_s ($grants)"
+[ "$sm_base" -le "$bl32_base" ] && [ $((bl32_base + bl32_size - 1)) -le "$sm_end" ] ||
+	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
+
+# BL31's own window (pinned from survey section 5) must be sane and inside the
+# SM window, and the BL32 window must not intersect it: OP-TEE's secure memory
+# may not cover resident EL3 firmware. Half-open ranges [base, base+size).
+bl31_base=$((pin[BL31_BASE]))
+bl31_size=$((pin[BL31_SIZE]))
+[ "$bl31_size" -gt 0 ] || die "$lock: BL31_SIZE must be nonzero, not ${pin[BL31_SIZE]}"
+[ "$bl31_base" -ge 0 ] && [ "$bl31_size" -ge 0 ] && [ $((bl31_base + bl31_size)) -gt "$bl31_base" ] ||
+	die "$lock: BL31_BASE ${pin[BL31_BASE]} + BL31_SIZE ${pin[BL31_SIZE]} wraps past 64 bits"
+[ "$sm_base" -le "$bl31_base" ] && [ $((bl31_base + bl31_size - 1)) -le "$sm_end" ] ||
+	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) is not inside the SM secure window (SM_SECURE_BASE ${pin[SM_SECURE_BASE]} to SM_SECURE_END ${pin[SM_SECURE_END]})"
+if [ "$bl32_base" -lt $((bl31_base + bl31_size)) ] && [ "$bl31_base" -lt $((bl32_base + bl32_size)) ]; then
+	die "$lock: BL32 window (BL32_BASE ${pin[BL32_BASE]}, BL32_SIZE ${pin[BL32_SIZE]}) overlaps the BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]})"
+fi
+
+# The BL31 window must be the one the pinned TF-A links BL31 at. The lock's pair
+# only describes BL31 to the checks above; the build does not pass it to TF-A,
+# so a pair that differs from the platform's own constants would let BL32 be
+# placed over the resident BL31. The constants are fixed here and the lock must
+# equal them (fail closed on any other value):
+#   BL31_BASE 0x8A200000: TF-A da738d5 (the commit docs/boot-container/boot-image.md
+#     cites), plat/imx/imx9/imx95/include/platform_def.h:34, `BL31_BASE U(0x8A200000)`.
+#   BL31_SIZE 0x00040000: the 256 KiB BL31 limit (BL31_LIMIT 0x8A240000) of the same
+#     imx95 platform_def.h, as recorded for both the NXP and the upstream tree in
+#     docs/secure-world/memory-protection-survey.md section 5.
+# The pinned imx-atf commit (TFA_COMMIT) was not read in this checkout; moving to
+# another commit or platform means re-reading these two values from its
+# platform_def.h and changing them here.
+plat_bl31_base=$((0x8A200000))
+plat_bl31_size=$((0x00040000))
+{ [ "$bl31_base" -eq "$plat_bl31_base" ] && [ "$bl31_size" -eq "$plat_bl31_size" ]; } ||
+	die "$lock: BL31 window (BL31_BASE ${pin[BL31_BASE]}, BL31_SIZE ${pin[BL31_SIZE]}) differs from the BL31 the pinned TF-A links at (BASE 0x8A200000, SIZE 0x00040000, imx95 platform_def.h)"
+
+# BL32_BASE must be where the boot container loads and enters tee.bin. BL31 is
+# built to enter BL32 at BL32_BASE and OP-TEE is built to run from it, but the
+# container (scripts/ahab/boot-image.yaml, assembled by scripts/boot-image-inputs.sh)
+# writes the tee.bin entry's load_address and entry_point as fixed values: a
+# BL32_BASE that differs from them would send BL31 to an address where OP-TEE was
+# not loaded. The container does not take its address from the lock, so any
+# other base is refused (fail closed) until the whole boot path carries it.
+tee_load='' tee_entry='' tee_n=0 in_tee=0
+while IFS= read -r line || [ -n "$line" ]; do
+	if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+image_path:[[:space:]]*tee\.bin[[:space:]]*$ ]]; then
+		tee_n=$((tee_n + 1))
+		in_tee=1
+	elif [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
+		in_tee=0
+	elif [ "$in_tee" = 1 ] && [[ "$line" =~ ^[[:space:]]*load_address:[[:space:]]*[\'\"]?(0x[0-9A-Fa-f]{1,16})[\'\"]?[[:space:]]*$ ]]; then
+		tee_load=${BASH_REMATCH[1]}
+	elif [ "$in_tee" = 1 ] && [[ "$line" =~ ^[[:space:]]*entry_point:[[:space:]]*[\'\"]?(0x[0-9A-Fa-f]{1,16})[\'\"]?[[:space:]]*$ ]]; then
+		tee_entry=${BASH_REMATCH[1]}
+	fi
+done <"$container" 2>/dev/null || die "$container: cannot read the boot container description"
+[ "$tee_n" -eq 1 ] || die "$container: $tee_n tee.bin entries, want one"
+{ [ -n "$tee_load" ] && [ -n "$tee_entry" ]; } || die "$container: the tee.bin entry has no load_address or entry_point"
+{ [ "$((tee_load))" -eq "$bl32_base" ] && [ "$((tee_entry))" -eq "$bl32_base" ]; } ||
+	die "$lock: BL32_BASE ${pin[BL32_BASE]} differs from the boot container's tee.bin (load_address $tee_load, entry_point $tee_entry in ${container#"$root"/}): BL31 would enter an address where OP-TEE was not loaded"
+
+# Owner ruling 1234 (superseding the part of ruling 771 that excluded imx-atf):
+# BL31 is NXP's imx-atf at the BSP release's revision, or upstream Arm TF-A at
+# a tagged release; OP-TEE OS is NXP's BSP OP-TEE. The lock may name nothing
+# else. Each source takes its own kind of release tag, which the build fetches
+# and requires to peel to TFA_COMMIT.
 case "${pin[TFA_REPO]}" in
-https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git) ;;
-*) die "$lock: TFA_REPO ${pin[TFA_REPO]} is not upstream Arm TF-A (owner ruling 771: upstream TF-A, not NXP's imx-atf)" ;;
+https://git.trustedfirmware.org/TF-A/trusted-firmware-a.git | https://github.com/ARM-software/arm-trusted-firmware.git)
+	[[ "${pin[TFA_TAG]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+		die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an upstream release tag vX.Y.Z (owner ruling 771)"
+	;;
+https://github.com/nxp-imx/imx-atf.git)
+	[[ "${pin[TFA_TAG]}" =~ ^lf-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+		die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an imx-atf release tag lf-X.Y.Z-A.B.C (owner ruling 1234)"
+	;;
+*) die "$lock: TFA_REPO ${pin[TFA_REPO]} is neither upstream Arm TF-A nor NXP's imx-atf, https://github.com/nxp-imx/imx-atf.git (owner rulings 771 and 1234)" ;;
 esac
-[[ "${pin[TFA_TAG]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-	die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an upstream release tag vX.Y.Z (owner ruling 771)"
 [ "${pin[OPTEE_REPO]}" = https://github.com/nxp-imx/imx-optee-os.git ] ||
 	die "$lock: OPTEE_REPO ${pin[OPTEE_REPO]} is not NXP's BSP OP-TEE, https://github.com/nxp-imx/imx-optee-os.git (owner ruling 771)"
 
@@ -147,7 +257,7 @@ cache=$(cd "$cache" && pwd -P)
 if [ "$single" = 0 ]; then
 	for i in 1 2; do
 		echo "secure-world-build: clean build $i of 2"
-		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --work "$work/build-$i" \
+		bash "${BASH_SOURCE[0]}" --single --lock "$lock" --grants "$grants" --container "$container" --work "$work/build-$i" \
 			--out "$work/out-$i" --cache "$cache" --jobs "$jobs" || die "build $i of 2 failed; nothing published"
 	done
 	differ=0
@@ -264,9 +374,9 @@ ftpm_uuid=bc50d971-d4c9-42c4-82cb-343fb7f37896
 pkcs11_uuid=fd02c9da-306c-48c7-a49c-bbd827ae86ee
 
 # TF-A BL31, release build, with the OP-TEE dispatcher (SPD=opteed), as the
-# upstream platform imx95 (plat/imx/imx9/imx95) builds it with OP-TEE.
+# NXP imx-atf platform imx95 (plat/imx/imx9/imx95) builds it with OP-TEE.
 step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cross" \
-	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
+	PLAT="${pin[TFA_PLAT]}" SPD=opteed BL32_BASE="${pin[BL32_BASE]}" BL32_SIZE="${pin[BL32_SIZE]}" bl31
 
 # OP-TEE's flags: the release recipe's log levels, REE FS secure storage
 # (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early. Both
@@ -279,6 +389,7 @@ optee_flags=(
 	CFG_REE_FS=y CFG_RPMB_FS=n
 	CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n
 	CFG_PKCS11_TA=y
+	CFG_TZDRAM_START="${pin[BL32_BASE]}" CFG_TZDRAM_SIZE="${pin[BL32_SIZE]}"
 )
 # The TA dev kit the fTPM TA builds against.
 step optee-devkit make -C "$src/optee" -j"$jobs" O="$bld/optee-devkit" "${optee_flags[@]}" ta_dev_kit
@@ -309,7 +420,7 @@ cp "$stage/bl31.bin" "$stage/tee.bin" "$stage/SHA256SUMS" "$out/"
 {
 	echo "lock: $(sha256sum "$lock" | cut -d' ' -f1)"
 	echo "release: ${pin[LF_RELEASE]} (provisional, #14 Q2)"
-	echo "tfa: ${pin[TFA_COMMIT]} tag ${pin[TFA_TAG]} PLAT=${pin[TFA_PLAT]} SPD=opteed"
+	echo "tfa: ${pin[TFA_COMMIT]} tag ${pin[TFA_TAG]} PLAT=${pin[TFA_PLAT]} SPD=opteed BL32_BASE=${pin[BL32_BASE]} BL32_SIZE=${pin[BL32_SIZE]}"
 	echo "optee: ${pin[OPTEE_COMMIT]} ${optee_flags[*]//CROSS_COMPILE*=*/} CFG_EARLY_TA=y early TAs $ftpm_uuid (fTPM) $pkcs11_uuid (PKCS#11)"
 	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage TEE_STORAGE_PRIVATE_REE"
 	echo "toolchain: $("${cross}gcc" --version | head -n 1)"
