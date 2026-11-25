@@ -296,9 +296,11 @@ integration-test-secure-key-handling: ## Integration test of the secure-key-hand
 	@bash test/integration/secure_key_handling_test.sh
 
 HDP_TREE ?= $(CURDIR)
+# HDP_TREE reaches the recipe through the environment, never expanded into its shell source.
+export HDP_TREE
 
 hdp-boundary-check: ## Check a tree keeps the hsm-device-protocol row (HDP_TREE=<dir>, default this repository): the row's facts, no wire protocol or xkmsd here, go-xkms #1521 named, xkmsd from a tagged release only
-	@python3 scripts/hdp-boundary-check.py "$(HDP_TREE)"
+	@python3 scripts/hdp-boundary-check.py "$$HDP_TREE"
 
 integration-test-hsm-device-protocol: ## Integration test of the hsm-device-protocol row: make hdp-boundary-check end to end on the repository and on a tree that breaks the row
 	@bash test/integration/hsm_device_protocol_test.sh
