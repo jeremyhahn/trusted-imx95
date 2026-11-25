@@ -64,3 +64,27 @@ in that order) to find the listener; `XKMS_PORT` pins the port.
 burn-in ledger, restart proofs and `concurrency.sh` against a stub xkmsctl,
 and every burn-in `--help` and `--dry-run`.
 It does not touch a real board.
+
+## Rescue
+
+To put the whole eMMC back to a stock backup,
+`scripts/board-rescue/restore.sh` kexecs the board, over its ssh session,
+into a rescue initramfs that writes the eMMC from the backup; the protocol is in
+[the rescue README](../../scripts/board-rescue/README.md#rescue-protocol).
+The rescue port is open to the network, so everything on it after the
+board's nonce is authenticated under a per-session key that never crosses
+the network: the command line, each 1 MiB chunk of a write's image (the
+board checks a chunk's MAC before it writes a byte of it, and the first bad,
+missing or short chunk aborts the write) and every reply (`restore.sh`
+takes no reply without a MAC good for that connection's nonce). The
+whole-image digest is still checked by reading the eMMC back.
+
+An attacker on the path, without the key, can only deny service: drop or
+cut a connection, alter a chunk so the write aborts, or replace a reply so
+the restore fails. An aborted write leaves the chunks before the bad one
+written, so the eMMC stays broken until a retry (`--no-kexec` with the same
+key file) completes; the attacker cannot get a byte onto the eMMC that the
+operator did not send, nor make `restore.sh` report OK or a digest the board
+did not. `bash test/board_rescue_test.sh` drives the rescue handler and
+`restore.sh` against plain files, with an on-path proxy that alters a chunk
+and forges or replays an OK.
