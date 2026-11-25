@@ -225,7 +225,10 @@ printf '%s\n' "$want_bbl" >"$conf/bblayers.conf"
 cpus=$(nproc 2>/dev/null || echo 6)
 [ "$cpus" -le 16 ] || cpus=16
 export BB_NUMBER_THREADS=${BB_NUMBER_THREADS:-$cpus} PARALLEL_MAKE=${PARALLEL_MAKE:--j $cpus}
-export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} BB_NUMBER_THREADS PARALLEL_MAKE"
+# TRUSTED_IMX95_FTPM_NV: the fTPM NV backend selection (owner ruling 1234) is one
+# value for this build and for scripts/secure-world-build.sh, so an exported
+# value reaches bitbake too (checked against bitbake -e below).
+export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} BB_NUMBER_THREADS PARALLEL_MAKE TRUSTED_IMX95_FTPM_NV"
 
 export BITBAKEDIR=$dir/sources/bitbake
 restore_u=0
@@ -289,6 +292,29 @@ for t in $targets; do
 	effective_check "$t" "$machine" "$distro" "$want_init"
 done
 distro=$effective_distro
+
+# The fTPM NV backend bitbake builds the image with (the optee-ftpm recipe's
+# datastore, which holds the recipe default too) against the selection of
+# scripts/secure-world-build.sh, which reads the same TRUSTED_IMX95_FTPM_NV from
+# the environment, the templates and this build's conf/*.conf. An exported value
+# bitbake does not use (a local.conf or auto.conf assignment wins over it) is
+# refused: the boot container's tee.bin and the image's OP-TEE must use the
+# same storage (docs/SPEC.md, secure storage). The debug image refuses rpmb on
+# the effective value, whichever way it was set.
+effective_nv=$(bbval "$(bitbake -e optee-ftpm)" TRUSTED_IMX95_FTPM_NV)
+case $effective_nv in
+reefs | rpmb) ;;
+*) die "bitbake -e optee-ftpm: TRUSTED_IMX95_FTPM_NV is '$effective_nv', not reefs or rpmb" ;;
+esac
+if [ -n "${TRUSTED_IMX95_FTPM_NV:-}" ] && [ "$effective_nv" != "$TRUSTED_IMX95_FTPM_NV" ]; then
+	die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$TRUSTED_IMX95_FTPM_NV' in the environment (what make secure-world builds tee.bin with) but bitbake uses '$effective_nv' (a TRUSTED_IMX95_FTPM_NV assignment in $conf/*.conf overrides it); make them equal"
+fi
+case " $targets " in
+*" trusted-imx95-image-debug "*)
+	[ "$effective_nv" != rpmb ] || die "the debug image is for development boards only: the effective TRUSTED_IMX95_FTPM_NV is rpmb (production); build trusted-imx95-image only, or select reefs"
+	;;
+esac
+echo "platform-image-build: fTPM NV backend $effective_nv (TRUSTED_IMX95_FTPM_NV)"
 
 start=$(date +%s)
 # PLATFORM_IMAGE_BITBAKE_ARGS (for example -k) goes before the targets.

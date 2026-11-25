@@ -117,6 +117,9 @@ for p in \
 	scripts/image-tag.sh \
 	build/docker/devcontainer/Dockerfile \
 	test/secure_world_build_test.sh \
+	platform-image/recipes-security/optee/optee-ftpm-flags.inc \
+	platform-image/recipes-security/optee/optee-ftpm_4.10.0.bb \
+	platform-image/conf/local.conf.template \
 	Makefile \
 	.github/workflows/ci.yml; do
 	want_sw "select: a PR changing $p selects the build" true pull_request false "$p"

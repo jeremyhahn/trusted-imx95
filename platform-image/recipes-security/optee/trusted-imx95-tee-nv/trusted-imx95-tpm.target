@@ -1,0 +1,15 @@
+[Unit]
+Description=The fTPM device (/dev/tpmrm0) is present
+# The ordering point for a TPM user: a unit that needs the TPM names this target with
+# Wants= and After=. With REE FS storage /dev/tpmrm0 appears only after tee-supplicant
+# has opened /dev/teepriv0 (docs/secure-world/ta-options-survey.md, item 6), so this
+# target waits for the device unit the pinned systemd's udev rules create, and is
+# ordered after the supplicant. Nothing here talks to the TPM.
+# The BSP's tee-supplicant@.service is DefaultDependencies=no and Before=sysinit.target;
+# this target is only ordered after it and before nothing, so no cycle can close.
+Requires=dev-tpmrm0.device
+After=dev-tpmrm0.device
+After=tee-supplicant@teepriv0.service
+
+[Install]
+WantedBy=multi-user.target

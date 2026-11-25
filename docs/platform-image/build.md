@@ -117,12 +117,33 @@ Reproducible builds and the SBOM stay at Yocto's defaults
 (SPDX 3.0) are on, and the test fails if any file under `platform-image/` sets
 the first two or removes the third.
 
+`make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>`
+(`scripts/platform-image-repro-check.sh`) compares two builds. On the build
+host: build the image twice from clean (separate `TMPDIR`s, same inputs), then
+pass the two deploy directories (`tmp/deploy/images/<machine>`). It needs no
+network and is not in CI. It compares byte for byte the fTPM TA's stripped ELF,
+`tee.bin`, `Image` and the `imx95-19x19-frdm-pro*.dtb` files, and the `.wic`'s
+`boot` and `tee-data` partitions (by GPT name) with the GPT entries' names,
+starts and sizes; and from the rootfs archive (`IMAGE_FSTYPES += "tar"`,
+provisional, added for this check) each member's name, type, mode, owner, link
+target and content hash. It does not compare the root partition byte for byte
+(whether ext4 is reproducible is unconfirmed; its content is the rootfs
+archive's), so not the `.wic` digest either, nor the GPT GUIDs. It
+prints each difference with both SHA-256s and exits nonzero. Paths and GUID
+behaviour are unconfirmed by a build: [docs/ftpm/build.md](../ftpm/build.md#reproducible-build).
+
 Open, MISSING, and deliberately not set: the `BBFILES += recipes-*/*/*.bbappend`
 line in `conf/layer.conf` (no survey covers the search path), `BB_NO_NETWORK`, hash equivalence, the
 `SPDX_INCLUDE_*`, `SPDX_INVOKED_BY` and `SPDX_ON_BEHALF_OF` fields
 (reproducible-build-survey question 6 has no recommendation), the xkmsd
 package (go-xkms has no recipe yet; hardening-survey question 7), and any
 login-policy image feature in the production image.
+
+## Firmware TPM
+
+The image carries a firmware TPM (SPEC row `ftpm`, provisional): the kernel driver fragment `ftpm.cfg`, OP-TEE
+with the fTPM as an early TA, and tpm2-tools in the debug image only. What is built, each default and what is left
+for the build host: [ftpm/build.md](../ftpm/build.md).
 
 ## Kernel hardening fragment
 

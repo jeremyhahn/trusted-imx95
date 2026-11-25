@@ -1,0 +1,63 @@
+#!/bin/sh
+# Mount the fTPM NV partition (GPT name tee-data) of the disk that holds the root file
+# system on /data. A global partition-label path is not used: with images on both the eMMC
+# and a microSD card it can name the other medium's partition, an NV that belongs to the
+# other medium's image (SPEC row ftpm: the NV is kept on tee-data and erased by a
+# full-image flash of that medium).
+# The disk is found from the major:minor of the mount on / (/proc/self/mountinfo) and
+# sysfs; the partition is the one child of that disk whose kernel PARTNAME is exactly
+# tee-data. None, or more than one, is an error: it fails closed and tee-supplicant,
+# which requires this unit (10-nv.conf), does not start.
+# TEE_NV_MOUNTINFO, TEE_NV_SYS, TEE_NV_DEV, TEE_NV_DATA and TEE_NV_MOUNT exist for the
+# test (test/platform_image_ftpm_test.sh).
+set -eu
+
+mountinfo=${TEE_NV_MOUNTINFO:-/proc/self/mountinfo}
+sys=${TEE_NV_SYS:-/sys}
+dev=${TEE_NV_DEV:-/dev}
+data=${TEE_NV_DATA:-/data}
+mountcmd=${TEE_NV_MOUNT:-mount}
+
+die() { echo "tee-data-mount: $*" >&2; exit 1; }
+
+# major:minor of the last mount on /
+majmin=
+while read -r _id _parent mm _root mp _rest; do
+	[ "$mp" = / ] && majmin=$mm
+done <"$mountinfo"
+[ -n "$majmin" ] || die "no mount on / in $mountinfo"
+case $majmin in *[!0-9:]* | : | :* | *:) die "bad device number $majmin for /" ;; esac
+
+link=$sys/dev/block/$majmin
+[ -e "$link" ] || die "no block device $majmin in sysfs"
+node=$(cd -P "$link" && pwd -P) || die "cannot resolve $link"
+# A partition sits inside its disk's directory; a whole-disk root is its own disk.
+if [ -e "$node/partition" ]; then
+	disk=${node%/*}
+else
+	disk=$node
+fi
+[ -d "$disk" ] || die "no disk directory for $majmin"
+
+found=
+count=0
+for p in "$disk"/*; do
+	[ -e "$p/partition" ] || continue
+	partname=
+	devname=
+	while IFS= read -r l; do
+		case $l in
+		PARTNAME=*) partname=${l#PARTNAME=} ;;
+		DEVNAME=*) devname=${l#DEVNAME=} ;;
+		esac
+	done <"$p/uevent" || die "cannot read $p/uevent"
+	if [ "$partname" = tee-data ]; then
+		count=$((count + 1))
+		found=$devname
+	fi
+done
+[ "$count" -eq 1 ] || die "$count partitions named tee-data on the disk holding /; need exactly one"
+case $found in '' | */* | .*) die "bad device name for tee-data" ;; esac
+[ -e "$dev/$found" ] || die "$dev/$found does not exist"
+
+exec "$mountcmd" -t ext4 -o rw,nosuid,nodev,noexec "$dev/$found" "$data"

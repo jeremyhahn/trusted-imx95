@@ -8,7 +8,8 @@ through go-xkms's existing TPM 2.0 workflows: endorse-01, then enroll-01, then d
 format. Issue #140. The SPEC.md row this file details was approved by the owner on 2026-11-21 (PR #138).
 
 Documentation only: nothing here is run, scripted or provisioned. In particular, no RPMB key is programmed and no
-fuse is touched; both are the owner's decision alone ([question 1](#open-questions-for-the-owner)).
+fuse is touched; the RPMB key is a provisioning-station step after OEM close (owner ruling 1234), a fuse burn the
+owner's decision alone.
 
 Sources are the documents in [references/](../references/README.md) and public upstream projects named in the
 text. Facts this repository's surveys already hold are linked, not restated. A version not yet chosen is marked
@@ -45,9 +46,14 @@ hands the A55 its first image is in the `boot-container` row and the missing IMX
    whether the BSP's U-Boot builds it for this board is **unconfirmed**. Without it U-Boot cannot extend PCRs.
 7. **Linux with `tpm_ftpm_tee`.** The kernel's firmware-TPM driver (`CONFIG_TCG_FTPM_TEE`) finds the TA on the TEE
    bus and registers a TPM 2.0 device; the kernel's resource manager exposes it as `/dev/tpmrm0`. With REE FS
-   storage the TA's NV needs `tee-supplicant`, so the device appears only once the supplicant runs
-   ([ta-options-survey.md](../secure-world/ta-options-survey.md), unconfirmed item 6). "`/dev/tpmrm0` present at
-   boot" therefore means present once the supplicant has started, before any service that uses the TPM.
+   storage the TA's NV needs `tee-supplicant`: the kernel lists the TA on the TEE bus only when the supplicant first
+   opens `/dev/teepriv0`, and the driver's probe then opens the TA and registers the chip
+   ([trace, item 6](../secure-world/ta-options-survey.md#unconfirmed-items), read at the pinned kernel,
+   OP-TEE and systemd commits). "`/dev/tpmrm0` present at boot" therefore means present once the supplicant has
+   started. The pinned systemd's udev rules already provide `dev-tpmrm0.device`, but its `tpm2.target` is not held for
+   a unit that does not name it, so the image carries `trusted-imx95-tpm.target` (`Requires=` and `After=`
+   `dev-tpmrm0.device`, `After=tee-supplicant@teepriv0.service`, wanted by `multi-user.target`). A TPM user
+   puts `Wants=` and `After=trusted-imx95-tpm.target` in its unit. The target sends no TPM command.
 8. **Users.** go-xkms's TPM 2.0 workflows and go-trusted-platform reach the TPM through `/dev/tpmrm0`.
 
 ## NV storage
@@ -60,7 +66,7 @@ objects, in the storage `CFG_FTPM_TA_TEE_STORAGE_ID` selects
 | | RPMB on the board's eMMC | REE file system |
 |---|---|---|
 | Rollback | The eMMC's write counter anchors the state ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §2) | None: root on Linux can restore an older copy of the files |
-| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | No: the files live in the root file system and go with it |
+| Survives a rootfs reflash | Yes, unless the RPMB data is wiped too | Yes for a rewrite of the root partition (the NV is on `tee-data`, which it does not touch); no for a full-image flash, which recreates `tee-data` empty |
 | Use from U-Boot | U-Boot can serve OP-TEE's RPMB requests itself (unconfirmed for this board) | No `tee-supplicant` before Linux, so U-Boot cannot reach the TPM's NV |
 | Precondition | The eMMC's RPMB authentication key is programmed: once, irreversibly ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5) | None |
 | Confidentiality | OP-TEE encrypts objects with keys derived from the hardware unique key | The same |
@@ -69,8 +75,37 @@ Both rest on OP-TEE's hardware unique key; whether the i.MX 95 port derives it f
 ([ta-options-survey.md](../secure-world/ta-options-survey.md), unconfirmed item 1). Wiping the NV store destroys
 the TPM's seeds, and with them the EK the issued certificate names ([EK lifecycle](#ek-lifecycle)).
 
-RPMB is used only if the owner approves programming its key; until then the stated default is REE FS with the
-limits above ([question 1](#open-questions-for-the-owner)).
+Owner ruling 1234 (2026-11-23) decides the location: on production devices the NV is in the eMMC RPMB, written
+only after OEM close; the REE file system (on the `tee-data` partition) holds it on development boards only. A
+development board therefore has no rollback protection. Programming the RPMB key is a
+provisioning-station step after OEM close and stays out of this repository: nothing here writes it.
+
+The build selects the location with `TRUSTED_IMX95_FTPM_NV`: `reefs` (default, development boards) or `rpmb`
+(production). Neither lets OP-TEE program the RPMB key, so RPMB writes fail until the provisioning station has
+programmed it after OEM close; nothing was parsed or built with `rpmb` ([build.md](build.md#the-defaults-each-provisional)).
+Open, all **unconfirmed**: how OP-TEE's RPMB frames reach the eMMC (`tee-supplicant`, or the kernel's in-kernel RPMB
+routing and `CONFIG_RPMB`); whether the pinned OP-TEE 4.10 has `CFG_REE_FS_INTEGRITY_RPMB` (the survey reads it in
+4.11.0) and what it means for the RPMB objects when a full-image flash recreates `/data/tee` under `rpmb`; U-Boot's
+RPMB path on this board.
+
+**Where the NV lives (provisional).** `tee-supplicant` (the BSP's OP-TEE client, enabled in the image) keeps OP-TEE's
+REE file system under `/data/tee` (`--fs-parent-path`). `/data` is a separate writable partition, GPT name `tee-data`
+(`platform-image/files/wic/trusted-imx95.wks`), mounted by `tee-data-mount.service` before the supplicant starts; the root file system
+stays read-only, which is why the NV cannot live on it. The NV therefore persists across a reboot.
+
+**Lifecycle (owner, 2026-11-25).** The NV is not wiped automatically:
+- A rewrite of the root partition keeps the NV. It lives on `tee-data`, which a root update does not touch, so the
+  TPM's seeds and EK and the PKCS#11 keys survive root updates. Nothing on the board erases the NV on its own.
+- Writing the whole `.wic` is the reprovisioning path: it recreates `tee-data` empty, and so erases the fTPM NV
+  (under `reefs`) and all of OP-TEE's REE-FS storage under `/data/tee`: every TA's private REE objects, PKCS#11 tokens
+  and keys included, under both selections (the `rpmb` setting keeps the PKCS#11 TA's objects in REE FS). Under
+  `reefs` the board then has a new EK ([EK lifecycle](#ek-lifecycle)); under `rpmb` the fTPM NV is in the RPMB,
+  outside `tee-data` (table above).
+- There is no manual or emergency wipe command; that is not in scope.
+
+`/data` is mounted by `tee-data-mount.service`, which picks the `tee-data` partition on
+the same disk as `/` (never a global partition label, which could name another medium's NV) and fails closed if there
+is none or more than one. The NV is plain files that root on Linux can copy or roll back.
 
 ## EK lifecycle
 
@@ -79,7 +114,8 @@ limits above ([question 1](#open-questions-for-the-owner)).
    it at a persistent handle. Nothing is done before the owner approves the template.
 2. **No manufacturer certificate.** A discrete TPM ships an EK certificate from its maker; this fTPM has none, and
    nothing on the board vouches for the EK on its own.
-3. **endorse-01.** go-xkms's endorse-01 issues the EK certificate. What it checks before it signs, and where it
+3. **endorse-01.** go-xkms's endorse-01 issues the EK certificate, and certifies the fTPM EK only after an EdgeLock
+   enclave attestation (owner ruling 1234). What it checks before it signs, and where it
    stores the certificate, are go-xkms's; go-xkms was not read here.
 4. **enroll-01**, then **device-attest-01** in the `tpm` format, as go-xkms defines them.
 5. **Re-provisioning.** Anything that clears the endorsement hierarchy or wipes the NV store gives the board a new
@@ -113,24 +149,25 @@ Each "unconfirmed" above is a gap until the board shows otherwise. The depth dev
 
 ## Later steps, not this design
 
-The image build and the board test ([ROADMAP.md](../../ROADMAP.md), `ftpm`) come after the owner approves this
+The image configuration is in [build.md](build.md) (provisional). The board test ([ROADMAP.md](../../ROADMAP.md), `ftpm`) come after the owner approves this
 row. The redeploy is coordinated with Infra together with the xkmsd web-console build and the barrier re-init;
 hardware runs happen on the lab's board host, one lane at a time. The boot media does not change (owner ruling
 769).
 
 ## Open questions for the owner
 
-1. **RPMB key programming.** Programming the eMMC's RPMB authentication key is a one-time, irreversible step, the
-   same class as a fuse burn, and needs the owner's explicit approval
-   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10). Is RPMB wanted for the TPM's NV, or is REE FS
-   accepted at first, with no rollback protection and NV lost on a rootfs reflash?
+1. **RPMB key programming. Decided, owner ruling 1234.** The NV is in the eMMC RPMB on production devices, written
+   only after OEM close, and in the REE file system on development boards only (no rollback protection). The key
+   programming is a one-time, irreversible provisioning-station step after OEM close
+   ([rpmb-survey.md](../secure-key-handling/rpmb-survey.md) §5, §10), outside this repository. A root rewrite keeps
+   the NV; a full-image flash erases it (owner, 2026-11-25).
 2. **fTPM TA source and revision.** The `ms-tpm-20-ref` TA in OP-TEE's `optee_ftpm`, or an fTPM carried in a newer
    `optee_os`; which revision; and whether the BSP's OP-TEE 4.10 builds it unchanged. Proposed and built
    ([secure-world/build.md](../secure-world/build.md#the-pins)): `optee_ftpm` 4.10.0, which the BSP's OP-TEE 4.10 builds
    unchanged; OP-TEE 4.10 carries no fTPM of its own.
 3. **EK template.** RSA 2048 or ECC P-256, the default templates of the TCG EK Credential Profile, and whether the
    EK persists at that profile's default handle.
-4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a rootfs reflash under REE FS),
+4. **Re-provisioning.** What clears the TPM (`TPM2_Clear`, a secure-storage wipe, a full-image flash under REE FS),
    who may do it, and what happens to the issued EK certificate: revoked, or reissued through endorse-01.
 5. **Image scope for the redeploy.** The full image, or only `flash.bin`, `tee.bin` and the kernel. The boot media
    does not change (ruling 769).

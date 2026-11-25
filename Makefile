@@ -51,8 +51,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
-	okp-policy-check integration-test-oem-key-provisioning \\
-	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
+	okp-policy-check integration-test-oem-key-provisioning \
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify platform-image-repro-check
 
 help: ## List the targets
 	@echo "Targets:"
@@ -237,6 +237,10 @@ platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 acce
 	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
 	@case "$(ALLOW_DIRTY)" in ""|0|1) ;; *) echo "platform-image-verify: ALLOW_DIRTY must be 0, 1 or empty (empty or 0 = off, 1 = on), got '$(ALLOW_DIRTY)'" >&2; exit 2 ;; esac
 	@scripts/platform-image-verify.sh $(if $(filter 1,$(ALLOW_DIRTY)),--allow-dirty) "$(OUT)"
+
+platform-image-repro-check: ## Reproducible-build check on a build host: REPRO_A=<dir> REPRO_B=<dir> are the deploy directories of two clean builds; compares firmware, kernel, boot and tee-data partitions and the rootfs archive (needs no network; not in CI)
+	@test -n "$(REPRO_A)" -a -n "$(REPRO_B)" || { echo "usage: make platform-image-repro-check REPRO_A=<deploy dir> REPRO_B=<deploy dir>" >&2; exit 2; }
+	@scripts/platform-image-repro-check.sh "$(REPRO_A)" "$(REPRO_B)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 

@@ -5,7 +5,9 @@
 # `make secure-world`: builds the Cortex-A secure world from the pins in
 # secure-world/bsp.lock (docs/secure-world/build.md): TF-A BL31 for i.MX 95
 # with the OP-TEE dispatcher, and OP-TEE OS with the fTPM TA and the PKCS#11
-# TA linked in as early TAs, secure storage on the REE file system. It writes
+# TA linked in as early TAs, secure storage as TRUSTED_IMX95_FTPM_NV selects
+# (reefs by default; the flag sets are the platform image's
+# optee-ftpm-flags.inc, owner ruling 1234). It writes
 # bl31.bin, tee.bin, SHA256SUMS and build-info.txt to the output directory.
 #
 # The build runs twice, each in its own clean directory under the work
@@ -108,6 +110,89 @@ esac
 	die "$lock: TFA_TAG ${pin[TFA_TAG]} is not an upstream release tag vX.Y.Z (owner ruling 771)"
 [ "${pin[OPTEE_REPO]}" = https://github.com/nxp-imx/imx-optee-os.git ] ||
 	die "$lock: OPTEE_REPO ${pin[OPTEE_REPO]} is not NXP's BSP OP-TEE, https://github.com/nxp-imx/imx-optee-os.git (owner ruling 771)"
+
+# --- The fTPM NV storage -------------------------------------------------------
+# One selector for the platform image and this build (owner ruling 1234):
+# TRUSTED_IMX95_FTPM_NV, reefs or rpmb, its default the platform image's. The
+# OP-TEE flag set of each value is read from optee-ftpm-flags.inc and the fTPM
+# TA's storage ID from the optee-ftpm recipe, so the tee.bin the boot container
+# ships selects the same storage as the image's OP-TEE.
+nv_inc=$root/platform-image/recipes-security/optee/optee-ftpm-flags.inc
+nv_bb=$root/platform-image/recipes-security/optee/optee-ftpm_4.10.0.bb
+# nv_value <file> <name>: the quoted value of the line `name = "..."` or
+# `name ?= "..."`.
+nv_value() {
+	local l
+	[ -f "$1" ] || die "$1: no such file"
+	while IFS= read -r l || [ -n "$l" ]; do
+		if [[ "$l" == "$2 = \""*\" || "$l" == "$2 ?= \""*\" ]]; then
+			l=${l#*\"}
+			printf '%s\n' "${l%\"}"
+			return 0
+		fi
+	done <"$1"
+	return 1
+}
+# conf_nv <file>: the value BitBake gives TRUSTED_IMX95_FTPM_NV from one conf
+# file, or nothing. Resolved the way BitBake parses it: = and := set the value
+# and a later one overrides; ?= sets it only while no earlier assignment has;
+# anything else that names the variable (??=, +=, :append, an override or flag
+# suffix, a single-quoted value) is refused, because this script cannot say
+# what BitBake would select from it, and the build must never pick a backend
+# BitBake would not. Runs in a command substitution: it returns 1 after a
+# message on stderr, and the caller exits.
+conf_nv() {
+	local l v='' set=0 op
+	local re='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV[[:space:]]*(:=|\?=|=)[[:space:]]*"([^"]*)"[[:space:]]*$'
+	local named='^[[:space:]]*(export[[:space:]]+)?TRUSTED_IMX95_FTPM_NV([^A-Za-z0-9_]|$)'
+	[ -f "$1" ] || return 0
+	while IFS= read -r l || [ -n "$l" ]; do
+		if [[ "$l" =~ $re ]]; then
+			op=${BASH_REMATCH[2]}
+			if [ "$op" != '?=' ] || [ "$set" = 0 ]; then
+				v=${BASH_REMATCH[3]}
+				set=1
+			fi
+		elif [[ "$l" =~ $named ]]; then
+			echo "secure-world-build: $1: refusing the line '$l': only TRUSTED_IMX95_FTPM_NV =, := or ?= \"value\" is read; BitBake's other forms (??=, +=, :append, overrides) cannot be resolved here" >&2
+			return 1
+		fi
+	done <"$1"
+	printf '%s' "$v"
+}
+# The image build's own configuration is a second place the selection can be
+# made: the local.conf template and the conf/*.conf of the build directory
+# (platform-image-build.sh passes the same environment variable to bitbake and
+# refuses a bitbake that uses another value). A selection there that differs from
+# the environment's, or from another file's, fails here: the tee.bin of the boot
+# container and the image's OP-TEE must use the same storage.
+nv_env=${TRUSTED_IMX95_FTPM_NV:-}
+nv_conf=
+nv_conf_src=
+pi_build_conf=${PLATFORM_IMAGE_DIR:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/trusted-imx95/platform-image}/build/conf
+for f in "$root/platform-image/conf/local.conf.template" "$pi_build_conf"/*.conf; do
+	[ -f "$f" ] || continue
+	v=$(conf_nv "$f") || exit 1
+	[ -n "$v" ] || continue
+	if [ -n "$nv_conf" ] && [ "$v" != "$nv_conf" ]; then
+		die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$v' in $f but '$nv_conf' in $nv_conf_src; make them equal"
+	fi
+	nv_conf=$v
+	nv_conf_src=$f
+done
+if [ -n "$nv_env" ] && [ -n "$nv_conf" ] && [ "$nv_env" != "$nv_conf" ]; then
+	die "the fTPM NV backends disagree: TRUSTED_IMX95_FTPM_NV is '$nv_env' in the environment (this build) but '$nv_conf' in $nv_conf_src (bitbake's image build); make them equal"
+fi
+nv=${nv_env:-${nv_conf:-$(nv_value "$nv_inc" TRUSTED_IMX95_FTPM_NV || true)}}
+{ [[ "$nv" =~ ^[a-z]+$ ]] &&
+	nv_set=$(nv_value "$nv_inc" "TRUSTED_IMX95_FTPM_NV_FLAGS[$nv]") &&
+	nv_sid=$(nv_value "$nv_bb" "FTPM_TA_STORAGE_ID[$nv]"); } ||
+	die "TRUSTED_IMX95_FTPM_NV must be reefs or rpmb, not $nv (the sets of $nv_inc and $nv_bb)"
+[[ "$nv_set" =~ ^[A-Z0-9_]+=[a-z0-9]+(\ [A-Z0-9_]+=[a-z0-9]+)*$ ]] ||
+	die "$nv_inc: the $nv flag set is not NAME=value words: $nv_set"
+[[ "$nv_sid" =~ ^TEE_STORAGE_PRIVATE_[A-Z]+$ ]] ||
+	die "$nv_bb: the $nv storage ID is not TEE_STORAGE_PRIVATE_*: $nv_sid"
+read -ra nv_flags <<<"$nv_set"
 
 if [ "$check_only" = 1 ]; then
 	echo "secure-world-build: $lock OK (${pin[LF_RELEASE]}, TF-A ${pin[TFA_TAG]} ${pin[TFA_COMMIT]:0:12}, OP-TEE ${pin[OPTEE_COMMIT]:0:12}, fTPM ${pin[FTPM_COMMIT]:0:12}, toolchain ${pin[TOOLCHAIN_VERSION]})"
@@ -268,24 +353,24 @@ pkcs11_uuid=fd02c9da-306c-48c7-a49c-bbd827ae86ee
 step bl31 make -C "$src/tfa" -j"$jobs" BUILD_BASE="$bld/tfa" CROSS_COMPILE="$cross" \
 	PLAT="${pin[TFA_PLAT]}" SPD=opteed bl31
 
-# OP-TEE's flags: the release recipe's log levels, REE FS secure storage
-# (RPMB is the owner's decision), the PKCS#11 TA, and both TAs early. Both
+# OP-TEE's flags: the release recipe's log levels, the secure storage of the
+# TRUSTED_IMX95_FTPM_NV selection (above), the PKCS#11 TA, and both TAs early. Both
 # required TAs are early TAs, so loading TAs from the REE file system is off
 # (CFG_REE_FS_TA=n): the public default TA key then trusts nothing.
 optee_flags=(
 	PLATFORM="${pin[OPTEE_PLATFORM]}" CFG_ARM64_core=y
 	CROSS_COMPILE="$cross" CROSS_COMPILE64="$cross"
 	CFG_TEE_CORE_LOG_LEVEL=0 CFG_TEE_TA_LOG_LEVEL=0
-	CFG_REE_FS=y CFG_RPMB_FS=n
+	"${nv_flags[@]}"
 	CFG_REE_FS_TA=n CFG_SECSTOR_TA_MGMT_PTA=n
 	CFG_PKCS11_TA=y
 )
 # The TA dev kit the fTPM TA builds against.
 step optee-devkit make -C "$src/optee" -j"$jobs" O="$bld/optee-devkit" "${optee_flags[@]}" ta_dev_kit
-# The fTPM TA, its NV in REE FS storage.
+# The fTPM TA, its NV in the storage of the TRUSTED_IMX95_FTPM_NV selection.
 step ftpm make -C "$src/ftpm" -j"$jobs" O="$bld/ftpm" CROSS_COMPILE="$cross" \
 	TA_DEV_KIT_DIR="$bld/optee-devkit/export-ta_arm64" CFG_MS_TPM_20_REF="$src/mstpm" \
-	CFG_FTPM_TA_TEE_STORAGE_ID=TEE_STORAGE_PRIVATE_REE CFG_TEE_TA_LOG_LEVEL=0
+	CFG_FTPM_TA_TEE_STORAGE_ID="$nv_sid" CFG_TEE_TA_LOG_LEVEL=0
 # OP-TEE OS with the fTPM TA and the in-tree PKCS#11 TA linked in as early TAs.
 step optee make -C "$src/optee" -j"$jobs" O="$bld/optee" "${optee_flags[@]}" \
 	CFG_EARLY_TA=y EARLY_TA_PATHS="$bld/ftpm/$ftpm_uuid.stripped.elf" \
@@ -311,7 +396,8 @@ cp "$stage/bl31.bin" "$stage/tee.bin" "$stage/SHA256SUMS" "$out/"
 	echo "release: ${pin[LF_RELEASE]} (provisional, #14 Q2)"
 	echo "tfa: ${pin[TFA_COMMIT]} tag ${pin[TFA_TAG]} PLAT=${pin[TFA_PLAT]} SPD=opteed"
 	echo "optee: ${pin[OPTEE_COMMIT]} ${optee_flags[*]//CROSS_COMPILE*=*/} CFG_EARLY_TA=y early TAs $ftpm_uuid (fTPM) $pkcs11_uuid (PKCS#11)"
-	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage TEE_STORAGE_PRIVATE_REE"
+	echo "ftpm: ${pin[FTPM_COMMIT]} ms-tpm-20-ref ${pin[MSTPM_COMMIT]} storage $nv_sid"
+	echo "ftpm-nv: $nv (TRUSTED_IMX95_FTPM_NV; ${nv_flags[*]})"
 	echo "toolchain: $("${cross}gcc" --version | head -n 1)"
 	echo "ta-signing: upstream OP-TEE default test key (keys/default_ta.pem in the fetched optee_os); REE FS TAs are rejected (CFG_REE_FS_TA=n)"
 	echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"

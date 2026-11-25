@@ -36,3 +36,7 @@ CRASH_DUMP=n
 PANIC_ON_OOPS=y
 PANIC_TIMEOUT=-1
 MAGIC_SYSRQ_DEFAULT_ENABLE=0xb0
+# The firmware TPM driver (SPEC row ftpm, issue #140; provisional), set by
+# ftpm.cfg. The offline test checks these against ftpm.cfg, not hardening.cfg.
+TCG_TPM=y
+TCG_FTPM_TEE=y

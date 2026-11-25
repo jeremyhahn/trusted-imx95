@@ -20,11 +20,18 @@ val_re='^(y|n|-?[0-9]+|0x[0-9a-fA-F]+)$'
 # generated .config against, so the two cannot drift apart.
 reqfile=$ROOT/platform-image/kernel-required.txt
 REQUIRED=()
+FTPM_REQ=()
+ftpmfrag=$kdir/files/ftpm.cfg
 while IFS= read -r l || [ -n "$l" ]; do
 	case $l in '' | '#'*) continue ;; esac
-	REQUIRED+=("$l")
+	# The firmware TPM symbols belong to ftpm.cfg, the rest to hardening.cfg.
+	case $l in
+	TCG_TPM=* | TCG_FTPM_TEE=*) FTPM_REQ+=("$l") ;;
+	*) REQUIRED+=("$l") ;;
+	esac
 done <"$reqfile"
 expect "the shared required table has entries" test "${#REQUIRED[@]}" -gt 20
+expect "the required table names both firmware TPM symbols" test "${#FTPM_REQ[@]}" -eq 2
 
 # symbols FILE: prints "SYMBOL VALUE" per non-comment, non-blank line (VALUE n
 # for "# CONFIG_X is not set"), or "BAD <line>" for a malformed one.
@@ -118,6 +125,12 @@ for kv in "${REQUIRED[@]}"; do
 done
 expect "every required hardening symbol has its required value (SysRq mask is hex 0xb0)" test "$q5ok" -eq 1
 
+ftok=1
+for kv in "${FTPM_REQ[@]}"; do
+	[ "$(value_of "$ftpmfrag" "${kv%%=*}" || true)" = "${kv#*=}" ] || { ftok=0; echo "wrong: $kv"; }
+done
+expect "ftpm.cfg sets the firmware TPM symbols the required table names" test "$ftok" -eq 1
+expect "the bbappend names ftpm.cfg" live "$bbappend" 'SRC_URI[[:space:]]*\+=.*file://ftpm\.cfg'
 expect "layer.conf BBFILES line covers the bbappend" live "$layer" 'BBFILES[[:space:]]*\+=.*recipes-\*/\*/\*\.bbappend'
 
 # The checker passes the real fragment and fails on a copy with an out-of-scope symbol.

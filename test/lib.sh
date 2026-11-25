@@ -60,10 +60,12 @@ expect() {
 }
 
 # fixture_repo <dir>: a git repository holding a copy of the Makefile, the
-# scripts, the tests and the Dockerfile, everything staged.
+# scripts, the tests, the Dockerfile and platform-image (the fTPM NV selector in
+# optee-ftpm-flags.inc and the TA recipe, which scripts/secure-world-build.sh
+# reads even for --check-lock), everything staged.
 fixture_repo() {
 	mkdir -p "$1"
-	cp -R "$ROOT/Makefile" "$ROOT/scripts" "$ROOT/test" "$ROOT/build" "$1/"
+	cp -R "$ROOT/Makefile" "$ROOT/scripts" "$ROOT/test" "$ROOT/build" "$ROOT/platform-image" "$1/"
 	git -C "$1" init -q
 	git -C "$1" add -A
 }

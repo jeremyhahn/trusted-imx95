@@ -67,10 +67,11 @@ lock=${args[1]:-$self/../platform-image/manifest.lock}
 [ -d "$out" ] || usage "$out is not a directory"
 [ -f "$lock" ] || usage "$lock is not a file"
 
-# The debug packages: the one list, read from the debug recipe.
+# The debug packages: the one list, read from the debug recipe, from every
+# IMAGE_INSTALL:append assignment in it (not only the first).
 debug_recipe=$self/../platform-image/recipes-core/images/trusted-imx95-image-debug.bb
 declare -A dbgpkg=()
-dbgline=$(sed -n 's/^IMAGE_INSTALL:append[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$debug_recipe" 2>/dev/null | head -n 1)
+dbgline=$(sed -n 's/^IMAGE_INSTALL:append[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$debug_recipe" 2>/dev/null)
 for p in $dbgline; do dbgpkg[$p]=1; done
 [ "${#dbgpkg[@]}" -gt 0 ] || usage "cannot parse IMAGE_INSTALL:append in $debug_recipe"
 

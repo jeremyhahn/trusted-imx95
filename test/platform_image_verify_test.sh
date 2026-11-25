@@ -201,6 +201,14 @@ rehash
 run bash "$script" "$d"
 check "two debug packages" 1 "debug package strace is" "debug package imx-test is"
 
+# tpm2-tools is added by a second IMAGE_INSTALL:append in the debug recipe
+# (SPEC row ftpm, #140): the verifier reads every assignment, so it is refused.
+mk "$d"
+printf 'busybox cortexa55 1.36\ntpm2-tools cortexa55 5.7\n' >"$mf"
+rehash
+run bash "$script" "$d"
+check "tpm2-tools (second debug append) in the production manifest" 1 "debug package tpm2-tools is in the production manifest"
+
 mk "$d"
 printf 'busybox cortexa55 1.36\ngdbserver cortexa55 14.2\nbash-completion all 2\n' >"$mf"
 rehash

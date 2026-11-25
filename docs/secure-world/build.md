@@ -169,12 +169,16 @@ provisional exactly as `bsp.lock` says (release `lf-6.18.37-2.1.0`, #14 Q2).
 The hashes belong to one build configuration, pinned by a digest that `test/secure_world_build_test.sh` recomputes:
 every non-comment, non-blank line of `secure-world/bsp.lock` but `TFA_TAG` (it names `TFA_COMMIT`, is checked at
 fetch and reaches no build step), the script's two UUID assignments, its `optee_flags`
-array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed.
+array and every `make` build step (`bl31`, `optee-devkit`, `ftpm` with its flags, and `optee`), whitespace squeezed,
+and the fTPM NV storage sets the script reads: the `TRUSTED_IMX95_FTPM_NV` lines of
+`platform-image/recipes-security/optee/optee-ftpm-flags.inc` and the `FTPM_TA_STORAGE_ID` lines of the
+`optee-ftpm` recipe (owner ruling 1234; the boot container's `tee.bin` and the image's OP-TEE select the same
+storage). The hashes above are for the default selection, `reefs`.
 The test fails when any pin, toolchain or wheel line of the lock, or any build argument or flag, differs from the
 configuration recorded here, so hashes cannot outlive a pin or flag change. Record the new digest together with new
 hashes.
 
-Build configuration digest: `8838ce34f6dffb1f1b315feca398963c111f5ab898117f3fb66376f3761a23d3`
+Build configuration digest: `6a32b2474943574046030142a2ae5efc257b7ef1acecc89233b8ae00bdea0a4e`
 
 Not tested: a second host, another `uv` or Python patch release, and a different `SOURCE_DATE_EPOCH`.
 
@@ -189,7 +193,8 @@ trees and output under the container's `$TMPDIR`.
 
 *Scope.* `preflight` selects the inputs: its `secure_world` output is `false` only on a pull request whose changed files
 all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the Dockerfile, `in-toolchain-image.sh`,
-`image-tag.sh`, the unit test, the `Makefile`, `ci.yml`). The job's own `if:` ends in
+`image-tag.sh`, the unit test, the fTPM NV selector in `optee-ftpm-flags.inc` and `optee-ftpm_4.10.0.bb`, the
+`Makefile`, `ci.yml`). The job's own `if:` ends in
 `needs.preflight.outputs.secure_world != 'false'`, so a README-only PR skips the whole job (image build, setup and
 build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
 `make test` runs only the offline lock check and the script's unit tests.
