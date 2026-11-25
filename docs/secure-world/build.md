@@ -193,7 +193,8 @@ trees and output under the container's `$TMPDIR`.
 
 *Scope.* `preflight` selects the inputs: its `secure_world` output is `false` only on a pull request whose changed files
 all miss `SECURE_WORLD_PATTERN` (`secure-world/`, the script, the pin file, the Dockerfile, `in-toolchain-image.sh`,
-`image-tag.sh`, the unit test, the `Makefile`, `ci.yml`). The job's own `if:` ends in
+`image-tag.sh`, the unit test, the fTPM NV selector in `optee-ftpm-flags.inc` and `optee-ftpm_4.10.0.bb`, the
+`Makefile`, `ci.yml`). The job's own `if:` ends in
 `needs.preflight.outputs.secure_world != 'false'`, so a README-only PR skips the whole job (image build, setup and
 build) and the CI Gate counts it passed (mode `sw`). A push, schedule, manual run or the full tier always builds.
 `make test` runs only the offline lock check and the script's unit tests.
