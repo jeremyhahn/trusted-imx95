@@ -89,6 +89,10 @@ entries["bin/busybox"] = (S_REG | 0o755, busybox, 0, 0)
 for a in applets:
     entries["bin/" + a] = (S_LNK | 0o777, b"busybox", 0, 0)
 entries["init"] = (S_REG | 0o755, rd(init), 0, 0)
+# What nc -e runs per connection (init's serve): busybox nc takes no
+# arguments for the program, so the handler mode is fixed here, and the
+# handler's log goes to the console, never to the client.
+entries["bin/rescue-handle"] = (S_REG | 0o755, b"#!/bin/sh\nexec /init --handle 2>/dev/console\n", 0, 0)
 entries["usr/share/udhcpc/default.script"] = (S_REG | 0o755, rd(dhcp), 0, 0)
 entries["dev/console"] = (S_CHR | 0o600, b"", 5, 1)
 entries["dev/null"] = (S_CHR | 0o666, b"", 1, 3)

@@ -118,7 +118,34 @@ except OSError:
 t.join()
 sys.stdout.write(b"".join(reply).decode(errors="replace"))
 EOS
-RESCUE_DEV_DIR=$dev RESCUE_SYS_DIR=$sys RESCUE_KEY_FILE=$bkey python3 -I "$tmp/listener.py" "$init" "$tmp/port" 2>"$tmp/listener.err" &
+# A client that never lets go: hold.py <port> <out> [<key file> <line>]
+# takes the nonce and goes quiet, or with a key and line authenticates, sends
+# 1000 bytes of the payload and goes quiet. It writes the nonce line to <out>
+# once connected, then "dropped after N s" when the board closes, or "held"
+# when it gave up after 40 s.
+cat >"$tmp/hold.py" <<'EOS'
+import hashlib, socket, sys, time
+port, out = sys.argv[1:3]
+s = socket.create_connection(("127.0.0.1", int(port)), timeout=40)
+t0 = time.monotonic()
+f = s.makefile("rb")
+first = f.readline().decode()
+if len(sys.argv) > 4:
+    key = open(sys.argv[3]).read().strip()
+    line = sys.argv[4]
+    nonce = first.split()[1]
+    mac = hashlib.sha256(f"{key}:{nonce}:{line}".encode()).hexdigest()
+    s.sendall(f"auth {mac} {line}\n".encode() + b"\0" * 1000)
+with open(out, "w") as o:
+    o.write(first)
+    o.flush()
+    try:
+        f.read()
+        o.write("dropped after %d s\n" % (time.monotonic() - t0))
+    except OSError:
+        o.write("held\n")
+EOS
+RESCUE_AUTH_SECS=2 RESCUE_LIFE_SECS=8 RESCUE_DEV_DIR=$dev RESCUE_SYS_DIR=$sys RESCUE_KEY_FILE=$bkey python3 -I "$tmp/listener.py" "$init" "$tmp/port" 2>"$tmp/listener.err" &
 listener_pid=$!
 n=0
 while [ ! -s "$tmp/port" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
@@ -219,6 +246,33 @@ out=$(rq "hash mmcblk0 100000" "" auth "$bkey.off")
 ok "without a session key on the board every command is refused" test "$out" = "ERR no session key"
 mv "$bkey.off" "$bkey"
 ok "the session key never reaches the handler's log" lacks "$(<"$tmp/listener.err")" "$(<"$bkey")"
+
+# --- deadlines ---------------------------------------------------------------
+# There is one listener. A client that takes the nonce and goes quiet is
+# dropped after RESCUE_AUTH_SECS (2 s here), and the next client is served;
+# an authenticated one that stalls mid-write is dropped after
+# RESCUE_LIFE_SECS (8 s here), with the processes of its write.
+# hold_then_serve <name> [<key file> <line>]
+hold_then_serve() {
+	local name=$1 n=0 hp want out
+	shift
+	rm -f "$tmp/hold.out"
+	python3 -I "$tmp/hold.py" "$port" "$tmp/hold.out" "$@" &
+	hp=$!
+	while [ ! -s "$tmp/hold.out" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+	want=$(shabytes "$dev/mmcblk0" 100000)
+	out=$(rq "hash mmcblk0 100000" 2>&1)
+	wait "$hp"
+	ok "$name: the board dropped the holding client" has "$(<"$tmp/hold.out")" "dropped after"
+	ok "$name: the next client was served" test "$out" = "$want"
+}
+hold_then_serve "idle client"
+ok "idle client: the drop is logged" test "$(logcount "no auth line after 2 s: dropping the connection")" -eq 1
+hold_then_serve "stalled write" "$bkey" "write mmcblk0 $size0 $(sha "$dump0")"
+ok "stalled write: the drop is logged" test "$(logcount "command still running after 8 s: dropping the connection")" -eq 1
+# shellcheck disable=SC2016 # init's text, not this shell's $port
+ok "serve runs the handler per accepted connection (nc -e)" has "$(<"$init")" 'nc -l -p "$port" -e /bin/rescue-handle'
+ok "the initramfs ships bin/rescue-handle" has "$(<"$root/scripts/board-rescue/build-initramfs.sh")" 'entries["bin/rescue-handle"]'
 
 # --- restore.sh -------------------------------------------------------------
 # A zstd that only copies: the fake dumps are plain bytes.

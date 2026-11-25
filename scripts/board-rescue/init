@@ -31,6 +31,13 @@
 RESCUE_DEV_DIR=${RESCUE_DEV_DIR:-/dev}
 RESCUE_SYS_DIR=${RESCUE_SYS_DIR:-/sys}
 RESCUE_KEY_FILE=${RESCUE_KEY_FILE:-/rescue.key}
+# There is one listener, so one client can shut every other one out: a
+# connection must send its "auth" line within RESCUE_AUTH_SECS of being
+# accepted, and an authenticated one is dropped RESCUE_LIFE_SECS later (6 h
+# covers writing a 64 GB eMMC at 3 MB/s). A watchdog (--watchdog) enforces
+# both, because the shell builtin read has no deadline in every sh.
+RESCUE_AUTH_SECS=${RESCUE_AUTH_SECS:-30}
+RESCUE_LIFE_SECS=${RESCUE_LIFE_SECS:-21600}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:$PATH
 export PATH
 
@@ -175,8 +182,48 @@ authenticate() {
 	fi
 }
 
+# tree <pid>: <pid> and every process below it, parents first. s, p and pp
+# are shared with the recursive calls, which is safe: the loop list is fixed
+# when the loop starts, and p and pp are not used after the call.
+tree() {
+	echo "$1"
+	for s in /proc/[0-9]*/stat; do
+		read -r p _ _ pp _ 2>/dev/null <"$s" || continue
+		[ "$pp" = "$1" ] && tree "$p"
+	done
+}
+
+# watchdog <secs> <pid> <what>: after <secs>, kill <pid> and everything it
+# started; that closes the socket they hold, so the client is dropped and the
+# listener is free again. A TERM (disarm) ends the watchdog quietly.
+watchdog() {
+	s=""
+	trap '[ -z "$s" ] || kill "$s" 2>/dev/null; exit 0' TERM
+	sleep "$1" &
+	s=$!
+	wait "$s" || exit 0
+	log "$3 after $1 s: dropping the connection"
+	for p in $(tree "$2"); do
+		[ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null
+	done
+}
+
+# arm <secs> <what>: put a watchdog over this handler; disarm takes it off.
+arm() {
+	disarm
+	sh "$0" --watchdog "$1" "$$" "$2" </dev/null >/dev/null &
+	dog=$!
+}
+
+disarm() {
+	[ -z "${dog:-}" ] || kill "$dog" 2>/dev/null
+	dog=""
+}
+
 handle() {
+	arm "$RESCUE_AUTH_SECS" "no auth line"
 	authenticate || return 0
+	arm "$RESCUE_LIFE_SECS" "command still running"
 	read -r cmd a1 a2 a3 extra <<EOF
 $line
 EOF
@@ -230,16 +277,17 @@ net_up() {
 
 serve() {
 	port=$(cmdline_get rescue.port 7777)
-	fifo=/tmp/rescue.fifo
-	mkfifo "$fifo"
 	while :; do
 		# The port is reachable from the network (the operator's host has no
 		# other way in: there is no sshd here), so every connection must
 		# carry a MAC made with the session key (authenticate).
 		log "listening on port $port"
-		# The fifo carries the handler's replies back into nc, on purpose.
-		# shellcheck disable=SC2094
-		nc -l -p "$port" <"$fifo" | /init --handle >"$fifo"
+		# nc -e starts the handler (bin/rescue-handle: /init --handle) only
+		# once a client is in, with the socket as its stdin and stdout, so its
+		# deadlines count from the accept and its end closes the connection.
+		# The pinned busybox nc has -e (its options are -l -p -w -i -f -e);
+		# its -w bounds only the connect, so the deadlines are the handler's.
+		nc -l -p "$port" -e /bin/rescue-handle || sleep 1
 	done
 }
 
@@ -264,7 +312,13 @@ main() {
 
 case ${1:-} in
 --handle)
+	trap disarm EXIT
 	handle
+	exit 0
+	;;
+--watchdog)
+	shift
+	watchdog "$@"
 	exit 0
 	;;
 esac
