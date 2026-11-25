@@ -23,7 +23,9 @@ Each record has a "step":
   committed.
 - counter_fuse_config (RM00284 section 3.24): the monotonic counter fuses are
   configured once. A fuse write is irreversible: it needs the owner's
-  explicit approval ("owner_approval", a non-empty reference) and runs at
+  explicit approval ("owner_approval", a non-empty reference), the outcome
+  "status": "ok" (as for key_exchange; absent, null, "error", any other
+  string or a non-string fails and completes nothing) and runs at
   most once, and the prior state must be proven: "already_configured" must
   be present and the JSON boolean false (true means the fuses are already
   configured and are not written again; anything else fails).
@@ -34,8 +36,8 @@ Each record has a "step":
   fuse write after it is refused.
 - lifecycle_close (RM00284 section 3.23): the life cycle moves from OEM open
   to OEM closed through the enclave ("from": "oem_open", "to": "oem_closed",
-  "via": "enclave"). Irreversible: it needs "owner_approval" and runs at most
-  once.
+  "via": "enclave"). Irreversible: it needs "owner_approval" and the outcome
+  "status": "ok" (anything else fails), and runs at most once.
 
 The run must be complete: at the end of the trace the check requires a
 committed key_import, the counter fuses configured (counter_fuse_config or
@@ -161,6 +163,9 @@ class Run:
             if "counter_fuse_config" in self.done:
                 faults.append("the counter fuses were written in this run; there is no prior state to evidence")
         else:
+            if rec.get("status") != "ok":
+                faults.append(f"{step} outcome: status {rec.get('status')!r}, not the string 'ok': "
+                              "a step that did not succeed does not complete the run")
             if not approved(rec):
                 faults.append(f"irreversible ({STEPS[step]}): no owner_approval recorded")
             if step in self.done:

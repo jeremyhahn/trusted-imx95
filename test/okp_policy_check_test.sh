@@ -20,9 +20,9 @@ vec() {
 both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
-fuse='{"step":"counter_fuse_config","owner_approval":"OD-test","already_configured":false}'
+fuse='{"step":"counter_fuse_config","status":"ok","owner_approval":"OD-test","already_configured":false}'
 evid='{"step":"counter_fuse_evidence","configured":true,"evidence":"OD-test-readout"}'
-close='{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
+close='{"step":"lifecycle_close","status":"ok","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
 
 vec good "$kx" "$imp" "$fuse" "$close"
 run python3 "$CHK" "$TMP_ROOT/good.jsonl"
@@ -75,10 +75,38 @@ for p in absent null true-string false-string; do
 	true-string) field=',"already_configured":"true"' ;;
 	false-string) field=',"already_configured":"false"' ;;
 	esac
-	vec "fuse-prior-$p" "$kx" "$imp" "{\"step\":\"counter_fuse_config\",\"owner_approval\":\"OD-test\"$field}" "$close"
+	vec "fuse-prior-$p" "$kx" "$imp" "{\"step\":\"counter_fuse_config\",\"status\":\"ok\",\"owner_approval\":\"OD-test\"$field}" "$close"
 	run python3 "$CHK" "$TMP_ROOT/fuse-prior-$p.jsonl"
 	check "a fuse write with the prior state $p fails" 1 "FAIL 3 counter_fuse_config: refused" \
 		"already_configured must be present and the JSON boolean false"
+done
+
+fuse_body='"owner_approval":"OD-test","already_configured":false'
+close_body='"from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"'
+for s in counter_fuse_config lifecycle_close; do
+	case $s in
+	counter_fuse_config) body=$fuse_body ;;
+	lifecycle_close) body=$close_body ;;
+	esac
+	for st in absent null error unknown number list; do
+		case $st in
+		absent) field= ;;
+		null) field='"status":null,' ;;
+		error) field='"status":"error",' ;;
+		unknown) field='"status":"pending",' ;;
+		number) field='"status":0,' ;;
+		list) field='"status":["ok"],' ;;
+		esac
+		rec="{\"step\":\"$s\",$field$body}"
+		if [ "$s" = counter_fuse_config ]; then
+			vec "$s-status-$st" "$kx" "$imp" "$rec" "$close"
+		else
+			vec "$s-status-$st" "$kx" "$imp" "$fuse" "$rec"
+		fi
+		run python3 "$CHK" "$TMP_ROOT/$s-status-$st.jsonl"
+		check "$s with status $st fails and does not complete the run" 1 \
+			"$s outcome: status" "FAIL end of trace"
+	done
 done
 
 vec evid-bad '{"step":"counter_fuse_evidence","configured":true}'

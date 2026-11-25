@@ -93,7 +93,8 @@ kept this row, and refuses (exit 1) when it did not; a trace it cannot read or p
   decision 241); the `warnings` field must be present and a list (empty means none), so an absent, null or
   non-list `warnings` is not committed;
 - `counter_fuse_config` (RM00284 §3.24) and `lifecycle_close` from OEM open to OEM closed through the enclave
-  (RM00284 §3.23) each carry a recorded owner approval and run at most once; a fuse write is accepted only when
+  (RM00284 §3.23) each carry a recorded owner approval and an outcome, `"status": "ok"` (an absent, null, error,
+  unknown or non-string status fails and completes nothing), and run at most once; a fuse write is accepted only when
   `already_configured` is present and the JSON boolean false, so fuses already configured, or a prior state that
   is absent, null or not a boolean, are not written;
 - a `counter_fuse_evidence` record (`configured: true` and a non-empty `evidence` reference) is read-only and

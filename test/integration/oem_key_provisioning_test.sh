@@ -13,8 +13,8 @@ set -uo pipefail
 both='"request_flags":["strict","monotonic"],"ack_flags":["strict","monotonic"],"warnings":[],"counter_split":true'
 kx='{"step":"key_exchange","status":"ok"}'
 imp="{\"step\":\"key_import\",\"wrapped\":true,$both}"
-fuse='{"step":"counter_fuse_config","owner_approval":"OD-test","already_configured":false}'
-close='{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
+fuse='{"step":"counter_fuse_config","status":"ok","owner_approval":"OD-test","already_configured":false}'
+close='{"step":"lifecycle_close","status":"ok","from":"oem_open","to":"oem_closed","via":"enclave","owner_approval":"OD-test"}'
 
 good="$TMP_ROOT/good.jsonl"
 printf '%s\n' "$kx" "$imp" "$fuse" "$close" >"$good"
@@ -55,7 +55,7 @@ for step in counter_fuse_config lifecycle_close; do
 done
 
 t="$TMP_ROOT/close-via.jsonl"
-printf '%s\n' '{"step":"lifecycle_close","from":"oem_open","to":"oem_closed","via":"fuse_tool","owner_approval":"OD-test"}' >"$t"
+printf '%s\n' '{"step":"lifecycle_close","status":"ok","from":"oem_open","to":"oem_closed","via":"fuse_tool","owner_approval":"OD-test"}' >"$t"
 run make -s -C "$ROOT" okp-policy-check OKP_TRACE="$t"
 check "make okp-policy-check: a close not through the enclave fails" nonzero "want 'enclave'"
 
