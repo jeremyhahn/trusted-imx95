@@ -51,7 +51,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
-	platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-hosttools \
+	okp-policy-check integration-test-oem-key-provisioning \\
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify \
 	ele-lib ele-lib-check ele-client-test
 
 help: ## List the targets
@@ -230,6 +231,9 @@ ele-client-test: ## Fetch the pinned secure-enclave source outside the checkout 
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
+platform-image: ## Build trusted-imx95-image (PI_DEBUG=1 adds the debug image) from the pinned layers; artefacts, SHA256SUMS, build-info.txt in .platform-image/out (needs bitbake, network, hours; not in CI; ARGS=--check builds nothing; ARGS=--repro builds twice in separate directories and publishes only if the two outputs are identical)
+	@scripts/platform-image-build.sh $(ARGS)
+
 platform-image-fetch: ## Check out the layers platform-image/manifest.lock pins, outside the clone (needs network; no build)
 	@scripts/platform-image-fetch.sh platform-image/manifest.lock
 
@@ -241,6 +245,14 @@ platform-image-parse: ## Metadata check on a build host: fetch the pins, bitbake
 
 platform-image-kernel-config: ## Kernel config check on a build host: bitbake linux-imx -c configure, then the generated .config against platform-image/kernel-required.txt (run platform-image-parse first; needs bitbake; not in CI)
 	@scripts/platform-image-kernel-config.sh
+
+platform-image-layer-check: ## Layer check on a fetched tree: every BBLAYERS layer has a conf/layer.conf, its LAYERDEPENDS are provided and its LAYERSERIES_COMPAT has the oe-core series (needs a fetched tree, no bitbake; not in CI)
+	@scripts/platform-image-layer-check.sh
+
+platform-image-verify: ## Check an output directory (OUT=dir, ALLOW_DIRTY=1 accepts a dirty build) against platform-image/manifest.lock: SHA256SUMS, machine, manifest and layer commits, an SBOM per target (offline, needs no bitbake; not in CI)
+	@[ -n "$(OUT)" ] || { echo "platform-image-verify: set OUT=<output directory>"; exit 2; }
+	@case "$(ALLOW_DIRTY)" in ""|0|1) ;; *) echo "platform-image-verify: ALLOW_DIRTY must be 0, 1 or empty (empty or 0 = off, 1 = on), got '$(ALLOW_DIRTY)'" >&2; exit 2 ;; esac
+	@scripts/platform-image-verify.sh $(if $(filter 1,$(ALLOW_DIRTY)),--allow-dirty) "$(OUT)"
 
 ## --- AHAB container signing (docs/boot-container/signing-pipeline.md) ---
 
@@ -297,6 +309,16 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
+
+# OKP_TRACE reaches the recipe through the environment, never expanded into its shell source.
+export OKP_TRACE
+
+okp-policy-check: ## Check the trace of a provisioning run against the oem-key-provisioning row (OKP_TRACE=<file.jsonl>; key exchange then wrapped-key import with both rollback flags, fuses and the close recorded once and owner-approved; host-side, no enclave)
+	@[ -n "$$OKP_TRACE" ] || { echo "okp-policy-check: set OKP_TRACE=<file.jsonl>"; exit 2; }
+	@python3 scripts/okp-policy-check.py "$$OKP_TRACE"
+
+integration-test-oem-key-provisioning: ## Integration test of the oem-key-provisioning row: make okp-policy-check end to end on provisioning runs that keep and break the row
+	@bash test/integration/oem_key_provisioning_test.sh
 
 integration-test-device-lifecycle: ## Integration test of the device-lifecycle row: the A55 collector, then endorse-01, enroll-01, device-attest-01 (tpm) against a stand-in control plane (no board, no TPM)
 	@bash test/integration/device_lifecycle_test.sh
