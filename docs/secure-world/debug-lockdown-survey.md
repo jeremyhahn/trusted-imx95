@@ -24,21 +24,21 @@ are the owner's decisions (SPEC.md lists the life-cycle close as an open questio
 
 ## 2. Sources surveyed
 
-Each source is public. "Reached" means this lane read it; the version is the one read.
+Each source is public. "Reached" means this survey read it; the version is the one read.
 
 | # | Source | Version read | URL | Reached |
 |---|---|---|---|---|
 | S1 | U-Boot (NXP fork), *i.MX 8ULP / i.MX 9x AHAB secure boot guide* (`doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt`) | branch `lf_v2024.04`, commit `e3219a5` (2025-02-18) | <https://github.com/nxp-imx/uboot-imx/blob/lf_v2024.04/doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt> | yes |
 | S2 | SPSDK, *Secure debug enablement on AHABv2 based devices* (Jupyter example `examples/dat/imx9/ahabv2_debug_authentication.ipynb`) | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/blob/v3.13.0/examples/dat/imx9/ahabv2_debug_authentication.ipynb> | yes |
 | S3 | SPSDK, *Debug authentication on i.MX9* (`examples/dat/imx9/imx9_debug_auth.rst`), a pointer page to S4 | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/blob/v3.13.0/examples/dat/imx9/imx9_debug_auth.rst> | yes |
-| S4 | NXP AN14579, *Secure Debug Enablement on ELE-based Platforms* | not known | <https://docs.nxp.com/bundle/AN14579/page/topics/introduction.html> | **no**: the portal renders the text with JavaScript and the lane got only the page shell; the PDF URL answered 404 |
+| S4 | NXP AN14579, *Secure Debug Enablement on ELE-based Platforms* | not known | <https://docs.nxp.com/bundle/AN14579/page/topics/introduction.html> | **no**: the portal renders the text with JavaScript and the survey got only the page shell; the PDF URL answered 404 |
 | S5 | SPSDK, i.MX 95 DC example and its field comments (`examples/dat/imx9/inputs/dc_config_95.yaml`, `dc_config_95.diffc`) | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/tree/v3.13.0/examples/dat/imx9/inputs> | yes |
 | S6 | SPSDK, i.MX 95 DAT example configuration (`examples/dat/imx9/inputs/dat_config_95.yaml`) | tag `v3.13.0` | same directory as S5 | yes |
 | S7 | NXP imx-sm, *Monitor* (`sm/doc/monitor.md`) | tag `rel_imx_sm_2026q3` (also `lf-6.18.37-2.1.0`), commit `eec2328` (2026-09-03) | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/monitor.md> | yes |
 | S8 | NXP imx-sm, *Debug* (`sm/doc/debug.md`) | same as S7 | <https://github.com/nxp-imx/imx-sm/blob/rel_imx_sm_2026q3/sm/doc/debug.md> | yes |
 | S9 | SPSDK, *User Guide - nxpele* (the source page `docs/apps/nxpele.rst` and its rendered command reference) | tag `v3.13.0` | <https://spsdk.readthedocs.io/en/v3.13.0/apps/nxpele.html> | yes |
 | S10 | SPSDK, *i.MX93 Field Return Lifecycle Update* (Jupyter example `examples/signed_message/imx93_field_return_LC/`, with its input comments) | tag `v3.13.0` | <https://github.com/nxp-mcuxpresso/spsdk/tree/v3.13.0/examples/signed_message/imx93_field_return_LC> | yes |
-| S11 | SPSDK, *User Guide - nxpdebugmbox* (`docs/apps/nxpdebugmbox.rst`). It holds only the generated command reference, which the lane used S2 for. | tag `v3.13.0` | <https://spsdk.readthedocs.io/en/v3.13.0/apps/nxpdebugmbox.html> | yes |
+| S11 | SPSDK, *User Guide - nxpdebugmbox* (`docs/apps/nxpdebugmbox.rst`). It holds only the generated command reference, which the survey used S2 for. | tag `v3.13.0` | <https://spsdk.readthedocs.io/en/v3.13.0/apps/nxpdebugmbox.html> | yes |
 
 The project's threat model (issue #48) asks how debug access is handled on a production
 board. §5.3 and §6 answer that question. The threat model is not on main yet, so this
@@ -64,7 +64,7 @@ file cites it by issue number and does not link to it.
   lane ran nothing.
 - In OEM Closed, the SPSDK example says, debug is **only** available through debug
   authentication, and debug can be turned off altogether by fuse programming; it sends
-  the reader to the i.MX 95 Security Reference Manual for that (S2 §2). The lane could
+  the reader to the i.MX 95 Security Reference Manual for that (S2 §2). The survey could
   not read that manual (it is not public), so which fuses do this, and whether the
   disable is per core or global, is unconfirmed.
 - In OEM Open the debug port is, by implication of S2, open without authentication. The
@@ -72,7 +72,7 @@ file cites it by issue number and does not link to it.
 - **Past OEM Closed.** SPSDK's `nxpele forward-lifecycle-update` command moves an ELE
   part forward to **OEM Closed** or **OEM Locked** (S9). Its page describes ELE parts in
   general and gives the i.MX 93 and the i.MX RT1180 as examples. It does not say what
-  OEM Locked does to debug. The lane found no public i.MX 95 source on that:
+  OEM Locked does to debug. The survey found no public i.MX 95 source on that:
   unconfirmed.
 - **Field return.** For the i.MX 93, SPSDK shows a part going from OEM Closed to an
   **OEM field-return** life cycle (`FR_OEM`) (S10):
@@ -124,13 +124,13 @@ What follows from this for a lockdown policy:
   this project issues therefore needs a UUID rule.
 - `cc_socu` lets a DC open fewer than all debug domains (S5). Which bit is which domain
   (A55 cluster, M33, M7, secure or non-secure debug, trace) is in the ELE user guide,
-  which the lane could not read: unconfirmed.
+  which the survey could not read: unconfirmed.
 - How long an authenticated session lasts (until reset, until power-off) is not stated in
-  the sources the lane read: unconfirmed.
+  the sources the survey read: unconfirmed.
 
 ### 5.2 Tools and keys
 
-The public NXP software for authenticated debug on the i.MX 95 is SPSDK. The lane found
+The public NXP software for authenticated debug on the i.MX 95 is SPSDK. The survey found
 no other public NXP tool for it. A probe vendor's own tooling (S2 uses a Lauterbach probe
 through an SPSDK plugin) was not surveyed.
 
@@ -227,7 +227,7 @@ messages work without a signature on a closed part is unconfirmed.
 
 ### 6.3 TF-A, OP-TEE and Linux
 
-The lane did not survey TF-A, OP-TEE or the Linux console for i.MX 95 debug controls
+The survey did not survey TF-A, OP-TEE or the Linux console for i.MX 95 debug controls
 within this slice. They are listed in §7 as not confirmed. The owner's question in §8 on
 consoles covers them as a class.
 
@@ -242,13 +242,13 @@ consoles covers them as a class.
    - the bit layout of `cc_socu` (which debug domains and enables exist);
    - what OEM Locked (S9) and OEM field return (S10, shown for the i.MX 93) do to
      debug and keys on the i.MX 95, and whether the i.MX 95 accepts the field-return
-     request at all. The lane tried to confirm the last point by asking SPSDK for an
+     request at all. The survey tried to confirm the last point by asking SPSDK for an
      i.MX 95 template, but could not install SPSDK in this container;
    - whether field return reopens debug on a part whose debug-disable fuses are burnt;
    - whether OEM Open allows debug without authentication (S2 implies it, but does not say so).
 3. How long an authenticated debug session lasts (S2 does not say).
 4. Whether NXP's released SM binaries (BSP or Yocto builds) are built with `M=0`. S7 gives
-   only the source default (`M=1`). The lane did not read the Yocto recipes.
+   only the source default (`M=1`). The survey did not read the Yocto recipes.
 5. Whether the TRDC set-up limits the SM monitor's `mm` command; how JTAG causes the
    `jtag` reset reasons that the SM records (S8).
 6. Debug and console controls in **TF-A**, **OP-TEE** and **Linux** for the i.MX 95: not
@@ -256,10 +256,10 @@ consoles covers them as a class.
 7. The FRDM-IMX95-PRO's debug connector pinout and which UART carries the SM console:
    these are in UM12527, which is in the private reference set, not a public source.
    SPEC.md says the port mapping is not fixed.
-8. Issue #61's own text: the lane could not read it from the forge. This file works
+8. Issue #61's own text: the survey could not read it from the forge. This file works
    from the scope the coordinator relayed and from the `secure-world` row in SPEC.md.
 9. Public NXP tools for authenticated debug other than SPSDK, and probe vendors' own
-   flows: not found in public sources the lane searched.
+   flows: not found in public sources the survey searched.
 
 ## 8. Questions for the owner
 
@@ -273,7 +273,7 @@ consoles covers them as a class.
    with (c) left open until AN14579 and the Security Reference Manual say what the fuses
    cover and whether field return is still possible.
    Development boards stay in (a). This is irreversible, so it waits for #9 (signing
-   tool) and the SRK custody decision. The lane recommends no step and runs none.
+   tool) and the SRK custody decision. The survey recommends no step and runs none.
 
 2. **Who may issue debug credentials, and with which key?** The DC is signed with an SRK
    private key (S5).
@@ -309,7 +309,7 @@ consoles covers them as a class.
    - (b) A U-Boot shell behind a keyed autoboot interrupt.
    - (c) As the BSP ships.
 
-   Recommendation: (a) for production. The lane did not survey the exact U-Boot, TF-A
+   Recommendation: (a) for production. The survey did not survey the exact U-Boot, TF-A
    and OP-TEE options (§7 item 6), so the next survey should list them.
 
 6. **Should the product treat a debugger attach as a security event?** The SM records

@@ -1,19 +1,5 @@
 #!/usr/bin/env bash
-# cst-check.sh: the prerequisite of every build step that needs NXP's Code
-# Signing Tool (CST). The build takes the tool only from CST_PATH, a CST 3.1.0
-# tree extracted outside this repository (docs/references/README.md §The Code
-# Signing Tool in the build). The tool is never downloaded or copied here.
-#
-# Exit 0: CST_PATH names a CST tree outside the repository.
-# Exit 2: CST_PATH is unset or empty.
-# Exit 1: CST_PATH is set but is not a directory, is inside this repository,
-#         or is not a CST tree.
-#
-# What "a CST tree" is: docs/references/README.md names no executable and no
-# top-level layout of the extracted tool. The one layout it gives is the
-# documents inside the archive, release/docs/CST_UG.pdf among them, so the
-# check is that CST_PATH/release/docs/CST_UG.pdf exists. When a document names
-# the CST executable, the check adds it.
+# cst-check.sh: CST_PATH must name an extracted CST 3.1.0 tree (release/docs/CST_UG.pdf) outside the repository; exit 0 ok, 2 unset, 1 invalid.
 set -euo pipefail
 
 readonly MARKER=release/docs/CST_UG.pdf

@@ -23,7 +23,7 @@ Out of scope, cited only: the signing tool decision (#30), the negative test pla
 
 | Id | Title | Version or tag | URL or path |
 |---|---|---|---|
-| S1 | NXP UM12527, FRDM-IMX95-PRO Board User Manual, §2.3 (boot modes, Table 7) | Rev. 1.0 | `jeremyhahn/vendor-nxp`: `docs/imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf` (private; **not reachable from this lane**, see §9) |
+| S1 | NXP UM12527, FRDM-IMX95-PRO Board User Manual, §2.3 (boot modes, Table 7) | Rev. 1.0 | `jeremyhahn/vendor-nxp`: `docs/imx95/UM12527-FRDM-IMX95-PRO-board-user-manual.pdf` (private; **not reachable from this survey**, see §9) |
 | S2 | This repository's SPEC.md, boot-container row and board interfaces | base `4b753a7` | [docs/SPEC.md](../SPEC.md) |
 | S3 | This repository's references index | base `4b753a7` | [docs/references/README.md](../references/README.md) |
 | S4 | nxp-imx/mfgtools (uuu), README, LICENSE, built-in script `uuu/emmc_burn_loader.lst`, commit history | tag `uuu_1.5.243` (commit dated 2025-12-16) | https://github.com/nxp-imx/mfgtools/tree/uuu_1.5.243 |
@@ -42,7 +42,7 @@ What the repository records from UM12527 §2.3 (S1, through S2): the board boots
 selects the boot mode; the default boot device is the eMMC; SD and FlexSPI NOR are the other boot devices (S3); one
 SW4 setting puts the boot ROM in the USB serial downloader.
 
-This lane could not open UM12527 itself (S1 is in a private repository the lane has no access to). So the SW4
+This survey could not open UM12527 itself (S1 is in a private repository the survey has no access to). So the SW4
 switch positions for each mode, the USB connector the serial downloader enumerates on, and whether the ROM falls
 back to the serial downloader when the selected device holds no valid container are **not confirmed here**. The ROM
 fallback behaviour also needs IMX95RM (S10), which is missing.
@@ -127,7 +127,7 @@ and the partition the i.MX 95 ROM reads are set by U-Boot's configuration and th
 and layout survey (#42) and need IMX95RM (S10), which is missing.
 
 `uuu -b emmc_all <image.wic>` writes a whole disk image instead (S4 README) and is not the boot-container loop.
-Its script, `emmc_burn_all.lst`, was not read in this lane. What it writes to the boot partitions and their boot
+Its script, `emmc_burn_all.lst`, was not read in this survey. What it writes to the boot partitions and their boot
 configuration is therefore **unverified**, and it must not be assumed to leave them untouched.
 
 ## 6. Recovering a board that does not boot
@@ -135,7 +135,7 @@ configuration is therefore **unverified**, and it must not be assumed to leave t
 The recovery path rests on an assumed property: the serial downloader is in the boot ROM, and the SW4
 serial-download setting makes the ROM enter it whatever the eMMC holds. If so, a bad container in eMMC cannot remove
 it while the device is in OEM open and no fuse that disables it has been blown. The SW4 behaviour is in UM12527 §2.3
-(S1, not read in this lane) and the ROM behaviour in IMX95RM (S10, missing): **unconfirmed** on this board. Which fuses can disable the
+(S1, not read in this survey) and the ROM behaviour in IMX95RM (S10, missing): **unconfirmed** on this board. Which fuses can disable the
 serial downloader or change boot-mode selection is in IMX95RM or the Security Reference Manual (S10, S11), both
 missing: **unconfirmed**. This survey proposes no fuse step.
 
@@ -286,7 +286,7 @@ rejection. N4 and N5 are the only fixtures that isolate cryptographic verificati
 reject both as signature failures, it is not a signature verifier for this procedure. The independent check of owner
 question 7 (b) then replaces it at 2.1, and that check is put through N1 and N3 to N6. Building N4 and N5 means editing
 the signature and header fields of an AHAB container. Where those fields are on the i.MX 95 needs the AHAB chapter of
-IMX95RM or the Security Reference Manual (S10, S11, missing), or SPSDK's source, which this lane did not read:
+IMX95RM or the Security Reference Manual (S10, S11, missing), or SPSDK's source, which this survey did not read:
 **unverified**. N7, N8 and N9 are built by signing, not by editing: they are valid containers whose key index,
 revocation mask or version the policy forbids. N7 needs an approved SRK table with more than one key and a policy
 record that marks one index revoked; N8 needs a recorded floor above the lowest version the build can set. The
@@ -343,7 +343,7 @@ and an approved revocation and version policy, both recorded outside the build (
 
 ## 9. Unconfirmed items
 
-1. UM12527 §2.3 was not read in this lane: the private context repository was not reachable. SW4 positions, the
+1. UM12527 §2.3 was not read in this survey: the private context repository was not reachable. SW4 positions, the
    download USB connector and Table 7 are cited only through SPEC.md (S2).
 2. ROM fallback to the serial downloader or between eMMC boot partitions: needs IMX95RM (missing).
 3. Fuses that disable the serial downloader or fix the boot mode: needs IMX95RM or the Security Reference Manual

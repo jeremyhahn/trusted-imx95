@@ -27,15 +27,15 @@ leaves the step to the `oem-key-provisioning` row.
 | S5 | OP-TEE OS: `core/drivers/crypto/se050/crypto.mk`, `core/drivers/crypto/se050/sub.mk`, `core/drivers/crypto/ele/crypto.mk`, `core/arch/arm/plat-imx/conf.mk` | tag `4.9.0` (newest release tag) | https://github.com/OP-TEE/optee_os | yes |
 | S6 | OP-TEE documentation, "Cryptographic implementation" (`architecture/crypto.rst`), section on the NXP SE05X family | `master` at commit `ae74963fa4e2` | https://github.com/OP-TEE/optee_docs/blob/master/architecture/crypto.rst | yes |
 | S7 | NXP fork of OP-TEE OS (tree listing and `plat-imx/conf.mk` only) | tag `lf-6.18.37-2.1.0` | https://github.com/nxp-imx/imx-optee-os | yes, partly |
-| S8 | NXP SE051 product page | — | https://www.nxp.com/products/SE051 | **no** (the site returned "page not available" / 404 to the lane) |
-| S9 | SE051 data sheet | — | https://www.nxp.com/docs/en/data-sheet/SE051-DATA-SHEET.pdf | **no** (404 to the lane) |
+| S8 | NXP SE051 product page | — | https://www.nxp.com/products/SE051 | **no** (the site returned "page not available" / 404 to the survey) |
+| S9 | SE051 data sheet | — | https://www.nxp.com/docs/en/data-sheet/SE051-DATA-SHEET.pdf | **no** (404 to the survey) |
 | S10 | AN12973, SE051 default configuration (named by S2 as the source of the SE051's default Platform SCP03 keys) | — | https://www.nxp.com/webapp/Download?colCode=AN12973 | **no** (needs an NXP account; not tried) |
-| S11 | Full Plug & Trust middleware package (named by S1 as the complete package) | — | https://www.nxp.com/products/:SE050 | **no** (404 to the lane) |
+| S11 | Full Plug & Trust middleware package (named by S1 as the complete package) | — | https://www.nxp.com/products/:SE050 | **no** (404 to the survey) |
 | S12 | Foundries.io `fio-se05x-cli` and their SE05x documentation (named by S6) | — | linked from S6 | **no** (the documentation URL tried returned 404; the CLI was not surveyed) |
 
 [SPEC.md](../SPEC.md) cites UM12527 (the FRDM-IMX95 board user manual) for the
 part's placement. UM12527 is in the private vendor repository and was not read
-by this lane. The board facts below come from SPEC.md as written.
+by this survey. The board facts below come from SPEC.md as written.
 
 ## What the public sources establish
 

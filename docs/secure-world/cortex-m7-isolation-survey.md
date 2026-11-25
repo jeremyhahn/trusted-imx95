@@ -28,7 +28,7 @@ rather than on a document that states it, the text says so.
 
 ## 2. Sources
 
-All were reached from the lane on 2026-11-12 unless marked unreachable.
+All were reached from the survey on 2026-11-12 unless marked unreachable.
 
 | Id | Title | Version or tag | URL |
 |---|---|---|---|
@@ -41,7 +41,7 @@ All were reached from the lane on 2026-11-12 unless marked unreachable.
 | S7 | Linux kernel documentation, "Remote Processor Framework" (`Documentation/staging/remoteproc.rst`), as carried in NXP's tree | tag `lf-6.12.49-2.2.0` | https://github.com/nxp-imx/linux-imx/blob/lf-6.12.49-2.2.0/Documentation/staging/remoteproc.rst |
 | S8 | [SPEC.md](../SPEC.md) of this repository, rows `secure-key-handling` and `system-manager-config` (cites NXP RM00284 for the EdgeLock HSM API) | `main` at the time of writing | (this repository) |
 
-Fetched but not read, because the lane's tooling does not open source or
+Fetched but not read, because the survey's tooling does not open source or
 YAML files outside the repository: the Linux `imx_rproc.c` remoteproc
 driver, the `imx-mailbox.c` driver, the `fsl,imx-rproc.yaml` and `fsl,mu.yaml`
 bindings and `Documentation/staging/rpmsg.rst`, all at `lf-6.12.49-2.2.0`. Claims
@@ -252,7 +252,7 @@ threat model for RPMsg.
    listed as missing in SPEC.md).
 2. Whether NXP's FRDM configuration lets Linux start or stop the M7. The
    configuration grants Linux only LMM notifications on LM1 [S1], but the
-   Linux driver `imx_rproc.c` could not be read from the lane.
+   Linux driver `imx_rproc.c` could not be read from the survey.
 3. How Linux avoids the M7-private DDR range. NXP's FRDM device tree
    declares memory from `0x8000_0000` and lets the default CMA pool allocate
    from `0x8000_0000` upward, while reserving only the shared window [S4]; the
