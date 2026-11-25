@@ -35,14 +35,12 @@ mkdir -p "$t/docs/references"
 cp "$ROOT/docs/SPEC.md" "$t/docs/"
 cp "$ROOT/docs/references/README.md" "$t/docs/references/"
 cp -R "$ROOT/docs/hsm-device-protocol" "$t/docs/"
-RC=0
-OUT=$(HDP_TREE="$t" make -s -C "$ROOT" hdp-boundary-check 2>&1) || RC=$?
+run env HDP_TREE="$t" make -s -C "$ROOT" hdp-boundary-check
 check "make hdp-boundary-check: a tree path with a backtick, \$( ) and a space reaches the check literally" 0 \
 	"hdp-boundary-check: OK (5 checks"
 expect "make hdp-boundary-check: no command in the tree path ran" \
 	test ! -e "$HDP_MARK" -a ! -e "$HDP_MARK2"
-RC=0
-OUT=$(make -s -C "$ROOT" hdp-boundary-check HDP_TREE="$t/docs/none \`touch \"\$HDP_MARK\"\`" 2>&1) || RC=$?
+run make -s -C "$ROOT" hdp-boundary-check HDP_TREE="$t/docs/none \`touch \"\$HDP_MARK\"\`"
 check "make hdp-boundary-check: a command-line path with a backtick and a dollar sign is refused, not run" 2 \
 	"hdp-boundary-check: a command-line HDP_TREE holding a dollar sign is refused"
 expect "make hdp-boundary-check: the command-line backtick did not run" test ! -e "$HDP_MARK"
