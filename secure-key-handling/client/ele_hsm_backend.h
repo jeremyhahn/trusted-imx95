@@ -1,0 +1,63 @@
+/* The ops-table backend that calls the pinned imx-secure-enclave library's
+ * HSM API (include/hsm/hsm_api.h and the headers under include/hsm/internal at the commit in
+ * secure-key-handling/ele-lib.lock). PROVISIONAL (docs/secure-key-handling/
+ * client.md). Built only against the fetched library (scripts/ele-lib-build.sh);
+ * the host tests use the stub. Never run on a board by this repository.
+ */
+#ifndef ELE_HSM_BACKEND_H
+#define ELE_HSM_BACKEND_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "ele_client.h"
+
+struct ele_hsm_ctx {
+	/* No vendor handle: each operation opens, uses and closes the session and
+	 * the key store inside its own forked child (ele_hsm_backend.c, run_op). */
+	uint32_t store_id;
+	uint32_t *nonce;	/* the caller's slot; erased by the fork of the one operation */
+	bool open;		/* one operation per open */
+	/* The caller sets this only after confirming the counter split is
+	 * configured on the device (architecture.md). It stays false until then,
+	 * so no operation is reported rollback-protected on an unconfirmed split. */
+	bool counter_split_confirmed;
+};
+
+extern const struct ele_ops ele_hsm_ops;
+
+/* Prepare an operation: lock all process memory and record the key-store
+ * identifier and the caller's nonce slot. No vendor call is made here; the
+ * session, the key store and the services are opened, used and closed by the
+ * one forked child of each operation. Returns 0, -1, or ELE_HSM_OPEN_NOLOCK.
+ * The store is only ever opened as an existing one, never CREATE here. */
+int ele_hsm_open(struct ele_hsm_ctx *ctx, uint32_t key_store_id, uint32_t *nonce);
+/* The nonce is a credential: *nonce is erased on every path, and so is the
+ * library argument structure holding its copy. */
+
+/* Test hook: called after the library's argument structure (which held the
+ * nonce) has been erased, with its address and size, so a test can check the
+ * erasure. NULL in production. */
+extern void (*ele_hsm_wipe_hook)(const void *copy, size_t len);
+/* Test hook, 0 in production: when nonzero and below the result size, the
+ * key-store child writes only this many bytes of its result (a short read). */
+extern size_t ele_hsm_result_len_override;
+/* Test hook, NULL in production: called with "child_locked" and
+ * "nonce_received" in the child and "nonce_sending" in the parent, so a test
+ * can check the order: the nonce is sent only after the child has locked. */
+extern void (*ele_hsm_event_hook)(const char *event);
+/* All vendor calls of an operation run in one forked child; the wipe hook is
+ * called in that child. */
+
+/* ele_hsm_open locks all process memory (mlockall) before the library sees the
+ * nonce, and fails closed when that fails. Test hooks, NULL in production:
+ * ele_hsm_lockall_override replaces the mlockall call (a unit test cannot
+ * count on the memory-lock limit of its host); ele_hsm_scrub_hook is called
+ * with the number of stack bytes zeroed each time the stack is scrubbed. */
+#define ELE_HSM_OPEN_NOLOCK (-2) /* ele_hsm_open: the memory could not be locked */
+extern int (*ele_hsm_lockall_override)(void);
+extern void (*ele_hsm_scrub_hook)(size_t len);
+void ele_hsm_close(struct ele_hsm_ctx *ctx);
+
+#endif

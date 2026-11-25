@@ -1,0 +1,26 @@
+# secure-key-handling/ele-lib.lock: the pinned source of NXP's public
+# secure-enclave user library, read by scripts/ele-lib-build.sh. Documented in
+# docs/secure-key-handling/client.md. PROVISIONAL: the Linux A55 side as the
+# caller of the HSM API is a default pending the owner (architecture.md).
+#
+# The library behaviour the client relies on, with file:line in this pinned
+# tree, is the contract table in docs/secure-key-handling/client.md.
+#
+# Format: one NAME=value per line; blank lines and # lines are ignored. The
+# script parses this file, it never sources it; each name appears once and each
+# value is checked. A value that could not be read would be the word UNREAD,
+# which the script refuses.
+#
+# Read on 2026-11-23 from public sources: meta-imx at the commit
+# platform-image/manifest.lock names (2eb758f4...) has imx-secure-enclave%.bbappend
+# with SRCBRANCH lf-6.18.37_2.1.0 and SRCREV 4638450...; meta-freescale at the
+# commit that file names (ca31f33c...) has recipes-bsp/imx-secure-enclave/
+# imx-secure-enclave_git.bb with PLAT = "ele" for i.MX 95 (mx9-nxp-bsp).
+ELE_REPO=https://github.com/NXP/imx-secure-enclave.git
+ELE_BRANCH=lf-6.18.37_2.1.0
+ELE_COMMIT=463845060a79dd9a6d39db3b3d8dff60225b9dfd
+# SHA-256 of `git archive --format=tar <commit>` (taken twice, equal).
+ELE_ARCHIVE_SHA256=31f7baedab12e5c5b1efe088d609243e63e5992bea9701082f0942fc4c90c079
+ELE_PLAT=ele
+# The toolchain is TOOLCHAIN_URL / TOOLCHAIN_SHA256 of secure-world/bsp.lock.
+TOOLCHAIN_LOCK=secure-world/bsp.lock

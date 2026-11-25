@@ -2,7 +2,9 @@
 # image-tag.sh <toolchain|secure-world|integration> <repo-name>
 #
 # Prints a CI image tag named by its content (handbook ci-standard.md §9):
-#   toolchain    <repo>-toolchain:<hash of the Dockerfile and the pin files>
+#   toolchain    <repo>-toolchain:<hash of the Dockerfile and every file it
+#                COPYs as a pin: tool and SPSDK pins, and the ele-src stage's
+#                ele-lib-build.sh, ele-lib.lock and bsp.lock>
 #   secure-world <repo>-secure-world:<hash of the Dockerfile and scripts/tool-pins.sh>
 #   integration  <repo>-ci-it:<hash of the commit's tree, on a dirty checkout
 #                the diff and every untracked file .gitignore keeps, and
@@ -17,7 +19,8 @@ cd "$root"
 case "$family" in
 toolchain)
 	hash=$(cat build/docker/devcontainer/Dockerfile scripts/tool-pins.sh scripts/fetch-tools.sh \
-		scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt | sha256sum)
+		scripts/ahab/spsdk-venv.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt \
+		scripts/ele-lib-build.sh secure-key-handling/ele-lib.lock secure-world/bsp.lock | sha256sum)
 	echo "${name}-toolchain:${hash:0:16}"
 	;;
 secure-world)

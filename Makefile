@@ -52,7 +52,8 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
 	okp-policy-check integration-test-oem-key-provisioning \\
-	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
+	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify \
+	ele-lib ele-lib-check ele-client-test
 
 help: ## List the targets
 	@echo "Targets:"
@@ -212,6 +213,21 @@ secure-world-check-lock: ## Check secure-world/bsp.lock offline (SW_LOCK=<file>)
 
 integration-test-secure-world: ## The secure-world integration test (test/integration/secure_world_test.sh), offline
 	@bash test/integration/secure_world_test.sh
+
+## --- The enclave HSM API client (docs/secure-key-handling/client.md; provisional) ---
+
+ELE_BASE ?= $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/trusted-imx95/ele-lib
+ELE_OUT  ?= $(CURDIR)/.ele-lib/out
+
+ele-lib-check: ## Check secure-key-handling/ele-lib.lock and the toolchain pin it reads (offline)
+	@scripts/ele-lib-build.sh --check-lock
+
+ele-lib: ## Fetch NXP's secure-enclave library at the pinned commit and SHA-256, cross-build it for aarch64 into ELE_OUT (needs network; not in CI)
+	@scripts/ele-lib-build.sh --work "$(ELE_BASE)/work" --out "$(ELE_OUT)" --cache "$(ELE_BASE)/cache"
+
+ele-client-test: ## Fetch the pinned secure-enclave source outside the checkout (commit and SHA-256 checked), then run test/ele_client_test.sh against it (needs network; not in CI)
+	@scripts/ele-lib-build.sh --work "$(ELE_BASE)/src-work" --src-only
+	@ELE_SRC="$(ELE_BASE)/src-work/src" REQUIRE_ELE_SRC=1 bash test/ele_client_test.sh
 
 ## --- The platform image (docs/platform-image/build.md) ---
 
