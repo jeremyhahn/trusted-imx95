@@ -101,6 +101,20 @@ state_ok() {
 	has "$mnt" 'Options=rw,' || { echo "the state mount is not read-write"; return 1; }
 	has "$wks" '--label xkms-state' || { echo "the layout has no xkms-state partition"; return 1; }
 	has "$wks" 'part /var/lib/xkms ' || { echo "the xkms-state partition is not for /var/lib/xkms"; return 1; }
+	has "$wks" 'part /boot ' || { echo "the layout has no /boot partition"; return 1; }
+	has "$wks" 'part / ' || { echo "the layout has no root partition"; return 1; }
+	local pl
+	while IFS= read -r pl; do
+		case $pl in
+		'part /'*)
+			case $pl in
+			*'--label xkms-state'*) ;;
+			*'--use-uuid'* | *'--use-label'*) ;;
+			*) echo "the mounted partition '$pl' is not mounted by uuid or label"; return 1 ;;
+			esac
+			;;
+		esac
+	done <"$wks"
 	has "$rec" 'file://var-lib-xkms.mount' || { echo "the mount unit is not in SRC_URI"; return 1; }
 	has "$rec" '${UNPACKDIR}/var-lib-xkms.mount ${D}${systemd_system_unitdir}/var-lib-xkms.mount' || { echo "the mount unit is not installed"; return 1; }
 	has "$rec" 'install -d -m 0750 ${D}${localstatedir}/lib/xkms' || { echo "the mount point is not created"; return 1; }
@@ -304,6 +318,10 @@ neg "negative: state mount of another label" state_ok "$ROOT/$unit_rel" "$scratc
 w0=$(<"$ROOT/$wks_rel")
 printf '%s\n' "${w0//--label xkms-state/--label data}" >"$scratch/nolabel.wks"
 neg "negative: layout without the xkms-state partition" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$scratch/nolabel.wks" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+printf '%s\n' "${w0//--label boot --use-uuid/--label boot}" >"$scratch/noboot-uuid.wks"
+neg "negative: a mounted /boot partition without a uuid or label mount" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$scratch/noboot-uuid.wks" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
+printf '%s\n' "${w0//--label root --use-uuid/--label root}" >"$scratch/noroot-uuid.wks"
+neg "negative: a mounted / partition without a uuid or label mount" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$scratch/noroot-uuid.wks" "$ROOT/$recipe_rel" "$ROOT/$image_rel"
 neg "negative: recipe without the mount unit" state_ok "$ROOT/$unit_rel" "$ROOT/$mount_rel" "$ROOT/$wks_rel" "$(rcopy 'file://var-lib-xkms.mount' 'file://x.mount' nomount)" "$ROOT/$image_rel"
 i0=$(<"$ROOT/$image_rel")
 printf '%s\n' "${i0//WKS_FILE = /X_FILE = }" >"$scratch/nowks.bb"

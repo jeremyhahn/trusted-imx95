@@ -9,8 +9,14 @@
 # (/var/lib/xkms) lives here; var-lib-xkms.mount (xkmsd recipe) mounts it by
 # this label and xkmsd.service refuses to start without it. It is not in the
 # root's fstab (--no-fstab-update): the mount unit owns it.
+#
+# /boot and / are mounted by filesystem UUID (--use-uuid), not by a device
+# name: the boot media differs (eMMC, microSD, NOR-boot with an eMMC root) and
+# a /dev/mmcblk number is not stable across them. Every mounted partition but
+# xkms-state carries --use-uuid or --use-label; test/platform_image_xkmsd_test.sh
+# checks it.
 bootloader --ptable gpt
 part --source rawcopy --sourceparams="file=${IMAGE_BOOTLOADER}" --ondisk mmcblk --no-table --align ${IMX_BOOT_SEEK}
-part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot --active --align 8192 --size 128M
-part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --align 8192
+part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot --use-uuid --active --align 8192 --size 128M
+part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --use-uuid --align 8192
 part /var/lib/xkms --ondisk mmcblk --fstype=ext4 --label xkms-state --align 8192 --size 256M --no-fstab-update
