@@ -102,7 +102,7 @@ want_sw() { # <name> <want> <event> <full> <path...>
 }
 
 want_sw "select: a README-only PR selects no secure-world build" false pull_request false README.md
-want_sw "select: a docs-only PR selects no secure-world build" false pull_request false docs/plans/166.md docs/secure-world/build.md
+want_sw "select: a docs-only PR selects no secure-world build" false pull_request false docs/threat-model.md docs/secure-world/build.md
 want_sw "select: an unrelated script selects no secure-world build" false pull_request false scripts/other.sh
 want_sw "select: a lookalike path selects none (scripts/secure-world-build.sh.bak)" false pull_request false scripts/secure-world-build.sh.bak
 want_sw "select: a README plus a watched file selects it" true pull_request false README.md secure-world/bsp.lock

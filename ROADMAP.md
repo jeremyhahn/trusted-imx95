@@ -21,6 +21,7 @@ None yet.
 
 - **boot-container** — the AHAB-signed boot container, signed with keys in HSM custody — issue #12 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **system-manager-config** — NXP's System Manager configured for the Cortex-M7 over SCMI — issue #13 — pinned, reproducible System Manager build exists (`make system-manager`, [build record](docs/system-manager-config/build.md)); imx-sm revision provisional until #14 Q2; board configuration unchanged, not flashed or signed — approved after the survey of #167 (owner rulings 1243 and 1244)
+- **xkms-board** — xkmsd from go-xkms on the board's Linux side, as the owner's 2026-11-24 directive asks: a reproducible static linux/arm64 build, a deploy with backup and automatic rollback, a burn-in suite and an eMMC rescue path — issue #139 — in progress, approved by the owner on 2026-11-25; build, deploy, rollback, burn-in suite and rescue are in the tree (#196); the burn-in run on the board remains
 - **maintenance** — the standing row for dependency updates and CI-configuration changes, worked on `row/178-maintenance`; it never closes and gates no release, so it sits outside every release-gating milestone (owner ruling 1234) — issue #178 — standing; the next `ci.yml` template adoption lands from it
 
 ## Next
@@ -31,7 +32,7 @@ None yet.
 
 Planned, undated. No issue is filed yet; each line gets its issue once the owner approves this file.
 
-- **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — no issue yet — blocked: owner approval; image build open
+- **platform-image** — the board's Linux image, booting from the eMMC and running xkmsd — issue #204 — blocked: owner approval; image build open
 - **secure-world** — the Cortex-A55 secure world of owner ruling 771: upstream TF-A (BL31) and the NXP BSP's OP-TEE with the PKCS#11 TA, hosting the `ftpm` entry's firmware TPM TA, configured and built here — no issue yet — blocked: owner approval; needs platform-image, and boot-container to sign the BL31 and OP-TEE images; go-xkms's PKCS#11 backend and go-trusted-platform consume it
   - (a) Pin the BSP: the NXP Linux BSP release tag, and the OP-TEE and `imx-optee-os` revisions it carries; TF-A is upstream v2.15.0, not the BSP's (ruling 771). State: sources pinned in `secure-world/bsp.lock`, with the BSP release `lf-6.18.37-2.1.0` PROVISIONAL until the owner chooses the baseline (#14 Q2); not complete.
   - (b) Reproducible build: pinned sources, toolchain and build command; a byte-for-byte rebuild check; the OP-TEE configuration flags that enable the PKCS#11 TA (the fTPM TA's flags are the `ftpm` entry's). State: `make secure-world` builds both artefacts with a SHA-256 manifest; `scripts/secure-world-build.sh` builds twice in clean directories and fails unless both outputs are identical, and the `secure-world-build` CI job runs it. Nothing has run on the board.
@@ -43,7 +44,7 @@ Planned, undated. No issue is filed yet; each line gets its issue once the owner
   - (d) Provisioning: go-xkms endorse-01 issues the EK certificate, then enroll-01, then device-attest-01 in the `tpm` format.
   - (e) Measured boot: each stage that can extend the fTPM PCRs does, and each gap in [docs/ftpm/](docs/ftpm/README.md#measured-boot) is closed or accepted by the owner.
 - **secure-key-handling** — keys held in the EdgeLock key store, never in the clear — no issue yet — blocked: owner approval; calling side and SE051 role open
-- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave, closed only at the provisioning station and never on a development board (owner ruling 1234) — no issue yet — blocked: owner approval; IMX95RM and the Security Reference Manual missing
+- **oem-key-provisioning** — OEM keys imported and the life cycle closed through the enclave, closed only at the provisioning station and never on a development board (owner ruling 1234) — issue #176 — blocked: owner approval; IMX95RM and the Security Reference Manual missing
 - **hsm-device-protocol** — the device side of go-xkms's xkmsd-to-device protocol over 1 GbE and 10 GbE — issue #24 — the HSM is an xkmsd node (owner rulings 1243 and 1244); needs go-xkms's wire protocol (`go-xkms#1521`)
 - **device-lifecycle** — the device side of go-trusted-platform's provisioning, enrollment and attestation — issue #177 (folder index #25) — blocked: owner approval; per owner ruling 1234 the device first presents an EdgeLock enclave attestation (RM00284 §3.12, requested by the Cortex-A55), then go-xkms endorse-01 certifies the fTPM EK, then enroll-01 and device-attest-01 in the `tpm` format (ruling 927); the root, the EK binding and the wire format are open for go-xkms and go-trusted-platform
 - **hsm-self-defence** — the HSM device side of the Cortex-M7 tamper response — issue #26 — blocked: owner approval; A55 side proposed, pending owner approval

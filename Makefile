@@ -51,7 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
-	okp-policy-check integration-test-oem-key-provisioning \
+	okp-policy-check integration-test-oem-key-provisioning integration-test-xkms-board \
 	hsm-self-defence-check integration-test-hsm-self-defence \
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
@@ -269,6 +269,13 @@ integration-test-boot-container: ## The boot-container row end to end: ahab-sign
 		$(MAKE) --no-print-directory "$$t" || { echo "integration-test-boot-container: FAIL $$t"; exit 1; }; \
 	done
 	@echo "integration-test-boot-container: OK"
+
+integration-test-xkms-board: ## The xkms-board row, host side: the deploy against a fake board, the upgrade check, the rescue protocol (stubs and plain files; no board, no network)
+	@for t in xkms_board_tools_test xkms_upgrade_test board_rescue_test; do \
+		echo "--- bash test/$$t.sh"; \
+		bash "test/$$t.sh" || { echo "integration-test-xkms-board: FAIL $$t"; exit 1; }; \
+	done
+	@echo "integration-test-xkms-board: OK"
 
 ## --- The test-PKI boot image (docs/boot-container/boot-image.md; no board, no flash) ---
 
