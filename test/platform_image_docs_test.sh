@@ -2,7 +2,8 @@
 # Structure test of docs/platform-image/emmc-layout.md (provisional, pending the
 # owner's answer on #14): required headings, the "proposed, pending owner
 # approval" status, a source cell in every region table row, no closing keyword.
-# A scratch copy with a heading removed must fail.
+# A scratch copy with a heading removed must fail. It also holds the ROADMAP
+# pointer: the platform-image entry names issue #204 and not "no issue yet".
 set -euo pipefail
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -58,5 +59,33 @@ printf '%s\n' '| a thing | 0 | someone | |' >"$TMP_ROOT/row.md"
 { echo "## Regions"; cat "$TMP_ROOT/row.md"; } >"$TMP_ROOT/row2.md"
 run check_doc "$TMP_ROOT/row2.md"
 expect "a region row with an empty source cell is reported" test "${OUT##*region row without a source cell*}" != "$OUT"
+
+# check_roadmap FILE: prints one line per problem in the top-level platform-image entry.
+check_roadmap() {
+	local f=$1 l entry=
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in '- **platform-image**'*) entry=$l ;; esac
+	done <"$f"
+	[ -n "$entry" ] || {
+		echo "no platform-image entry"
+		return 0
+	}
+	case $entry in *'issue #204'*) ;; *) echo "platform-image entry does not name issue #204" ;; esac
+	case $entry in *'no issue yet'*) echo "platform-image entry says no issue yet" ;; esac
+}
+
+run check_roadmap "$ROOT/ROADMAP.md"
+expect "the ROADMAP platform-image entry names issue #204" test -z "$OUT"
+
+roadmap_copy=$TMP_ROOT/ROADMAP.md
+rm -f "$roadmap_copy"
+while IFS= read -r l || [ -n "$l" ]; do
+	case $l in
+	'- **platform-image**'*) l=${l/issue #204/no issue yet} ;;
+	esac
+	printf '%s\n' "$l" >>"$roadmap_copy"
+done <"$ROOT/ROADMAP.md"
+run check_roadmap "$roadmap_copy"
+expect "a ROADMAP copy with the pointer put back to no issue yet is reported" test "${OUT##*platform-image entry says no issue yet*}" != "$OUT"
 
 finish

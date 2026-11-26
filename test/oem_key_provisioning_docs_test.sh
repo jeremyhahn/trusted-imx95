@@ -40,4 +40,21 @@ for want in \
 	expect "architecture.md states: $want" test "${arch/"$want"/}" != "$arch"
 done
 
+# ROADMAP.md names the row's issue: the entry says "issue #176" and no longer
+# "no issue yet". The negative runs the same check on a copy without the pointer.
+roadmap_names_issue() {
+	local entry="" line
+	while IFS= read -r line; do
+		[[ "$line" == "- **oem-key-provisioning** "* ]] && entry=$line
+	done <"$1"
+	[[ -n "$entry" && "$entry" == *"issue #176"* && "$entry" != *"no issue yet"* ]]
+}
+expect "ROADMAP.md names issue #176 for oem-key-provisioning" roadmap_names_issue "$ROOT/ROADMAP.md"
+noptr="$TMP_ROOT/ROADMAP.no-pointer.md"
+while IFS= read -r line; do
+	printf '%s\n' "${line/"issue #176"/no issue yet}"
+done <"$ROOT/ROADMAP.md" >"$noptr"
+roadmap_rejects_issue() { ! roadmap_names_issue "$1"; }
+expect "negative: ROADMAP.md copy without the pointer is rejected" roadmap_rejects_issue "$noptr"
+
 finish
