@@ -53,6 +53,26 @@ must change the board's `/proc/sys/kernel/random/boot_id`.
     scripts/xkms/burnin/soak.sh --hours 8 <board>
     scripts/xkms/burnin/powerloss.sh --hard-reboot <board>
 
+### Board client
+
+xkmsd needs mutual TLS on every transport, and its only client credential is
+the init admin credential in its storage directory, readable by the `xkms`
+user alone. The key must not leave the board, so the suite runs the board's own
+`xkmsctl` through `scripts/xkms/burnin/board-ctl.sh`, which runs it over ssh as
+the `xkms` user and names the key by path only:
+
+    XKMS_BOARD=<board> scripts/xkms/burnin/functional.sh \
+        --ctl scripts/xkms/burnin/board-ctl.sh --ctl-args "--transport rest" <board>
+
+Set `XKMS_BOARD` to the same target as the positional `<board>`. It adds
+`--tls-ca`, `--tls-cert` and `--tls-key` from `XKMS_BOARD_TLS_CA`,
+`XKMS_BOARD_TLS_CERT` and `XKMS_BOARD_TLS_KEY` (defaults under
+`/var/lib/xkms/storage`: `unified-tls/cert.pem` as the CA, `admin-cert.pem`,
+`admin-key.pem`); `XKMS_BOARD_CTL` is the board's `xkmsctl`. Files named by
+`--output`, `--key-output`, `--ca-cert`, `--ca-key`, `--csr`, `cert save` and
+`key export` move through a per-call temp directory on the board, removed on
+exit. The script header has the details.
+
 Run `powerloss.sh` and `diskfull.sh` last on a board you can reach again:
 the first reboots it, the second fills `/var/lib/xkms` for a short time.
 None of the scripts touches fuses, the life cycle or RPMB.

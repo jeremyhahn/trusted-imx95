@@ -978,6 +978,8 @@ ok "diskfull proof: says the durability cannot be checked" out_has "$tmp/df-nopr
 for s in "$here"/scripts/xkms/burnin/*.sh; do
 	[ -e "$s" ] || continue
 	n=$(basename "$s")
+	# board-ctl.sh is the --ctl stand-in, tested in xkms_burnin_ctl_test.sh
+	[ "$n" != board-ctl.sh ] || continue
 	[ "$n" = lib.sh ] && continue
 	set +e
 	"$s" --help >"$tmp/h.log" 2>&1
