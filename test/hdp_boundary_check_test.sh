@@ -54,6 +54,22 @@ run python3 "$CHK" "$t"
 check "B1: the rulings and #1521 cited without their statements fail" 1 "FAIL B1 row" \
 	"not in the sentence that states the HSM is an xkmsd node" "not in the sentence that states go-xkms #1521 owns the open questions"
 
+# A sentence that starts with go-xkms must not join the open-question sentence before it.
+t="$TMP_ROOT/b1-go-xkms-sentence"
+tree "$t"
+python3 - "$t/docs/SPEC.md" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+old = "go-xkms's open questions (go-xkms #1521), which go-xkms still owns."
+assert old in s
+s = s.replace(old, "go-xkms's open questions. go-xkms #1521 tracks unrelated work.")
+open(p, "w", encoding="utf-8").write(s)
+EOF
+run python3 "$CHK" "$t"
+check "B1: a go-xkms sentence after the open questions does not carry #1521 for them" 1 "FAIL B1 row" \
+	"not in the sentence that states go-xkms #1521 owns the open questions"
+
 t="$TMP_ROOT/b1-gone"
 tree "$t"
 printf '# spec\n' >"$t/docs/SPEC.md"

@@ -72,7 +72,10 @@ ROW_SENTENCES = (
     ("the HSM is an xkmsd node", "rulings 1243 and 1244", re.compile(r"\bHSM is an xkmsd node\b", re.IGNORECASE)),
     ("go-xkms #1521 owns the open questions", "go-xkms #1521", re.compile(r"\bopen questions\b", re.IGNORECASE)),
 )
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`])|\n|<br\s*/?>")
+# A sentence ends at ., ! or ? followed by whitespace, whatever the next character is
+# (a sentence may start with go-xkms or a digit). Dots with no whitespace after them
+# (v0.64.2, 1.2) and the abbreviations e.g. and i.e. do not end one.
+SENTENCE_END = re.compile(r"(?<!e\.g\.)(?<!i\.e\.)(?<=[.!?])\s+|\n|<br\s*/?>")
 
 
 def read(path):
