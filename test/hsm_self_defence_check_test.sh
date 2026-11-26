@@ -40,4 +40,52 @@ printf '%s\n' "| hsm-self-defence | planned | x |" >"$t/docs/SPEC.md"
 run python3 "$CHECK" "$t"
 check "hsm-self-defence-check: a row without four cells fails" 1 "the row has four cells: found 3"
 
+# The no-build guard reads the build integration, not target names: a minimal
+# tree that passes, then a copy per way of compiling an A55 source.
+printf '%s\n' "| Row | Status | Requirements | Folder |" "|---|---|---|---|" "$spec" >"$t/docs/SPEC.md"
+MSG="build files: nothing compiles the hsm-self-defence A55 sources"
+fixture() { rm -rf "${TMP_ROOT:?}/$1"; cp -r "$t" "$TMP_ROOT/$1"; echo "$TMP_ROOT/$1"; }
+
+b=$(fixture recipe)
+printf 'build:\n\tcc -o /tmp/q hsm-self-defence/a55/quarantine.c\n' >"$b/Makefile"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: a non-hsd target recipe compiling an A55 source fails" 1 "$MSG" "named by Makefile"
+
+b=$(fixture included)
+mkdir -p "$b/mk"
+printf 'build:\n\t@true\ninclude mk/extra.mk\n' >"$b/Makefile"
+printf 'extra:\n\tcc -c hsm-self-defence/a55/tamper_event.c\n' >"$b/mk/extra.mk"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: an included makefile compiling an A55 source fails" 1 "$MSG" "named by mk/extra.mk"
+
+b=$(fixture script)
+mkdir -p "$b/scripts"
+printf 'build:\n\t@bash scripts/pack.sh\n' >"$b/Makefile"
+printf '#!/bin/sh\ncc -o /tmp/q hsm-self-defence/a55/quarantine.c\n' >"$b/scripts/pack.sh"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: an unrelated script that compiles an A55 source fails" 1 "$MSG" "named by scripts/pack.sh"
+
+b=$(fixture bbappend)
+mkdir -p "$b/platform-image/meta/recipes"
+printf 'SRC_URI += "file://hsm-self-defence/a55/tamper_event.c"\n' >"$b/platform-image/meta/recipes/x.bbappend"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: a bbappend adding an A55 source fails" 1 "$MSG" "named by platform-image/meta/recipes/x.bbappend"
+
+# An include operand is expanded from the literal variables set before it; one
+# still holding a Make expression fails closed.
+b=$(fixture incvar)
+mkdir -p "$b/mk"
+printf "MKDIR := mk\nbuild:\n\t@true\ninclude \$(MKDIR)/extra.mk\n" >"$b/Makefile"
+printf 'extra:\n\tcc -c hsm-self-defence/a55/quarantine.c\n' >"$b/mk/extra.mk"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: an include through a plain variable is followed and fails" 1 "$MSG" "named by mk/extra.mk"
+
+b=$(fixture incshell)
+mkdir -p "$b/mk"
+printf "build:\n\t@true\ninclude \$(shell echo mk)/extra.mk\n" >"$b/Makefile"
+printf 'extra:\n\t@true\n' >"$b/mk/extra.mk"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: an include the checker cannot resolve fails" 1 \
+	"build files: an include the checker cannot resolve" "Makefile includes '\$(shell"
+
 finish

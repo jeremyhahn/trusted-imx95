@@ -9,6 +9,7 @@ the tree builds it beyond the A55 service files #183 put in hsm-self-defence/.
 Prints one "ok"/"FAIL" line per check; exits 0 when all hold, 1 when one
 fails, 2 on a usage error.
 """
+import glob
 import os
 import re
 import sys
@@ -74,6 +75,76 @@ def table_rows(lines, name):
     return out
 
 
+INCLUDE = re.compile(r"^\s*-?(?:include|sinclude)\s+(.*)$")
+ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:::=|:=|\?=|=)\s*(.*)$")
+VARREF = re.compile(r"\$(?:\(([A-Za-z_][A-Za-z0-9_.-]*)\)|\{([A-Za-z_][A-Za-z0-9_.-]*)\})")
+BUILD_SUFFIXES = (".bb", ".bbappend", ".inc", ".mk", ".sh")
+
+
+def make_includes(root, rel, seen, variables, unresolved):
+    """rel and every makefile it pulls in with include/-include, recursively.
+    Plain VAR := value / VAR = value lines with a literal value, made earlier,
+    are expanded in an operand; one that still holds a Make expression is
+    appended to unresolved as (file, operand)."""
+    if rel in seen:
+        return
+    path = os.path.join(root, rel)
+    if not os.path.isfile(path):
+        return
+    seen.add(rel)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f.read().splitlines():
+            line = line.split("#", 1)[0]
+            a = ASSIGN.match(line)
+            if a:
+                if "$" in a.group(2):
+                    variables.pop(a.group(1), None)
+                else:
+                    variables[a.group(1)] = a.group(2).strip()
+                continue
+            m = INCLUDE.match(line)
+            if not m:
+                continue
+            for word in m.group(1).split():
+                word = VARREF.sub(lambda v: variables.get(v.group(1) or v.group(2), v.group(0)), word)
+                if "$" in word:
+                    unresolved.append((rel, word))
+                    continue
+                for hit in sorted(glob.glob(os.path.join(root, word))):
+                    make_includes(root, os.path.relpath(hit, root), seen, variables, unresolved)
+
+
+def compiling_files(root):
+    """The build files that name the A55 sources: the Makefile and what it
+    includes, every script under scripts/ but this checker, and the BitBake
+    recipes, appends, includes and scripts under platform-image/."""
+    files = set()
+    unresolved = []
+    make_includes(root, "Makefile", files, {"CURDIR": root}, unresolved)
+
+    def fail(e):
+        raise e
+
+    for sub, keep in (("scripts", lambda f: f != "hsm-self-defence-check.py"),
+                      ("platform-image", lambda f: f.endswith(BUILD_SUFFIXES))):
+        top = os.path.join(root, sub)
+        if not os.path.isdir(top):
+            continue
+        for d, _, fs in os.walk(top, onerror=fail):
+            for f in fs:
+                p = os.path.join(d, f)
+                if keep(f) and os.path.isfile(p):
+                    files.add(os.path.relpath(p, root))
+    names = [ROW + "/"] + [os.path.basename(t) for t in TREE_FILES]
+    hits = []
+    for rel in sorted(files):
+        with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        if any(n in text for n in names):
+            hits.append(rel)
+    return hits, unresolved
+
+
 def main(argv):
     if len(argv) != 2 or not os.path.isdir(argv[1]):
         print("usage: hsm-self-defence-check.py <root>", file=sys.stderr)
@@ -133,6 +204,15 @@ def main(argv):
     extra = sorted(f for f in (os.listdir(scripts) if os.path.isdir(scripts) else [])
                    if f.startswith(ROW) and f not in ALLOWED_SCRIPTS)
     r.check(not extra, "scripts/: no hsm-self-defence build script", "found " + ", ".join(extra))
+    try:
+        hits, unresolved = compiling_files(root)
+        r.check(not unresolved, "build files: an include the checker cannot resolve",
+                ", ".join(f"{f} includes '{w}'" for f, w in unresolved))
+        r.check(not hits, "build files: nothing compiles the hsm-self-defence A55 sources",
+                "named by " + ", ".join(hits))
+    except OSError as e:
+        r.check(False, "build files: nothing compiles the hsm-self-defence A55 sources",
+                f"unreadable ({e})")
     tree = os.path.join(root, ROW)
     have = sorted(os.path.relpath(os.path.join(d, f), tree)
                   for d, _, fs in os.walk(tree) for f in fs)
