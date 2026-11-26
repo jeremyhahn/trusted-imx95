@@ -1,4 +1,4 @@
-# SPSDK 3.13.0 and its whole dependency closure, each pinned to one version and
+# SPSDK 3.14.0 and its whole dependency closure, each pinned to one version and
 # to the SHA-256 of every file pip may pick for it on Linux x86_64: the
 # CPython 3.13 and 3.14 manylinux and musllinux wheels, the abi3 and the
 # pure-Python wheels, or the sdist when a project publishes no wheel (hexdump,
@@ -34,14 +34,14 @@ cffi==2.1.1 \
     --hash=sha256:e0bcb7e0f677f543555d2adff3bf19c05f66cdb4796e5ff602442ab2fe3c4ef7
 chardet==5.2.0 \
     --hash=sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970
-charset-normalizer==3.5.2 \
-    --hash=sha256:1c50fe28bbc2ced33386f298650d91218076c05420e6cbd790b913adc41659e7 \
-    --hash=sha256:34276fd796040bf0993ab33a369aa572e6979c7aab225a88893667ad8eac8f7a \
-    --hash=sha256:7218e8f32b0956cfcd048fd42d9d5779809745ca1d86113ca56f66e7ae1549c4 \
-    --hash=sha256:9cae88599c7219005d879f98e5ed53341e9a122af585e1091200358a3003d2a0 \
-    --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685 \
-    --hash=sha256:ddc7dacc8ece3a182e7f15cb862d1fd616b46d076cb1ae9dd232b2c38b655874 \
-    --hash=sha256:e243bd13217235fc7290c621941c3f5cc8b66e4872495be821d7436ba2fb838d
+charset-normalizer==3.5.3 \
+    --hash=sha256:26c6ad87bb79628954b52f8f7b9e18ab5cd9667546712ded9689fb7677e630d6 \
+    --hash=sha256:3e8da696ef1935a019c10ec16555a062183ddf6d5901e296edeca4b2a8f84e1d \
+    --hash=sha256:656b9744bac4493561d28b56d7d646afd7a8471254ef7004d849aa8368020037 \
+    --hash=sha256:8baddc6349faf49edae4d1322f12b681b9e86acacd01874457c997437ef4ccaa \
+    --hash=sha256:96e268b0cbda016ac519513294fcd17032264085b600abaac58b93049477e132 \
+    --hash=sha256:9eba4613d45b49196af04a5cbadfc5e9379ba94aac85184b72cb1107ad31af0d \
+    --hash=sha256:ee9de080e8d6221bbe4ba2667367b1cee0f47a53f60ffc5e431b698cd2f2b214
 click==8.5.1 \
     --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37
 click-command-tree==1.2.0 \
@@ -89,12 +89,12 @@ libusb-package==1.0.30.1 \
 libusbsio==2.2.1 \
     --hash=sha256:7374a0b5754adb2ab9701e33e0a30ab64819d192bee972fd1f5a0ce3fc54380c
 libuuu==1.5.243 \
-    --hash=sha256:9e23ad9107f66fb36e7bce9d4657b7f674853c121f7e5b8cf7b433fd3d1c3119 \
-    --hash=sha256:93b0c556baa41f33cb8d931d5b22dd7dac32392c3e2fb062e2845d789a3a971c
+    --hash=sha256:93b0c556baa41f33cb8d931d5b22dd7dac32392c3e2fb062e2845d789a3a971c \
+    --hash=sha256:9e23ad9107f66fb36e7bce9d4657b7f674853c121f7e5b8cf7b433fd3d1c3119
 oscrypto==1.3.0 \
     --hash=sha256:2b2f1d2d42ec152ca90ccb5682f3e051fb55986e1b170ebde472b133713e7085
-packaging==26.3 \
-    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+packaging==26.4 \
+    --hash=sha256:81383611a09c1bc0b08b76e0fd5829d7c6824c65b27a6aee339da133f4233ea2
 platformdirs==4.14.8 \
     --hash=sha256:1e34af590de4d978631b751eb2202f2fee4497537a17c1720b12fcf57b331392
 prettytable==3.19.0 \
@@ -105,6 +105,11 @@ pycparser==3.12 \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
 pyelftools==0.33 \
     --hash=sha256:f215ad5f47d3f1373a21496a6c9e0707c622840d0622f23ff7ce08678b020036
+pyjson5==2.0.1 \
+    --hash=sha256:0e042f9b869e7f21d5f53a2638e5d0cf1daaba2342127c8777c502daf972602e \
+    --hash=sha256:2930140edd1a64eb42689993c5ae317bca2e6bc785b5dc5053bd5e9d184c98ad \
+    --hash=sha256:c9dca542eeb6e8fbbc1fe3373bfd18ae6250f1aedc78f39242ac12c8837091b8 \
+    --hash=sha256:cc03673adb544324500d79b2acfe2ced038998b2aceb564d335de9cc238cbdb0
 pyserial==3.5 \
     --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0
 pyusb==1.3.1 \
@@ -128,10 +133,10 @@ setuptools-scm==9.2.2 \
     --hash=sha256:30e8f84d2ab1ba7cb0e653429b179395d0c33775d54807fc5f1dd6671801aef7
 sly==0.5 \
     --hash=sha256:20485483259eec7f6ba85ff4d2e96a4e50c6621902667fc2695cc8bc2a3e5133
-spsdk==3.13.0 \
-    --hash=sha256:2826ce4960db848b4bc4922d6e925e6654d55da4a7097c62e63c71c143d16df4
-spsdk-mcu-link==0.6.18 \
-    --hash=sha256:8ad2003bf5fd5c51595184e1f5464ec2b4e15a6722f1eb114ea020cc820d7aeb
+spsdk==3.14.0 \
+    --hash=sha256:ce14ae18d0799da48d8b508a782a8d31ceed5821868b1386b2a3928b6db74fea
+spsdk-mcu-link==0.6.19 \
+    --hash=sha256:45663bcb07a0219484e0ef9c3ed021fbfdbb216f2c4f1f12f542189897e87911
 t61codec==1.0.1 \
     --hash=sha256:4dae780d65086a10ff822b14ecebb762defe478645a248b74980ced87c85f723
 tibs==0.5.7 \
@@ -145,10 +150,10 @@ wasmtime==24.0.0 \
     --hash=sha256:94799597e5067fb5d3c0d14fe2b06aff735a12eb4ed4389df5d2d449fa72a227 \
     --hash=sha256:f30a3bfa87118133582654fcce1d3967efd2b4cb1b2d4a818ca8f74666627c47 \
     --hash=sha256:fd75f520ca988b4a63aab6e93d0844c7dfaaf2361605cb27907fd3e641eb5d03
-wcwidth==0.9.4 \
-    --hash=sha256:901eace6d2dd25ebb917d0ce5db18e5c537e1504c905cf32f0d006c12098b05d \
-    --hash=sha256:b185c8b927b23af2721be1783499d1cfa5c028b098b0858951b4ae224477f1c2 \
-    --hash=sha256:d8905f1390d828d745fdd1904374c90386d902d3cfa9ee88e9875099f75a4e17
+wcwidth==0.9.5 \
+    --hash=sha256:61ffb194ccf2224ff552b46912aa44f1bc841f8ef751b193335b317a286b7c03 \
+    --hash=sha256:76523d4013b1373b74654b19f4c68ce2af2deb00bacdd7ef497403eeeaff2ec6 \
+    --hash=sha256:ef205150ff317032d633de2d8ca26d03dc8d5ba6a00294f6acfd1d0cfe1365d6
 x690==1.0.0.post1 \
     --hash=sha256:de754c27c9a46e6ede08036a804478ecd79591ecbe92df6f97b34adee55e9d64
 zipp==4.1.2 \

@@ -18,7 +18,7 @@
 # --hsm-key 1 makes the HSM hold a key that is not the container's used SRK
 # (used_srk_id 0); --no-hsm starts no HSM. Both must fail: there is no
 # fallback to a key file. AHAB_OUT_DIR, if set, receives m7-container.bin.
-# The SPSDK venv comes from spsdk-venv.sh (pinned 3.13.0). No real key, no real
+# The SPSDK venv comes from spsdk-venv.sh (pinned 3.14.0). No real key, no real
 # HSM, no fuse: the .bcf fuse script nxpimage writes is deleted unread.
 set -euo pipefail
 

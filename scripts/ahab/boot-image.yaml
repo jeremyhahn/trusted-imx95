@@ -1,4 +1,4 @@
-# nxpimage ahab export configuration for make boot-image-test (SPSDK 3.13.0).
+# nxpimage ahab export configuration for make boot-image-test (SPSDK 3.14.0).
 # PROVISIONAL (docs/boot-container/boot-image.md). The full i.MX 95 B0 (SPSDK
 # family mimx9596, revision b0) boot image as three OEM containers signed with
 # a throwaway ECDSA P-384 test SRK; scripts/ahab/boot-image.sh copies this file
@@ -16,7 +16,7 @@
 #                uboot and tee entries; atf at the cited 0x8A200000, tee at the
 #                cited 0x8C000000, uboot at SPSDK's default; see the entries).
 #
-# Addresses, core ids and image types are SPSDK 3.13.0 defaults or the values of
+# Addresses, core ids and image types are SPSDK 3.14.0 defaults or the values of
 # m7-container.yaml; the boot ROM's order and the real load addresses are
 # MISSING (IMX95RM, docs/boot-container/architecture.md "Missing"). The
 # fuse_version and sw_version are 0 for this test image only.
@@ -71,7 +71,7 @@ containers:
       signer: type=file;file_path=srk0.pem
       images:
         # BL31 at 0x8A200000: TF-A da738d5 plat/imx/imx9/imx95/include/
-        # platform_def.h:34 (BL31_BASE U(0x8A200000)). SPSDK 3.13.0's atf default
+        # platform_def.h:34 (BL31_BASE U(0x8A200000)). SPSDK 3.14.0's atf default
         # is the same address, so the shorthand stays; the test asserts it.
         - atf: bl31.bin
         # U-Boot is a stand-in here: SPSDK's default address, not a pinned value.
@@ -82,7 +82,7 @@ containers:
         # (CFG_TZDRAM_START = CFG_DRAM_BASE + 0x0C000000), with CFG_DRAM_BASE
         # 0x80000000 for the mx95 flavours at conf.mk:299. Written out
         # because the tee shorthand cannot carry an address; every other field
-        # is what the shorthand produced under SPSDK 3.13.0.
+        # is what the shorthand produced under SPSDK 3.14.0.
         - image_path: tee.bin
           load_address: '0x8C000000'
           entry_point: '0x8C000000'

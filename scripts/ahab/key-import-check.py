@@ -9,7 +9,7 @@ is a production derivation.
       real device.
 
   key-import-check.py check <blob> <MK_SK hex file> <raw key file>
-      Check a key_import TLV blob built by SPSDK 3.13.0 (RFC 3394 wrapping,
+      Check a key_import TLV blob built by SPSDK 3.14.0 (RFC 3394 wrapping,
       CMAC): derive OEM_IMPORT_WRAP_SK and OEM_IMPORT_CMAC_SK from the MK_SK
       (HKDF-SHA256, zero salt, the info strings the SPSDK source uses), check the
       trailing 16-byte CMAC over everything before it, and unwrap the wrapped key

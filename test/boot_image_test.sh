@@ -448,7 +448,7 @@ done
 #       CFG_DRAM_BASE + 0x0C000000, with CFG_DRAM_BASE ?= 0x80000000 for the mx95
 #       flavours at conf.mk:299.
 #  atf: TF-A da738d5eae93 plat/imx/imx9/imx95/include/platform_def.h:34,
-#       BL31_BASE U(0x8A200000); SPSDK 3.13.0's atf default is the same address.
+#       BL31_BASE U(0x8A200000); SPSDK 3.14.0's atf default is the same address.
 #  uboot: a stand-in, SPSDK's default, not asserted.
 WANT_ATF_LOAD=0x8a200000 WANT_ATF_ENTRY=0x8a200000
 WANT_TEE_LOAD=0x8c000000 WANT_TEE_ENTRY=0x8c000000

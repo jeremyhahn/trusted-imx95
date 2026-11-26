@@ -32,7 +32,7 @@ touch "$stamp"
 # verifies again through the same step.
 run env AHAB_OUT_DIR="$out" make -C "$ROOT" --no-print-directory ahab-sign-test
 check "(a) make ahab-sign-test builds, signs and verifies a mimx9596 b0 container" 0 \
-	"nxpimage, version 3.13.0" "verify: OK" "SRK table hash (test PKI only):" "ahab-sign-test: OK"
+	"nxpimage, version 3.14.0" "verify: OK" "SRK table hash (test PKI only):" "ahab-sign-test: OK"
 bin="$out/container.bin"
 if [ -s "$bin" ]; then
 	run "$SIGN" verify "$bin"
@@ -148,12 +148,12 @@ keys=$(git -C "$ROOT" ls-files -z --cached --others --exclude-standard | xargs -
 if [ -z "$keys" ]; then pass "(c) no private key under the clone"; else
 	fail "(c) private key material under the clone" "$keys"; fi
 
-# (d) a venv whose SPSDK is not 3.13.0 fails the run, naming the pin.
+# (d) a venv whose SPSDK is not 3.14.0 fails the run, naming the pin.
 fake="$TMP_ROOT/fake-venv"
 mkdir -p "$fake/bin"
 printf '#!/bin/sh\necho "nxpimage, version 3.12.1"\n' >"$fake/bin/nxpimage"
 chmod +x "$fake/bin/nxpimage"
 run env SPSDK_VENV="$fake" "$SIGN"
-check "(d) a run with SPSDK 3.12.1 in the venv fails naming the pin" nonzero "3.13.0" "3.12.1"
+check "(d) a run with SPSDK 3.12.1 in the venv fails naming the pin" nonzero "3.14.0" "3.12.1"
 
 finish

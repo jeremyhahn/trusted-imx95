@@ -185,11 +185,11 @@ s = s + s[i:]'
 run_scratch dup
 expect_fail "a duplicated name fails and is named" "zipp" "appears twice"
 
-scratch otherver 's = s.replace("requirements file for SPSDK 3.13.0", "requirements file for SPSDK 3.12.9", 1)' provisioning-host-survey.md
+scratch otherver 's = s.replace("requirements file for SPSDK 3.14.0", "requirements file for SPSDK 3.12.9", 1)' provisioning-host-survey.md
 run_scratch otherver
 expect_fail "a document with another SPSDK version fails and names document and version" "provisioning-host-survey.md" "3.12.9"
 
-scratch archver 's = s.replace("pinned at 3.13.0", "pinned at 3.14.0", 1)' architecture.md
+scratch archver 's = s.replace("pinned at 3.14.0", "pinned at 3.15.0", 1)' architecture.md
 run_scratch archver
 expect_fail "architecture.md with another SPSDK version fails and names it" "architecture.md" "3.14.0"
 
