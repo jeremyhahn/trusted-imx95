@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deps-check.sh [pin-file] | --fetch <dir> [pin-file]: fails when a pinned tool or the Alpine base is behind a release older than 7 days, unless <TOOL>_HOLD gives a reason; --fetch writes each tool's latest release to <dir>.
+# deps-check.sh [pin-file] | --fetch <dir> [pin-file]: fails when a pinned tool, the Alpine base, a pinned Python package (DEPS_REQUIREMENTS) or a pinned workflow action (DEPS_WORKFLOWS) is behind a release older than 7 days, unless <TOOL>_HOLD gives a reason; one unreadable item fails and does not hide the others; --fetch writes each tool's latest release to <dir>.
 set -euo pipefail
 
 fetch=
@@ -25,11 +25,11 @@ latest_github() {
 	if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
 		code=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN:-${GH_TOKEN:-}}" |
 			curl -fsSL --retry 2 --config - -H 'Accept: application/vnd.github+json' \
-				-o "$body" --write-out='%{http_code}' \
+				-o "$body" --write-out '%{http_code}' \
 				"https://api.github.com/repos/$1/releases/latest") || rc=$?
 	else
 		code=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
-			-o "$body" --write-out='%{http_code}' \
+			-o "$body" --write-out '%{http_code}' \
 			"https://api.github.com/repos/$1/releases/latest") || rc=$?
 	fi
 	[ -z "$xt" ] || set -x
@@ -63,9 +63,32 @@ valid_release() {
 		[[ $2 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
 }
 
-# judge <name> <pinned> <latest> <released-at> <hold-reason>
+# latest_pypi <package> prints "<version> <upload time>" of the newest release; a failure prints the reason.
+latest_pypi() {
+	local body code rc=0
+	body=$(mktemp)
+	code=$(curl -fsSL --retry 2 -o "$body" --write-out '%{http_code}' \
+		"https://pypi.org/pypi/$1/json") || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		rm -f "$body"
+		if [ -n "$code" ] && [ "$code" != 000 ]; then echo "HTTP $code"; else echo "curl exit $rc"; fi
+		return 1
+	fi
+	if ! python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)
+t = d["urls"][0]["upload_time_iso_8601"]
+print(d["info"]["version"], re.sub(r"\.\d+Z$", "Z", t))' <"$body" 2>/dev/null; then
+		rm -f "$body"
+		echo "HTTP ${code:-200}, a reply with no version and upload time"
+		return 1
+	fi
+	rm -f "$body"
+}
+
+# judge <name> <pinned> <latest> <released-at> <hold-reason> [<remedy>]
 judge() {
-	local name=$1 pinned=$2 latest=${3#v} when=$4 hold=$5 age
+	local name=$1 pinned=$2 latest=${3#v} when=$4 hold=$5 remedy=${6:-bump scripts/tool-pins.sh or set ${1}_HOLD} age
 	if [ "$pinned" = "$latest" ]; then
 		echo "deps-check: OK     $name $pinned (latest)"
 		return
@@ -76,7 +99,7 @@ judge() {
 	elif [ "$age" -lt "$WEEK" ]; then
 		echo "deps-check: REPORT $name $pinned, latest $latest released $when (under 7 days)"
 	else
-		echo "deps-check: FAIL   $name $pinned is behind $latest (released $when); bump scripts/tool-pins.sh or set ${name}_HOLD"
+		echo "deps-check: FAIL   $name $pinned is behind $latest (released $when); $remedy"
 		bad=1
 	fi
 }
@@ -120,6 +143,78 @@ if read -r tag when < <(latest_alpine) && [ -n "${when:-}" ]; then
 else
 	echo "deps-check: FAIL   ALPINE: the latest Alpine release cannot be read"
 	bad=1
+fi
+
+# The Python and Actions sections run only when the caller names the files (make deps-check does), and not
+# when DEPS_RELEASES_DIR is set: the CI step that sets it reads the tools' releases alone.
+if [ -n "${DEPS_RELEASES_DIR:-}" ]; then
+	[ -z "${DEPS_REQUIREMENTS:-}${DEPS_WORKFLOWS:-}" ] ||
+		echo "deps-check: SKIP   Python and Actions pins (DEPS_RELEASES_DIR is set)"
+	exit "$bad"
+fi
+
+# Python: every name==version in the requirements file against the newest PyPI release.
+if [ -n "${DEPS_REQUIREMENTS:-}" ]; then
+	if [ ! -r "$DEPS_REQUIREMENTS" ]; then
+		echo "deps-check: FAIL   PYPI: $DEPS_REQUIREMENTS cannot be read"
+		bad=1
+	else
+		pkg_re='^[[:space:]]*([A-Za-z0-9][A-Za-z0-9._-]*)==([^[:space:];\\]+)'
+		while IFS= read -r line || [ -n "$line" ]; do
+			[[ $line =~ $pkg_re ]] || continue
+			pkg=${BASH_REMATCH[1]} version=${BASH_REMATCH[2]}
+			tag='' when='' got=''
+			if ! got=$(latest_pypi "$pkg") || ! read -r tag when <<<"$got" ||
+				[[ ! $when =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+				echo "deps-check: FAIL   PYPI:$pkg: the latest release cannot be read (${got:-no reply})"
+				bad=1
+				continue
+			fi
+			judge "PYPI:$pkg" "$version" "$tag" "$when" "" "bump $DEPS_REQUIREMENTS"
+		done <"$DEPS_REQUIREMENTS"
+	fi
+fi
+
+# Actions: every `uses: owner/repo@<sha> # vX.Y.Z` in the workflows; one lookup per action, one verdict per
+# action and pinned tag. A pin tagged by major only (`# v6`) is current while the latest release is in v6.
+if [ -n "${DEPS_WORKFLOWS:-}" ]; then
+	shopt -s nullglob
+	files=("$DEPS_WORKFLOWS"/*.yml)
+	shopt -u nullglob
+	if [ "${#files[@]}" -eq 0 ]; then
+		echo "deps-check: FAIL   ACTIONS: no workflow files in $DEPS_WORKFLOWS"
+		bad=1
+	else
+		act_re='uses:[[:space:]]*([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(/[^@[:space:]]*)?@[0-9a-f]{40}[[:space:]]*#[[:space:]]*(v?[0-9][^[:space:]]*)'
+		declare -A act_latest=() act_seen=()
+		for f in "${files[@]}"; do
+			while IFS= read -r line || [ -n "$line" ]; do
+				[[ $line =~ $act_re ]] || continue
+				repo=${BASH_REMATCH[1]} version=${BASH_REMATCH[3]}
+				[ -z "${act_seen["$repo $version"]:-}" ] || continue
+				act_seen["$repo $version"]=1
+				if [ -z "${act_latest[$repo]:-}" ]; then
+					tag='' when='' got=''
+					if got=$(latest_github "$repo") && read -r tag when <<<"$got" && valid_release "$tag" "$when"; then
+						act_latest[$repo]="$tag $when"
+					else
+						act_latest[$repo]="FAIL ${got:-no reply}"
+					fi
+				fi
+				if [ "${act_latest[$repo]%% *}" = FAIL ]; then
+					echo "deps-check: FAIL   ACTION:$repo: the latest release of $repo cannot be read (${act_latest[$repo]#FAIL })"
+					bad=1
+					continue
+				fi
+				read -r tag when <<<"${act_latest[$repo]}"
+				if [[ ${tag#v} == "${version#v}".* ]]; then
+					echo "deps-check: OK     ACTION:$repo $version (latest $tag)"
+				else
+					judge "ACTION:$repo" "${version#v}" "$tag" "$when" "" "bump the pin in $DEPS_WORKFLOWS"
+				fi
+			done <"$f"
+		done
+	fi
 fi
 
 exit "$bad"
