@@ -126,8 +126,8 @@ pins-check: ## Offline: scripts/tool-pins.sh and scripts/ahab/requirements.txt a
 pins-report: ## Offline: print every pin (tools, images, requirements, workflow actions) from the files in the tree
 	@scripts/pins-report.sh scripts/tool-pins.sh scripts/ahab/requirements.txt scripts/ahab/build-requirements.txt .github/workflows
 
-deps-check: ## Latest-version check: every pin in scripts/tool-pins.sh (needs the network)
-	@scripts/deps-check.sh scripts/tool-pins.sh
+deps-check: ## Latest-version check: scripts/tool-pins.sh, Alpine, scripts/ahab/requirements.txt (PyPI) and the workflow action pins (needs the network)
+	@DEPS_REQUIREMENTS=scripts/ahab/requirements.txt DEPS_WORKFLOWS=.github/workflows scripts/deps-check.sh scripts/tool-pins.sh
 
 ## --- The lint-class gates the canonical ci.yml runs on the PR tier ---
 
