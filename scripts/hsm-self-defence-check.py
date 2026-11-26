@@ -75,7 +75,10 @@ def table_rows(lines, name):
     return out
 
 
-INCLUDE = re.compile(r"^\s*-?(?:include|sinclude)\s+(.*)$")
+INCLUDE = re.compile(r"^\s*(-|s?)include\s+(.*)$")
+# Make's rule: an odd run of backslashes before a newline, the newline and the
+# next line's leading whitespace become one space.
+CONTINUATION = re.compile(r"(?<!\\)((?:\\\\)*)\\\r?\n[ \t]*")
 ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:::=|:=|\?=|=)\s*(.*)$")
 VARREF = re.compile(r"\$(?:\(([A-Za-z_][A-Za-z0-9_.-]*)\)|\{([A-Za-z_][A-Za-z0-9_.-]*)\})")
 BUILD_SUFFIXES = (".bb", ".bbappend", ".inc", ".mk", ".sh")
@@ -93,25 +96,31 @@ def make_includes(root, rel, seen, variables, unresolved):
         return
     seen.add(rel)
     with open(path, encoding="utf-8", errors="replace") as f:
-        for line in f.read().splitlines():
-            line = line.split("#", 1)[0]
-            a = ASSIGN.match(line)
-            if a:
-                if "$" in a.group(2):
-                    variables.pop(a.group(1), None)
-                else:
-                    variables[a.group(1)] = a.group(2).strip()
-                continue
-            m = INCLUDE.match(line)
-            if not m:
-                continue
-            for word in m.group(1).split():
-                word = VARREF.sub(lambda v: variables.get(v.group(1) or v.group(2), v.group(0)), word)
-                if "$" in word:
-                    unresolved.append((rel, word))
-                    continue
-                for hit in sorted(glob.glob(os.path.join(root, word))):
-                    make_includes(root, os.path.relpath(hit, root), seen, variables, unresolved)
+        text = CONTINUATION.sub(lambda c: c.group(1) + " ", f.read())
+    for line in text.splitlines():
+        line = line.split("#", 1)[0]
+        a = ASSIGN.match(line)
+        if a:
+            if "$" in a.group(2):
+                variables.pop(a.group(1), None)
+            else:
+                variables[a.group(1)] = a.group(2).strip()
+            continue
+        m = INCLUDE.match(line)
+        if not m:
+            continue
+        optional = m.group(1) != ""
+        operand = VARREF.sub(lambda v: variables.get(v.group(1) or v.group(2), v.group(0)),
+                             m.group(2).strip())
+        if "$" in operand:
+            unresolved.append((rel, operand))
+            continue
+        for word in operand.split():
+            hits = sorted(glob.glob(os.path.join(root, word)))
+            if not hits and not optional:
+                unresolved.append((rel, word + " (matches no file)"))
+            for hit in hits:
+                make_includes(root, os.path.relpath(hit, root), seen, variables, unresolved)
 
 
 def compiling_files(root):
