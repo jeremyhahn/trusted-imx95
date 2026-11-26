@@ -88,4 +88,21 @@ run python3 "$CHECK" "$b"
 check "hsm-self-defence-check: an include the checker cannot resolve fails" 1 \
 	"build files: an include the checker cannot resolve" "Makefile includes '\$(shell"
 
+# A variable holding several makefiles loads each of them; a continued include
+# line is one line.
+b=$(fixture incparts)
+mkdir -p "$b/mk"
+printf "PARTS := mk/base.mk mk/extra.mk\nbuild:\n\t@true\ninclude \$(PARTS)\n" >"$b/Makefile"
+printf 'base:\n\t@true\n' >"$b/mk/base.mk"
+printf 'extra:\n\tcc -c hsm-self-defence/a55/quarantine.c\n' >"$b/mk/extra.mk"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: a multi-word include operand is split and every word followed" 1 "$MSG" "named by mk/extra.mk"
+
+b=$(fixture inccont)
+mkdir -p "$b/mk"
+printf 'build:\n\t@true\ninclude \\\n  mk/extra.mk\n' >"$b/Makefile"
+printf 'extra:\n\tcc -c hsm-self-defence/a55/quarantine.c\n' >"$b/mk/extra.mk"
+run python3 "$CHECK" "$b"
+check "hsm-self-defence-check: an include continued onto the next line is followed" 1 "$MSG" "named by mk/extra.mk"
+
 finish

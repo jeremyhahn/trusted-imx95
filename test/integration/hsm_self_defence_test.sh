@@ -16,7 +16,7 @@ tree() {
 	cp "$ROOT/docs/SPEC.md" "$t/docs/SPEC.md"
 	cp "$ROOT/docs/references/README.md" "$t/docs/references/README.md"
 	cp "$ROOT/ROADMAP.md" "$ROOT/Makefile" "$t/"
-	cp "$ROOT/scripts/hsm-self-defence-check.py" "$t/scripts/"
+	cp "$ROOT/scripts/hsm-self-defence-check.py" "$ROOT/scripts/tool-pins.sh" "$t/scripts/"
 	cp -r "$ROOT/hsm-self-defence" "$t/"
 	echo "$t"
 }
