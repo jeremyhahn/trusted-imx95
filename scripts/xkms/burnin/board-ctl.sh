@@ -40,6 +40,11 @@
 #            key export <id> FILE
 # (-o is the output format, not a file.) A positional file must directly
 # follow `cert save <id>` or `key export <id>`.
+#
+# Signals. Every ssh runs in the background and is waited on, so TERM, INT or
+# HUP act at once: the active ssh is killed and reaped, the cleanup ssh runs
+# bounded (XKMS_BOARD_CLEANUP_TIMEOUT seconds, default 10), and the script
+# exits 143, 130 or 129. Under bi_ctl's `timeout` that is status 124.
 set -u
 umask 077
 
@@ -59,7 +64,55 @@ q() {
 	printf "'%s'" "${s//\'/$sq}"
 }
 
-bssh() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$board" "$@"; }
+ssh_pid=""
+rdir=""
+mkf=""
+
+# stop_ssh: kill and reap the active ssh child, if any. ssh shares this
+# script's process group (no job control), so the group is left alone.
+# shellcheck disable=SC2329 # runs from the traps
+stop_ssh() {
+	if [ -n "$ssh_pid" ]; then
+		kill -KILL "$ssh_pid" 2>/dev/null
+		wait "$ssh_pid" 2>/dev/null
+		ssh_pid=""
+	fi
+}
+
+# bssh: one ssh session, run in the background and waited on. Bash defers a
+# trap while a foreground command runs, so a stalled ssh would hold off the
+# TERM that `timeout` sends; `wait` returns at once and the trap runs. <&0
+# keeps the caller's stdin, which a background command would lose. The
+# keepalive options end a dead connection on their own.
+bssh() {
+	local rc
+	ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 "$board" "$@" <&0 &
+	ssh_pid=$!
+	wait "$ssh_pid"
+	rc=$?
+	ssh_pid=""
+	return "$rc"
+}
+
+# cleanup: runs on every exit. The ssh that removes the board's temp dir is
+# bounded, so cleanup cannot hang, and a signal during it is ignored.
+# shellcheck disable=SC2329 # runs from the EXIT trap
+cleanup() {
+	local rc=$?
+	trap '' HUP INT TERM
+	stop_ssh
+	if [ -n "$rdir" ]; then
+		timeout -k 2 "${XKMS_BOARD_CLEANUP_TIMEOUT:-10}" ssh -o BatchMode=yes -o ConnectTimeout=5 \
+			-o ServerAliveInterval=2 -o ServerAliveCountMax=2 "$board" "rm -rf $(q "$rdir")" \
+			</dev/null >/dev/null 2>&1
+	fi
+	[ -z "$mkf" ] || rm -f "$mkf"
+	exit "$rc"
+}
+trap cleanup EXIT
+trap 'stop_ssh; exit 129' HUP
+trap 'stop_ssh; exit 130' INT
+trap 'stop_ssh; exit 143' TERM
 
 args=("$@")
 rargs=()
@@ -159,26 +212,16 @@ if [ "$n" -eq 0 ]; then
 	exit $?
 fi
 
-rdir=""
-# shellcheck disable=SC2329 # runs from the EXIT trap
-cleanup() {
-	local rc=$?
-	if [ -n "$rdir" ]; then
-		bssh "rm -rf $(q "$rdir")" </dev/null >/dev/null 2>&1
-	fi
-	exit "$rc"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
+# The answer goes through a local file, not $(...): a command substitution runs
+# in a subshell the main shell cannot interrupt while it waits.
+mkf=$(mktemp "${TMPDIR:-/tmp}/board-ctl.XXXXXX") || die "cannot make a local temp file"
 # shellcheck disable=SC2016 # expands on the board
-mk=$(bssh 'd=$(mktemp -d /tmp/xkms-burnin.XXXXXX) && chown xkms "$d" && chmod 700 "$d" && echo "$d"' </dev/null) || {
+bssh 'd=$(mktemp -d /tmp/xkms-burnin.XXXXXX) && chown xkms "$d" && chmod 700 "$d" && echo "$d"' </dev/null >"$mkf" || {
 	# mktemp may have succeeded before a later step failed; the name is unknown.
 	echo "board-ctl: cannot make the temp dir on the board" >&2
 	exit 1
 }
+mk=$(<"$mkf")
 case "$mk" in
 /tmp/xkms-burnin.?*) rdir=$mk ;;
 *) die "unexpected temp dir from the board" ;;
