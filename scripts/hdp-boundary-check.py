@@ -34,6 +34,7 @@ Exit status: 0 when every check holds, 1 when one does not, 2 when the tree
 cannot be read.
 """
 
+import json
 import os
 import re
 import sys
@@ -47,6 +48,10 @@ import sys
 SKIP_PATHS = {".git", ".tools", "out", "build/go-xkms"}
 PROTOCOL_SUFFIXES = (".proto", ".thrift", ".capnp", ".fbs", ".avsc", ".asn1")
 PROTOCOL_NAME = re.compile(r"^(openapi|asyncapi|swagger)[^/]*\.(ya?ml|json)$", re.IGNORECASE)
+DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
+API_KEYS = ("openapi", "asyncapi", "swagger")
+API_KEY_LINE = re.compile(r"^[\"']?(openapi|asyncapi|swagger)[\"']?[ \t]*:", re.MULTILINE)
+HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 RECIPE_NAME = re.compile(r"^(xkmsd|go-xkms)[^/]*\.bb(append)?$")
 
 ROW_FACTS = (
@@ -60,6 +65,14 @@ ROW_FACTS = (
     ("the HSM is an xkmsd node", "rulings 1243 and 1244"),
     ("the protocol is never defined here", "never defines"),
 )
+
+# Facts whose reference must sit in the same sentence or bullet as the statement
+# itself: (what, reference, statement pattern).
+ROW_SENTENCES = (
+    ("the HSM is an xkmsd node", "rulings 1243 and 1244", re.compile(r"\bHSM is an xkmsd node\b", re.IGNORECASE)),
+    ("go-xkms #1521 owns the open questions", "go-xkms #1521", re.compile(r"\bopen questions\b", re.IGNORECASE)),
+)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`])|\n|<br\s*/?>")
 
 
 def read(path):
@@ -81,7 +94,29 @@ def b1_row(tree):
     if row is None or len(row) < 3:
         return ["docs/SPEC.md has no hsm-device-protocol row"]
     requirements = row[2]
-    return [f"the row does not state {what} ({needle!r})" for what, needle in ROW_FACTS if needle not in requirements]
+    faults = [f"the row does not state {what} ({needle!r})" for what, needle in ROW_FACTS if needle not in requirements]
+    sentences = SENTENCE_END.split(requirements)
+    for what, needle, statement in ROW_SENTENCES:
+        if needle in requirements and not any(needle in s and statement.search(s) for s in sentences):
+            faults.append(f"the row cites {needle!r} but not in the sentence that states {what}")
+    return faults
+
+
+def missing_section(text):
+    """The lines of the "Missing documents" section, from its heading to the next
+    heading of the same or a higher level, or None when there is no such heading."""
+    section = None
+    level = 0
+    for line in text.splitlines():
+        heading = HEADING.match(line)
+        if section is None:
+            if heading and heading.group(2).strip().lower() == "missing documents":
+                section, level = [], len(heading.group(1))
+        elif heading and len(heading.group(1)) <= level:
+            break
+        else:
+            section.append(line)
+    return section
 
 
 def b2_missing(tree):
@@ -89,9 +124,13 @@ def b2_missing(tree):
     faults = []
     if "UM12527" not in text:
         faults.append("docs/references/README.md does not list UM12527")
-    listed = [ln for ln in text.splitlines() if ln.startswith("| 10 GbE expansion card documentation |")]
+    section = missing_section(text)
+    if section is None:
+        faults.append("docs/references/README.md has no Missing documents section")
+        return faults
+    listed = [ln for ln in section if ln.startswith("| 10 GbE expansion card documentation |")]
     if not listed:
-        faults.append("docs/references/README.md does not list the 10 GbE expansion card documentation as missing")
+        faults.append("the Missing documents section of docs/references/README.md does not list the 10 GbE expansion card documentation as missing")
     elif "hsm-device-protocol" not in listed[0]:
         faults.append("the 10 GbE card documentation entry does not name the hsm-device-protocol row")
     return faults
@@ -130,6 +169,27 @@ def walk(tree):
                 yield rel + "/", d
 
 
+def declares_protocol(path, lower):
+    """A fault text when the YAML or JSON file at path declares an OpenAPI,
+    AsyncAPI or Swagger document by a top-level key, whatever its name; None
+    otherwise. An unparsable JSON file is a fault, never skipped."""
+    try:
+        text = read(path)
+    except UnicodeDecodeError:
+        return "is not UTF-8 text and cannot be inspected"
+    if lower.endswith(".json"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            return "is not parsable JSON and cannot be inspected"
+        if isinstance(doc, dict) and any(k in doc for k in API_KEYS):
+            return "declares an API document"
+        return None
+    if API_KEY_LINE.search(text):
+        return "declares an API document"
+    return None
+
+
 def b3_no_protocol(tree):
     faults = []
     for rel, name in walk(tree):
@@ -138,6 +198,10 @@ def b3_no_protocol(tree):
             faults.append(f"{rel} defines a wire protocol: go-xkms owns it (go-xkms #1521)")
         elif lower.endswith(".go") or name == "go.mod" or rel.endswith("/"):
             faults.append(f"{rel} implements xkmsd: go-xkms owns xkmsd")
+        elif lower.endswith(DOCUMENT_SUFFIXES):
+            what = declares_protocol(os.path.join(tree, rel), lower)
+            if what:
+                faults.append(f"{rel} {what} (an openapi, asyncapi or swagger top-level key): go-xkms owns the wire protocol (go-xkms #1521)")
     return faults
 
 

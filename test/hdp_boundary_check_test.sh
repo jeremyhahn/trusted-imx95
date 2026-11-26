@@ -39,6 +39,21 @@ EOF
 run python3 "$CHK" "$t"
 check "B1: a row that drops go-xkms #1521 fails" 1 "FAIL B1 row" "go-xkms #1521 owns the open questions"
 
+# The ruling numbers and the issue reference are cited, but not with the statements they back.
+t="$TMP_ROOT/b1-statements"
+tree "$t"
+python3 - "$t/docs/SPEC.md" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace("The HSM is an xkmsd node (owner", "The HSM is a device (owner").replace("go-xkms's open questions (go-xkms #1521)", "go-xkms's questions (go-xkms #1521)")
+s = s.replace("which go-xkms still owns.", "which go-xkms still owns. The open questions are listed elsewhere.")
+open(p, "w", encoding="utf-8").write(s)
+EOF
+run python3 "$CHK" "$t"
+check "B1: the rulings and #1521 cited without their statements fail" 1 "FAIL B1 row" \
+	"not in the sentence that states the HSM is an xkmsd node" "not in the sentence that states go-xkms #1521 owns the open questions"
+
 t="$TMP_ROOT/b1-gone"
 tree "$t"
 printf '# spec\n' >"$t/docs/SPEC.md"
@@ -47,10 +62,34 @@ check "B1: a SPEC without the row fails" 1 "docs/SPEC.md has no hsm-device-proto
 
 t="$TMP_ROOT/b2"
 tree "$t"
-printf '# references\n\n| UM12527 | x |\n' >"$t/docs/references/README.md"
+printf '# references\n\n| UM12527 | x |\n\n## Missing documents\n\nNone.\n' >"$t/docs/references/README.md"
 run python3 "$CHK" "$t"
 check "B2: references that do not list the 10 GbE card documentation as missing fail" 1 \
 	"FAIL B2 missing" "10 GbE expansion card documentation as missing"
+
+# The card's entry moved out of the Missing documents section into an available-documents table.
+t="$TMP_ROOT/b2-available"
+tree "$t"
+python3 - "$t/docs/references/README.md" <<'EOF'
+import sys
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().split("\n")
+entry = next(ln for ln in lines if ln.startswith("| 10 GbE expansion card documentation |"))
+lines.remove(entry)
+at = lines.index("## Missing documents")
+lines.insert(at, entry + "\n")
+open(p, "w", encoding="utf-8").write("\n".join(lines))
+EOF
+run python3 "$CHK" "$t"
+check "B2: the card entry in an available-documents table, outside Missing documents, fails" 1 \
+	"FAIL B2 missing" "Missing documents section of docs/references/README.md does not list the 10 GbE expansion card documentation as missing"
+
+t="$TMP_ROOT/b2-no-section"
+tree "$t"
+printf '# references\n\nUM12527\n\n| 10 GbE expansion card documentation | hsm-device-protocol |\n' >"$t/docs/references/README.md"
+run python3 "$CHK" "$t"
+check "B2: references with the entry and no Missing documents section fail" 1 \
+	"FAIL B2 missing" "has no Missing documents section"
 
 for f in wire.proto api/openapi.yaml cmd/xkmsd/README go.mod; do
 	t="$TMP_ROOT/b3-${f//\//-}"
@@ -60,6 +99,33 @@ for f in wire.proto api/openapi.yaml cmd/xkmsd/README go.mod; do
 	run python3 "$CHK" "$t"
 	check "B3: $f in the tree fails" 1 "FAIL B3 no-protocol" "go-xkms owns"
 done
+
+# B3 reads the content of YAML and JSON files: the name does not hide an API document.
+t="$TMP_ROOT/b3-content-yaml"
+tree "$t"
+mkdir -p "$t/api"
+printf 'openapi: 3.1.0\ninfo:\n  title: device\n' >"$t/api/api.yaml"
+run python3 "$CHK" "$t"
+check "B3: api.yaml holding a top-level openapi key fails" 1 "FAIL B3 no-protocol" "api/api.yaml declares an API document"
+
+t="$TMP_ROOT/b3-content-json"
+tree "$t"
+printf '{"asyncapi": "2.6.0"}\n' >"$t/device-protocol.json"
+run python3 "$CHK" "$t"
+check "B3: device-protocol.json holding a top-level asyncapi key fails" 1 "FAIL B3 no-protocol" "device-protocol.json declares an API document"
+
+t="$TMP_ROOT/b3-content-bad-json"
+tree "$t"
+printf '{"asyncapi": ' >"$t/device-protocol.json"
+run python3 "$CHK" "$t"
+check "B3: an unparsable JSON file is reported, not skipped" 1 "FAIL B3 no-protocol" "device-protocol.json is not parsable JSON"
+
+t="$TMP_ROOT/b3-content-ok"
+tree "$t"
+printf 'name: ci\nsteps:\n  - openapi: nested\n' >"$t/ci.yaml"
+printf '{"name": "x", "nested": {"swagger": "2.0"}}\n' >"$t/data.json"
+run python3 "$CHK" "$t"
+check "B3: YAML and JSON files with no top-level API key pass" 0 "ok B3 no-protocol"
 
 t="$TMP_ROOT/b4"
 tree "$t"
