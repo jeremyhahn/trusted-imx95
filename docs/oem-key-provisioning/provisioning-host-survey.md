@@ -173,7 +173,7 @@ this tree, takes its location from an environment variable, stops and names the 
 - **Where.** `SPSDK_VENV` names a Python virtual environment outside the repository; `UUU_PATH` names a standalone uuu
   binary only if the owner chooses the binary over `libuuu` (Q2). A step that needs a tool and finds its variable unset
   stops and names it.
-- **What is pinned in the repository.** A hash-locked requirements file for SPSDK 3.13.0 and its whole dependency closure
+- **What is pinned in the repository.** A hash-locked requirements file for SPSDK 3.14.0 and its whole dependency closure
   (including `libuuu` 1.5.243), every line with `--hash=sha256:`; for a standalone uuu, the release tag and the asset's
   SHA-256. The SPSDK wheel's SHA-256 at the time of writing is
   `2826ce4960db848b4bc4922d6e925e6654d55da4a7097c62e63c71c143d16df4` (S3).

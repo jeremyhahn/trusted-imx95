@@ -23,7 +23,7 @@ touch "$stamp"
 # (a)
 run env AHAB_OUT_DIR="$out" make -C "$ROOT" --no-print-directory ahab-hsm-test
 check "(a) make ahab-hsm-test signs the Cortex-M7 container through the test HSM" 0 \
-	"nxpimage, version 3.13.0" "holds srk0 (the build holds public keys only)" \
+	"nxpimage, version 3.14.0" "holds srk0 (the build holds public keys only)" \
 	"custody: no private key in the build directory (before export)" \
 	"custody: no private key in the build directory (after export)" \
 	"test HSM: signed a SHA-384 digest" "verify: OK (HSM-signed Cortex-M7 container)" "ahab-hsm-test: OK"

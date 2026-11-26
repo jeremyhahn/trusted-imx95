@@ -9,7 +9,7 @@
   "life_cycle_after": "fake-state-after",
   "ahab_events": [],
   "enclave_fw_version": "fake-fw-0",
-  "spsdk_version": "3.13.0",
+  "spsdk_version": "3.14.0",
   "enclave_lib_version": "fake-lib-0",
   "public_keys": [
     {"key_id": "fake-key-1", "public_key_hash": "1111111111111111111111111111111111111111111111111111111111111111"}

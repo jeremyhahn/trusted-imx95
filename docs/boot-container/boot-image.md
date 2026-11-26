@@ -2,7 +2,7 @@
 
 Status: **PROVISIONAL**, the assembly slice of issue #161 in the `boot-container` row of
 [docs/SPEC.md](../SPEC.md). Every value marked *default* below is a lane's choice, not the owner's,
-and is open to change. Signing tool: SPSDK 3.13.0, the owner's decision in
+and is open to change. Signing tool: SPSDK 3.14.0, the owner's decision in
 [signing-tool-options.md](signing-tool-options.md); chip: i.MX 95 B0 (SPSDK family `mimx9596`,
 revision `b0`).
 
@@ -40,7 +40,7 @@ Container 3's addresses:
   written out in the yaml, because the `tee` shorthand cannot carry an address; its other fields equal what
   the shorthand produced.
 - `atf` `0x8A200000` is TF-A `da738d5` `plat/imx/imx9/imx95/include/platform_def.h:34`
-  (`BL31_BASE U(0x8A200000)`). SPSDK 3.13.0's `atf` default is the same address, so the shorthand stays.
+  (`BL31_BASE U(0x8A200000)`). SPSDK 3.14.0's `atf` default is the same address, so the shorthand stays.
 - `uboot` is a stand-in with SPSDK's default address.
 
 `test/boot_image_test.sh` reads the parse of the built image: container 3 holds three entries, all

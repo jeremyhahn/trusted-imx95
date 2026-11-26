@@ -2,7 +2,7 @@
 
 Status: host-side pipeline for issue #9, in the `boot-container` row of
 [docs/SPEC.md](../SPEC.md). It follows the owner's decision in
-[signing-tool-options.md](signing-tool-options.md): SPSDK 3.13.0, ECDSA P-384, i.MX 95 B0
+[signing-tool-options.md](signing-tool-options.md): SPSDK 3.14.0, ECDSA P-384, i.MX 95 B0
 (SPSDK family `mimx9596`, revision `b0`).
 
 `make ahab-sign-test` builds one AHAB OEM container around a random test payload, signs it with a
@@ -21,7 +21,7 @@ On a host with `python3` and `pip`, `make ahab-sign-test` runs the same steps. T
 installs the pinned closure (`scripts/ahab/requirements.txt` and `build-requirements.txt`, every
 file checked against its SHA-256 with `pip install --require-hashes`) into a venv under
 `${XDG_CACHE_HOME:-$HOME/.cache}/trusted-imx95/`; set `SPSDK_VENV` to use another directory
-outside the clone. The run fails, naming the pin, if the venv's `nxpimage` is not 3.13.0.
+outside the clone. The run fails, naming the pin, if the venv's `nxpimage` is not 3.14.0.
 
 Set `AHAB_OUT_DIR` to keep a copy of the signed `container.bin`; nothing else leaves the run.
 `scripts/ahab/sign-test.sh verify <container.bin>` verifies a container on its own and prints
@@ -43,7 +43,7 @@ and that a wrong SPSDK version fails.
 
 ## musl and libuuu
 
-SPSDK 3.13.0 requires `libuuu`, which publishes only glibc (manylinux) wheels. On musl (the Alpine
+SPSDK 3.14.0 requires `libuuu`, which publishes only glibc (manylinux) wheels. On musl (the Alpine
 image) pip installs the pinned `libuuu` sdist instead. The sdist compiles nothing. It only packages
 NXP's prebuilt glibc `libuuu.so`, which `nxpimage ahab export` and `verify` never load, so the
 pipeline runs on musl. Board flashing through `nxpuuu` would load that library and is not part of
@@ -63,7 +63,7 @@ load and entry address match the yaml, and that a flipped payload byte is reject
 
 | Field | Value | Source |
 |---|---|---|
-| `core_id` | `cortex-m7-1` | [m7-load-path-survey.md](m7-load-path-survey.md) §3 (the `-m7` image entry); the only M7 name SPSDK 3.13.0 accepts for `mimx9596` |
+| `core_id` | `cortex-m7-1` | [m7-load-path-survey.md](m7-load-path-survey.md) §3 (the `-m7` image entry); the only M7 name SPSDK 3.14.0 accepts for `mimx9596` |
 | `load_address` | `0x0` | survey §3 and §5, TCM row: the M7's own view of its TCM (first address of mkimage's `-m7`) |
 | `entry_point` | `0x303C0000` | survey §3: the TCM seen from the system bus (second address of `-m7`) |
 | `image_type` | `executable` | survey §8 (`m7_image.bin` is firmware the core runs) |
@@ -87,7 +87,7 @@ AN14471's model for the custody of the signing keys (AN14471 §3.1, §3.6). `mak
 1. Four test SRKs are generated in an "HSM" directory (`mktemp -d`, outside the clone). Only the four
    public keys move to the build directory, a second `mktemp -d`.
 2. [scripts/ahab/test-hsm.py](../../scripts/ahab/test-hsm.py), a test stand-in for the HSM, holds
-   SRK 0's private key and serves SPSDK 3.13.0's `proxy` signature provider (REST API 2.0) on
+   SRK 0's private key and serves SPSDK 3.14.0's `proxy` signature provider (REST API 2.0) on
    the loopback interface, on an ephemeral port. It signs only a pre-hashed SHA-384 digest: it never sees the
    container.
 3. The M7 configuration ([m7-container.yaml](../../scripts/ahab/m7-container.yaml)) has its `signer`
@@ -152,7 +152,7 @@ Every container the image holds is accounted for, and the check fails closed (pr
 - Every non-zero byte of the image and of each nxp binary container must lie in a parsed container's header, signature block or referenced image; otherwise the check fails naming the offset.
 - An image with no OEM container fails.
 
-SPSDK 3.13.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
+SPSDK 3.14.0 gives `used_srk_id`, `srk_revoke_mask` and `fuse_version` in `parsed_config.yaml`, and
 the SRK table hash as `ahab_oem0_srk0_hash.txt` in the same output directory (the same file name
 `nxpimage ahab export` writes), so no hash algorithm is chosen here.
 
@@ -180,14 +180,14 @@ make ahab-tamper-test
 
 `test/ahab_tamper_test.sh` (also in `make test`) builds one M7 test-PKI container in a temp
 directory, writes a tampered copy per case and runs `scripts/ahab/sign-test.sh verify`
-(`nxpimage ahab verify`, SPSDK 3.13.0) on it. It covers C2b, C5b and C6 of
+(`nxpimage ahab verify`, SPSDK 3.14.0) on it. It covers C2b, C5b and C6 of
 [secure-boot-test-plan.md](secure-boot-test-plan.md) (§4, §7 item 1); C1 and a payload byte are in
 `test/ahab_sign_test.sh`. Offsets are derived from the container: the signature block offset is the
 u16 at byte 12, the SRK table array starts 16 bytes after it, the image entry's hash is found by
 searching the entry for the `sha384sum` of the payload. Nothing is committed: no key, container or
 policy.
 
-| Case | Change | SPSDK 3.13.0 `verify` |
+| Case | Change | SPSDK 3.14.0 `verify` |
 |---|---|---|
 | C6a | truncated to half its size | rejected (exit 1), no traceback |
 | C6b | truncated by one byte | rejected, no traceback |
