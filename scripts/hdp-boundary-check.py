@@ -47,6 +47,7 @@ import sys
 SKIP_PATHS = {".git", ".tools", "out", "build/go-xkms"}
 PROTOCOL_SUFFIXES = (".proto", ".thrift", ".capnp", ".fbs", ".avsc", ".asn1")
 PROTOCOL_NAME = re.compile(r"^(openapi|asyncapi|swagger)[^/]*\.(ya?ml|json)$", re.IGNORECASE)
+HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 RECIPE_NAME = re.compile(r"^(xkmsd|go-xkms)[^/]*\.bb(append)?$")
 
 ROW_FACTS = (
@@ -84,14 +85,35 @@ def b1_row(tree):
     return [f"the row does not state {what} ({needle!r})" for what, needle in ROW_FACTS if needle not in requirements]
 
 
+def missing_section(text):
+    """The lines of the "Missing documents" section, from its heading to the next
+    heading of the same or a higher level, or None when there is no such heading."""
+    section = None
+    level = 0
+    for line in text.splitlines():
+        heading = HEADING.match(line)
+        if section is None:
+            if heading and heading.group(2).strip().lower() == "missing documents":
+                section, level = [], len(heading.group(1))
+        elif heading and len(heading.group(1)) <= level:
+            break
+        else:
+            section.append(line)
+    return section
+
+
 def b2_missing(tree):
     text = read(os.path.join(tree, "docs", "references", "README.md"))
     faults = []
     if "UM12527" not in text:
         faults.append("docs/references/README.md does not list UM12527")
-    listed = [ln for ln in text.splitlines() if ln.startswith("| 10 GbE expansion card documentation |")]
+    section = missing_section(text)
+    if section is None:
+        faults.append("docs/references/README.md has no Missing documents section")
+        return faults
+    listed = [ln for ln in section if ln.startswith("| 10 GbE expansion card documentation |")]
     if not listed:
-        faults.append("docs/references/README.md does not list the 10 GbE expansion card documentation as missing")
+        faults.append("the Missing documents section of docs/references/README.md does not list the 10 GbE expansion card documentation as missing")
     elif "hsm-device-protocol" not in listed[0]:
         faults.append("the 10 GbE card documentation entry does not name the hsm-device-protocol row")
     return faults

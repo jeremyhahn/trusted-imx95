@@ -47,10 +47,34 @@ check "B1: a SPEC without the row fails" 1 "docs/SPEC.md has no hsm-device-proto
 
 t="$TMP_ROOT/b2"
 tree "$t"
-printf '# references\n\n| UM12527 | x |\n' >"$t/docs/references/README.md"
+printf '# references\n\n| UM12527 | x |\n\n## Missing documents\n\nNone.\n' >"$t/docs/references/README.md"
 run python3 "$CHK" "$t"
 check "B2: references that do not list the 10 GbE card documentation as missing fail" 1 \
 	"FAIL B2 missing" "10 GbE expansion card documentation as missing"
+
+# The card's entry moved out of the Missing documents section into an available-documents table.
+t="$TMP_ROOT/b2-available"
+tree "$t"
+python3 - "$t/docs/references/README.md" <<'EOF'
+import sys
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().split("\n")
+entry = next(ln for ln in lines if ln.startswith("| 10 GbE expansion card documentation |"))
+lines.remove(entry)
+at = lines.index("## Missing documents")
+lines.insert(at, entry + "\n")
+open(p, "w", encoding="utf-8").write("\n".join(lines))
+EOF
+run python3 "$CHK" "$t"
+check "B2: the card entry in an available-documents table, outside Missing documents, fails" 1 \
+	"FAIL B2 missing" "Missing documents section of docs/references/README.md does not list the 10 GbE expansion card documentation as missing"
+
+t="$TMP_ROOT/b2-no-section"
+tree "$t"
+printf '# references\n\nUM12527\n\n| 10 GbE expansion card documentation | hsm-device-protocol |\n' >"$t/docs/references/README.md"
+run python3 "$CHK" "$t"
+check "B2: references with the entry and no Missing documents section fail" 1 \
+	"FAIL B2 missing" "has no Missing documents section"
 
 for f in wire.proto api/openapi.yaml cmd/xkmsd/README go.mod; do
 	t="$TMP_ROOT/b3-${f//\//-}"
