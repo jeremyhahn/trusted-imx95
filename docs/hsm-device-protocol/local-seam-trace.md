@@ -5,7 +5,7 @@
 This record answers four questions behind R6 and R8 of [xkmsd-node.md](xkmsd-node.md) that the
 [survey](on-device-transport-survey.md) §4 left "details unconfirmed". It reads seven public man pages and summarises them
 in its own words; it copies no page text. Section names are cited from the pages. It names no socket path, port, message
-or timeout, and no go-xkms code was read.
+or timeout, and no go-xkms code was read: go-xkms owns the protocol and whether xkmsd has two processes (go-xkms #1521).
 
 ## Sources
 
