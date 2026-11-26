@@ -53,6 +53,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
 	hdp-boundary-check integration-test-hsm-device-protocol \
 	okp-policy-check integration-test-oem-key-provisioning integration-test-xkms-board \
+	hsm-self-defence-check integration-test-hsm-self-defence \
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
 
 help: ## List the targets
@@ -301,6 +302,28 @@ skh-policy-check: ## Check a trace of enclave operations against the secure-key-
 
 integration-test-secure-key-handling: ## Integration test of the secure-key-handling row: make skh-policy-check end to end on traces that keep and break the row
 	@bash test/integration/secure_key_handling_test.sh
+
+## --- hsm-self-defence: blocked (owner rulings 1243 and 1244, #26) ---
+
+HSD_ROOT ?= $(CURDIR)
+# HSD_ROOT reaches the recipe through the environment, never expanded into its shell source.
+# Make expands a command-line variable (a shell function in it runs) when it builds the
+# recipe environment, so a command-line value holding a dollar sign is refused before
+# anything runs ($(origin) and $(value) do not expand it). An environment value is
+# passed on as it is: a path with a dollar sign is given as
+# HSD_ROOT='<dir>' make hsm-self-defence-check.
+ifeq ($(origin HSD_ROOT),command line)
+ifneq ($(findstring $$,$(value HSD_ROOT)),)
+$(error hsm-self-defence-check: a command-line HSD_ROOT holding a dollar sign is refused, Make would expand it; set it in the environment instead: HSD_ROOT='<dir>' make hsm-self-defence-check)
+endif
+endif
+export HSD_ROOT
+
+hsm-self-defence-check: ## Check the hsm-self-defence row holds as written: blocked and planned in docs/SPEC.md, blocked in ROADMAP.md, its missing documents listed, nothing built (HSD_ROOT=<tree>, default this one; a path holding a dollar sign only through the environment, never on the command line)
+	@python3 scripts/hsm-self-defence-check.py "$$HSD_ROOT"
+
+integration-test-hsm-self-defence: ## Integration test of the hsm-self-defence row: make hsm-self-defence-check on this tree and on trees that break the row
+	@bash test/integration/hsm_self_defence_test.sh
 
 HDP_TREE ?= $(CURDIR)
 # HDP_TREE reaches the recipe through the environment, never expanded into its shell source.
