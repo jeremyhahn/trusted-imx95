@@ -11,6 +11,7 @@ the owner approved it on 2026-11-25. It is not done.
 | Build | `scripts/xkms/xkmsd-build.sh [<commit>]` | `build/xkms/<commit>/{xkmsd,xkmsctl,manifest.txt}`, static linux/arm64 |
 | Deploy | `scripts/xkms/xkmsd-deploy.sh <ssh target> build/xkms/<commit>` | new binary running, backup in `/var/backups/xkms/<stamp>/` |
 | Roll back | `scripts/xkms/xkmsd-deploy.sh --rollback <stamp> <ssh target>` | that backup restored |
+| Upgrade | `scripts/xkms/xkmsd-upgrade.sh [--apply] <ssh target>` | says whether the board runs the latest go-xkms; with `--apply`, builds and deploys it |
 | Burn in | `scripts/xkms/burnin/*.sh` | see [burn-in.md](burn-in.md) |
 
 ## Build
@@ -64,6 +65,38 @@ in that order) to find the listener; `XKMS_PORT` pins the port.
 burn-in ledger, restart proofs and `concurrency.sh` against a stub xkmsctl,
 and every burn-in `--help` and `--dry-run`.
 It does not touch a real board.
+
+## Upgrade
+
+The board runs the latest go-xkms (the owner's 2026-11-24 directive).
+`scripts/xkms/xkmsd-upgrade.sh [--apply] [--ref <go-xkms ref>] <ssh target>`
+resolves the ref (default `refs/heads/main` of `XKMS_REPO`, the same default as
+the build script; an annotated tag is peeled) to exactly one commit, runs
+`/usr/local/bin/xkmsd --version` on the board over ssh and matches the commit
+the way the deploy's health check does. It prints one line:
+
+| Line | Exit |
+| --- | --- |
+| `current <commit>` | 0 |
+| `behind: board <reported>, latest <commit>` | 10 (without `--apply`) |
+| `unknown: <reason>` (no commit in the answer, or ssh failed) | 1 |
+| any other error (the ref does not resolve, the build failed) | 1 |
+| usage | 2 |
+
+With `--apply` and behind, it runs the build for that commit, then the deploy
+with the build directory the build printed, and exits with the deploy's
+status. It never deploys after a failed build, nor when the build directory's
+manifest names another commit. With `--apply` and an unknown version it
+refuses: installing over a board whose version is not known is done by hand
+with the deploy script. Every upgrade goes through the deploy, so its backup
+and its restore on a failed health check cover every upgrade. `--dry-run`
+contacts nothing.
+
+`make integration-test-xkms-board` runs the host-side tests of this row in
+turn (the deploy and burn-in tools, the upgrade check, the rescue protocol),
+stops on the first failure and ends with `integration-test-xkms-board: OK`.
+The upgrade test uses a local bare repository, a stub ssh and stub build and
+deploy scripts. The burn-in run on the board is a separate step.
 
 ## Rescue
 
