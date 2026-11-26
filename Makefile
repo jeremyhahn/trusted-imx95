@@ -51,6 +51,7 @@ IT_TESTS   := $(sort $(wildcard test/integration/*_test.sh))
 	sw-image sw-ref docker-build-sw secure-world-check-lock integration-test-secure-world \
 	ahab-m7-test ahab-policy-test ahab-tamper-test ahab-hsm-test integration-test-boot-container srk-hash-check okp-keyexchange-test okp-import-tlv-test \
 	boot-image-inputs boot-image-test skh-policy-check integration-test-secure-key-handling integration-test-device-lifecycle \
+	hdp-boundary-check integration-test-hsm-device-protocol \
 	okp-policy-check integration-test-oem-key-provisioning integration-test-xkms-board \
 	hsm-self-defence-check integration-test-hsm-self-defence \
 	platform-image platform-image-fetch platform-image-parse platform-image-kernel-config platform-image-layer-check platform-image-hosttools platform-image-verify
@@ -311,6 +312,26 @@ hsm-self-defence-check: ## Check the hsm-self-defence row holds as written: bloc
 
 integration-test-hsm-self-defence: ## Integration test of the hsm-self-defence row: make hsm-self-defence-check on this tree and on trees that break the row
 	@bash test/integration/hsm_self_defence_test.sh
+
+HDP_TREE ?= $(CURDIR)
+# HDP_TREE reaches the recipe through the environment, never expanded into its shell source.
+# Make expands a command-line variable (a shell function in it runs) when it builds the
+# recipe environment, so a command-line value holding a dollar sign is refused before
+# anything runs ($(origin) and $(value) do not expand it). An environment value is
+# passed on as it is: a path with a dollar sign is given as
+# HDP_TREE='<dir>' make hdp-boundary-check.
+ifeq ($(origin HDP_TREE),command line)
+ifneq ($(findstring $$,$(value HDP_TREE)),)
+$(error hdp-boundary-check: a command-line HDP_TREE holding a dollar sign is refused, Make would expand it; set it in the environment instead: HDP_TREE='<dir>' make hdp-boundary-check)
+endif
+endif
+export HDP_TREE
+
+hdp-boundary-check: ## Check a tree keeps the hsm-device-protocol row (HDP_TREE=<dir>, default this repository; a path holding a dollar sign only through the environment, never on the command line): the row's facts, no wire protocol or xkmsd here, go-xkms #1521 named, xkmsd from a tagged release only
+	@python3 scripts/hdp-boundary-check.py "$$HDP_TREE"
+
+integration-test-hsm-device-protocol: ## Integration test of the hsm-device-protocol row: make hdp-boundary-check end to end on the repository and on a tree that breaks the row
+	@bash test/integration/hsm_device_protocol_test.sh
 
 # OKP_TRACE reaches the recipe through the environment, never expanded into its shell source.
 export OKP_TRACE
