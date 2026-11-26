@@ -34,6 +34,7 @@ Exit status: 0 when every check holds, 1 when one does not, 2 when the tree
 cannot be read.
 """
 
+import json
 import os
 import re
 import sys
@@ -47,6 +48,9 @@ import sys
 SKIP_PATHS = {".git", ".tools", "out", "build/go-xkms"}
 PROTOCOL_SUFFIXES = (".proto", ".thrift", ".capnp", ".fbs", ".avsc", ".asn1")
 PROTOCOL_NAME = re.compile(r"^(openapi|asyncapi|swagger)[^/]*\.(ya?ml|json)$", re.IGNORECASE)
+DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
+API_KEYS = ("openapi", "asyncapi", "swagger")
+API_KEY_LINE = re.compile(r"^[\"']?(openapi|asyncapi|swagger)[\"']?[ \t]*:", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 RECIPE_NAME = re.compile(r"^(xkmsd|go-xkms)[^/]*\.bb(append)?$")
 
@@ -165,6 +169,27 @@ def walk(tree):
                 yield rel + "/", d
 
 
+def declares_protocol(path, lower):
+    """A fault text when the YAML or JSON file at path declares an OpenAPI,
+    AsyncAPI or Swagger document by a top-level key, whatever its name; None
+    otherwise. An unparsable JSON file is a fault, never skipped."""
+    try:
+        text = read(path)
+    except UnicodeDecodeError:
+        return "is not UTF-8 text and cannot be inspected"
+    if lower.endswith(".json"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            return "is not parsable JSON and cannot be inspected"
+        if isinstance(doc, dict) and any(k in doc for k in API_KEYS):
+            return "declares an API document"
+        return None
+    if API_KEY_LINE.search(text):
+        return "declares an API document"
+    return None
+
+
 def b3_no_protocol(tree):
     faults = []
     for rel, name in walk(tree):
@@ -173,6 +198,10 @@ def b3_no_protocol(tree):
             faults.append(f"{rel} defines a wire protocol: go-xkms owns it (go-xkms #1521)")
         elif lower.endswith(".go") or name == "go.mod" or rel.endswith("/"):
             faults.append(f"{rel} implements xkmsd: go-xkms owns xkmsd")
+        elif lower.endswith(DOCUMENT_SUFFIXES):
+            what = declares_protocol(os.path.join(tree, rel), lower)
+            if what:
+                faults.append(f"{rel} {what} (an openapi, asyncapi or swagger top-level key): go-xkms owns the wire protocol (go-xkms #1521)")
     return faults
 
 

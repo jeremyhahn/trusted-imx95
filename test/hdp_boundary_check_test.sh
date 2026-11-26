@@ -100,6 +100,33 @@ for f in wire.proto api/openapi.yaml cmd/xkmsd/README go.mod; do
 	check "B3: $f in the tree fails" 1 "FAIL B3 no-protocol" "go-xkms owns"
 done
 
+# B3 reads the content of YAML and JSON files: the name does not hide an API document.
+t="$TMP_ROOT/b3-content-yaml"
+tree "$t"
+mkdir -p "$t/api"
+printf 'openapi: 3.1.0\ninfo:\n  title: device\n' >"$t/api/api.yaml"
+run python3 "$CHK" "$t"
+check "B3: api.yaml holding a top-level openapi key fails" 1 "FAIL B3 no-protocol" "api/api.yaml declares an API document"
+
+t="$TMP_ROOT/b3-content-json"
+tree "$t"
+printf '{"asyncapi": "2.6.0"}\n' >"$t/device-protocol.json"
+run python3 "$CHK" "$t"
+check "B3: device-protocol.json holding a top-level asyncapi key fails" 1 "FAIL B3 no-protocol" "device-protocol.json declares an API document"
+
+t="$TMP_ROOT/b3-content-bad-json"
+tree "$t"
+printf '{"asyncapi": ' >"$t/device-protocol.json"
+run python3 "$CHK" "$t"
+check "B3: an unparsable JSON file is reported, not skipped" 1 "FAIL B3 no-protocol" "device-protocol.json is not parsable JSON"
+
+t="$TMP_ROOT/b3-content-ok"
+tree "$t"
+printf 'name: ci\nsteps:\n  - openapi: nested\n' >"$t/ci.yaml"
+printf '{"name": "x", "nested": {"swagger": "2.0"}}\n' >"$t/data.json"
+run python3 "$CHK" "$t"
+check "B3: YAML and JSON files with no top-level API key pass" 0 "ok B3 no-protocol"
+
 t="$TMP_ROOT/b4"
 tree "$t"
 printf '# A new trace\n\nNo owner named.\n' >"$t/docs/hsm-device-protocol/new.md"
