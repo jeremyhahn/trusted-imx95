@@ -62,6 +62,14 @@ ROW_FACTS = (
     ("the protocol is never defined here", "never defines"),
 )
 
+# Facts whose reference must sit in the same sentence or bullet as the statement
+# itself: (what, reference, statement pattern).
+ROW_SENTENCES = (
+    ("the HSM is an xkmsd node", "rulings 1243 and 1244", re.compile(r"\bHSM is an xkmsd node\b", re.IGNORECASE)),
+    ("go-xkms #1521 owns the open questions", "go-xkms #1521", re.compile(r"\bopen questions\b", re.IGNORECASE)),
+)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`])|\n|<br\s*/?>")
+
 
 def read(path):
     with open(path, encoding="utf-8") as fh:
@@ -82,7 +90,12 @@ def b1_row(tree):
     if row is None or len(row) < 3:
         return ["docs/SPEC.md has no hsm-device-protocol row"]
     requirements = row[2]
-    return [f"the row does not state {what} ({needle!r})" for what, needle in ROW_FACTS if needle not in requirements]
+    faults = [f"the row does not state {what} ({needle!r})" for what, needle in ROW_FACTS if needle not in requirements]
+    sentences = SENTENCE_END.split(requirements)
+    for what, needle, statement in ROW_SENTENCES:
+        if needle in requirements and not any(needle in s and statement.search(s) for s in sentences):
+            faults.append(f"the row cites {needle!r} but not in the sentence that states {what}")
+    return faults
 
 
 def missing_section(text):

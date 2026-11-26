@@ -39,6 +39,21 @@ EOF
 run python3 "$CHK" "$t"
 check "B1: a row that drops go-xkms #1521 fails" 1 "FAIL B1 row" "go-xkms #1521 owns the open questions"
 
+# The ruling numbers and the issue reference are cited, but not with the statements they back.
+t="$TMP_ROOT/b1-statements"
+tree "$t"
+python3 - "$t/docs/SPEC.md" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace("The HSM is an xkmsd node (owner", "The HSM is a device (owner").replace("go-xkms's open questions (go-xkms #1521)", "go-xkms's questions (go-xkms #1521)")
+s = s.replace("which go-xkms still owns.", "which go-xkms still owns. The open questions are listed elsewhere.")
+open(p, "w", encoding="utf-8").write(s)
+EOF
+run python3 "$CHK" "$t"
+check "B1: the rulings and #1521 cited without their statements fail" 1 "FAIL B1 row" \
+	"not in the sentence that states the HSM is an xkmsd node" "not in the sentence that states go-xkms #1521 owns the open questions"
+
 t="$TMP_ROOT/b1-gone"
 tree "$t"
 printf '# spec\n' >"$t/docs/SPEC.md"
