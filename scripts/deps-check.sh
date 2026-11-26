@@ -176,7 +176,8 @@ if [ -n "${DEPS_REQUIREMENTS:-}" ]; then
 fi
 
 # Actions: every `uses: owner/repo@<sha> # vX.Y.Z` in the workflows; one lookup per action, one verdict per
-# action and pinned tag. A pin tagged by major only (`# v6`) is current while the latest release is in v6.
+# action and pinned tag. The pin is a full commit SHA, which never moves, so its comment must name the exact
+# release; a coarser one (`# v6`) fails, and is judged as an exact version.
 if [ -n "${DEPS_WORKFLOWS:-}" ]; then
 	shopt -s nullglob
 	files=("$DEPS_WORKFLOWS"/*.yml)
@@ -207,11 +208,13 @@ if [ -n "${DEPS_WORKFLOWS:-}" ]; then
 					continue
 				fi
 				read -r tag when <<<"${act_latest[$repo]}"
-				if [[ ${tag#v} == "${version#v}".* ]]; then
-					echo "deps-check: OK     ACTION:$repo $version (latest $tag)"
-				else
-					judge "ACTION:$repo" "${version#v}" "$tag" "$when" "" "bump the pin in $DEPS_WORKFLOWS"
+				# A full-SHA pin never moves, so its comment must name the exact release: a coarser one (`# v6`)
+				# is a failure of its own, and the pin is still judged against the latest tag as an exact version.
+				if [[ ! $version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+					echo "deps-check: FAIL   ACTION:$repo: the comment '$version' on the SHA pin must name the exact release (vX.Y.Z)"
+					bad=1
 				fi
+				judge "ACTION:$repo" "${version#v}" "$tag" "$when" "" "bump the pin in $DEPS_WORKFLOWS"
 			done <"$f"
 		done
 	fi

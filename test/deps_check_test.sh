@@ -63,7 +63,7 @@ pypi fresh-pkg 1.0.0 "$old"
 pypi stale-pkg 1.2.0 "$old"
 gh example/uptodate v1.0.0 "${old}Z"
 gh example/stale v1.2.0 "${old}Z"
-gh example/coarse v6.1.0 "${old}Z"
+gh example/coarse v6.2.0 "${old}Z"
 
 pins=$TMP_ROOT/pins.sh
 cat >"$pins" <<'EOF'
@@ -105,7 +105,8 @@ check "mixed run fails" 1 \
 	"FAIL   PYPI:gone-pkg: the latest release cannot be read (HTTP 404)" \
 	"OK     ACTION:example/uptodate 1.0.0 (latest)" \
 	"FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0" \
-	"OK     ACTION:example/coarse v6 (latest v6.1.0)" \
+	"FAIL   ACTION:example/coarse: the comment 'v6' on the SHA pin must name the exact release" \
+	"FAIL   ACTION:example/coarse 6 is behind 6.2.0" \
 	"FAIL   ACTION:example/missing: the latest release of example/missing cannot be read (HTTP 404)"
 if [[ "$OUT" == *"./local"* || "$OUT" == *"example/loose"* ]]; then fail "local and unpinned actions are not listed"; else pass "local and unpinned actions are not listed"; fi
 stale_lines=0 stale_calls=0
@@ -133,6 +134,16 @@ rm "$wf/y.yml"
 printf 'jobs:\n  j:\n    steps:\n      - uses: example/uptodate@%s # v1.0.0\n' "$sha" >"$wf/x.yml"
 run dc env DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
 check "everything at its latest release passes" 0 "OK     PYPI:fresh-pkg" "OK     ACTION:example/uptodate"
+
+# A SHA pin never moves: a major-only comment is not current while the latest is v6.2.0; the exact version is.
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/coarse@%s # v6\n' "$sha" >"$wf/x.yml"
+run dc env DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "a SHA pin commented with a major only is not OK" 1 "FAIL   ACTION:example/coarse: the comment 'v6' on the SHA pin must name the exact release"
+if [[ "$OUT" == *"OK     ACTION:example/coarse"* ]]; then fail "a major-only SHA pin is not judged current"; else pass "a major-only SHA pin is not judged current"; fi
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/coarse@%s # v6.2.0\n' "$sha" >"$wf/x.yml"
+run dc env DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "a SHA pin commented with the exact latest version is OK" 0 "OK     ACTION:example/coarse 6.2.0 (latest)"
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/uptodate@%s # v1.0.0\n' "$sha" >"$wf/x.yml"
 
 # An outdated pin under 7 days old is reported, not failed.
 new=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%S)
