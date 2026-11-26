@@ -112,4 +112,38 @@ check "make hsm-self-defence-check: a tree without docs/SPEC.md fails" nonzero "
 run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$TMP_ROOT/absent"
 check "make hsm-self-defence-check: a root that is not a directory is a usage error" nonzero "usage:"
 
+# HSD_ROOT is a path, never shell source: a directory whose name holds a
+# backtick command, a $( ) command and a space reaches the check literally and
+# no command runs. The directory lives under $TMP_ROOT, never in the clone.
+HSD_MARK="$TMP_ROOT/hsd-mark-backtick"
+HSD_MARK2="$TMP_ROOT/hsd-mark-dollar"
+export HSD_MARK HSD_MARK2
+rm -f "$HSD_MARK" "$HSD_MARK2"
+t=$(tree "inj/a \`touch \"\$HSD_MARK\"\` \$(touch \"\$HSD_MARK2\") b")
+run env HSD_ROOT="$t" make -s -C "$ROOT" hsm-self-defence-check
+check "make hsm-self-defence-check: a root path with a backtick, \$( ) and a space reaches the check literally" 0 \
+	"hsm-self-defence-check: OK"
+expect "make hsm-self-defence-check: no command in the root path ran" \
+	test ! -e "$HSD_MARK" -a ! -e "$HSD_MARK2"
+run make -s -C "$ROOT" hsm-self-defence-check HSD_ROOT="$t/none \`touch \"\$HSD_MARK\"\`"
+check "make hsm-self-defence-check: a command-line path with a backtick and a dollar sign is refused, not run" 2 \
+	"hsm-self-defence-check: a command-line HSD_ROOT holding a dollar sign is refused"
+expect "make hsm-self-defence-check: the command-line backtick did not run" test ! -e "$HSD_MARK"
+
+# Make runs a function in a command-line variable while it builds the recipe
+# environment: a literal $(shell ...) on the command line is refused before it
+# runs, and the same text in the environment reaches the check as a path that
+# does not exist (usage error) with no command run.
+HSD_MARK3="$TMP_ROOT/hsd-mark-shell-cmdline"
+HSD_MARK4="$TMP_ROOT/hsd-mark-shell-env"
+rm -f "$HSD_MARK3" "$HSD_MARK4"
+run make -s -C "$ROOT" hsm-self-defence-check "HSD_ROOT=$TMP_ROOT/\$(shell touch $HSD_MARK3)"
+check "make hsm-self-defence-check: a command-line \$(shell ...) HSD_ROOT is refused" 2 \
+	"a command-line HSD_ROOT holding a dollar sign is refused"
+expect "make hsm-self-defence-check: the command-line \$(shell ...) did not run" test ! -e "$HSD_MARK3"
+run env HSD_ROOT="$TMP_ROOT/\$(shell touch $HSD_MARK4)" make -s -C "$ROOT" hsm-self-defence-check
+check "make hsm-self-defence-check: an environment \$(shell ...) HSD_ROOT reaches the check literally, unreadable" nonzero \
+	"usage:"
+expect "make hsm-self-defence-check: the environment \$(shell ...) did not run" test ! -e "$HSD_MARK4"
+
 finish
