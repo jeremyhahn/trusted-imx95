@@ -211,6 +211,64 @@ run cert save id "$tmp/work/does-not-exist.crt"
 ok "missing local input is left to xkmsctl, no upload" [ "$(grep -c 'cat >' "$FAKE_SSH_LOG")" = 0 ]
 ok "missing input still cleans up" gone
 
+# --- a stalled ssh must not outlive bi_ctl's timeout -------------------------
+# The stalling ssh answers the mktemp and upload calls like the fake above, but
+# the xkmsctl call and the cleanup call sleep far longer than the timeout. It
+# records its pid (the sleep it execs into), so survivors are found by pid, not
+# by name.
+stallbin=$tmp/stallbin
+mkdir -p "$stallbin"
+cat >"$stallbin/ssh" <<'EOF'
+#!/bin/sh
+case "$*" in
+*"su -s"* | *"rm -rf"*)
+	echo $$ >>"$STALL_PIDS"
+	exec sleep 300
+	;;
+esac
+exec "$FAKE_REAL_SSH" "$@"
+EOF
+chmod +x "$stallbin/ssh"
+
+alive() { # alive <pidfile>: succeed when any pid in the file still runs
+	local p
+	while read -r p; do
+		! kill -0 "$p" 2>/dev/null || return 0
+	done <"$1"
+	return 1
+}
+not_alive() { ! alive "$1"; }
+stall() { # stall <name> <ctl args...>: bi_ctl with a 2s timeout; RC, ELAPSED, $tmp/stall.<name>
+	local name=$1 start=$SECONDS
+	shift
+	: >"$tmp/stall.$name"
+	(
+		export STALL_PIDS=$tmp/stall.$name FAKE_REAL_SSH=$fakebin/ssh
+		export PATH=$stallbin:$PATH XKMS_BOARD_CLEANUP_TIMEOUT=2
+		# shellcheck source=/dev/null
+		. "$here/scripts/xkms/burnin/lib.sh"
+		export BI_CTL=$bc BI_CTL_TIMEOUT=2
+		bi_ctl "$@"
+	) >"$tmp/out" 2>"$tmp/err" </dev/null
+	RC=$?
+	ELAPSED=$((SECONDS - start))
+}
+
+reset
+stall plain key get x
+ok "stalled plain call: bi_ctl reports the timeout (124)" [ "$RC" = 124 ]
+ok "stalled plain call returns in bounded time" [ "$ELAPSED" -le 8 ]
+ok "stalled plain call ran one ssh" [ "$(wc -l <"$tmp/stall.plain")" = 1 ]
+ok "stalled plain call leaves no ssh behind" not_alive "$tmp/stall.plain"
+
+reset
+stall file cert generate-ca --cn x --output "$tmp/work/st.crt"
+ok "stalled file call: bi_ctl reports the timeout (124)" [ "$RC" = 124 ]
+ok "stalled file call returns in bounded time (cleanup ssh is bounded too)" [ "$ELAPSED" -le 12 ]
+ok "stalled file call ran the call and the cleanup ssh" [ "$(wc -l <"$tmp/stall.file")" = 2 ]
+ok "stalled file call leaves no ssh behind" not_alive "$tmp/stall.file"
+ok "stalled file call downloads nothing" [ ! -e "$tmp/work/st.crt" ]
+
 # --- every burn-in script plans with the stand-in ----------------------------
 reset
 for s in "$here"/scripts/xkms/burnin/*.sh; do
