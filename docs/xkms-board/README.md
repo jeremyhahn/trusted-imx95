@@ -8,7 +8,7 @@ the owner approved it on 2026-11-25. It is not done.
 
 | Step | Command | Result |
 | --- | --- | --- |
-| Build | `scripts/xkms/xkmsd-build.sh [<commit>]` | `build/xkms/<commit>/{xkmsd,xkmsctl,manifest.txt}`, static linux/arm64 |
+| Build | `scripts/xkms/xkmsd-build.sh [<commit>]` | `build/xkms/<commit>/{xkmsd,xkmsctl,manifest.txt}`, static linux/arm64, stamped with the go-xkms commit (`xkmsd --version` prints it); `XKMSCTL_HOST=1` also builds `host/xkmsctl` for the build host |
 | Deploy | `scripts/xkms/xkmsd-deploy.sh <ssh target> build/xkms/<commit>` | new binary running, backup in `/var/backups/xkms/<stamp>/` |
 | Roll back | `scripts/xkms/xkmsd-deploy.sh --rollback <stamp> <ssh target>` | that backup restored |
 | Upgrade | `scripts/xkms/xkmsd-upgrade.sh [--apply] <ssh target>` | says whether the board runs the latest go-xkms; with `--apply`, builds and deploys it |
@@ -36,7 +36,8 @@ and a fixed `GOPATH` and `GOCACHE` under `build/go-xkms/`, outside the source
 tree. Nothing from the caller's shell reaches the build except `PATH` and the
 proxy and CA variables the module download needs. The manifest lists the
 commit, the pinned and the actual Go version, the exact environment, the flags
-and the hashes.
+(with the `-X` version stamp: `git describe` of the commit, the full sha, the
+commit's own date) and the hashes.
 
 ## Deploy
 

@@ -718,9 +718,11 @@ case \$1 in
 version) echo "go version \$(cat "$gobin/release") linux/amd64" ;;
 build)
 	env | LC_ALL=C sort >>"$gobin/build.env"
+	echo "\$*" >>"$gobin/build.args"
 	find . -type f -not -path './.git/*' | LC_ALL=C sort >>"$gobin/build.files"
 	while [ \$# -gt 0 ]; do case \$1 in -o) printf 'stub binary\n' >"\$2"; shift ;; esac; shift; done
 	;;
+env) printf 'linux\namd64\n' ;;
 *) exit 2 ;;
 esac
 EOF
@@ -739,6 +741,7 @@ BLD() { # BLD <log> <outdir> <go release> [VAR=value...]: build the fake commit 
 	shift 3
 	: >"$gobin/build.env"
 	: >"$gobin/build.files"
+	: >"$gobin/build.args"
 	set +e
 	env "$@" PATH="$gobin:$PATH" XKMS_REPO="$gx" XKMS_SRC="$tmp/gosrc" XKMS_OUT="$out" \
 		"$here/scripts/xkms/xkmsd-build.sh" "$gxc" >"$log" 2>&1
@@ -804,6 +807,53 @@ ok "build: the untracked .go file was not in the build tree" out_lacks "$gobin/b
 ok "build: the ignored .go file was not in the build tree" out_lacks "$gobin/build.files" "ign.go"
 ok "build: the modified VERSION did not reach the record" cmp -s "$tmp/bld-2/$gxc/manifest.txt" "$tmp/bld-3/$gxc/manifest.txt"
 ok "build: the record says the source was a fresh checkout" out_has "$tmp/bld-3/$gxc/manifest.txt" "source: fresh checkout of the commit"
+
+# The version stamp: -X on the variables go-xkms defines, for both binaries.
+gxs=${gxc:0:12}
+XB_DRY() { # XB_DRY <log> [VAR=value...]: the build script's --dry-run on the fake repository; set RC
+	local log=$1
+	shift
+	set +e
+	env "$@" PATH="$gobin:$PATH" XKMS_REPO="$gx" XKMS_SRC="$tmp/gosrc" XKMS_OUT="$tmp/dry-out" \
+		"$here/scripts/xkms/xkmsd-build.sh" --dry-run "$gxc" >"$log" 2>&1
+	RC=$?
+	set -e
+}
+XB_DRY "$tmp/xb-dry.log"
+ok "build dry-run: exits 0" [ "$RC" = 0 ]
+ok "build dry-run: the plan line names the version ldflags" out_has "$tmp/xb-dry.log" "plan: -ldflags '-s -w -X main.Version=<git describe --tags --always --abbrev=12 of the commit> -X main.GitCommit=<full commit sha> -X main.BuildDate=<commit date, UTC, RFC 3339>' on both binaries"
+ok "build dry-run: no host client unless asked" out_lacks "$tmp/xb-dry.log" "host/xkmsctl"
+XB_DRY "$tmp/xb-dry-host.log" XKMSCTL_HOST=1
+ok "build dry-run: XKMSCTL_HOST=1 plans the host client" out_has "$tmp/xb-dry-host.log" "$tmp/dry-out/<commit>/host/xkmsctl"
+ok "build dry-run: wrote nothing" [ ! -e "$tmp/dry-out" ]
+BLD "$tmp/bld-bad.log" "$tmp/bld-bad" "$pin" XKMSCTL_HOST=yes
+ok "build: XKMSCTL_HOST other than 0 or 1 is refused" [ "$RC" = 2 ]
+BLD "$tmp/bld-4.log" "$tmp/bld-4" "$pin"
+ok "build: ldflags stamp the full commit" out_has "$gobin/build.args" "-X main.GitCommit=$gxc"
+ok "build: ldflags stamp the commit's own date" out_has "$gobin/build.args" "-X main.BuildDate=2026-01-02T03:04:05Z"
+# the commit has no tag: describe falls back to the 12-character sha
+ok "build: an untagged commit is versioned by its short sha" out_has "$gobin/build.args" "-X main.Version=$gxs "
+ok "build: both binaries were stamped" [ "$(wc -l <"$gobin/build.args")" = 2 ]
+ok "build: the manifest records the version ldflags" out_has "$tmp/bld-4/$gxc/manifest.txt" "-X main.GitCommit=$gxc -X main.BuildDate=2026-01-02T03:04:05Z"
+git -C "$gx" -c user.name=t -c user.email=t@example.invalid -c tag.gpgsign=false tag -a -m rel v0.1.0 "$gxc"
+BLD "$tmp/bld-5.log" "$tmp/bld-5" "$pin"
+ok "build: a tagged commit is versioned by git describe" out_has "$gobin/build.args" "-X main.Version=v0.1.0 "
+# the host client
+ok "build: no host client by default" [ ! -e "$tmp/bld-5/$gxc/host" ]
+ok "build: no host client in the default manifest" out_lacks "$tmp/bld-5/$gxc/manifest.txt" "host/xkmsctl"
+BLD "$tmp/bld-6.log" "$tmp/bld-6" "$pin" XKMSCTL_HOST=1 GOOS=windows GOARCH=s390x
+ok "build: XKMSCTL_HOST=1 builds" [ "$RC" = 0 ]
+ok "build: the host xkmsctl is in host/" [ -s "$tmp/bld-6/$gxc/host/xkmsctl" ]
+ok "build: three go builds ran" [ "$(wc -l <"$gobin/build.args")" = 3 ]
+ok "build: the host client is built for the host's GOARCH" out_has "$gobin/build.env" $'\nGOARCH=amd64\n'
+ok "build: the board binaries stay linux/arm64" out_has "$gobin/build.env" $'\nGOARCH=arm64\n'
+ok "build: the caller's GOOS/GOARCH did not reach the build" out_lacks "$gobin/build.env" "s390x"
+ok "build: the host client is still CGO-free" out_lacks "$gobin/build.env" "CGO_ENABLED=1"
+ok "build: the host client carries the same stamp" [ "$(grep -c -- "-X main.GitCommit=$gxc" "$gobin/build.args")" = 3 ]
+ok "build: the manifest records the host platform" out_has "$tmp/bld-6/$gxc/manifest.txt" "host-xkmsctl: GOOS/GOARCH linux/amd64, CGO_ENABLED=0"
+ok "build: the manifest has the host client's sha256" out_has "$tmp/bld-6/$gxc/manifest.txt" "  host/xkmsctl"
+ok "build: that sha256 is the file's" out_has "$tmp/bld-6/$gxc/manifest.txt" "sha256: $(sha256sum "$tmp/bld-6/$gxc/host/xkmsctl" | cut -d' ' -f1)  host/xkmsctl"
+ok "build: the manifest still holds no host path" out_lacks "$tmp/bld-6/$gxc/manifest.txt" "$here"
 
 # --- burn-in writers drain at a stop -------------------------------------------
 # Every create takes FAKE_CTL_SLOW seconds to be answered after it succeeded,

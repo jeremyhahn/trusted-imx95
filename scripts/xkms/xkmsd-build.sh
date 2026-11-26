@@ -15,6 +15,8 @@
 #   XKMSD_TAGS  Go build tags (default: the codec, pkcs8 and frost tags of
 #               go-xkms's own CGO-free build)
 #   XKMS_OUT    output root (default build/xkms under the repository)
+#   XKMSCTL_HOST  1: also build xkmsctl for the build host into
+#               build/xkms/<commit>/host/xkmsctl (default 0)
 set -euo pipefail
 
 # The Go release this build is pinned to; any other `go version` is refused
@@ -40,6 +42,16 @@ The build is reproducible only with one toolchain: it is refused unless
 it runs in a clean environment (no GOFLAGS, no GOEXPERIMENT, GOTOOLCHAIN=local,
 default GOAMD64/GOARM64, CGO_ENABLED=0, a fixed GOPATH and GOCACHE outside
 the source tree).
+
+Both binaries are stamped with the go-xkms commit through -ldflags -X on the
+variables go-xkms defines (main.Version = git describe --tags --always of the
+commit, main.GitCommit = the full sha, main.BuildDate = the commit's own date,
+UTC, RFC 3339), so `xkmsd --version` says which go-xkms it runs and the build
+stays reproducible.
+
+With XKMSCTL_HOST=1 an xkmsctl for the build host's own GOOS/GOARCH (still
+CGO_ENABLED=0) is also built into build/xkms/<commit>/host/xkmsctl, with its
+SHA-256 in the manifest. Off by default.
 
   --dry-run   print the plan; clone and build nothing
 EOF
@@ -76,9 +88,23 @@ done
 cleango() {
 	env -i PATH="$PATH" HOME="$root/$gobase_rel/home" ${passenv[@]+"${passenv[@]}"} "${buildenv[@]}" go "$@"
 }
+# cleango_host <goos> <goarch> <go args>: the same, for another target (a
+# later NAME=value of env wins over the arm64 one in buildenv)
+cleango_host() {
+	local os=$1 arch=$2
+	shift 2
+	env -i PATH="$PATH" HOME="$root/$gobase_rel/home" ${passenv[@]+"${passenv[@]}"} "${buildenv[@]}" \
+		GOOS="$os" GOARCH="$arch" go "$@"
+}
 
 dry=0
 want=""
+hostctl=${XKMSCTL_HOST:-0}
+case $hostctl in 0 | 1) ;; *)
+	echo "xkmsd-build: XKMSCTL_HOST must be 0 or 1, not '$hostctl'" >&2
+	exit 2
+	;;
+esac
 while [ $# -gt 0 ]; do
 	case $1 in
 	-h | --help)
@@ -108,7 +134,11 @@ if [ "$dry" = 1 ]; then
 	echo "plan: clone $repo into $src (object cache), build in a fresh checkout of $want, refused unless git status --ignored is empty"
 	echo "plan: refuse to build unless go version is $go_pin"
 	echo "plan: env -i $buildenv_record go build -trimpath -buildvcs=false -tags '$tags' ./cmd/xkmsd ./cmd/xkmsctl"
+	echo "plan: -ldflags '-s -w -X main.Version=<git describe --tags --always --abbrev=12 of the commit> -X main.GitCommit=<full commit sha> -X main.BuildDate=<commit date, UTC, RFC 3339>' on both binaries"
 	echo "plan: write $outroot/<commit>/{xkmsd,xkmsctl,manifest.txt}"
+	if [ "$hostctl" = 1 ]; then
+		echo "plan: XKMSCTL_HOST=1: also build xkmsctl for the build host's own GOOS/GOARCH (CGO_ENABLED=0, same flags) into $outroot/<commit>/host/xkmsctl"
+	fi
 	exit 0
 fi
 
@@ -147,6 +177,7 @@ work=$(mktemp -d "$(dirname "$src")/build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 git -C "$work" init -q
 git -C "$work" fetch -q --no-tags "$src" '+refs/*:refs/src/*'
+git -C "$work" fetch -q --no-tags "$src" '+refs/tags/*:refs/tags/*'
 git -C "$work" -c advice.detachedHead=false checkout -q --detach "$commit"
 [ "$(git -C "$work" rev-parse HEAD)" = "$commit" ] || {
 	echo "xkmsd-build: the fresh checkout is not at $commit" >&2
@@ -159,9 +190,9 @@ dirty=$(git -C "$work" status --porcelain --ignored)
 	exit 1
 }
 
-short=$(git -C "$work" rev-parse --short=12 HEAD)
-base=$(tr -d '[:space:]' <"$work/VERSION" 2>/dev/null || true)
-version="${base:-0.0.0}+g$short"
+# Version is git describe of the commit (the tags came with the fetch above);
+# --abbrev=12 fixes the length, which would otherwise depend on the object count.
+version=$(git -C "$work" describe --tags --always --abbrev=12 HEAD)
 # The commit date, not the wall clock, so a rebuild is byte-identical.
 bdate=$(TZ=UTC git -C "$work" show -s --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD)
 ldflags="-s -w -X main.Version=$version -X main.GitCommit=$commit -X main.BuildDate=$bdate"
@@ -176,6 +207,23 @@ for b in xkmsd xkmsctl; do
 	)
 done
 
+# The host client, for the burn-in driver: the same source, flags and
+# stamp, built for the build host's own GOOS/GOARCH, still without cgo.
+hostplat=""
+shas=(xkmsd xkmsctl)
+rm -rf "$out/host"
+if [ "$hostctl" = 1 ]; then
+	hostplat=$(cleango env GOHOSTOS GOHOSTARCH | tr '\n' '/')
+	hostplat=${hostplat%/}
+	mkdir -p "$out/host"
+	(
+		cd "$work"
+		cleango_host "${hostplat%/*}" "${hostplat#*/}" build -trimpath -buildvcs=false -tags "$tags" \
+			-ldflags "$ldflags" -o "$out/host/xkmsctl" ./cmd/xkmsctl
+	)
+	shas+=(host/xkmsctl)
+fi
+
 {
 	echo "go-xkms-commit: $commit"
 	echo "version: $version"
@@ -185,7 +233,8 @@ done
 	echo "go-version: $goversion"
 	echo "env: $buildenv_record"
 	echo "flags: -trimpath -buildvcs=false -tags '$tags' -ldflags '$ldflags'"
-	(cd "$out" && sha256sum xkmsd xkmsctl | while read -r h f; do echo "sha256: $h  $f"; done)
+	[ -z "$hostplat" ] || echo "host-xkmsctl: GOOS/GOARCH $hostplat, CGO_ENABLED=0, same flags and ldflags"
+	(cd "$out" && sha256sum "${shas[@]}" | while read -r h f; do echo "sha256: $h  $f"; done)
 } >"$out/manifest.txt"
 
 echo "xkmsd-build: output $out"
