@@ -477,21 +477,23 @@ directory (`bitbake -c cleansstate imx-oei imx-system-manager`, then build):
 (`18:22:54` against `20:12:32`; `18:24:14` against `20:12:56`) next to the build
 date `Nov 27 2026`. Both recipes write it in their own
 `<oei|sm>/makefiles/build_info.mak`: `date +'#define OEI_DATE "%b %d %C%y"'`
-and `OEI_TIME "%T"` (lines 70-71; lines 97 for a date file) in imx-oei, and
-`SM_DATE`/`SM_TIME` (lines 82-83, 116) in imx-system-manager. Plain `date`
+and `OEI_TIME "%T"` (lines 71-72, and line 98 for the release-notes date) in
+imx-oei, and `SM_DATE`/`SM_TIME` (lines 83-84, 117) in imx-system-manager. Plain `date`
 reads the wall clock and ignores `SOURCE_DATE_EPOCH`. The date part differs only
 when the two builds straddle a day or month. The cause is therefore the
 wall-clock time, fed by `date`, in two firmware images from NXP's sources.
 
-Not pinned yet (gap, row open): no bbappend was added and nothing was
-rebuilt with a fix, so no `cmp`-equal result with a pin exists. Next step: a
-`platform-image/recipes-bsp/imx-oei/imx-oei_%.bbappend` and an
-`imx-system-manager_%.bbappend` that make `date` print `SOURCE_DATE_EPOCH`
-(for example a `date` wrapper on `PATH` for `do_compile`, or `date -d @...` via
-a small patch of `build_info.mak`), rebuild each twice after `cleansstate`, and
-compare. The Yocto layer's imx-system-manager and imx-oei recipes, not
-imx-boot, are the ones to append. `test/platform_image_test.sh` then checks
-the bbappends structurally.
+Pin (slice 4): `platform-image/recipes-bsp/imx-oei/imx-oei_%.bbappend` and
+`platform-image/recipes-bsp/imx-system-manager/imx-system-manager_%.bbappend`
+each add `files/0001-build-info-use-source-date-epoch.patch`, which rewrites the
+three `date` calls of that recipe's `build_info.mak` to `date -u -d
+@$(SOURCE_DATE_EPOCH)`. `test/platform_image_test.sh` checks both structurally.
+
+Not verified yet (gap, row open): the clean double rebuild with the pin
+(`cleansstate` of imx-oei, imx-system-manager and imx-boot between two builds,
+then `cmp` of both firmware binaries and of `flash_a55`/`flash_all`) was started
+but its result is not recorded here. Record the `cmp` lines in this section
+before the row is called done.
 
 ### `make platform-image PI_DEBUG=1`
 
