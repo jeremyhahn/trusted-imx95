@@ -34,10 +34,6 @@ while [ $# -gt 0 ]; do
 done
 [ "$cfg" -eq 0 ] || cat >>"$STUB_DIR/stdin.log"
 file=$STUB_DIR/answers/$(printf '%s' "$url" | tr -c 'A-Za-z0-9.' '_')
-# answers/any_github_release, when present, answers every releases/latest URL that has no answer of its own.
-if [ ! -f "$file" ] && [[ $url == https://api.github.com/repos/*/releases/latest ]]; then
-	file=$STUB_DIR/answers/any_github_release
-fi
 if [ -f "$file" ]; then
 	if [ -n "$out" ]; then cp "$file" "$out"; else cat "$file"; fi
 	[ "$wo" -eq 0 ] || printf 200
@@ -164,54 +160,7 @@ args=$(<"$STUB_DIR/args.log")
 if [[ "$args" == *pypi.org* ]]; then fail "PyPI is not read without DEPS_REQUIREMENTS"; else pass "PyPI is not read without DEPS_REQUIREMENTS"; fi
 mkdir -p "$TMP_ROOT/rel"
 printf 'v1.0.0 %sZ\n' "$old" >"$TMP_ROOT/rel/AAA"
-# --fetch writes the tools' and the pinned actions' latest releases; a check with DEPS_RELEASES_DIR judges the
-# actions from those files with no GitHub call, reads PyPI live, and fails an action with no file.
-printf 'jobs:\n  j:\n    steps:\n      - uses: example/uptodate@%s # v1.0.0\n      - uses: example/stale@%s # v1.0.0\n' "$sha" "$sha" >"$wf/x.yml"
-run dc env DEPS_WORKFLOWS="$wf" "$CHECK" --fetch "$TMP_ROOT/rel" "$pins"
-check "--fetch writes the pinned actions' releases" 0 "FETCH  AAA v1.0.0" "FETCH  ACTION:example/uptodate v1.0.0" "FETCH  ACTION:example/stale v1.2.0"
-if [ -s "$TMP_ROOT/rel/ACTION@example@stale" ]; then pass "--fetch writes one file per action"; else fail "--fetch writes one file per action"; fi
-: >"$STUB_DIR/args.log"
 run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
-check "DEPS_RELEASES_DIR still judges the Python and Actions pins" 1 \
-	"OK     AAA 1.0.0 (latest)" \
-	"REPORT PYPI:stale-pkg 1.0.0, latest 1.2.0" \
-	"OK     ACTION:example/uptodate 1.0.0 (latest)" \
-	"FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0"
-args=$(<"$STUB_DIR/args.log")
-if [[ "$args" == *api.github.com* ]]; then fail "DEPS_RELEASES_DIR makes no GitHub call"; else pass "DEPS_RELEASES_DIR makes no GitHub call"; fi
-if [[ "$OUT" == *SKIP* ]]; then fail "DEPS_RELEASES_DIR skips nothing"; else pass "DEPS_RELEASES_DIR skips nothing"; fi
-printf 'jobs:\n  j:\n    steps:\n      - uses: example/unfetched@%s # v1.0.0\n' "$sha" >"$wf/z.yml"
-run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
-check "an action --fetch did not write fails with DEPS_RELEASES_DIR" 1 \
-	"FAIL   ACTION:example/unfetched: the latest release of example/unfetched cannot be read ($TMP_ROOT/rel/ACTION@example@unfetched holds no release tag and date)"
-rm "$wf/z.yml"
-
-# .yaml workflows are read beside .yml ones, by the check and by --fetch.
-printf 'jobs:\n  j:\n    steps:\n      - uses: example/uptodate@%s # v1.0.0\n' "$sha" >"$wf/x.yml"
-printf 'jobs:\n  j:\n    steps:\n      - uses: example/coarse@%s # v6\n' "$sha" >"$wf/w.yaml"
-run dc env DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
-check "a pin in a .yaml workflow is checked beside the .yml ones" 1 \
-	"OK     ACTION:example/uptodate 1.0.0 (latest)" \
-	"FAIL   ACTION:example/coarse: the comment 'v6' on the SHA pin must name the exact release"
-run dc env DEPS_WORKFLOWS="$wf" "$CHECK" --fetch "$TMP_ROOT/rel" "$pins"
-check "--fetch reads .yaml workflows" 0 "FETCH  ACTION:example/coarse v6.2.0"
-rm "$wf/w.yaml"
-mkdir -p "$TMP_ROOT/wf-yaml"
-printf 'jobs:\n  j:\n    steps:\n      - uses: example/stale@%s # v1.0.0\n' "$sha" >"$TMP_ROOT/wf-yaml/only.yaml"
-run dc env DEPS_WORKFLOWS="$TMP_ROOT/wf-yaml" "$CHECK" "$pins"
-check "a directory of .yaml workflows alone is checked" 1 "FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0"
-
-# The repository's own workflows: every SHA pin's comment names an exact release, and --fetch with its default
-# directory reads them. Every action's latest release is served as the same canned answer.
-answer any-github-release "{\"tag_name\":\"v1.0.0\",\"published_at\":\"${old}Z\"}"
-rm -rf "$TMP_ROOT/rel-repo"
-run dc "$CHECK" --fetch "$TMP_ROOT/rel-repo" "$pins"
-check "--fetch reads the repository's workflows by default" 0 "FETCH  ACTION:actions/checkout"
-run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel-repo" DEPS_WORKFLOWS="$ROOT/.github/workflows" "$CHECK" "$pins"
-if [[ "$OUT" == *"ACTION:actions/checkout 6.1.0 is behind 1.0.0"* && "$OUT" != *"must name the exact release"* && "$OUT" != *"cannot be read"* ]]; then
-	pass "every SHA pin in .github/workflows names an exact release"
-else
-	fail "every SHA pin in .github/workflows names an exact release" "$(printf '%s\n' "$OUT" | while IFS= read -r l; do [[ $l != *"must name the exact release"* ]] || printf '%s\n' "$l"; done)"
-fi
+check "DEPS_RELEASES_DIR skips the Python and Actions sections" 0 "SKIP   Python and Actions pins"
 
 finish

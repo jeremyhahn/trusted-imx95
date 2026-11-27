@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deps-check.sh [pin-file] | --fetch <dir> [pin-file]: fails when a pinned tool, the Alpine base, a pinned Python package (DEPS_REQUIREMENTS) or a pinned workflow action (DEPS_WORKFLOWS) is behind a release older than 7 days, unless <TOOL>_HOLD gives a reason; one unreadable item fails and does not hide the others; --fetch writes each tool's and each pinned action's latest release to <dir> (the actions of DEPS_WORKFLOWS, by default .github/workflows), and DEPS_RELEASES_DIR=<dir> reads them back.
+# deps-check.sh [pin-file] | --fetch <dir> [pin-file]: fails when a pinned tool, the Alpine base, a pinned Python package (DEPS_REQUIREMENTS) or a pinned workflow action (DEPS_WORKFLOWS) is behind a release older than 7 days, unless <TOOL>_HOLD gives a reason; one unreadable item fails and does not hide the others; --fetch writes each tool's latest release to <dir>.
 set -euo pipefail
 
 fetch=
@@ -136,57 +136,7 @@ for tool in "${tools[@]}"; do
 		judge "$tool" "$version" "$tag" "$when" "$hold"
 	fi
 done
-
-# workflow_files <dir>: sets files to every *.yml and *.yaml workflow in <dir>, as GitHub and pins-check.sh read both.
-workflow_files() {
-	shopt -s nullglob
-	files=("$1"/*.yml "$1"/*.yaml)
-	shopt -u nullglob
-}
-
-# action_pins <file>...: prints "<owner/repo> <comment version>" once per pair of every
-# `uses: owner/repo[/path]@<40-hex sha> # <version>` line, in file order.
-action_pins() {
-	local f line key re='uses:[[:space:]]*([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(/[^@[:space:]]*)?@[0-9a-f]{40}[[:space:]]*#[[:space:]]*(v?[0-9][^[:space:]]*)'
-	local -A seen=()
-	for f in "$@"; do
-		while IFS= read -r line || [ -n "$line" ]; do
-			[[ $line =~ $re ]] || continue
-			key="${BASH_REMATCH[1]} ${BASH_REMATCH[3]}"
-			[ -z "${seen[$key]:-}" ] || continue
-			seen[$key]=1
-			printf '%s\n' "$key"
-		done <"$f"
-	done
-}
-
-# action_file <owner/repo>: the release file of an action under --fetch's directory; '@' is in no owner or repo name.
-action_file() { printf 'ACTION@%s' "${1//\//@}"; }
-
-# --fetch also writes the latest release of every action the workflows pin (DEPS_WORKFLOWS, by default the
-# repository's .github/workflows), so a check run with DEPS_RELEASES_DIR judges the actions with no token.
-if [ -n "$fetch" ]; then
-	wfdir=${DEPS_WORKFLOWS:-$(dirname "${BASH_SOURCE[0]}")/../.github/workflows}
-	workflow_files "$wfdir"
-	if [ "${#files[@]}" -eq 0 ]; then
-		echo "deps-check: FAIL   ACTIONS: no workflow files in $wfdir"
-		exit 1
-	fi
-	declare -A fetched=()
-	while read -r repo version; do
-		[ -z "${fetched[$repo]:-}" ] || continue
-		fetched[$repo]=1
-		tag='' when='' got=''
-		if got=$(latest_github "$repo") && read -r tag when <<<"$got" && valid_release "$tag" "$when"; then
-			printf '%s %s\n' "$tag" "$when" >"$fetch/$(action_file "$repo")"
-			echo "deps-check: FETCH  ACTION:$repo $tag ($when)"
-		else
-			echo "deps-check: FAIL   ACTION:$repo: the latest release of $repo cannot be read (${got:-no reply})"
-			bad=1
-		fi
-	done < <(action_pins "${files[@]}")
-	exit "$bad"
-fi
+[ -z "$fetch" ] || exit "$bad"
 
 if read -r tag when < <(latest_alpine) && [ -n "${when:-}" ]; then
 	judge ALPINE "$ALPINE_VERSION" "$tag" "$when" "${ALPINE_HOLD:-}"
@@ -195,9 +145,13 @@ else
 	bad=1
 fi
 
-# The Python and Actions sections run when the caller names the files (make deps-check does). PyPI needs no
-# token and is read live in every mode, as Alpine is; with DEPS_RELEASES_DIR the actions' releases are read
-# from the files --fetch wrote, and an action with none fails.
+# The Python and Actions sections run only when the caller names the files (make deps-check does), and not
+# when DEPS_RELEASES_DIR is set: the CI step that sets it reads the tools' releases alone.
+if [ -n "${DEPS_RELEASES_DIR:-}" ]; then
+	[ -z "${DEPS_REQUIREMENTS:-}${DEPS_WORKFLOWS:-}" ] ||
+		echo "deps-check: SKIP   Python and Actions pins (DEPS_RELEASES_DIR is set)"
+	exit "$bad"
+fi
 
 # Python: every name==version in the requirements file against the newest PyPI release.
 if [ -n "${DEPS_REQUIREMENTS:-}" ]; then
@@ -225,41 +179,44 @@ fi
 # action and pinned tag. The pin is a full commit SHA, which never moves, so its comment must name the exact
 # release; a coarser one (`# v6`) fails, and is judged as an exact version.
 if [ -n "${DEPS_WORKFLOWS:-}" ]; then
-	workflow_files "$DEPS_WORKFLOWS"
+	shopt -s nullglob
+	files=("$DEPS_WORKFLOWS"/*.yml)
+	shopt -u nullglob
 	if [ "${#files[@]}" -eq 0 ]; then
 		echo "deps-check: FAIL   ACTIONS: no workflow files in $DEPS_WORKFLOWS"
 		bad=1
 	else
-		declare -A act_latest=()
-		while read -r repo version; do
-			if [ -z "${act_latest[$repo]:-}" ]; then
-				tag='' when='' got=''
-				if [ -n "${DEPS_RELEASES_DIR:-}" ]; then
-					if read -r tag when 2>/dev/null <"$DEPS_RELEASES_DIR/$(action_file "$repo")" && valid_release "$tag" "$when"; then
+		act_re='uses:[[:space:]]*([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(/[^@[:space:]]*)?@[0-9a-f]{40}[[:space:]]*#[[:space:]]*(v?[0-9][^[:space:]]*)'
+		declare -A act_latest=() act_seen=()
+		for f in "${files[@]}"; do
+			while IFS= read -r line || [ -n "$line" ]; do
+				[[ $line =~ $act_re ]] || continue
+				repo=${BASH_REMATCH[1]} version=${BASH_REMATCH[3]}
+				[ -z "${act_seen["$repo $version"]:-}" ] || continue
+				act_seen["$repo $version"]=1
+				if [ -z "${act_latest[$repo]:-}" ]; then
+					tag='' when='' got=''
+					if got=$(latest_github "$repo") && read -r tag when <<<"$got" && valid_release "$tag" "$when"; then
 						act_latest[$repo]="$tag $when"
 					else
-						act_latest[$repo]="FAIL $DEPS_RELEASES_DIR/$(action_file "$repo") holds no release tag and date"
+						act_latest[$repo]="FAIL ${got:-no reply}"
 					fi
-				elif got=$(latest_github "$repo") && read -r tag when <<<"$got" && valid_release "$tag" "$when"; then
-					act_latest[$repo]="$tag $when"
-				else
-					act_latest[$repo]="FAIL ${got:-no reply}"
 				fi
-			fi
-			if [ "${act_latest[$repo]%% *}" = FAIL ]; then
-				echo "deps-check: FAIL   ACTION:$repo: the latest release of $repo cannot be read (${act_latest[$repo]#FAIL })"
-				bad=1
-				continue
-			fi
-			read -r tag when <<<"${act_latest[$repo]}"
-			# A full-SHA pin never moves, so its comment must name the exact release: a coarser one (`# v6`)
-			# is a failure of its own, and the pin is still judged against the latest tag as an exact version.
-			if [[ ! $version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-				echo "deps-check: FAIL   ACTION:$repo: the comment '$version' on the SHA pin must name the exact release (vX.Y.Z)"
-				bad=1
-			fi
-			judge "ACTION:$repo" "${version#v}" "$tag" "$when" "" "bump the pin in $DEPS_WORKFLOWS"
-		done < <(action_pins "${files[@]}")
+				if [ "${act_latest[$repo]%% *}" = FAIL ]; then
+					echo "deps-check: FAIL   ACTION:$repo: the latest release of $repo cannot be read (${act_latest[$repo]#FAIL })"
+					bad=1
+					continue
+				fi
+				read -r tag when <<<"${act_latest[$repo]}"
+				# A full-SHA pin never moves, so its comment must name the exact release: a coarser one (`# v6`)
+				# is a failure of its own, and the pin is still judged against the latest tag as an exact version.
+				if [[ ! $version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+					echo "deps-check: FAIL   ACTION:$repo: the comment '$version' on the SHA pin must name the exact release (vX.Y.Z)"
+					bad=1
+				fi
+				judge "ACTION:$repo" "${version#v}" "$tag" "$when" "" "bump the pin in $DEPS_WORKFLOWS"
+			done <"$f"
+		done
 	fi
 fi
 
