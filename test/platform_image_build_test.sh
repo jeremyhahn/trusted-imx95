@@ -77,7 +77,7 @@ for t in "$@"; do
 	if [ "${BB_META:-}" = "$t" ]; then
 		echo bmap-$t >"$d/$b.wic.bmap"
 		echo mf-$t >"$d/$b.manifest"
-		echo spdx-$t >"$d/$b.spdx.json"
+		printf '{"name":"spdx-%s"}\n' "$t" >"$d/$b.spdx.json"
 		echo td-$t >"$d/$b.testdata.json"
 		continue
 	fi
@@ -91,7 +91,7 @@ for t in "$@"; do
 	echo tj-$t >"$d/$b.testdata.json"
 	# BB_NOSPDX: a build that wrote no SBOM.
 	if [ -z "${BB_NOSPDX:-}" ]; then
-		echo spdx-$t >"$d/$b.spdx.json"
+		printf '{"name":"spdx-%s"}\n' "$t" >"$d/$b.spdx.json"
 		ln -sf "$b.spdx.json" "$d/$t-$BB_MACHINE.rootfs.spdx.json"
 	fi
 	ln -sf "$b.wic.zst" "$d/$t-$BB_MACHINE.rootfs.wic.zst"
