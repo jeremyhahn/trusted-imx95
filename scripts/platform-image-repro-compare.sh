@@ -77,11 +77,34 @@ norm() {
 # spdx_hash FILE: the sha256 of FILE's SPDX JSON in a canonical form: blank-node
 # ids ("_:...", the CreationInfo numbering) renumbered by the content of the
 # node they name, every list sorted by SPDX id or name (then by content), keys
-# sorted. Nothing is removed. Fails (exit 1) when FILE is not a JSON document.
+# sorted. In every id and id reference the per-build task hash is replaced by the
+# constant UNIHASH: OE-core's SPDX 3.0 writer builds an id as
+# "<SPDX_NAMESPACE_PREFIX>/<PN>-<uuid5>/<BB_UNIHASH>/<suffix>..." (meta/lib/oe/
+# sbom30.py new_spdxid, l.358-364 at OE-core 5d1aa5c8; its alias ids already
+# carry the literal UNIHASH), so the hash is the 64-hex segment directly after
+# the "<PN>-<uuid>" segment. The same graph built twice keeps ids that differ
+# only there. Nothing else is removed. Fails (exit 1) when FILE is not a JSON
+# document.
 read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
-import hashlib, json, sys
+import hashlib, json, re, sys
 
 IDK = ("@id", "spdxId", "SPDXID")
+
+# "/<PN>-<uuid 8-4-4-4-12>/<64 hex>" followed by "/" or the end of the string.
+UNIHASH = re.compile(
+    r"(/[^/]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"/[0-9a-f]{64}(?=/|$)"
+)
+
+
+def unihash(o):
+    if isinstance(o, dict):
+        return {k: unihash(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [unihash(v) for v in o]
+    if isinstance(o, str):
+        return UNIHASH.sub(r"\1/UNIHASH", o)
+    return o
 
 
 def canon(o):
@@ -133,6 +156,7 @@ try:
 except (OSError, ValueError) as e:
     print("not a readable JSON document: %s" % e, file=sys.stderr)
     sys.exit(1)
+doc = unihash(doc)
 walk(doc)
 rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
 new = {old: "_:n%d" % rank[c] for old, c in defs.items()}

@@ -191,6 +191,29 @@ sbom "$b" 20261123000002 "{\"@graph\":[${pb//CreationInfo_2/CreationInfo_3},${se
 run bash "$script" "$a" "$b"
 check "an SBOM with a changed package version differs" 1 "img-m.rootfs.spdx.json differs"
 
+# The task hash in an id ("<prefix>/<pn>-<uuid>/<64 hex>/<suffix>", OE-core's
+# sbom30.py new_spdxid) differs from build to build and is stripped from ids and
+# references; the ids here are synthetic.
+h1=$(printf 'a%.0s' $(seq 64))
+h2=$(printf 'b%.0s' $(seq 64))
+uid=12345678-1234-1234-1234-123456789abc
+idsbom() { # PREFIX HASH VERSION: one package and a reference to it
+	printf '{"@graph":[{"spdxId":"%s/%s/package/a","type":"software_Package","name":"a","software_packageVersion":"%s"}],"rootElement":["%s/%s/package/a"]}' \
+		"$1" "$2" "$3" "$1" "$2"
+}
+sbom "$a" 20261123000001 "$(idsbom "https://example.invalid/spdx/pkg-$uid" "$h1" 1.0)"
+sbom "$b" 20261123000002 "$(idsbom "https://example.invalid/spdx/pkg-$uid" "$h2" 1.0)"
+run bash "$script" "$a" "$b"
+check "SBOMs whose ids differ only in the task-hash segment compare equal" 0 "OK, 4 artefacts identical"
+sbom "$b" 20261123000002 "$(idsbom "https://example.invalid/spdx/pkg-$uid" "$h2" 1.1)"
+run bash "$script" "$a" "$b"
+check "the same pair with a changed package version differs" 1 "img-m.rootfs.spdx.json differs"
+# A 64-hex segment that does not follow a <pn>-<uuid> segment is not stripped.
+sbom "$a" 20261123000001 "$(idsbom "https://example.invalid/spdx/pkg" "$h1" 1.0)"
+sbom "$b" 20261123000002 "$(idsbom "https://example.invalid/spdx/pkg" "$h2" 1.0)"
+run bash "$script" "$a" "$b"
+check "a hex segment not after <pn>-<uuid> is kept: the SBOMs differ" 1 "img-m.rootfs.spdx.json differs"
+
 # Nothing to compare is a failure, never "0 artefacts identical".
 mk "$a"
 mk "$b"
