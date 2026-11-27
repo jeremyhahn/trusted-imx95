@@ -213,6 +213,15 @@ sbom "$a" 20261123000001 "$(idsbom "https://example.invalid/spdx/pkg" "$h1" 1.0)
 sbom "$b" 20261123000002 "$(idsbom "https://example.invalid/spdx/pkg" "$h2" 1.0)"
 run bash "$script" "$a" "$b"
 check "a hex segment not after <pn>-<uuid> is kept: the SBOMs differ" 1 "img-m.rootfs.spdx.json differs"
+# The same text in a non-id field (a download location) is not stripped.
+locsbom() { # HASH: ids identical, only the download location digest varies
+	printf '{"@graph":[{"spdxId":"https://example.invalid/spdx/pkg-%s/%s/package/a","type":"software_Package","name":"a","software_downloadLocation":"https://example.invalid/spdx/pkg-%s/%s/source.tar.gz"}]}' \
+		"$uid" "$h1" "$uid" "$1"
+}
+sbom "$a" 20261123000001 "$(locsbom "$h1")"
+sbom "$b" 20261123000002 "$(locsbom "$h2")"
+run bash "$script" "$a" "$b"
+check "a digest differing only in a non-id field (download location) differs" 1 "img-m.rootfs.spdx.json differs"
 
 # Nothing to compare is a failure, never "0 artefacts identical".
 mk "$a"

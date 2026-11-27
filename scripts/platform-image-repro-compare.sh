@@ -83,7 +83,10 @@ norm() {
 # sbom30.py new_spdxid, l.358-364 at OE-core 5d1aa5c8; its alias ids already
 # carry the literal UNIHASH), so the hash is the 64-hex segment directly after
 # the "<PN>-<uuid>" segment. The same graph built twice keeps ids that differ
-# only there. Nothing else is removed. Fails (exit 1) when FILE is not a JSON
+# only there. The replacement applies only to a value under an id key ("@id",
+# "spdxId", "SPDXID") and to a string that equals such an id elsewhere in the
+# document (a reference); any other string, a download location for one, is left
+# untouched, so a digest differing there still shows. Nothing else is removed. Fails (exit 1) when FILE is not a JSON
 # document.
 read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
 import hashlib, json, re, sys
@@ -97,12 +100,25 @@ UNIHASH = re.compile(
 )
 
 
-def unihash(o):
+def collect(o, ids):
     if isinstance(o, dict):
-        return {k: unihash(v) for k, v in o.items()}
+        for k, v in o.items():
+            if k in IDK and isinstance(v, str):
+                ids.add(v)
+            collect(v, ids)
+    elif isinstance(o, list):
+        for v in o:
+            collect(v, ids)
+
+
+def unihash(o, ids, under=False):
+    # Only a value under an id key, or a string equal to a collected id (a
+    # reference), is rewritten; every other string is left as it is.
+    if isinstance(o, dict):
+        return {k: unihash(v, ids, k in IDK) for k, v in o.items()}
     if isinstance(o, list):
-        return [unihash(v) for v in o]
-    if isinstance(o, str):
+        return [unihash(v, ids, under) for v in o]
+    if isinstance(o, str) and (under or o in ids):
         return UNIHASH.sub(r"\1/UNIHASH", o)
     return o
 
@@ -156,7 +172,9 @@ try:
 except (OSError, ValueError) as e:
     print("not a readable JSON document: %s" % e, file=sys.stderr)
     sys.exit(1)
-doc = unihash(doc)
+allids = set()
+collect(doc, allids)
+doc = unihash(doc, allids)
 walk(doc)
 rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
 new = {old: "_:n%d" % rank[c] for old, c in defs.items()}
