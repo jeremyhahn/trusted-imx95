@@ -288,7 +288,7 @@ carries the marker this mode wrote. Then
 `scripts/platform-image-repro-compare.sh OUT_A OUT_B` compares the outputs, and
 `.platform-image/out/` is written only when they match; on a difference the two
 outputs stay for inspection and nothing is published. `--check` with `--repro`
-builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/wic/trusted-imx95.wks.in`, which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; every other file is compared byte for byte.
+builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/files/wic/trusted-imx95.wks.in` (a `wic/` directory at the layer root fails OE-core's sanity check, which wants `files/wic`), which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; every other file is compared byte for byte.
 
 What is compared: each output against its own `SHA256SUMS` (a missing file, an
 unlisted file or a changed byte fails); then every artefact in both
