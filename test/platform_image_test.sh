@@ -459,4 +459,35 @@ expect "fetch: pin B over an ignored file it tracks is refused" test "$rc" -ne 0
 expect "fetch: the ignored file survives byte for byte" cmp -s "$tmp/secret.want" "$t2/sources/stub/secret.txt"
 expect "fetch: the layer is still at pin A" test "$(git -C "$t2/sources/stub" rev-parse HEAD)" = "$pa"
 
+# The wic image is reproducible (#160): the distro selects the project wks, and
+# the wks fixes every partition's --uuid, the ext4 and vfat --fsuuid and the disk id.
+wksname=$(conf_val "$distro" WKS_FILE || true)
+wks=$ROOT/platform-image/wic/$wksname
+expect "the distro sets WKS_FILE to a wks file of the layer" test -n "$wksname" -a -f "$wks"
+# wks_fixed FILE: every part line has --uuid (a GUID); an ext4 part has a --fsuuid
+# (a UUID), a vfat part a 0x-prefixed 8-digit --fsuuid; the bootloader line a --diskid.
+wks_fixed() {
+	local l parts=0 disk=0 guid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+	while IFS= read -r l || [ -n "$l" ]; do
+		case $l in
+		'#'*) continue ;;
+		part\ *)
+			parts=$((parts + 1))
+			[[ $l =~ --uuid[[:space:]]+$guid([[:space:]]|$) ]] || return 1
+			case $l in
+			*--fstype=ext4*) [[ $l =~ --fsuuid[[:space:]]+$guid([[:space:]]|$) ]] || return 1 ;;
+			*--fstype=vfat*) [[ $l =~ --fsuuid[[:space:]]+0x[0-9a-f]{8}([[:space:]]|$) ]] || return 1 ;;
+			esac
+			;;
+		bootloader*) [[ $l =~ --diskid[[:space:]]+$guid([[:space:]]|$) ]] && disk=1 ;;
+		esac
+	done <"$1"
+	[ "$parts" -ge 3 ] && [ "$disk" -eq 1 ]
+}
+expect "the wks fixes every partition's --uuid, the ext4 and vfat --fsuuid and the disk id" wks_fixed "$wks"
+sed 's/ --fsuuid 0x[0-9a-f]*//' "$wks" >"$nt/wks.novfat"
+neg "a vfat partition without a fixed volume id is caught" wks_fixed "$nt/wks.novfat"
+sed 's/ --uuid [0-9a-f-]*//' "$wks" >"$nt/wks.nouuid"
+neg "a partition without --uuid is caught" wks_fixed "$nt/wks.nouuid"
+
 finish
