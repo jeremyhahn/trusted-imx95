@@ -2249,7 +2249,7 @@ jobs:
 
       # ROOT (a node action). Untrusted code from here on: no credential in
       # .git/config, and the next step hands the tree to uid 1000.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         if: steps.guard.outputs.requested == 'true' && steps.guard.outputs.skip == '' && steps.guard.outputs.nocode != 'true'
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -3455,7 +3455,7 @@ jobs:
           echo "Reviewing $EVENT_SHA as $REVIEWER with $MODEL ($(opencode --version))."
 
       # Root's, and it stays root's: never chowned (v5.2.2).
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         if: steps.guard.outputs.requested == 'true' && steps.guard.outputs.skip == ''
         with:
           ref: ${{ github.event.pull_request.head.sha }}
