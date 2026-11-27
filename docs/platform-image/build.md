@@ -489,11 +489,20 @@ each add `files/0001-build-info-use-source-date-epoch.patch`, which rewrites the
 three `date` calls of that recipe's `build_info.mak` to `date -u -d
 @$(SOURCE_DATE_EPOCH)`. `test/platform_image_test.sh` checks both structurally.
 
-Not verified yet (gap, row open): the clean double rebuild with the pin
-(`cleansstate` of imx-oei, imx-system-manager and imx-boot between two builds,
-then `cmp` of both firmware binaries and of `flash_a55`/`flash_all`) was started
-but its result is not recorded here. Record the `cmp` lines in this section
-before the row is called done.
+Verified (2026-11-27): `bitbake -c cleansstate imx-oei imx-system-manager
+imx-boot`, `bitbake imx-boot`, copy the outputs as A; the same again as B, about
+three minutes later (the unpinned build time moves in that interval). `cmp` of A
+against B:
+
+```
+cmp equal: imx-boot-imx95-19x19-lpddr5-frdm-pro-sd.bin-flash_a55
+cmp equal: imx-boot-imx95-19x19-lpddr5-frdm-pro-sd.bin-flash_all
+cmp equal: m33_image-mx95frdm-pro.bin
+cmp equal: oei-m33-ddr.bin
+```
+
+So the imx-boot difference is pinned: the two firmware images no longer carry the
+wall-clock time and the container hashes follow.
 
 ### `make platform-image PI_DEBUG=1`
 
