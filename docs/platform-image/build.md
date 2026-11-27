@@ -288,7 +288,7 @@ carries the marker this mode wrote. Then
 `scripts/platform-image-repro-compare.sh OUT_A OUT_B` compares the outputs, and
 `.platform-image/out/` is written only when they match; on a difference the two
 outputs stay for inspection and nothing is published. `--check` with `--repro`
-builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/wic/trusted-imx95.wks.in`, which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; every other file is compared byte for byte.
+builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/files/wic/trusted-imx95.wks.in` (a `wic/` directory at the layer root fails OE-core's sanity check, which wants `files/wic`), which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; every other file is compared byte for byte.
 
 What is compared: each output against its own `SHA256SUMS` (a missing file, an
 unlisted file or a changed byte fails); then every artefact in both
@@ -383,6 +383,63 @@ Differing files and the cause found:
   fix is outside this slice: a normalising step or a Yocto SPDX setting,
   to be chosen with the reproducible-build survey's question 6.
 
+### Second `--repro` run with the #257 fixes: NOT identical (gap, row open)
+
+Date: 2026-11-27 (builds started 06:30Z, finished 10:43Z). Checkout commit
+`7f7b60073e0d624663d6377911ae636513a8a329` (main with #257, plus the move of the
+wks to `platform-image/files/wic/`), `platform_image_dirty=no`, manifest commit
+`0c44ab18abe471b4326037b61893f4e69b6fc182`, `SOURCE_DATE_EPOCH=1302044400`,
+`BB_NUMBER_THREADS=16`, `PARALLEL_MAKE="-j 16"`. `ARGS=--check` passed first.
+Each build had its own empty `SSTATE_DIR` and ran all 4716 tasks (none restored):
+build A 7576 s, build B about 7000 s (08:46Z to 10:43Z). Nothing was published; both outputs were
+kept and both pass `make platform-image-verify` (5 artefacts, pins match).
+
+One script-side defect surfaced: the first attempt stopped before bitbake, because
+OE-core's sanity check refuses a `wic/` directory at the layer root ("wic/wks
+files need to be moved to files/wic"). The wks now lives in
+`platform-image/files/wic/` and `test/platform_image_test.sh` fails if
+`platform-image/wic` exists.
+
+| Artefact (name without the build stamp) | Build A SHA-256 | Build B SHA-256 | Same |
+| --- | --- | --- | --- |
+| `.manifest` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | yes |
+| `.tar.zst` (rootfs) | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | yes |
+| `.wic.zst` | `4460c60063c2f17d1c8410567be0b13e2a4e8e88ca45fad9e9166b7df114f794` | `93b4d32ddaff3b1609979d8604831ff1997871dc5138e6cf88d4257c3dd1ae24` | **no** |
+| `.wic.bmap` | `c4c781c1b3d89fadc213fc8008aaf6df1408aaf6e970c89355dfc22b183b939b` | `c72aea5715f314da5fbd586625db0c5370ee928aac97346cae0a4025e96dbe34` | **no** |
+| `.spdx.json` (SBOM, as shipped) | `5ec0b4be7aa3bb621b8ab72f48d791b89b55613d183614240ca80ec2b0f3c0f0` | `a72650dec1de1c12988ad4d9185cc45b13441127170fd118accdf2c8665d175b` | **no** |
+
+The rootfs tarball and package manifest are identical across two fully
+independent compiles of every recipe (and equal to the earlier runs'): the
+compiled packages are reproducible. The partition GUIDs, filesystem UUIDs, FAT
+volume id and GPT CRCs now match (#257's wks works).
+
+Differing files and the cause found:
+
+- `.wic.zst` and `.wic.bmap`. The decompressed images have the same size
+  (443534336 bytes) and differ in 103 bytes, all below 1 MiB (before the first
+  partition at 8 MiB), in the bootloader area: byte ranges (0-based) 65712-65759,
+  65840-65887 (two 48-byte runs), and a handful of single bytes at 224809-224815
+  and 754957-754963. Every partition's contents are identical. The cause is
+  inside the `imx-boot` image that wic writes there (the 48-byte runs have the
+  size of a SHA-384 digest); `cmp -l` of the two builds' deployed
+  `imx-boot-<machine>-sd.bin-flash_a55` shows the same 103 bytes (the first at
+  file offset 32944, wic offset 65712 minus the 32 KiB boot offset), so the
+  difference is made by the `imx-boot` recipe, not by wic; the field was not
+  named.
+  Next step: build `imx-boot` twice from the same sstate, or `cmp` the two
+  `imx-boot` files in each build's deploy directory, to name the field and
+  the recipe.
+- `.spdx.json`. The compare normalises the SBOM (sorted, CreationInfo ids
+  renumbered) and still reports a difference. Both documents hold 5063 graph
+  elements, but about 84 `spdxId`s are in A only and 84 others in B only (for
+  example the licence elements of `acl`, `acl-native`, `attr`, `util-linux`, and
+  the image's own `document` and `sbom` ids). Those ids embed a hash of the
+  owning document, which differs between the builds, so the normalisation, which
+  keys on the id, cannot make them equal. Next step: normalise by stripping
+  that hash component from ids and references, or find what feeds it.
+
+The reproducibility row stays open.
+
 ### `make platform-image PI_DEBUG=1`
 
 Built both targets, `trusted-imx95-image` and `trusted-imx95-image-debug`
@@ -408,8 +465,9 @@ The production rootfs tarball and manifest hashes equal the two `--repro` builds
 and the first build's: three builds, one hash. The debug build was not run
 under `--repro`.
 
-Open: the wic and SBOM differences above, and a `--repro` run with a separate
-`SSTATE_DIR` per build. The reproducibility row stays open.
+Open: the bootloader-area wic bytes and the SBOM ids of the second `--repro` run
+above (the run with a separate `SSTATE_DIR` per build is done). The
+reproducibility row stays open.
 
 ## Checking an output directory (provisional)
 

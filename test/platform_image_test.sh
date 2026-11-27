@@ -462,8 +462,10 @@ expect "fetch: the layer is still at pin A" test "$(git -C "$t2/sources/stub" re
 # The wic image is reproducible (#160): the distro selects the project wks, and
 # the wks fixes every partition's --uuid, the ext4 and vfat --fsuuid and the disk id.
 wksname=$(conf_val "$distro" WKS_FILE || true)
-wks=$ROOT/platform-image/wic/$wksname
+wks=$ROOT/platform-image/files/wic/$wksname
 expect "the distro sets WKS_FILE to a wks file of the layer" test -n "$wksname" -a -f "$wks"
+# OE-core's sanity check fails the build when the layer root holds wic/ (it wants files/wic).
+neg "the layer root has no wic/ directory (OE-core's sanity check refuses it)" test -e "$ROOT/platform-image/wic"
 # wks_fixed FILE: every part line has --uuid (a GUID); an ext4 part has a --fsuuid
 # (a UUID), a vfat part a 0x-prefixed 8-digit --fsuuid; the bootloader line a --diskid.
 wks_fixed() {
