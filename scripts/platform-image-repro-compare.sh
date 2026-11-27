@@ -8,6 +8,12 @@
 # Then build-info.txt must be readable, carry SOURCE_DATE_EPOCH and a layer
 # revision, and match line by line, ignoring only build_seconds= (it differs
 # every run).
+# The one exception to byte-for-byte: a *.spdx.json SBOM is compared after a
+# normalisation (python3, stdlib only): blank-node ids (CreationInfo numbering)
+# renumbered by their content, every list sorted by SPDX id or name. BitBake
+# emits the same graph in a different order and numbering on each run; nothing
+# else is dropped, so a changed version, licence, hash or relationship still
+# differs. The bytes of each SBOM are still checked against its SHA256SUMS.
 # At least one artefact must be compared: two empty SHA256SUMS fail.
 # Exit 0: "platform-image-repro: OK, N artefacts identical" (N >= 1); 1: each
 # difference named with both values; 2: usage error. No network, no bitbake.
@@ -68,10 +74,93 @@ norm() {
 		printf '%s\n' "$1"
 	fi
 }
+# spdx_hash FILE: the sha256 of FILE's SPDX JSON in a canonical form: blank-node
+# ids ("_:...", the CreationInfo numbering) renumbered by the content of the
+# node they name, every list sorted by SPDX id or name (then by content), keys
+# sorted. Nothing is removed. Fails (exit 1) when FILE is not a JSON document.
+read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
+import hashlib, json, sys
+
+IDK = ("@id", "spdxId", "SPDXID")
+
+
+def canon(o):
+    return json.dumps(o, sort_keys=True, separators=(",", ":"))
+
+
+def blank(s):
+    return isinstance(s, str) and s.startswith("_:")
+
+
+def strip(o):
+    # Content with every blank id replaced by one constant, so a node's rank
+    # does not depend on the numbering of any node.
+    if isinstance(o, dict):
+        return {k: strip(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [strip(v) for v in o]
+    return "_:" if blank(o) else o
+
+
+defs = {}
+
+
+def walk(o):
+    if isinstance(o, dict):
+        for k in IDK:
+            if blank(o.get(k)) and o[k] not in defs:
+                defs[o[k]] = canon(strip({a: b for a, b in o.items() if a != k}))
+        for v in o.values():
+            walk(v)
+    elif isinstance(o, list):
+        for v in o:
+            walk(v)
+
+
+def sortkey(x):
+    ident = ""
+    if isinstance(x, dict):
+        for k in IDK + ("name",):
+            if isinstance(x.get(k), str):
+                ident = x[k]
+                break
+    return (ident, canon(x))
+
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        doc = json.load(fh)
+except (OSError, ValueError) as e:
+    print("not a readable JSON document: %s" % e, file=sys.stderr)
+    sys.exit(1)
+walk(doc)
+rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
+new = {old: "_:n%d" % rank[c] for old, c in defs.items()}
+
+
+def rewrite(o):
+    if isinstance(o, dict):
+        return {k: rewrite(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return sorted((rewrite(v) for v in o), key=sortkey)
+    if isinstance(o, str):
+        return new.get(o, o)
+    return o
+
+
+print(hashlib.sha256(canon(rewrite(doc)).encode("utf-8")).hexdigest())
+PYEOF
+spdx_hash() {
+	command -v python3 >/dev/null 2>&1 || {
+		say "python3 is needed to compare an SBOM"
+		return 1
+	}
+	python3 -I -c "$SPDX_NORMALISE_PY" "$1"
+}
 names_a=()
 names_b=()
 load() {
-	local p=$1 dir=$2 line h n k f got
+	local p=$1 dir=$2 line h n k f got nh
 	local -n names=names_$p hashes=hash_$p listed=listed_$p
 	if [ ! -f "$dir/SHA256SUMS" ]; then
 		fail "$dir has no SHA256SUMS"
@@ -97,6 +186,15 @@ load() {
 		got=$(sha256sum <"$dir/$n")
 		got=${got%% *}
 		[ "$got" = "$h" ] || fail "$n: bytes do not match $dir/SHA256SUMS (listed $h, actual $got)"
+		case $n in
+		*.spdx.json)
+			if nh=$(spdx_hash "$dir/$n"); then
+				hashes["$k"]=$nh
+			else
+				fail "$n: cannot normalise the SBOM in $dir"
+			fi
+			;;
+		esac
 	done <"$dir/SHA256SUMS"
 	for f in "$dir"/*; do
 		[ -e "$f" ] || [ -L "$f" ] || continue

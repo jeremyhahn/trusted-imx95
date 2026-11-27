@@ -144,7 +144,7 @@ mkts() {
 mksbom() {
 	mkts "$1" "$2"
 	echo mf >"$1/img-m.rootfs-$2.manifest"
-	echo "${3:-spdx}" >"$1/img-m.rootfs-$2.spdx.json"
+	printf '{"version":"%s"}\n' "${3:-spdx}" >"$1/img-m.rootfs-$2.spdx.json"
 	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
 }
 mkts "$a" 20261123000001
@@ -169,6 +169,28 @@ mksbom "$b" 20261123000002 spdx-changed
 run bash "$script" "$a" "$b"
 check "an SBOM with one changed byte: names the .spdx.json member" 1 "img-m.rootfs.spdx.json differs"
 
+# An SBOM is compared normalised: the same graph in another element order and
+# with other CreationInfo numbering is equal; a changed package version is not.
+sbom() { # DIR TIMESTAMP JSON
+	mkts "$1" "$2"
+	printf '%s\n' "$3" >"$1/img-m.rootfs-$2.spdx.json"
+	(cd "$1" && sha256sum -- img-m.* >SHA256SUMS)
+}
+ci1='{"@id":"_:CreationInfo_1","type":"CreationInfo","created":"2026-11-23T00:00:00Z"}'
+ci2='{"@id":"_:CreationInfo_2","type":"CreationInfo","created":"2026-11-24T00:00:00Z"}'
+pa='{"spdxId":"urn:p:a","type":"software_Package","name":"a","software_packageVersion":"1.0","creationInfo":"_:CreationInfo_1"}'
+pb='{"spdxId":"urn:p:b","type":"software_Package","name":"b","software_packageVersion":"2.0","creationInfo":"_:CreationInfo_2"}'
+sbom "$a" 20261123000001 "{\"@graph\":[$ci1,$ci2,$pa,$pb],\"rootElement\":[\"urn:p:a\",\"urn:p:b\"]}"
+# b: reversed graph, the two CreationInfo blank nodes numbered 7 and 3 instead of 1 and 2.
+sbom "$b" 20261123000002 "{\"@graph\":[${pb//CreationInfo_2/CreationInfo_3},${pa//CreationInfo_1/CreationInfo_7},${ci2//CreationInfo_2/CreationInfo_3},${ci1//CreationInfo_1/CreationInfo_7}],\"rootElement\":[\"urn:p:b\",\"urn:p:a\"]}"
+run bash "$script" "$a" "$b"
+check "SBOMs differing only in element order and CreationInfo numbering compare equal" 0 "OK, 4 artefacts identical"
+sbom "$b" 20261123000002 "{\"@graph\":[${pb//CreationInfo_2/CreationInfo_3},${pa//CreationInfo_1/CreationInfo_7},${ci2//CreationInfo_2/CreationInfo_3},${ci1//CreationInfo_1/CreationInfo_7}],\"rootElement\":[\"urn:p:b\",\"urn:p:a\"]}"
+sed_v=${pa//1.0/1.1}
+sbom "$b" 20261123000002 "{\"@graph\":[${pb//CreationInfo_2/CreationInfo_3},${sed_v//CreationInfo_1/CreationInfo_7},${ci2//CreationInfo_2/CreationInfo_3},${ci1//CreationInfo_1/CreationInfo_7}],\"rootElement\":[\"urn:p:b\",\"urn:p:a\"]}"
+run bash "$script" "$a" "$b"
+check "an SBOM with a changed package version differs" 1 "img-m.rootfs.spdx.json differs"
+
 # Nothing to compare is a failure, never "0 artefacts identical".
 mk "$a"
 mk "$b"
@@ -190,7 +212,7 @@ for d in "$a" "$b"; do
 	rm "$d"/img-m.*
 	echo bmap >"$d/img-m.rootfs-20261123000001.wic.bmap"
 	echo mf >"$d/img-m.rootfs-20261123000001.manifest"
-	echo spdx >"$d/img-m.rootfs-20261123000001.spdx.json"
+	echo '{"version":"spdx"}' >"$d/img-m.rootfs-20261123000001.spdx.json"
 	(cd "$d" && sha256sum -- img-m.* >SHA256SUMS)
 done
 run bash "$script" "$a" "$b"

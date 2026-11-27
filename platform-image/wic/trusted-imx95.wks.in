@@ -1,0 +1,18 @@
+# Project wks for trusted-imx95-image (selected by WKS_FILE in
+# conf/distro/trusted-imx95.conf). The partition layout is that of NXP's
+# imx-imx-boot-bootpart.wks.in (Freescale/meta-freescale, files/wic/, the
+# commit pinned in platform-image/manifest.lock), which the board's machine
+# conf selects through SOC_DEFAULT_WKS_FILE. That file sets no identifiers, so
+# wic drew a new disk GUID, partition GUIDs, FAT volume serial and ext4 UUID
+# on every build and two builds of the same inputs differed (#160). Every
+# identifier is fixed here; they are not secrets and name no device.
+#
+# The table is GPT, as NXP's IMX_BOOTLOADER_PTABLE gives under use-nxp-bsp; it
+# is written out so that the --diskid below is always a GUID.
+# --uuid is the GPT partition GUID; --fsuuid is the ext4 UUID and, for the vfat
+# partition, its volume id (8 hex digits, 0x prefix).
+part u-boot --source rawcopy --sourceparams="file=imx-boot.tagged" --ondisk mmcblk --no-table --align ${IMX_BOOT_SEEK} --uuid 7c0b6f1e-5a3d-4e1c-9b52-0d1a1c9e0001
+part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label boot --active --align 8192 --fixed-size 256 --uuid 7c0b6f1e-5a3d-4e1c-9b52-0d1a1c9e0002 --fsuuid 0x5c0de001
+part / --source rootfs --ondisk mmcblk --fstype=ext4 --label root --align 8192 --uuid 7c0b6f1e-5a3d-4e1c-9b52-0d1a1c9e0003 --fsuuid 7c0b6f1e-5a3d-4e1c-9b52-0d1a1c9e0004
+
+bootloader --ptable gpt --diskid 7c0b6f1e-5a3d-4e1c-9b52-0d1a1c9e0000
