@@ -232,10 +232,10 @@ Gaps, all provisional:
 
 - **EULA.** Accepted on 2026-11-24 by the owner: `ACCEPT_FSL_EULA = "1"` is set
   in `local.conf.template` (#14 answered). The run above is the one before that.
-- Reproducibility is untested on real artefacts: the check exists (see
-  "Reproducibility check" below) but no real two-build run has happened.
-- The debug image was not run on its own; its target shares every failing
-  recipe.
+- Reproducibility: the first real two-build run (2026-11-27, "Results of the
+  --repro and debug builds" below) found the images **not identical**; the
+  causes are named there and the row stays open.
+- The debug image was built on its own on 2026-11-27 (same section).
 - The host-tool list in the script (gcc, g++, make, git, python3, tar, xz,
   bzip2, patch, perl, unzip, wget, diffstat, chrpath, gawk, cpio, file, socat,
   zstd, lz4c) is a working list from this run, not Yocto's full required list.
@@ -274,9 +274,10 @@ Artefacts (name prefix `trusted-imx95-image-imx95-19x19-lpddr5-frdm-pro.rootfs-2
 | `.manifest` | 3166 | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` |
 | `.spdx.json` (SBOM) | 3700404 | `541cd494c29b857540db3c298621bc2e3a58726752c34a118f4501a32a8fc9e1` |
 
-The image is unsigned. No `--repro` run has happened on real artefacts.
+The image is unsigned. The `--repro` run is recorded in "Results of the --repro
+and debug builds" below.
 
-## Reproducibility check (provisional, not run)
+## Reproducibility check (provisional; first real run found a difference)
 
 `make platform-image ARGS=--repro` (or `scripts/platform-image-build.sh --repro`)
 runs the build twice, each in its own freshly emptied build directory
@@ -302,16 +303,113 @@ the compare script has no exception option. An empty comparison fails too: two
 
 The SBOM (`.spdx.json`) and the package manifest (`.manifest`) are artefacts
 like the rest: they are listed in `SHA256SUMS`, paired across the two builds by
-their name without the build timestamp, and compared byte for byte. Whether
-Yocto's SPDX 3.0 output is byte-reproducible is not verified on real artefacts,
-because the EULA (#14) blocks the build; if it is not, the compare will fail
-on it and the cause has to be found then, not allowed.
+their name without the build timestamp, and compared byte for byte. The first
+real run shows Yocto's SPDX 3.0 image SBOM is not byte-reproducible (see the
+results section); the compare reports it and allows nothing.
 
-No real run has happened: the build stops at the NXP EULA (#14, the owner's to
-accept), so only the stub bitbake tests
-(`test/platform_image_repro_test.sh`, `test/platform_image_build_test.sh`)
-have exercised this.
+The real run is in "Results of the --repro and debug builds" below. Besides
+that run, `test/platform_image_repro_test.sh` and
+`test/platform_image_build_test.sh` exercise the mode against a stub bitbake.
 
+
+## Results of the --repro and debug builds
+
+Date: 2026-11-27. Same host class, caps and checkout as the first build
+(`BB_NUMBER_THREADS=16`, `PARALLEL_MAKE="-j 16"`, build and output directories
+outside the clone), checkout commit `ce27c75d97262e8236b66a34b2285b9da1987a23`,
+`platform_image_dirty=no`, manifest commit
+`0c44ab18abe471b4326037b61893f4e69b6fc182` (`platform-image/manifest.lock`
+unchanged; `platform-image-verify` checks every layer commit against it),
+`SOURCE_DATE_EPOCH=1302044400`.
+`ARGS=--check` passed first. No script was changed: the run exposed no script
+defect. The EULA was not touched by this run (the template sets it).
+
+A container kill between sessions stopped both builds mid-compile; the build
+directories were kept and the builds restarted. The debug restart then failed
+once in `binutils-native` `do_compile` (gas link: undefined x86 target symbols,
+the half-written objects of the killed build). `bitbake -c cleansstate
+binutils-native` and a restart finished it; this is not a script or recipe
+fault. The `--repro` mode empties its two directories itself, so its restart
+began from nothing.
+
+### `make platform-image ARGS=--repro`: NOT identical (gap, row open)
+
+Nothing was published to the default output directory. Both outputs were kept
+and both pass `make platform-image-verify`. Build A took 6472 s. Build B
+attempted 4716 tasks, 4686 of which "didn't need to be rerun": the two builds
+share the host-tools cache's sstate directory, so B restored the recipes' built
+packages from A and re-ran only the image assembly (rootfs, wic, SBOM), 1161 s.
+So this run compares the image assembly of the same packages, **not** two
+independent compiles of every recipe; whether the compiled packages are
+reproducible is not shown, and a run with a separate `SSTATE_DIR` per build is
+still to do.
+
+| Artefact (name without the build stamp) | Build A SHA-256 | Build B SHA-256 | Same |
+| --- | --- | --- | --- |
+| `.manifest` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | yes |
+| `.tar.zst` (rootfs) | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | yes |
+| `.wic.zst` | `0ec7d0f69ce1b5787abd44b998f15b952e58635d891e8a82a5ba973f5390c5af` | `7d8ca4c77b0623e8aaa3967da431f7ded93f63e4c516dee1556db6a1961e70b6` | **no** |
+| `.wic.bmap` | `4798177db2553e86c8008872a1bf5a7b57cf767f44629d77b2b9e6adb10b7ffb` | `87de17ec36899bd46fff61e0e5af1d354e9e17c915773f2e1d2aa4ee70c16e86` | **no** |
+| `.spdx.json` (SBOM) | `6b4027da615551eea26642afa4d63664238e551346500380c3522e5a83acd33f` | `5c358a66379d5ecb9e55d06151ec0f7c5993fe33b4289a4f9bb0f38fa2d2d936` | **no** |
+
+The rootfs tarball and the package manifest are bit-identical across the two
+builds (and equal to the first build's, 2026-11-24). `build-info.txt` matched
+on every line but `build_seconds`.
+
+Differing files and the cause found:
+
+- `.wic.zst` and `.wic.bmap` (the `.bmap` follows the image's block map). The
+  decompressed images have the same size (443534336 bytes) and differ in 62450
+  bytes. The first differences read from a byte comparison are the two GPT
+  partition GUIDs (bytes 1040-1055 and 1168-1183) and with them the
+  partition-array and header CRCs (528-531, 600-603), the FAT volume serial of
+  the `boot` partition (8388647-8388650), and a 16-byte run in the ext4
+  superblock (276825193-276825207) that is the filesystem UUID. The remaining
+  differences were not itemised; they are consistent with the checksums that
+  depend on that UUID, but that was not verified. The disk GUID and the partition
+  table layout are the same, and the rootfs tarball that feeds the root
+  partition is identical. The likely cause is the wks file wic uses,
+  NXP's `imx-imx-boot-bootpart.wks.in`: its three `part` lines set no `--uuid`
+  and no `--fsuuid`. The fix, not made in this slice (it is outside its file
+  map), is an own wks file in `platform-image/` with fixed `--uuid` and
+  `--fsuuid` (and a FAT serial) per partition, selected by `WKS_FILE`.
+- `.spdx.json`. Both documents hold 5063 graph elements of the same types. They
+  differ in the order of `@graph`, in the numbering of the `_:CreationInfoNN`
+  blank nodes (all 4916 elements with the same `spdxId` differ only there), and
+  in which recipe's document carries 62 shared licence elements (62 `spdxId`s
+  appear only in A and 62 others only in B, for example the same licence under
+  another recipe's document; the order in which the recipe documents are
+  combined is the likely cause, not confirmed). A
+  fix is outside this slice: a normalising step or a Yocto SPDX setting,
+  to be chosen with the reproducible-build survey's question 6.
+
+### `make platform-image PI_DEBUG=1`
+
+Built both targets, `trusted-imx95-image` and `trusted-imx95-image-debug`
+(10 artefacts); `build_seconds=1219` for the run that finished (the earlier
+partial run's tasks were reused). `make platform-image-verify OUT=<out dir>`
+passes (10 artefacts, pins match). Output `SHA256SUMS`, stamp
+`20261127015816`:
+
+| Artefact | SHA-256 |
+| --- | --- |
+| `trusted-imx95-image-debug` `.manifest` | `3183831da97d482e5998965cb150469a323b05409bdc7f120aeac525f0aa7b34` |
+| `trusted-imx95-image-debug` `.spdx.json` | `2d041bf89a0fc9c6c3defac861f7323b3eaca5dad900262371d0fb47a2d22d80` |
+| `trusted-imx95-image-debug` `.tar.zst` | `15c645e589d9a4260d1468405a44864e34274e90a05ca36553089706804c3da1` |
+| `trusted-imx95-image-debug` `.wic.bmap` | `d2b187e90bc104ac4de3c119cfed28dc9d7bb4e49e2a671f909105fca5142eb7` |
+| `trusted-imx95-image-debug` `.wic.zst` | `1d0e3051ea227b7f1e12f00003753594b63dfb726fad51af08c5488153d02022` |
+| `trusted-imx95-image` `.manifest` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` |
+| `trusted-imx95-image` `.spdx.json` | `a9f870c5e2637567ee4cb6863784480a1ea0dd0671bfbbd85b246c674a5079df` |
+| `trusted-imx95-image` `.tar.zst` | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` |
+| `trusted-imx95-image` `.wic.bmap` | `80d8ecb868c79bad17917f8c0d63a806f138db6d423804bb34ab3caec5daf874` |
+| `trusted-imx95-image` `.wic.zst` | `8272a69cb17ae10fd5f72311e9350612dc07665f28a10f6950e97353ee60eaf9` |
+
+The production rootfs tarball and manifest hashes equal the two `--repro` builds'
+and the first build's: three builds, one hash. The debug build was not run
+under `--repro`.
+
+Open: the wic and SBOM differences above, and a `--repro` run with a separate
+`SSTATE_DIR` per build. The reproducibility row stays open.
 
 ## Checking an output directory (provisional)
 
@@ -335,9 +433,10 @@ through the `package-management` image feature, not a package name; a
 provisional default, pending #14), again matched by whole name. The debug
 target's manifest is not checked. Exit 0 is OK, 1 a mismatch, 2 a usage error.
 
-A consumer runs it before AHAB signing (#14 Q4 (b)) or provisioning. Nothing has
-been checked on real artefacts: the EULA (#14) blocks the build, so only the
-stub test, `test/platform_image_verify_test.sh`, has run it.
+A consumer runs it before AHAB signing (#14 Q4 (b)) or provisioning. It has
+passed on real artefacts: the first build's output, and on 2026-11-27 the debug
+output and both `--repro` outputs (see the results section below). Its stub
+test is `test/platform_image_verify_test.sh`.
 
 ## Operator procedure (provisional, the EULA is accepted)
 
