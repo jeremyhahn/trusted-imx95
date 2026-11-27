@@ -492,4 +492,31 @@ neg "a vfat partition without a fixed volume id is caught" wks_fixed "$nt/wks.no
 sed 's/ --uuid [0-9a-f-]*//' "$wks" >"$nt/wks.nouuid"
 neg "a partition without --uuid is caught" wks_fixed "$nt/wks.nouuid"
 
+# imx-boot reproducibility (#160): the imx-oei and imx-system-manager makefiles write the
+# build time with plain date, which ignores SOURCE_DATE_EPOCH; each bbappend carries a patch
+# that rewrites all three date calls of its build_info.mak.
+fw_date_pinned() { # recipe-dir bbappend-name
+	local d=$1 b=$2 p
+	p=$d/files/0001-build-info-use-source-date-epoch.patch
+	[ -f "$d/$b" ] && [ -f "$p" ] || return 1
+	grep -Eq '^FILESEXTRAPATHS:prepend := "\$\{THISDIR\}/files:"$' "$d/$b" || return 1
+	grep -Eq '^SRC_URI \+= "file://0001-build-info-use-source-date-epoch\.patch"$' "$d/$b" || return 1
+	grep -Eq '^Upstream-Status: ' "$p" || return 1 # OE-core's patch-status QA fails do_patch without it
+	[ "$(grep -Ec '^-.*\$\(AT\)date \+' "$p")" -eq 3 ] || return 1
+	[ "$(grep -Ec '^\+.*\$\(AT\)date -u -d @\$\(SOURCE_DATE_EPOCH\) \+' "$p")" -eq 3 ] || return 1
+	! grep -Eq '^\+.*\$\(AT\)date \+' "$p"
+}
+bsp=$ROOT/platform-image/recipes-bsp
+expect "imx-oei builds its firmware time from SOURCE_DATE_EPOCH (bbappend + patch)" \
+	fw_date_pinned "$bsp/imx-oei" 'imx-oei_%.bbappend'
+expect "imx-system-manager builds its firmware time from SOURCE_DATE_EPOCH (bbappend + patch)" \
+	fw_date_pinned "$bsp/imx-system-manager" 'imx-system-manager_%.bbappend'
+rm -rf "$nt/bsp"
+cp -R "$bsp" "$nt/bsp"
+sed -i '/^SRC_URI/d' "$nt/bsp/imx-oei/imx-oei_%.bbappend"
+neg "a bbappend that does not add the patch is caught" fw_date_pinned "$nt/bsp/imx-oei" 'imx-oei_%.bbappend'
+sed -i 's/ -u -d @[$](SOURCE_DATE_EPOCH)//' "$nt/bsp/imx-system-manager/files/0001-build-info-use-source-date-epoch.patch"
+neg "a patch that leaves a plain date call is caught" fw_date_pinned "$nt/bsp/imx-system-manager" 'imx-system-manager_%.bbappend'
+rm -rf "$nt/bsp"
+
 finish

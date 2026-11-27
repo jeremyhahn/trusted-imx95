@@ -1,7 +1,12 @@
+build_info.mak: take the build date and time from SOURCE_DATE_EPOCH
+
+The makefile writes them with plain date, which ignores SOURCE_DATE_EPOCH, so
+every build embeds a different time in the firmware image (#160).
+
+Upstream-Status: Inappropriate [local reproducibility fix]
+
 --- a/sm/makefiles/build_info.mak
-
 +++ b/sm/makefiles/build_info.mak
-
 @@ -80,8 +80,8 @@
  	$(AT)-perl -pi -e 'chomp if eof' $@
  	$(AT)/bin/echo 'UL' >> $@
