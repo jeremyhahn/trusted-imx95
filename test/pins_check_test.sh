@@ -110,10 +110,16 @@ bad_build "shared pin with another version" "packaging==26.4" "packaging==26.2" 
 	"rule h" "packaging" "26.2"
 bad_build "shared pin with another hash set" "$pk_hash" "${pk_hash%?}0" "rule h" "packaging" "hash set"
 
-co=actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-bad_wf "action pinned to a tag" signatures.yml "$co # v6.1.0" "actions/checkout@v6" "signatures.yml" "rule i" "40-hex"
-bad_wf "action commit in uppercase hex" signatures.yml "$co" "actions/checkout@D23441A48E516B6C34AEA4FA41551A30E30AF803" "rule i"
-bad_wf "action without a tag comment" signatures.yml "$co # v6.1.0" "$co" "rule i" "no '# <tag>' comment"
+# The checkout pin is read from the workflow, so a bump does not break these fixtures.
+sha="" tag=""
+if [[ $(<"$WFDIR/signatures.yml") =~ actions/checkout@([0-9a-f]{40})\ \#\ (v[^[:space:]]+) ]]; then
+	sha=${BASH_REMATCH[1]} tag=${BASH_REMATCH[2]}
+fi
+[[ -n "$sha" ]] || { echo "pins_check_test: signatures.yml has no 'actions/checkout@<sha> # <tag>' pin" >&2; exit 1; }
+co=actions/checkout@$sha
+bad_wf "action pinned to a tag" signatures.yml "$co # $tag" "actions/checkout@v6" "signatures.yml" "rule i" "40-hex"
+bad_wf "action commit in uppercase hex" signatures.yml "$co" "actions/checkout@${sha^^}" "rule i"
+bad_wf "action without a tag comment" signatures.yml "$co # $tag" "$co" "rule i" "no '# <tag>' comment"
 bad_wf "two workflows, two checkout commits" releasability.yml "$co" \
 	"actions/checkout@0000000000000000000000000000000000000001" "rule i" "actions/checkout" "is pinned to"
 
