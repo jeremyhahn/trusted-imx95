@@ -2,7 +2,7 @@
 # spsdk-venv.sh prints the path of a venv holding the pinned SPSDK (SPSDK_VENV, default under the user cache), creating it with hash-checked installs; an existing venv is only checked.
 set -euo pipefail
 
-SPSDK_PIN=3.13.0
+SPSDK_PIN=3.14.0
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 root=$(cd "$here/../.." && pwd -P)
 req="$here/requirements.txt"

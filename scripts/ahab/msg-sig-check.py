@@ -8,7 +8,7 @@ block header of the message itself, and the signature is checked with the
 `nxpimage signed-msg verify` of the pinned SPSDK did not reject a flipped
 signature byte (docs/oem-key-provisioning/key-exchange-msg.md).
 
-Layout read (little endian), as written by SPSDK 3.13.0 for a container v2:
+Layout read (little endian), as written by SPSDK 3.14.0 for a container v2:
   container header: byte 12..13 = signature block offset
   signature block (at that offset): +8..+9 = signature offset in the block
   signature (at block + signature offset): 8-byte header, then r || s

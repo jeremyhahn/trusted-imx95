@@ -100,13 +100,13 @@ bad_reqs "duplicate requirement" "asn1crypto==1.5.1" "argparse-addons==0.12.0 \\
     $first_hash
 asn1crypto==1.5.1" "duplicate requirement 'argparse-addons'"
 
-pk_hash=--hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
-bad_build "build requirement without --hash" "packaging==26.3 \\
-    $pk_hash" "packaging==26.3" "build." "line 6" "rule g" "packaging"
-bad_build "duplicate build requirement" "setuptools-scm==9.2.2" "packaging==26.3 \\
+pk_hash=--hash=sha256:81383611a09c1bc0b08b76e0fd5829d7c6824c65b27a6aee339da133f4233ea2
+bad_build "build requirement without --hash" "packaging==26.4 \\
+    $pk_hash" "packaging==26.4" "build." "line 6" "rule g" "packaging"
+bad_build "duplicate build requirement" "setuptools-scm==9.2.2" "packaging==26.4 \\
     $pk_hash
 setuptools-scm==9.2.2" "duplicate requirement 'packaging'" "rule g"
-bad_build "shared pin with another version" "packaging==26.3" "packaging==26.2" \
+bad_build "shared pin with another version" "packaging==26.4" "packaging==26.2" \
 	"rule h" "packaging" "26.2"
 bad_build "shared pin with another hash set" "$pk_hash" "${pk_hash%?}0" "rule h" "packaging" "hash set"
 
