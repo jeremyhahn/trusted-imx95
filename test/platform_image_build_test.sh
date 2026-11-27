@@ -53,6 +53,9 @@ case $1 in
 	printf '%s\n' "${BB_E_OUT-export SOURCE_DATE_EPOCH=\"1700000000\"}"; exit 0 ;;
 esac
 echo "bitbake $*" >>"$BB_LOG"
+n=0
+for f in "${SSTATE_DIR:-/nonexistent}"/* "${SSTATE_DIR:-/nonexistent}"/.[!.]*; do [ -e "$f" ] && n=$((n + 1)); done
+echo "${SSTATE_DIR-unset} $n" >>"$BB_LOG.sstate"
 [ -z "${BB_FAIL:-}" ] || exit 1
 d=tmp/deploy/images/$BB_MACHINE
 mkdir -p "$d"
@@ -74,7 +77,7 @@ for t in "$@"; do
 	if [ "${BB_META:-}" = "$t" ]; then
 		echo bmap-$t >"$d/$b.wic.bmap"
 		echo mf-$t >"$d/$b.manifest"
-		echo spdx-$t >"$d/$b.spdx.json"
+		printf '{"name":"spdx-%s"}\n' "$t" >"$d/$b.spdx.json"
 		echo td-$t >"$d/$b.testdata.json"
 		continue
 	fi
@@ -88,7 +91,7 @@ for t in "$@"; do
 	echo tj-$t >"$d/$b.testdata.json"
 	# BB_NOSPDX: a build that wrote no SBOM.
 	if [ -z "${BB_NOSPDX:-}" ]; then
-		echo spdx-$t >"$d/$b.spdx.json"
+		printf '{"name":"spdx-%s"}\n' "$t" >"$d/$b.spdx.json"
 		ln -sf "$b.spdx.json" "$d/$t-$BB_MACHINE.rootfs.spdx.json"
 	fi
 	ln -sf "$b.wic.zst" "$d/$t-$BB_MACHINE.rootfs.wic.zst"
@@ -419,6 +422,12 @@ expect "--repro: staged outputs removed" test ! -e "$tmp/out.repro-a" -a ! -e "$
 BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
 check "--repro: a second run passes" 0 "two builds identical"
 expect "--repro: the stale file in a build directory is gone" test ! -e "$tmp/d.repro-a/stale"
+# Each --repro build has its own SSTATE_DIR, empty when bitbake starts.
+rm -f "$tmp/log.sstate"
+BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro
+expect "--repro: two bitbake runs recorded an SSTATE_DIR" test "$(wc -l <"$tmp/log.sstate")" -eq 2
+expect "--repro: build 1 SSTATE_DIR is its own and empty" test "$(sed -n 1p "$tmp/log.sstate")" = "$tmp/d.repro-a/sstate-cache 0"
+expect "--repro: build 2 SSTATE_DIR is its own and empty" test "$(sed -n 2p "$tmp/log.sstate")" = "$tmp/d.repro-b/sstate-cache 0"
 
 rm -rf "$tmp/d" "$tmp/out" "$tmp"/d.repro-* "$tmp"/out.repro-*
 BB_NONDET=1 BB_TS_SEQ="$tmp/seq" brun "$stub:$tools" --repro

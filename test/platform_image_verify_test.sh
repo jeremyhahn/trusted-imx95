@@ -13,6 +13,12 @@ d=$tmp/out
 t=trusted-imx95-image
 machine=$(sed -n 's/^machine=//p' "$lock")
 
+# sbom FILE: a minimal valid SPDX 2.3 JSON document (the compare normalises
+# an SBOM and fails closed on one that is not JSON).
+sbom() {
+	printf '%s\n' '{"spdxVersion":"SPDX-2.3","dataLicense":"CC0-1.0","SPDXID":"SPDXRef-DOCUMENT","name":"sbom","documentNamespace":"https://example.invalid/spdx/sbom","creationInfo":{"created":"2023-11-14T22:13:20Z","creators":["Tool: test"]},"packages":[]}' >"$1"
+}
+
 # mk DIR [DIRTY]: an image, a manifest and an SBOM for one target, SHA256SUMS,
 # and a build-info.txt carrying the lock's pins.
 mk() {
@@ -20,7 +26,7 @@ mk() {
 	mkdir -p "$1"
 	echo wic >"$1/$t-$machine.rootfs-20261123000001.wic.zst"
 	echo mf >"$1/$t-$machine.rootfs-20261123000001.manifest"
-	echo spdx >"$1/$t-$machine.rootfs-20261123000001.spdx.json"
+	sbom "$1/$t-$machine.rootfs-20261123000001.spdx.json"
 	echo marker >"$1/.platform-image-out"
 	(cd "$1" && sha256sum -- * >SHA256SUMS)
 	{
@@ -135,6 +141,13 @@ rm "$d/$t-$machine.rootfs-20261123000001.spdx.json"
 run bash "$script" "$d"
 check "a missing SBOM" 1 "$t: no .spdx.json listed"
 
+# An SBOM that is not JSON fails closed: it cannot be normalised.
+mk "$d"
+printf 'not json\n' >"$d/$t-$machine.rootfs-20261123000001.spdx.json"
+(cd "$d" && sha256sum -- * >SHA256SUMS)
+run bash "$script" "$d"
+check "an SBOM that is not JSON" 1 "not a readable JSON document"
+
 # settargets VALUE: rewrite targets= in $d/build-info.txt.
 settargets() {
 	local line
@@ -223,7 +236,7 @@ check "no production manifest" 1 "no .manifest listed"
 mk "$d"
 dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
 printf 'busybox cortexa55 1.36\ngdb cortexa55 14.2\n' >"$dm.manifest"
-echo spdx >"$dm.spdx.json"
+sbom "$dm.spdx.json"
 echo wic >"$dm.wic.zst"
 rehash
 sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
@@ -252,7 +265,7 @@ check "names that only contain a package manager name" 0 "OK, 3 artefacts"
 mk "$d"
 dm=$d/trusted-imx95-image-debug-$machine.rootfs-20261123000001
 printf 'busybox cortexa55 1.36\nrpm cortexa55 4\n' >"$dm.manifest"
-echo spdx >"$dm.spdx.json"
+sbom "$dm.spdx.json"
 echo wic >"$dm.wic.zst"
 rehash
 sed -i "s/^targets=.*/targets=$t trusted-imx95-image-debug/" "$info"
