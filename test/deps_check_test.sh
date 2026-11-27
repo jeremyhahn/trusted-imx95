@@ -201,6 +201,44 @@ printf 'jobs:\n  j:\n    steps:\n      - uses: example/stale@%s # v1.0.0\n' "$sh
 run dc env DEPS_WORKFLOWS="$TMP_ROOT/wf-yaml" "$CHECK" "$pins"
 check "a directory of .yaml workflows alone is checked" 1 "FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0"
 
+# With DEPS_RELEASES_DIR, which CI sets, a stale Python pin and a stale action fail as they do without it.
+pypi stale-pkg 1.2.0 "$old"
+printf 'stale-pkg==1.0.0 \\\n    --hash=sha256:bb\n' >"$reqs"
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/stale@%s # v1.0.0\n' "$sha" >"$wf/x.yml"
+run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "with DEPS_RELEASES_DIR a stale Python pin and a stale action fail" 1 \
+	"FAIL   PYPI:stale-pkg 1.0.0 is behind 1.2.0" \
+	"FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0"
+
+# A stale pin in a .yaml workflow fails in a directory that also holds .yml workflows.
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/uptodate@%s # v1.0.0\n' "$sha" >"$wf/x.yml"
+printf 'jobs:\n  j:\n    steps:\n      - uses: example/stale@%s # v1.0.0\n' "$sha" >"$wf/w.yaml"
+run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "a stale .yaml pin fails beside .yml workflows with DEPS_RELEASES_DIR" 1 \
+	"OK     ACTION:example/uptodate 1.0.0 (latest)" \
+	"FAIL   ACTION:example/stale 1.0.0 is behind 1.2.0"
+rm "$wf/w.yaml"
+
+# A Python pin that a package pinned beside it caps below the latest release is CAPPED; a stale pin that nothing
+# caps, one whose requirement still admits the latest release, and one capped only behind an extra still fail.
+pypi_meta() { answer "https://pypi.org/pypi/$1/$2/json" "{\"info\":{\"requires_dist\":$3}}"; }
+pypi parent-pkg 2.0.0 "$old"
+for p in capped-pkg tilde-pkg loose-pkg extra-pkg; do pypi "$p" 1.2.0 "$old"; done
+pypi_meta parent-pkg 2.0.0 '["capped-pkg (>=1.0,<1.1)", "tilde-pkg~=1.0.0; python_version >= \"3.9\"", "loose-pkg>=1.0", "extra-pkg<1.1; extra == \"x\""]'
+for p in parent-pkg capped-pkg tilde-pkg; do printf '%s==%s \\\n    --hash=sha256:dd\n' "$p" "$([ "$p" = parent-pkg ] && echo 2.0.0 || echo 1.0.0)"; done >"$reqs"
+run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "pins an upstream requirement caps below the latest release are CAPPED, not failed" 0 \
+	"OK     PYPI:parent-pkg 2.0.0 (latest)" \
+	"CAPPED PYPI:capped-pkg 1.0.0, latest 1.2.0 is excluded by the requirement of parent-pkg" \
+	"CAPPED PYPI:tilde-pkg 1.0.0, latest 1.2.0 is excluded by the requirement of parent-pkg"
+printf '%s==1.0.0 \\\n    --hash=sha256:dd\n' loose-pkg extra-pkg stale-pkg >>"$reqs"
+run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel" DEPS_REQUIREMENTS="$reqs" DEPS_WORKFLOWS="$wf" "$CHECK" "$pins"
+check "a stale pin no requirement caps still fails beside capped ones" 1 \
+	"CAPPED PYPI:capped-pkg 1.0.0" \
+	"FAIL   PYPI:loose-pkg 1.0.0 is behind 1.2.0" \
+	"FAIL   PYPI:extra-pkg 1.0.0 is behind 1.2.0" \
+	"FAIL   PYPI:stale-pkg 1.0.0 is behind 1.2.0"
+
 # The repository's own workflows: every SHA pin's comment names an exact release, and --fetch with its default
 # directory reads them. Every action's latest release is served as the same canned answer.
 answer any-github-release "{\"tag_name\":\"v1.0.0\",\"published_at\":\"${old}Z\"}"
