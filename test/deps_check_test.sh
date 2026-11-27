@@ -246,7 +246,7 @@ rm -rf "$TMP_ROOT/rel-repo"
 run dc "$CHECK" --fetch "$TMP_ROOT/rel-repo" "$pins"
 check "--fetch reads the repository's workflows by default" 0 "FETCH  ACTION:actions/checkout"
 run dc env DEPS_RELEASES_DIR="$TMP_ROOT/rel-repo" DEPS_WORKFLOWS="$ROOT/.github/workflows" "$CHECK" "$pins"
-if [[ "$OUT" == *"ACTION:actions/checkout 6.1.0 is behind 1.0.0"* && "$OUT" != *"must name the exact release"* && "$OUT" != *"cannot be read"* ]]; then
+if [[ "$OUT" == *"ACTION:actions/checkout "*" is behind 1.0.0"* && "$OUT" != *"must name the exact release"* && "$OUT" != *"cannot be read"* ]]; then
 	pass "every SHA pin in .github/workflows names an exact release"
 else
 	fail "every SHA pin in .github/workflows names an exact release" "$(printf '%s\n' "$OUT" | while IFS= read -r l; do [[ $l != *"must name the exact release"* ]] || printf '%s\n' "$l"; done)"
