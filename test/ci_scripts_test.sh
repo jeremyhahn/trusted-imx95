@@ -189,7 +189,10 @@ run env PATH="$stub:$PATH" "$ROOT/scripts/deps-check.sh" "$pins"
 check "deps-check: a held pin with its reason is reported" 0 "HELD   BBB 2.0.0, latest 2.1.0: waiting on a fix"
 
 rel="$TMP_ROOT/releases"
-run env PATH="$stub:$PATH" GITHUB_TOKEN=stub-token "$ROOT/scripts/deps-check.sh" --fetch "$rel" "$pins"
+# --fetch also fetches the actions the workflows pin; this stub serves tools only, so it reads a workflow with none.
+mkdir -p "$TMP_ROOT/nopin-wf"
+printf 'jobs: {}\n' >"$TMP_ROOT/nopin-wf/w.yml"
+run env PATH="$stub:$PATH" GITHUB_TOKEN=stub-token DEPS_WORKFLOWS="$TMP_ROOT/nopin-wf" "$ROOT/scripts/deps-check.sh" --fetch "$rel" "$pins"
 check "deps-check: --fetch writes each tool's release" 0 "FETCH  AAA v1.0.0" "FETCH  BBB v2.1.0"
 if [ "$(cat "$rel/BBB")" = "v2.1.0 $old" ] && grep -qx 'header = "Authorization: Bearer stub-token"' "$STUB_DIR/.config" &&
 	[[ "$OUT" != *stub-token* ]]; then
