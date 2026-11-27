@@ -10,6 +10,10 @@
 # --check names every missing host tool and prints the plan; it fetches and
 # builds nothing. --repro builds twice in separate directories and publishes
 # to OUT only when platform-image-repro-compare.sh finds the outputs equal.
+# Each --repro build gets its own SSTATE_DIR (<its directory>/sstate-cache,
+# empty at the start), so neither build restores the other's tasks and the
+# comparison covers every task, not only image assembly; DL_DIR is not
+# touched (a download cache does not change what is built).
 # Needs the network and a Yocto build host; not in CI.
 # Provisional default, pending the owner's answer on #14.
 set -euo pipefail
@@ -168,14 +172,14 @@ if [ "$repro" -eq 1 ]; then
 			fi
 			rm -rf "$d"
 		fi
-		mkdir -p "$d"
+		mkdir -p "$d" "$d/sstate-cache"
 		printf '%s\n' "written by scripts/platform-image-build.sh --repro; the script may delete this directory" >"$d/$repro_marker"
 		rdirs+=("$d")
 		routs+=("$out.repro-$k")
 	done
 	for i in 0 1; do
 		echo "platform-image-build: repro: build $((i + 1)) of 2 in ${rdirs[$i]}"
-		PLATFORM_IMAGE_OUT=${routs[$i]} "$BASH" "$root/scripts/platform-image-build.sh" "${rdirs[$i]}" ||
+		SSTATE_DIR=${rdirs[$i]}/sstate-cache PLATFORM_IMAGE_OUT=${routs[$i]} "$BASH" "$root/scripts/platform-image-build.sh" "${rdirs[$i]}" ||
 			die "build $((i + 1)) of 2 failed; nothing published"
 	done
 	"$BASH" "$root/scripts/platform-image-repro-compare.sh" "${routs[0]}" "${routs[1]}" ||
@@ -226,6 +230,10 @@ cpus=$(nproc 2>/dev/null || echo 6)
 [ "$cpus" -le 16 ] || cpus=16
 export BB_NUMBER_THREADS=${BB_NUMBER_THREADS:-$cpus} PARALLEL_MAKE=${PARALLEL_MAKE:--j $cpus}
 export BB_ENV_PASSTHROUGH_ADDITIONS="${BB_ENV_PASSTHROUGH_ADDITIONS:-} BB_NUMBER_THREADS PARALLEL_MAKE"
+# --repro hands each build its own SSTATE_DIR (set above); bitbake must see it.
+if [ -n "${SSTATE_DIR:-}" ]; then
+	export SSTATE_DIR BB_ENV_PASSTHROUGH_ADDITIONS="$BB_ENV_PASSTHROUGH_ADDITIONS SSTATE_DIR"
+fi
 
 export BITBAKEDIR=$dir/sources/bitbake
 restore_u=0
