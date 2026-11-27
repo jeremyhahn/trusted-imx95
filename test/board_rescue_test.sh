@@ -274,7 +274,13 @@ ok "the device keeps its size" test "$(wc -c <"$dev/mmcblk0")" -eq "$size0"
 reset_devs
 want=$(sha "$dump0")
 bad=$tmp/bad
-{ head -c 1000 "$dump0"; printf 'X'; tail -c +1002 "$dump0"; } >"$bad"
+orig_byte=$(od -An -tu1 -j1000 -N1 "$dump0")
+# shellcheck disable=SC2059 # the format is an octal escape built on purpose
+{ head -c 1000 "$dump0"; printf "\\$(printf '%03o' "$((orig_byte ^ 255))")"; tail -c +1002 "$dump0"; } >"$bad"
+if cmp -s "$bad" "$dump0"; then
+	echo "board_rescue_test: the corrupted stream equals the original dump" >&2
+	exit 1
+fi
 out=$(rq "write mmcblk0 $size0 $want" "$bad")
 ok "a corrupted stream gives MISMATCH" has "$out" "MISMATCH"
 ok "the MISMATCH names the hash read back" has "$out" "$(sha "$dev/mmcblk0")"
