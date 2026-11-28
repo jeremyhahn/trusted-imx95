@@ -226,7 +226,8 @@ check "a digest differing only in a non-id field (download location) differs" 1 
 # A shared element is owned by the recipe whose task ran first: a licence id's
 # <pn>-<uuid> owner segment, the hash ending a relationship id, the CreationInfo
 # "created" time and the image build stamp differ between two builds of the same
-# graph and are replaced by constants; the ids here are synthetic.
+# graph (the relationship hash is replaced by one derived from the relationship's
+# content, the others by constants); the ids here are synthetic.
 shbom() { # LICENCE-OWNER RELATIONSHIP-HASH CREATED STAMP LICENCE-EXPRESSION [DOWNLOAD-LOCATION]
 	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH lic=http://spdx.org/spdxdocs/$1/UNIHASH/license/3_28_0/MIT
 	printf '{"@graph":[{"@id":"_:C1","type":"CreationInfo","created":"%s"},' "$3"
@@ -241,6 +242,23 @@ check "SBOMs differing only in licence owner, relationship hash, created time an
 sbom "$b" 20261123000002 "$(shbom "attr-87654321-4321-4321-4321-cba987654321" fedcba9876543210fedcba9876543210 2011-04-05T23:00:00Z 20261123000002 Apache-2.0)"
 run bash "$script" "$a" "$b"
 check "the same pair with a changed licence expression differs" 1 "img-m.rootfs.spdx.json differs"
+# A relationship id's hash is replaced by one derived from the relationship's
+# own content, not by one constant: with two relationships R1 (a to l) and R2
+# (b to l), the SBOMs differ when an element lists R1 in one and R2 in the other.
+relbom() { # HASH-OF-R1 HASH-OF-R2 HASH-LISTED
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":['
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/a","to":["%s/license/l"]},' "$ns" "$1" "$ns" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/b","to":["%s/license/l"]},' "$ns" "$2" "$ns" "$ns"
+	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File","rels":["%s/relationship/%s"]}]}' "$ns" "$ns" "$3"
+}
+sbom "$a" 20261123000001 "$(relbom aaaa1111 bbbb2222 aaaa1111)"
+sbom "$b" 20261123000002 "$(relbom cccc3333 dddd4444 cccc3333)"
+run bash "$script" "$a" "$b"
+check "relationships with other hashes, the same one listed, compare equal" 0 "OK, 4 artefacts identical"
+sbom "$b" 20261123000002 "$(relbom cccc3333 dddd4444 dddd4444)"
+run bash "$script" "$a" "$b"
+check "an element listing the other relationship differs" 1 "img-m.rootfs.spdx.json differs"
 # The stamp is normalised only in names and ids: a download location that
 # differs only in a rootfs-<14 digits> pattern is a real difference.
 sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT https://example.invalid/rootfs-20261123000001.tar.gz)"

@@ -87,8 +87,12 @@ norm() {
 # "spdxId", "SPDXID") and to a string that equals such an id elsewhere in the
 # document (a reference); any other string, a download location for one, is left
 # untouched, so a digest differing there still shows. Also constants: the owner
-# segment of a licence id, the hash ending a relationship id, and a CreationInfo
-# "created" time (see LICOWNER, RELHASH and unihash below). The image build
+# segment of a licence id and a CreationInfo "created" time (see LICOWNER and
+# unihash below). The hash ending a relationship id is replaced by a sha256 of
+# that relationship's own normalised content, and every reference to the old id
+# is rewritten the same way, so relationships with different content (from, to,
+# type) keep different ids and a changed reference still shows (see relids
+# below). The image build
 # stamp (".rootfs-<14 digits>") is replaced only in such an id and in the value
 # of a "name" key, never in another field (a download location, a version; see
 # STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is
@@ -108,8 +112,11 @@ UNIHASH = re.compile(
 # A licence-expression element is shared between recipe documents: its id sits
 # under the namespace of whichever recipe's task ran first, which changes from
 # run to run, so the owner segment is replaced by a constant. A relationship id
-# ends in a hash over the ids it joins; it is replaced by a constant (the
-# relationship's own from/to/type fields stay and are compared).
+# ends in a hash that varies from run to run; it is NOT replaced by one
+# constant (that would give every relationship of a namespace the same id and
+# collapse the references to them). Instead each relationship gets an id
+# derived from its own normalised content (see relids below), and every
+# reference to the old id is rewritten through that old -> new mapping.
 LICOWNER = re.compile(r"/spdxdocs/[^/]+/UNIHASH/license/")
 RELHASH = re.compile(r"(/UNIHASH/relationship/)[^/]+$")
 STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
@@ -117,8 +124,7 @@ STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
 
 def fixid(s):
     s = UNIHASH.sub(r"\1/UNIHASH", s)
-    s = LICOWNER.sub("/spdxdocs/OWNER/UNIHASH/license/", s)
-    return RELHASH.sub(r"\1HASH", s)
+    return LICOWNER.sub("/spdxdocs/OWNER/UNIHASH/license/", s)
 
 
 def collect(o, ids):
@@ -216,17 +222,50 @@ rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
 new = {old: "_:n%d" % rank[c] for old, c in defs.items()}
 
 
-def rewrite(o):
+def rewrite(o, m):
     if isinstance(o, dict):
-        return {k: rewrite(v) for k, v in o.items()}
+        return {k: rewrite(v, m) for k, v in o.items()}
     if isinstance(o, list):
-        return sorted((rewrite(v) for v in o), key=sortkey)
+        return sorted((rewrite(v, m) for v in o), key=sortkey)
     if isinstance(o, str):
-        return new.get(o, o)
+        return m.get(o, o)
     return o
 
 
-print(hashlib.sha256(canon(rewrite(doc)).encode("utf-8")).hexdigest())
+def relconst(o):
+    if isinstance(o, dict):
+        return {k: relconst(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [relconst(v) for v in o]
+    if isinstance(o, str):
+        return RELHASH.sub(r"\1REL", o)
+    return o
+
+
+def relids(o, m):
+    # Old relationship id -> an id derived from the relationship's own content
+    # (its id removed, any reference to a relationship id made constant), so two
+    # relationships keep different ids unless their normalised content is the
+    # same, in which case they may share one. Runs after every other id
+    # normalisation and the blank-node renumbering, so both builds agree.
+    if isinstance(o, dict):
+        for k in IDK:
+            v = o.get(k)
+            if isinstance(v, str) and RELHASH.search(v) and v not in m:
+                body = canon(relconst({a: b for a, b in o.items() if a != k}))
+                h = hashlib.sha256(body.encode("utf-8")).hexdigest()
+                m[v] = RELHASH.sub(lambda g: g.group(1) + h, v)
+        for v in o.values():
+            relids(v, m)
+    elif isinstance(o, list):
+        for v in o:
+            relids(v, m)
+
+
+doc = rewrite(doc, new)
+relmap = {}
+relids(doc, relmap)
+print(hashlib.sha256(canon(rewrite(doc, relmap)).encode("utf-8")).hexdigest())
 PYEOF
 spdx_hash() {
 	command -v python3 >/dev/null 2>&1 || {
