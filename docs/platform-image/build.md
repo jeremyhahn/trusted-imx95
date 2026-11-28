@@ -571,11 +571,34 @@ elements. Cause found by comparing the two normalised documents:
   (creation-info numbering blanked); after the relationship hash is also
   blanked, 7 still differ and were not named in this run.
 
-Next step (a script change for the next slice): make the compare's
-normalisation replace the owning-recipe namespace of a licence id
-(`<pn>-<uuid>` in `.../spdxdocs/<pn>-<uuid>/UNIHASH/license/`) with a constant
-and the hash of a relationship id with a constant, then name the 7 remaining
-elements. The reproducibility row stays open.
+Rerun of the compare on these two kept SBOMs (no rebuild) with the normalisation
+extended in the next slice:
+
+1. Licence owner and relationship hash replaced by constants: 7 elements still
+   differed. They are the image's own document element, its `sbom` root, three
+   image-file elements (`.tar.zst`, `.wic.bmap`, `.wic.zst`) and the
+   `hasOutput` relationship; the cause is the image build stamp
+   (`IMAGE_VERSION_SUFFIX`, `20261128005108` in A and `20261128030308` in B) in
+   their `name` fields and ids. The compare already ignores that stamp in file
+   names; it now ignores it in the SBOM too (`.rootfs-<14 digits>`, in
+   `name` values and ids only).
+2. After that the element contents were equal, but 26 elements still pointed at
+   a different CreationInfo node: a recipe, CVE or licence element that several
+   recipe documents write keeps the CreationInfo (and so the `created` time) of
+   whichever document the SBOM merge saw first, which changes with task order
+   (for example the `dbus` recipe element: `created` 2025-02-27 in A and
+   2011-04-05, the `SOURCE_DATE_EPOCH`, in B). The compare replaces every
+   CreationInfo `created` by a constant; `SOURCE_DATE_EPOCH` stays compared
+   through `build-info.txt`.
+
+With the licence owner, the relationship hash, the image stamp and `created`
+replaced, `scripts/platform-image-repro-compare.sh` on the two kept outputs
+reports `OK, 5 artefacts identical`: all 5063 graph elements are equal. The
+shipped SBOM is unchanged and still differs byte for byte (the hashes above),
+and `make platform-image ARGS=--repro` on a fresh double build is not rerun
+here, so no output was published and `make platform-image-verify` was not run
+on a published output. The next full `--repro` run publishes if nothing else
+differs. The reproducibility row stays open until that run.
 
 ## Checking an output directory (provisional)
 

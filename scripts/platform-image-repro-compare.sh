@@ -86,7 +86,10 @@ norm() {
 # only there. The replacement applies only to a value under an id key ("@id",
 # "spdxId", "SPDXID") and to a string that equals such an id elsewhere in the
 # document (a reference); any other string, a download location for one, is left
-# untouched, so a digest differing there still shows. Nothing else is removed. Fails (exit 1) when FILE is not a JSON
+# untouched, so a digest differing there still shows. Also constants: the owner
+# segment of a licence id, the hash ending a relationship id, the image build
+# stamp (".rootfs-<14 digits>") and a CreationInfo "created" time (see LICOWNER,
+# RELHASH, STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is not a JSON
 # document.
 read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
 import hashlib, json, re, sys
@@ -98,6 +101,22 @@ UNIHASH = re.compile(
     r"(/[^/]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
     r"/[0-9a-f]{64}(?=/|$)"
 )
+
+
+# A licence-expression element is shared between recipe documents: its id sits
+# under the namespace of whichever recipe's task ran first, which changes from
+# run to run, so the owner segment is replaced by a constant. A relationship id
+# ends in a hash over the ids it joins; it is replaced by a constant (the
+# relationship's own from/to/type fields stay and are compared).
+LICOWNER = re.compile(r"/spdxdocs/[^/]+/UNIHASH/license/")
+RELHASH = re.compile(r"(/UNIHASH/relationship/)[^/]+$")
+STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
+
+
+def fixid(s):
+    s = UNIHASH.sub(r"\1/UNIHASH", s)
+    s = LICOWNER.sub("/spdxdocs/OWNER/UNIHASH/license/", s)
+    return RELHASH.sub(r"\1HASH", s)
 
 
 def collect(o, ids):
@@ -115,11 +134,23 @@ def unihash(o, ids, under=False):
     # Only a value under an id key, or a string equal to a collected id (a
     # reference), is rewritten; every other string is left as it is.
     if isinstance(o, dict):
-        return {k: unihash(v, ids, k in IDK) for k, v in o.items()}
+        r = {k: unihash(v, ids, k in IDK) for k, v in o.items()}
+        # An element that several recipe documents write (a recipe, a CVE, a
+        # licence) keeps the CreationInfo of whichever document the SBOM merge
+        # saw first, so the "created" time of a CreationInfo node varies with
+        # task order; it is replaced by a constant (SOURCE_DATE_EPOCH is
+        # compared through build-info.txt).
+        if r.get("type") == "CreationInfo" and "created" in r:
+            r["created"] = "CREATED"
+        return r
     if isinstance(o, list):
         return [unihash(v, ids, under) for v in o]
-    if isinstance(o, str) and (under or o in ids):
-        return UNIHASH.sub(r"\1/UNIHASH", o)
+    if isinstance(o, str):
+        # The image's build stamp (IMAGE_VERSION_SUFFIX, 14 digits after
+        # ".rootfs-" or "_rootfs-") is in its file names and their ids.
+        isid = under or o in ids
+        o = STAMP.sub(r"\1-STAMP", o)
+        return fixid(o) if isid else o
     return o
 
 
