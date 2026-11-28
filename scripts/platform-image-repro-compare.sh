@@ -89,10 +89,13 @@ norm() {
 # untouched, so a digest differing there still shows. Also constants: the owner
 # segment of a licence id and a CreationInfo "created" time (see LICOWNER and
 # unihash below). The hash ending a relationship id is replaced by a sha256 of
-# that relationship's own normalised content, and every reference to the old id
-# is rewritten the same way, so relationships with different content (from, to,
-# type) keep different ids and a changed reference still shows (see relids
-# below). The image build
+# that relationship's own normalised content, in which a referenced relationship
+# id is that relationship's canonical id (computed by repeating the derivation
+# until no id changes, bounded, so a chain converges and a cycle terminates);
+# every reference to the old id is rewritten through the final mapping. So
+# relationships with different content (from, to, type, or a different
+# relationship referenced) keep different ids and a changed reference still
+# shows (see relids below). The image build
 # stamp (".rootfs-<14 digits>") is replaced only in such an id and in the value
 # of a "name" key, never in another field (a download location, a version; see
 # STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is
@@ -232,39 +235,62 @@ def rewrite(o, m):
     return o
 
 
-def relconst(o):
+def relsub(o, m):
+    # o with every string that is a relationship id replaced: by its current
+    # canonical id in m, or by one constant when m has none yet (or the id is
+    # not defined in the document).
     if isinstance(o, dict):
-        return {k: relconst(v) for k, v in o.items()}
+        return {k: relsub(v, m) for k, v in o.items()}
     if isinstance(o, list):
-        return [relconst(v) for v in o]
+        return [relsub(v, m) for v in o]
     if isinstance(o, str):
-        return RELHASH.sub(r"\1REL", o)
+        return m[o] if o in m else RELHASH.sub(r"\1REL", o)
     return o
 
 
-def relids(o, m):
-    # Old relationship id -> an id derived from the relationship's own content
-    # (its id removed, any reference to a relationship id made constant), so two
-    # relationships keep different ids unless their normalised content is the
-    # same, in which case they may share one. Runs after every other id
-    # normalisation and the blank-node renumbering, so both builds agree.
+def reldefs(o, defs):
+    # Old relationship id -> the relationship's content without its id. If an
+    # id is defined twice, the smaller content wins, whatever the order.
     if isinstance(o, dict):
         for k in IDK:
             v = o.get(k)
-            if isinstance(v, str) and RELHASH.search(v) and v not in m:
-                body = canon(relconst({a: b for a, b in o.items() if a != k}))
-                h = hashlib.sha256(body.encode("utf-8")).hexdigest()
-                m[v] = RELHASH.sub(lambda g: g.group(1) + h, v)
+            if isinstance(v, str) and RELHASH.search(v):
+                c = {a: b for a, b in o.items() if a != k}
+                if v not in defs or canon(c) < canon(defs[v]):
+                    defs[v] = c
         for v in o.values():
-            relids(v, m)
+            reldefs(v, defs)
     elif isinstance(o, list):
         for v in o:
-            relids(v, m)
+            reldefs(v, defs)
+
+
+def relids(o):
+    # Old relationship id -> a canonical id: the sha256 of the relationship's
+    # normalised content (its own id removed), in which every referenced
+    # relationship id is that relationship's canonical id from the previous
+    # round. Round 0 masks the references with a constant. The rounds repeat
+    # until no id changes, at most one more than there are relationships, so a
+    # chain of relationships converges and a reference cycle still stops after
+    # a fixed number of rounds; the result depends only on the content, never
+    # on the old hashes or on the document order. Two relationships keep
+    # different ids unless their content, references included, is the same.
+    defs = {}
+    reldefs(o, defs)
+    cur = {}
+    for _ in range(len(defs) + 1):
+        nxt = {}
+        for old, c in defs.items():
+            h = hashlib.sha256(canon(relsub(c, cur)).encode("utf-8")).hexdigest()
+            nxt[old] = RELHASH.sub(lambda g: g.group(1) + h, old)
+        if nxt == cur:
+            break
+        cur = nxt
+    return cur
 
 
 doc = rewrite(doc, new)
-relmap = {}
-relids(doc, relmap)
+relmap = relids(doc)
 print(hashlib.sha256(canon(rewrite(doc, relmap)).encode("utf-8")).hexdigest())
 PYEOF
 spdx_hash() {

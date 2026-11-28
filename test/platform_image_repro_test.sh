@@ -259,6 +259,40 @@ check "relationships with other hashes, the same one listed, compare equal" 0 "O
 sbom "$b" 20261123000002 "$(relbom cccc3333 dddd4444 dddd4444)"
 run bash "$script" "$a" "$b"
 check "an element listing the other relationship differs" 1 "img-m.rootfs.spdx.json differs"
+# Two levels: Q1 and Q2 differ only in the relationship they reference (R1 or
+# R2, themselves different), so the ids derived for them must differ too.
+relbom2() { # HASH-R1 HASH-R2 HASH-Q1 HASH-Q2 HASH-LISTED
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":['
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/a","to":["%s/license/l"]},' "$ns" "$1" "$ns" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/b","to":["%s/license/l"]},' "$ns" "$2" "$ns" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/relationship/%s","to":["%s/license/l"]},' "$ns" "$3" "$ns" "$1" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/relationship/%s","to":["%s/license/l"]},' "$ns" "$4" "$ns" "$2" "$ns"
+	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File","rootElement":["%s/relationship/%s"]}]}' "$ns" "$ns" "$5"
+}
+sbom "$a" 20261123000001 "$(relbom2 aaaa1111 bbbb2222 eeee5555 ffff6666 eeee5555)"
+sbom "$b" 20261123000002 "$(relbom2 cccc3333 dddd4444 gggg7777 hhhh8888 gggg7777)"
+run bash "$script" "$a" "$b"
+check "two-level relationships with other hashes, the same one listed, compare equal" 0 "OK, 4 artefacts identical"
+sbom "$b" 20261123000002 "$(relbom2 cccc3333 dddd4444 gggg7777 hhhh8888 hhhh8888)"
+run bash "$script" "$a" "$b"
+check "a root element listing Q2 in place of Q1 differs" 1 "img-m.rootfs.spdx.json differs"
+# Two relationships referencing each other (a cycle) terminate, and compare
+# equal to the same graph under other hashes; listing the other one differs.
+relcyc() { # HASH-X HASH-Y HASH-LISTED
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":['
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/relationship/%s","to":["%s/license/l"]},' "$ns" "$1" "$ns" "$2" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"dependsOn","from":"%s/relationship/%s","to":["%s/license/l"]},' "$ns" "$2" "$ns" "$1" "$ns"
+	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File","rootElement":["%s/relationship/%s"]}]}' "$ns" "$ns" "$3"
+}
+sbom "$a" 20261123000001 "$(relcyc aaaa1111 bbbb2222 aaaa1111)"
+sbom "$b" 20261123000002 "$(relcyc cccc3333 dddd4444 cccc3333)"
+run bash "$script" "$a" "$b"
+check "a relationship cycle under other hashes compares equal" 0 "OK, 4 artefacts identical"
+sbom "$b" 20261123000002 "$(relcyc cccc3333 dddd4444 dddd4444)"
+run bash "$script" "$a" "$b"
+check "a relationship cycle listing the other relationship differs" 1 "img-m.rootfs.spdx.json differs"
 # The stamp is normalised only in names and ids: a download location that
 # differs only in a rootfs-<14 digits> pattern is a real difference.
 sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT https://example.invalid/rootfs-20261123000001.tar.gz)"
