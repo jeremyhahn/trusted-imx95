@@ -250,7 +250,7 @@ relbom() { # HASH-OF-R1 HASH-OF-R2 HASH-LISTED
 	printf '{"@graph":['
 	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/a","to":["%s/license/l"]},' "$ns" "$1" "$ns" "$ns"
 	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/b","to":["%s/license/l"]},' "$ns" "$2" "$ns" "$ns"
-	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File","rels":["%s/relationship/%s"]}]}' "$ns" "$ns" "$3"
+	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File","element":["%s/relationship/%s"]}]}' "$ns" "$ns" "$3"
 }
 sbom "$a" 20261123000001 "$(relbom aaaa1111 bbbb2222 aaaa1111)"
 sbom "$b" 20261123000002 "$(relbom cccc3333 dddd4444 cccc3333)"
@@ -328,6 +328,33 @@ sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 20
 sbom "$b" 20261123000002 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000002 MIT https://example.invalid/rootfs-20261123000002.tar.gz)"
 run bash "$script" "$a" "$b"
 check "SBOMs differing in a download location by a rootfs stamp differ" 1 "img-m.rootfs.spdx.json differs"
+# The stamp is normalised only for the image's own elements (document, sbom,
+# image files): a package whose name (and id) differ only in the stamp is a
+# real difference, and so is a package whose name alone differs.
+pkgbom() { # STAMP-IN-ID STAMP-IN-NAME
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":[{"spdxId":"%s/package/sdk_rootfs-%s","name":"sdk.rootfs-%s","type":"software_Package"}]}' "$ns" "$1" "$2"
+}
+sbom "$a" 20261123000001 "$(pkgbom 20261123000001 20261123000001)"
+sbom "$b" 20261123000002 "$(pkgbom 20261123000002 20261123000002)"
+run bash "$script" "$a" "$b"
+check "packages named sdk.rootfs-<stamp> with different stamps differ" 1 "img-m.rootfs.spdx.json differs"
+sbom "$a" 20261123000001 "$(pkgbom 20261123000001 20261123000001)"
+sbom "$b" 20261123000002 "$(pkgbom 20261123000001 20261123000002)"
+run bash "$script" "$a" "$b"
+check "packages with the same id and names differing in the stamp differ" 1 "img-m.rootfs.spdx.json differs"
+# A string that equals a relationship id in a field that is not a reference
+# (a download location) is data: it is not rewritten to the canonical id, so
+# changing it together with the relationship hash is a real difference.
+sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT "http://spdx.org/spdxdocs/img-$uid/UNIHASH/relationship/0123456789abcdef0123456789abcdef")"
+sbom "$b" 20261123000002 "$(shbom "acl-$uid" fedcba9876543210fedcba9876543210 2025-02-27T16:29:06Z 20261123000002 MIT "http://spdx.org/spdxdocs/img-$uid/UNIHASH/relationship/fedcba9876543210fedcba9876543210")"
+run bash "$script" "$a" "$b"
+check "a download location equal to a relationship id is not rewritten and differs" 1 "img-m.rootfs.spdx.json differs"
+# The same pair with a download location that does not change compares equal.
+sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT "http://spdx.org/spdxdocs/img-$uid/UNIHASH/relationship/same")"
+sbom "$b" 20261123000002 "$(shbom "acl-$uid" fedcba9876543210fedcba9876543210 2025-02-27T16:29:06Z 20261123000002 MIT "http://spdx.org/spdxdocs/img-$uid/UNIHASH/relationship/same")"
+run bash "$script" "$a" "$b"
+check "the image element's stamped name and id and a constant look-alike location compare equal" 0 "OK, 4 artefacts identical"
 
 # Nothing to compare is a failure, never "0 artefacts identical".
 mk "$a"

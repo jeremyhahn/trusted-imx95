@@ -125,6 +125,39 @@ LICOWNER = re.compile(r"/spdxdocs/[^/]+/UNIHASH/license/")
 RELHASH = re.compile(r"(/UNIHASH/relationship/)[^/]+$")
 STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
 
+# The generated image's own elements are the document, the SBOM and the image
+# files (SpdxDocument, software_Sbom, software_File); their ids sit under the
+# document, sbom or image segment of the image namespace and carry the build
+# stamp. STAMP is replaced only in such an id (and in a reference to one) and
+# in the "name" of an element that has such an id. Any other element (a
+# package named "sdk.rootfs-<14 digits>") keeps its stamp, so two builds that
+# differ in it still differ.
+IMGID = re.compile(
+    r"^[a-z]+://[^/]+/spdxdocs/[^/]+/[^/]+/(?:document|sbom|image)/[^/]+$"
+)
+
+# The only places a string is read as a reference to an element: the value of
+# one of these keys (SPDX 3 relationship ends, root elements, creation info and
+# its creators) and the "value" of a DictionaryEntry (a licence id -> licence
+# text element). A string elsewhere that happens to equal an element id, such
+# as a software_downloadLocation, is plain data and is never rewritten.
+REFK = (
+    "from", "to", "rootElement", "element",
+    "creationInfo", "createdBy", "createdUsing",
+)
+
+
+def isref(key, parent):
+    if key in REFK:
+        return True
+    return key == "value" and isinstance(parent, dict) and parent.get("type") == "DictionaryEntry"
+
+
+def isimage(o):
+    return isinstance(o, dict) and any(
+        isinstance(o.get(k), str) and IMGID.match(o[k]) for k in IDK
+    )
+
 
 def fixid(s):
     s = UNIHASH.sub(r"\1/UNIHASH", s)
@@ -142,13 +175,14 @@ def collect(o, ids):
             collect(v, ids)
 
 
-def unihash(o, ids, key=None):
-    # Only a value under an id key, or a string equal to a collected id (a
-    # reference), is rewritten; every other string is left as it is. The
-    # image build stamp is replaced only in such an id and in the value of a
-    # "name" key, never in any other field (a download location, a version).
+def unihash(o, ids, key=None, parent=None):
+    # Only a value under an id key, or a string equal to a collected id under a
+    # reference key (see REFK), is rewritten; every other string is left as it
+    # is, whatever it equals. The image build stamp is replaced only in an id
+    # of the image's own elements and in their "name" (see IMGID), never in
+    # any other field or element.
     if isinstance(o, dict):
-        r = {k: unihash(v, ids, k) for k, v in o.items()}
+        r = {k: unihash(v, ids, k, o) for k, v in o.items()}
         # An element that several recipe documents write (a recipe, a CVE, a
         # licence) keeps the CreationInfo of whichever document the SBOM merge
         # saw first, so the "created" time of a CreationInfo node varies with
@@ -158,12 +192,11 @@ def unihash(o, ids, key=None):
             r["created"] = "CREATED"
         return r
     if isinstance(o, list):
-        return [unihash(v, ids, key) for v in o]
+        return [unihash(v, ids, key, parent) for v in o]
     if isinstance(o, str):
-        isid = key in IDK or o in ids
-        if isid or key == "name":
-            # The image's build stamp (IMAGE_VERSION_SUFFIX, 14 digits after
-            # ".rootfs-" or "_rootfs-") is in its file names and their ids.
+        isid = key in IDK or (isref(key, parent) and o in ids)
+        if (isid and IMGID.match(o)) or (key == "name" and isimage(parent)):
+            # IMAGE_VERSION_SUFFIX: 14 digits after ".rootfs-" or "_rootfs-".
             o = STAMP.sub(r"\1-STAMP", o)
         return fixid(o) if isid else o
     return o
@@ -226,12 +259,14 @@ rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
 new = {old: "_:n%d" % rank[c] for old, c in defs.items()}
 
 
-def rewrite(o, m):
+def rewrite(o, m, key=None, parent=None):
+    # Old id -> new id, applied to a definition (an id key) and to a reference
+    # (a REFK key), never to any other string.
     if isinstance(o, dict):
-        return {k: rewrite(v, m) for k, v in o.items()}
+        return {k: rewrite(v, m, k, o) for k, v in o.items()}
     if isinstance(o, list):
-        return sorted((rewrite(v, m) for v in o), key=sortkey)
-    if isinstance(o, str):
+        return sorted((rewrite(v, m, key, parent) for v in o), key=sortkey)
+    if isinstance(o, str) and (key in IDK or isref(key, parent)):
         return m.get(o, o)
     return o
 
