@@ -86,8 +86,20 @@ norm() {
 # only there. The replacement applies only to a value under an id key ("@id",
 # "spdxId", "SPDXID") and to a string that equals such an id elsewhere in the
 # document (a reference); any other string, a download location for one, is left
-# untouched, so a digest differing there still shows. Nothing else is removed. Fails (exit 1) when FILE is not a JSON
-# document.
+# untouched, so a digest differing there still shows. Also constants: the owner
+# segment of a licence id and a CreationInfo "created" time (see LICOWNER and
+# unihash below). The hash ending a relationship id is replaced by a sha256 of
+# that relationship's own normalised content, and every reference to the old id
+# is rewritten through that mapping, so relationships with different content
+# (from, to, type) keep different ids and a changed reference still shows. A
+# relationship that references another relationship is refused (exit 1,
+# "unsupported: relationship references relationship <id>"): canonical ids of
+# such a graph, a cycle above all, need graph canonicalisation (see relids
+# below). The image build
+# stamp (".rootfs-<14 digits>") is replaced only in such an id and in the value
+# of a "name" key, never in another field (a download location, a version; see
+# STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is
+# not a JSON document.
 read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
 import hashlib, json, re, sys
 
@@ -98,6 +110,58 @@ UNIHASH = re.compile(
     r"(/[^/]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
     r"/[0-9a-f]{64}(?=/|$)"
 )
+
+
+# A licence-expression element is shared between recipe documents: its id sits
+# under the namespace of whichever recipe's task ran first, which changes from
+# run to run, so the owner segment is replaced by a constant. A relationship id
+# ends in a hash that varies from run to run; it is NOT replaced by one
+# constant (that would give every relationship of a namespace the same id and
+# collapse the references to them). Instead each relationship gets an id
+# derived from its own normalised content (see relids below), and every
+# reference to the old id is rewritten through that old -> new mapping. A
+# relationship that references another relationship is refused (see relids).
+LICOWNER = re.compile(r"/spdxdocs/[^/]+/UNIHASH/license/")
+RELHASH = re.compile(r"(/UNIHASH/relationship/)[^/]+$")
+STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
+
+# The generated image's own elements are the document, the SBOM and the image
+# files (SpdxDocument, software_Sbom, software_File); their ids sit under the
+# document, sbom or image segment of the image namespace and carry the build
+# stamp. STAMP is replaced only in such an id (and in a reference to one) and
+# in the "name" of an element that has such an id. Any other element (a
+# package named "sdk.rootfs-<14 digits>") keeps its stamp, so two builds that
+# differ in it still differ.
+IMGID = re.compile(
+    r"^[a-z]+://[^/]+/spdxdocs/[^/]+/[^/]+/(?:document|sbom|image)/[^/]+$"
+)
+
+# The only places a string is read as a reference to an element: the value of
+# one of these keys (SPDX 3 relationship ends, root elements, creation info and
+# its creators) and the "value" of a DictionaryEntry (a licence id -> licence
+# text element). A string elsewhere that happens to equal an element id, such
+# as a software_downloadLocation, is plain data and is never rewritten.
+REFK = (
+    "from", "to", "rootElement", "element",
+    "creationInfo", "createdBy", "createdUsing",
+)
+
+
+def isref(key, parent):
+    if key in REFK:
+        return True
+    return key == "value" and isinstance(parent, dict) and parent.get("type") == "DictionaryEntry"
+
+
+def isimage(o):
+    return isinstance(o, dict) and any(
+        isinstance(o.get(k), str) and IMGID.match(o[k]) for k in IDK
+    )
+
+
+def fixid(s):
+    s = UNIHASH.sub(r"\1/UNIHASH", s)
+    return LICOWNER.sub("/spdxdocs/OWNER/UNIHASH/license/", s)
 
 
 def collect(o, ids):
@@ -111,15 +175,30 @@ def collect(o, ids):
             collect(v, ids)
 
 
-def unihash(o, ids, under=False):
-    # Only a value under an id key, or a string equal to a collected id (a
-    # reference), is rewritten; every other string is left as it is.
+def unihash(o, ids, key=None, parent=None):
+    # Only a value under an id key, or a string equal to a collected id under a
+    # reference key (see REFK), is rewritten; every other string is left as it
+    # is, whatever it equals. The image build stamp is replaced only in an id
+    # of the image's own elements and in their "name" (see IMGID), never in
+    # any other field or element.
     if isinstance(o, dict):
-        return {k: unihash(v, ids, k in IDK) for k, v in o.items()}
+        r = {k: unihash(v, ids, k, o) for k, v in o.items()}
+        # An element that several recipe documents write (a recipe, a CVE, a
+        # licence) keeps the CreationInfo of whichever document the SBOM merge
+        # saw first, so the "created" time of a CreationInfo node varies with
+        # task order; it is replaced by a constant (SOURCE_DATE_EPOCH is
+        # compared through build-info.txt).
+        if r.get("type") == "CreationInfo" and "created" in r:
+            r["created"] = "CREATED"
+        return r
     if isinstance(o, list):
-        return [unihash(v, ids, under) for v in o]
-    if isinstance(o, str) and (under or o in ids):
-        return UNIHASH.sub(r"\1/UNIHASH", o)
+        return [unihash(v, ids, key, parent) for v in o]
+    if isinstance(o, str):
+        isid = key in IDK or (isref(key, parent) and o in ids)
+        if (isid and IMGID.match(o)) or (key == "name" and isimage(parent)):
+            # IMAGE_VERSION_SUFFIX: 14 digits after ".rootfs-" or "_rootfs-".
+            o = STAMP.sub(r"\1-STAMP", o)
+        return fixid(o) if isid else o
     return o
 
 
@@ -180,17 +259,74 @@ rank = {c: i for i, c in enumerate(sorted(set(defs.values())))}
 new = {old: "_:n%d" % rank[c] for old, c in defs.items()}
 
 
-def rewrite(o):
+def rewrite(o, m, key=None, parent=None):
+    # Old id -> new id, applied to a definition (an id key) and to a reference
+    # (a REFK key), never to any other string.
     if isinstance(o, dict):
-        return {k: rewrite(v) for k, v in o.items()}
+        return {k: rewrite(v, m, k, o) for k, v in o.items()}
     if isinstance(o, list):
-        return sorted((rewrite(v) for v in o), key=sortkey)
-    if isinstance(o, str):
-        return new.get(o, o)
+        return sorted((rewrite(v, m, key, parent) for v in o), key=sortkey)
+    if isinstance(o, str) and (key in IDK or isref(key, parent)):
+        return m.get(o, o)
     return o
 
 
-print(hashlib.sha256(canon(rewrite(doc)).encode("utf-8")).hexdigest())
+def reldefs(o, defs):
+    # Old relationship id -> the relationship's content without its id. If an
+    # id is defined twice, the smaller content wins, whatever the order.
+    if isinstance(o, dict):
+        for k in IDK:
+            v = o.get(k)
+            if isinstance(v, str) and RELHASH.search(v):
+                c = {a: b for a, b in o.items() if a != k}
+                if v not in defs or canon(c) < canon(defs[v]):
+                    defs[v] = c
+        for v in o.values():
+            reldefs(v, defs)
+    elif isinstance(o, list):
+        for v in o:
+            reldefs(v, defs)
+
+
+def strs(o):
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from strs(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from strs(v)
+    elif isinstance(o, str):
+        yield o
+
+
+def relids(o):
+    # Old relationship id -> a canonical id: the sha256 of the relationship's
+    # normalised content (its own id removed). That is only well defined when a
+    # relationship refers to elements, never to another relationship: ids of
+    # relationships that refer to one another (a chain, and above all a cycle)
+    # would need a canonical labelling of the whole graph, and an id derived
+    # round by round collapses distinct cycles or depends on the order of the
+    # old ids. Such a document is refused, which is the safe answer for a gate
+    # that publishes on a pass. (The SBOMs this build writes have no such
+    # reference.)
+    defs = {}
+    reldefs(o, defs)
+    for old, c in sorted(defs.items()):
+        for s in strs(c):
+            if s in defs or RELHASH.search(s):
+                print("unsupported: relationship references relationship %s" % s,
+                      file=sys.stderr)
+                sys.exit(1)
+    m = {}
+    for old, c in defs.items():
+        h = hashlib.sha256(canon(c).encode("utf-8")).hexdigest()
+        m[old] = RELHASH.sub(lambda g: g.group(1) + h, old)
+    return m
+
+
+doc = rewrite(doc, new)
+relmap = relids(doc)
+print(hashlib.sha256(canon(rewrite(doc, relmap)).encode("utf-8")).hexdigest())
 PYEOF
 spdx_hash() {
 	command -v python3 >/dev/null 2>&1 || {

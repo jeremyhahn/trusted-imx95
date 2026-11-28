@@ -533,6 +533,79 @@ Open: the bootloader-area wic bytes and the SBOM ids of the second `--repro` run
 above (the run with a separate `SSTATE_DIR` per build is done). The
 reproducibility row stays open.
 
+### Third `--repro` run with the #257 and #263 fixes: wic identical, SBOM still differs (gap, row open)
+
+Date: 2026-11-28 (build A 00:51Z to 02:58Z, 7740 s; build B 03:03Z to 05:02Z,
+7238 s). Checkout commit `1b76aed7d62e0ae3fd83cc730976db0ce8de23d4` (main with
+#257 and #263), `platform_image_dirty=no`, manifest commit
+`0c44ab18abe471b4326037b61893f4e69b6fc182`, `SOURCE_DATE_EPOCH=1302044400`,
+`BB_NUMBER_THREADS=16`, `PARALLEL_MAKE="-j 16"`. `ARGS=--check` passed first.
+Each build had its own empty `SSTATE_DIR` and ran all 4716 tasks. The compare
+stopped on the SBOM and nothing was published, so `make platform-image-verify`
+was not run on a published output.
+
+| Artefact (name without the build stamp) | Build A SHA-256 | Build B SHA-256 | Same |
+| --- | --- | --- | --- |
+| `.manifest` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | yes |
+| `.tar.zst` (rootfs) | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | yes |
+| `.wic.zst` | `c95a3c4d991210f617ac9210de825ddbf16a42946a36e5f925fe774e6e3588ba` | `c95a3c4d991210f617ac9210de825ddbf16a42946a36e5f925fe774e6e3588ba` | yes |
+| `.wic.bmap` | `a104600003d3ce3fca66d1671d53d5f6baf001fbc864bf332e776a26592eaedb` | `a104600003d3ce3fca66d1671d53d5f6baf001fbc864bf332e776a26592eaedb` | yes |
+| `.spdx.json` (SBOM, as shipped) | `91063601618860195f78658c969cf1f9ebdfddc091256ded6989d5b930dcf284` | `fcd601c61af882e3c0c57fe17cd7366b865638f5a6c8c292de6d92bf82abc070` | **no** |
+
+The wic image is now identical (the #263 imx-oei/System Manager time pin closed
+the bootloader-area difference), as are the rootfs and the manifest. Only the
+SBOM differs, and the compare reports it after its normalisation (sorted,
+renumbered, task hash stripped from ids). Both documents hold 5063 graph
+elements. Cause found by comparing the two normalised documents:
+
+- The SPDX 3.0 writer deduplicates licence-expression elements across recipe
+  documents, so each one is owned by (its id is under the namespace of) the
+  recipe whose task ran first. Which recipe that is depends on task scheduling,
+  which differs per run: the `LGPL-2.1-or-later AND GPL-2.0-or-later` element is
+  under `attr` in A and under `acl` in B, and `GPL-2.0-or-later` is under a
+  different owner in each. 67 licence elements exist in each document; the
+  owners of some differ, and every reference to them follows.
+- Relationship element ids (`.../relationship/<hash>`) are a hash over the
+  from/to ids, so they differ wherever an id they cover differs. After the owner
+  namespace of licence ids is replaced by a constant, 17 elements still differ
+  (creation-info numbering blanked); after the relationship hash is also
+  blanked, 7 still differ and were not named in this run.
+
+Rerun of the compare on these two kept SBOMs (no rebuild) with the normalisation
+extended in the next slice:
+
+1. Licence owner and relationship hash replaced by constants: 7 elements still
+   differed. They are the image's own document element, its `sbom` root, three
+   image-file elements (`.tar.zst`, `.wic.bmap`, `.wic.zst`) and the
+   `hasOutput` relationship; the cause is the image build stamp
+   (`IMAGE_VERSION_SUFFIX`, `20261128005108` in A and `20261128030308` in B) in
+   their `name` fields and ids. The compare already ignores that stamp in file
+   names; it now ignores it in the SBOM too (`.rootfs-<14 digits>`, in
+   `name` values and ids only).
+2. After that the element contents were equal, but 26 elements still pointed at
+   a different CreationInfo node: a recipe, CVE or licence element that several
+   recipe documents write keeps the CreationInfo (and so the `created` time) of
+   whichever document the SBOM merge saw first, which changes with task order
+   (for example the `dbus` recipe element: `created` 2025-02-27 in A and
+   2011-04-05, the `SOURCE_DATE_EPOCH`, in B). The compare replaces every
+   CreationInfo `created` by a constant; `SOURCE_DATE_EPOCH` stays compared
+   through `build-info.txt`.
+
+With the licence owner, the relationship hash, the image stamp and `created`
+replaced, `scripts/platform-image-repro-compare.sh` on the two kept outputs
+reports `OK, 5 artefacts identical`: all 5063 graph elements are equal. The
+compare gives each relationship an id from a hash of its own content and
+rewrites every reference through that mapping. It refuses (exit 1, `unsupported:
+relationship references relationship <id>`) an SBOM in which a relationship
+refers to another relationship, because ids for such a graph, a cycle above all,
+need graph canonicalisation; neither kept SBOM has such a reference (1491
+relationships each, none refers to another). The
+shipped SBOM is unchanged and still differs byte for byte (the hashes above),
+and `make platform-image ARGS=--repro` on a fresh double build is not rerun
+here, so no output was published and `make platform-image-verify` was not run
+on a published output. The next full `--repro` run publishes if nothing else
+differs. The reproducibility row stays open until that run.
+
 ## Checking an output directory (provisional)
 
 `scripts/platform-image-verify.sh [--allow-dirty] OUT [LOCK]`, or
