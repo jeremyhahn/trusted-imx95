@@ -288,14 +288,18 @@ def reldefs(o, defs):
             reldefs(v, defs)
 
 
-def strs(o):
+def strs(o, key=None, parent=None):
+    # The strings read as references (a REFK key, or the value of a
+    # DictionaryEntry), the same set the id rewrite and STAMP use. Every other
+    # field (name, summary, description, ...) is plain data: a description that
+    # equals or ends like a relationship id is not a reference.
     if isinstance(o, dict):
-        for v in o.values():
-            yield from strs(v)
+        for k, v in o.items():
+            yield from strs(v, k, o)
     elif isinstance(o, list):
         for v in o:
-            yield from strs(v)
-    elif isinstance(o, str):
+            yield from strs(v, key, parent)
+    elif isinstance(o, str) and isref(key, parent):
         yield o
 
 

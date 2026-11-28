@@ -322,6 +322,22 @@ sbom "$a" 20261123000001 "$(relto aaaa1111 bbbb2222)"
 sbom "$b" 20261123000002 "$(relto bbbb2222 aaaa1111)"
 run bash "$script" "$a" "$b"
 check "a relationship listing two relationships in its to array is refused" 1 "unsupported: relationship references relationship"
+# Plain data is never read as a reference (#266): a relationship whose
+# description equals another relationship's id (or ends like one) is not a
+# relationship that references a relationship, so the SBOM compares equal to
+# itself and to an identical copy.
+reldesc() { # HASH-R1 HASH-R2
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":['
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/package/a","to":["%s/license/l"],"description":"%s/relationship/%s","summary":"see relationship/%s"},' "$ns" "$1" "$ns" "$ns" "$ns" "$2" "$2"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/package/b","to":["%s/license/l"],"name":"%s/relationship/%s"}]}' "$ns" "$2" "$ns" "$ns" "$ns" "$1"
+}
+sbom "$a" 20261123000001 "$(reldesc aaaa1111 bbbb2222)"
+sbom "$b" 20261123000002 "$(reldesc aaaa1111 bbbb2222)"
+run bash "$script" "$a" "$b"
+check "a relationship description equal to a relationship id compares equal to an identical copy" 0 "OK, 4 artefacts identical"
+run bash "$script" "$a" "$a"
+check "a relationship description equal to a relationship id compares equal to itself" 0 "OK, 4 artefacts identical"
 # The stamp is normalised only in names and ids: a download location that
 # differs only in a rootfs-<14 digits> pattern is a real difference.
 sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT https://example.invalid/rootfs-20261123000001.tar.gz)"
