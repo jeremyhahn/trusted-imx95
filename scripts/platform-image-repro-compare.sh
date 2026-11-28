@@ -89,13 +89,13 @@ norm() {
 # untouched, so a digest differing there still shows. Also constants: the owner
 # segment of a licence id and a CreationInfo "created" time (see LICOWNER and
 # unihash below). The hash ending a relationship id is replaced by a sha256 of
-# that relationship's own normalised content, in which a referenced relationship
-# id is that relationship's canonical id (computed by repeating the derivation
-# until no id changes, bounded, so a chain converges and a cycle terminates);
-# every reference to the old id is rewritten through the final mapping. So
-# relationships with different content (from, to, type, or a different
-# relationship referenced) keep different ids and a changed reference still
-# shows (see relids below). The image build
+# that relationship's own normalised content, and every reference to the old id
+# is rewritten through that mapping, so relationships with different content
+# (from, to, type) keep different ids and a changed reference still shows. A
+# relationship that references another relationship is refused (exit 1,
+# "unsupported: relationship references relationship <id>"): canonical ids of
+# such a graph, a cycle above all, need graph canonicalisation (see relids
+# below). The image build
 # stamp (".rootfs-<14 digits>") is replaced only in such an id and in the value
 # of a "name" key, never in another field (a download location, a version; see
 # STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is
@@ -119,7 +119,8 @@ UNIHASH = re.compile(
 # constant (that would give every relationship of a namespace the same id and
 # collapse the references to them). Instead each relationship gets an id
 # derived from its own normalised content (see relids below), and every
-# reference to the old id is rewritten through that old -> new mapping.
+# reference to the old id is rewritten through that old -> new mapping. A
+# relationship that references another relationship is refused (see relids).
 LICOWNER = re.compile(r"/spdxdocs/[^/]+/UNIHASH/license/")
 RELHASH = re.compile(r"(/UNIHASH/relationship/)[^/]+$")
 STAMP = re.compile(r"([._]rootfs)-[0-9]{14}(?![0-9])")
@@ -235,19 +236,6 @@ def rewrite(o, m):
     return o
 
 
-def relsub(o, m):
-    # o with every string that is a relationship id replaced: by its current
-    # canonical id in m, or by one constant when m has none yet (or the id is
-    # not defined in the document).
-    if isinstance(o, dict):
-        return {k: relsub(v, m) for k, v in o.items()}
-    if isinstance(o, list):
-        return [relsub(v, m) for v in o]
-    if isinstance(o, str):
-        return m[o] if o in m else RELHASH.sub(r"\1REL", o)
-    return o
-
-
 def reldefs(o, defs):
     # Old relationship id -> the relationship's content without its id. If an
     # id is defined twice, the smaller content wins, whatever the order.
@@ -265,28 +253,40 @@ def reldefs(o, defs):
             reldefs(v, defs)
 
 
+def strs(o):
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from strs(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from strs(v)
+    elif isinstance(o, str):
+        yield o
+
+
 def relids(o):
     # Old relationship id -> a canonical id: the sha256 of the relationship's
-    # normalised content (its own id removed), in which every referenced
-    # relationship id is that relationship's canonical id from the previous
-    # round. Round 0 masks the references with a constant. The rounds repeat
-    # until no id changes, at most one more than there are relationships, so a
-    # chain of relationships converges and a reference cycle still stops after
-    # a fixed number of rounds; the result depends only on the content, never
-    # on the old hashes or on the document order. Two relationships keep
-    # different ids unless their content, references included, is the same.
+    # normalised content (its own id removed). That is only well defined when a
+    # relationship refers to elements, never to another relationship: ids of
+    # relationships that refer to one another (a chain, and above all a cycle)
+    # would need a canonical labelling of the whole graph, and an id derived
+    # round by round collapses distinct cycles or depends on the order of the
+    # old ids. Such a document is refused, which is the safe answer for a gate
+    # that publishes on a pass. (The SBOMs this build writes have no such
+    # reference.)
     defs = {}
     reldefs(o, defs)
-    cur = {}
-    for _ in range(len(defs) + 1):
-        nxt = {}
-        for old, c in defs.items():
-            h = hashlib.sha256(canon(relsub(c, cur)).encode("utf-8")).hexdigest()
-            nxt[old] = RELHASH.sub(lambda g: g.group(1) + h, old)
-        if nxt == cur:
-            break
-        cur = nxt
-    return cur
+    for old, c in sorted(defs.items()):
+        for s in strs(c):
+            if s in defs or RELHASH.search(s):
+                print("unsupported: relationship references relationship %s" % s,
+                      file=sys.stderr)
+                sys.exit(1)
+    m = {}
+    for old, c in defs.items():
+        h = hashlib.sha256(canon(c).encode("utf-8")).hexdigest()
+        m[old] = RELHASH.sub(lambda g: g.group(1) + h, old)
+    return m
 
 
 doc = rewrite(doc, new)

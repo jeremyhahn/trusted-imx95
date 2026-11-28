@@ -594,6 +594,12 @@ extended in the next slice:
 With the licence owner, the relationship hash, the image stamp and `created`
 replaced, `scripts/platform-image-repro-compare.sh` on the two kept outputs
 reports `OK, 5 artefacts identical`: all 5063 graph elements are equal. The
+compare gives each relationship an id from a hash of its own content and
+rewrites every reference through that mapping. It refuses (exit 1, `unsupported:
+relationship references relationship <id>`) an SBOM in which a relationship
+refers to another relationship, because ids for such a graph, a cycle above all,
+need graph canonicalisation; neither kept SBOM has such a reference (1491
+relationships each, none refers to another). The
 shipped SBOM is unchanged and still differs byte for byte (the hashes above),
 and `make platform-image ARGS=--repro` on a fresh double build is not rerun
 here, so no output was published and `make platform-image-verify` was not run

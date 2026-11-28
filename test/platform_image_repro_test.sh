@@ -259,8 +259,10 @@ check "relationships with other hashes, the same one listed, compare equal" 0 "O
 sbom "$b" 20261123000002 "$(relbom cccc3333 dddd4444 dddd4444)"
 run bash "$script" "$a" "$b"
 check "an element listing the other relationship differs" 1 "img-m.rootfs.spdx.json differs"
-# Two levels: Q1 and Q2 differ only in the relationship they reference (R1 or
-# R2, themselves different), so the ids derived for them must differ too.
+# A relationship that references another relationship is refused: ids derived
+# for relationships that refer to one another need graph canonicalisation (a
+# round-by-round derivation collapses distinct cycles and depends on the order
+# of the old ids), and a gate that publishes on a pass must not guess.
 relbom2() { # HASH-R1 HASH-R2 HASH-Q1 HASH-Q2 HASH-LISTED
 	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
 	printf '{"@graph":['
@@ -273,12 +275,8 @@ relbom2() { # HASH-R1 HASH-R2 HASH-Q1 HASH-Q2 HASH-LISTED
 sbom "$a" 20261123000001 "$(relbom2 aaaa1111 bbbb2222 eeee5555 ffff6666 eeee5555)"
 sbom "$b" 20261123000002 "$(relbom2 cccc3333 dddd4444 gggg7777 hhhh8888 gggg7777)"
 run bash "$script" "$a" "$b"
-check "two-level relationships with other hashes, the same one listed, compare equal" 0 "OK, 4 artefacts identical"
-sbom "$b" 20261123000002 "$(relbom2 cccc3333 dddd4444 gggg7777 hhhh8888 hhhh8888)"
-run bash "$script" "$a" "$b"
-check "a root element listing Q2 in place of Q1 differs" 1 "img-m.rootfs.spdx.json differs"
-# Two relationships referencing each other (a cycle) terminate, and compare
-# equal to the same graph under other hashes; listing the other one differs.
+check "a relationship referencing a relationship is refused" 1 "unsupported: relationship references relationship"
+# Two relationships referencing each other (a cycle) are refused too.
 relcyc() { # HASH-X HASH-Y HASH-LISTED
 	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
 	printf '{"@graph":['
@@ -289,10 +287,41 @@ relcyc() { # HASH-X HASH-Y HASH-LISTED
 sbom "$a" 20261123000001 "$(relcyc aaaa1111 bbbb2222 aaaa1111)"
 sbom "$b" 20261123000002 "$(relcyc cccc3333 dddd4444 cccc3333)"
 run bash "$script" "$a" "$b"
-check "a relationship cycle under other hashes compares equal" 0 "OK, 4 artefacts identical"
-sbom "$b" 20261123000002 "$(relcyc cccc3333 dddd4444 dddd4444)"
+check "a relationship cycle is refused" 1 "unsupported: relationship references relationship"
+# Four relationships in one 4-cycle against four in two 2-cycles, every other
+# field equal, must never compare equal (they are refused).
+rel4() { # MODE: one4 or two2; ids r1..r4 with one hash each
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH i n
+	printf '{"@graph":['
+	for i in 1 2 3 4; do
+		case $1/$i in
+		one4/*) n=$((i % 4 + 1)) ;;
+		two2/1) n=2 ;;
+		two2/2) n=1 ;;
+		two2/3) n=4 ;;
+		two2/4) n=3 ;;
+		esac
+		printf '{"spdxId":"%s/relationship/h%s%s","type":"Relationship","relationshipType":"contains","from":"%s/relationship/h%s%s","to":["%s/license/l"]},' "$ns" "$i" "$2" "$ns" "$n" "$2" "$ns"
+	done
+	printf '{"spdxId":"%s/image/img-m_rootfs_wic","name":"img-m.rootfs.wic","type":"software_File"}]}' "$ns"
+}
+sbom "$a" 20261123000001 "$(rel4 one4 x)"
+sbom "$b" 20261123000002 "$(rel4 two2 y)"
 run bash "$script" "$a" "$b"
-check "a relationship cycle listing the other relationship differs" 1 "img-m.rootfs.spdx.json differs"
+check "a 4-cycle against two 2-cycles does not compare equal" 1 "unsupported: relationship references relationship"
+# A relationship whose "to" array lists two relationships is refused, whichever
+# order their old ids are in.
+relto() { # HASH-R1 HASH-R2
+	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH
+	printf '{"@graph":['
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/package/a","to":["%s/license/l"]},' "$ns" "$1" "$ns" "$ns"
+	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"contains","from":"%s/package/b","to":["%s/license/l"]},' "$ns" "$2" "$ns" "$ns"
+	printf '{"spdxId":"%s/relationship/qqqq","type":"Relationship","relationshipType":"contains","from":"%s/package/c","to":["%s/relationship/%s","%s/relationship/%s"]}]}' "$ns" "$ns" "$ns" "$1" "$ns" "$2"
+}
+sbom "$a" 20261123000001 "$(relto aaaa1111 bbbb2222)"
+sbom "$b" 20261123000002 "$(relto bbbb2222 aaaa1111)"
+run bash "$script" "$a" "$b"
+check "a relationship listing two relationships in its to array is refused" 1 "unsupported: relationship references relationship"
 # The stamp is normalised only in names and ids: a download location that
 # differs only in a rootfs-<14 digits> pattern is a real difference.
 sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT https://example.invalid/rootfs-20261123000001.tar.gz)"
