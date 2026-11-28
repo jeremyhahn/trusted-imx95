@@ -288,7 +288,7 @@ carries the marker this mode wrote. Then
 `scripts/platform-image-repro-compare.sh OUT_A OUT_B` compares the outputs, and
 `.platform-image/out/` is written only when they match; on a difference the two
 outputs stay for inspection and nothing is published. `--check` with `--repro`
-builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/files/wic/trusted-imx95.wks.in` (a `wic/` directory at the layer root fails OE-core's sanity check, which wants `files/wic`), which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; every other file is compared byte for byte.
+builds nothing. Each build has its own empty `SSTATE_DIR` (`<dir>.repro-a/sstate-cache`), so neither restores the other's tasks; the image uses the project wks `platform-image/files/wic/trusted-imx95.wks.in` (a `wic/` directory at the layer root fails OE-core's sanity check, which wants `files/wic`), which fixes the partition GUIDs, the ext4 UUID and the FAT volume id. The SBOM (`*.spdx.json`) is compared normalised (elements sorted, CreationInfo ids renumbered, nothing dropped) because BitBake writes the same graph in a different order each run; the compare also strips the per-build task-hash segment from every SPDX id and reference (the 64-hex segment after `<pn>-<uuid>`, from OE-core's `new_spdxid`), while the shipped SBOM stays as Yocto writes it, pending the owner's Q6 answer; every other file is compared byte for byte.
 
 What is compared: each output against its own `SHA256SUMS` (a missing file, an
 unlisted file or a changed byte fails); then every artefact in both
@@ -439,6 +439,70 @@ Differing files and the cause found:
   that hash component from ids and references, or find what feeds it.
 
 The reproducibility row stays open.
+
+### imx-boot difference
+
+Date: 2026-11-27 (slice 3 of #160, Refs #160). Built on a fresh host
+(`make platform-image-hosttools`, `make platform-image-parse`, same pinned
+layers, `SOURCE_DATE_EPOCH=1302044400`, `BB_NUMBER_THREADS=16`,
+`PARALLEL_MAKE="-j 16"`).
+
+Result of the brief's test: `bitbake imx-boot`, copy
+`imx-boot-<machine>-sd.bin-flash_a55` (and `-flash_all`) as A, `bitbake -c
+cleansstate imx-boot`, build again, copy as B: **A and B are byte-identical**
+(`cmp` finds no difference in either file). The `imx-boot` recipe (and
+`mkimage_imx8`) is therefore deterministic for the same inputs; the 103 bytes of
+the second `--repro` run come from its inputs, which the two independent builds
+compiled twice.
+
+Where the 103 bytes sit, read from the container format of the unchanged A
+image (container header: 16 bytes, then 128-byte image entries; an entry's
+SHA-384 field starts 32 bytes into it):
+
+| Offsets (imx-boot file) | Field | Image it belongs to |
+| --- | --- | --- |
+| 32944-32991 (48 bytes) | hash of image 1 of the container at 0x8000 (entry at 0x8090) | `oei-m33-ddr.bin` joined with the LPDDR5 imem/dmem firmware (image at 0x2B000), from `imx-oei` |
+| 33072-33119 (48 bytes) | hash of image 2 of the same container (entry at 0x8110) | `m33_image-mx95frdm-pro.bin` (image at 0x8A000), from `imx-system-manager` |
+| 192041-192047 (a few bytes) | image data, offset 0x3EA9 of image 1, inside `oei-m33-ddr.bin` | the OEI build time `HH:MM:SS` |
+| 722189-722195 (a few bytes) | image data, offset 0x26F8D of image 2, inside `m33_image-mx95frdm-pro.bin` | the System Manager build time `HH:MM:SS` |
+
+The image hashes are made by `set_image_hash` in imx-mkimage `src/imx8qxb0.c`
+(lines 234-292), which digests the input file, so a changed input changes its
+hash and nothing else. The hash is not itself a source of difference.
+
+Cause, shown by rebuilding only the two firmware recipes in the same build
+directory (`bitbake -c cleansstate imx-oei imx-system-manager`, then build):
+`oei-m33-ddr.bin` differs from the first build in 5 bytes and
+`m33_image-mx95frdm-pro.bin` in 6, all of them the time-of-day string
+(`18:22:54` against `20:12:32`; `18:24:14` against `20:12:56`) next to the build
+date `Nov 27 2026`. Both recipes write it in their own
+`<oei|sm>/makefiles/build_info.mak`: `date +'#define OEI_DATE "%b %d %C%y"'`
+and `OEI_TIME "%T"` (lines 71-72, and line 98 for the release-notes date) in
+imx-oei, and `SM_DATE`/`SM_TIME` (lines 83-84, 117) in imx-system-manager. Plain `date`
+reads the wall clock and ignores `SOURCE_DATE_EPOCH`. The date part differs only
+when the two builds straddle a day or month. The cause is therefore the
+wall-clock time, fed by `date`, in two firmware images from NXP's sources.
+
+Pin (slice 4): `platform-image/recipes-bsp/imx-oei/imx-oei_%.bbappend` and
+`platform-image/recipes-bsp/imx-system-manager/imx-system-manager_%.bbappend`
+each add `files/0001-build-info-use-source-date-epoch.patch`, which rewrites the
+three `date` calls of that recipe's `build_info.mak` to `date -u -d
+@$(SOURCE_DATE_EPOCH)`. `test/platform_image_test.sh` checks both structurally.
+
+Verified (2026-11-27): `bitbake -c cleansstate imx-oei imx-system-manager
+imx-boot`, `bitbake imx-boot`, copy the outputs as A; the same again as B, about
+three minutes later (the unpinned build time moves in that interval). `cmp` of A
+against B:
+
+```
+cmp equal: imx-boot-imx95-19x19-lpddr5-frdm-pro-sd.bin-flash_a55
+cmp equal: imx-boot-imx95-19x19-lpddr5-frdm-pro-sd.bin-flash_all
+cmp equal: m33_image-mx95frdm-pro.bin
+cmp equal: oei-m33-ddr.bin
+```
+
+So the imx-boot difference is pinned: the two firmware images no longer carry the
+wall-clock time and the container hashes follow.
 
 ### `make platform-image PI_DEBUG=1`
 
