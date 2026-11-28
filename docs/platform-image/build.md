@@ -533,6 +533,50 @@ Open: the bootloader-area wic bytes and the SBOM ids of the second `--repro` run
 above (the run with a separate `SSTATE_DIR` per build is done). The
 reproducibility row stays open.
 
+### Third `--repro` run with the #257 and #263 fixes: wic identical, SBOM still differs (gap, row open)
+
+Date: 2026-11-28 (build A 00:51Z to 02:58Z, 7740 s; build B 03:03Z to 05:02Z,
+7238 s). Checkout commit `1b76aed7d62e0ae3fd83cc730976db0ce8de23d4` (main with
+#257 and #263), `platform_image_dirty=no`, manifest commit
+`0c44ab18abe471b4326037b61893f4e69b6fc182`, `SOURCE_DATE_EPOCH=1302044400`,
+`BB_NUMBER_THREADS=16`, `PARALLEL_MAKE="-j 16"`. `ARGS=--check` passed first.
+Each build had its own empty `SSTATE_DIR` and ran all 4716 tasks. The compare
+stopped on the SBOM and nothing was published, so `make platform-image-verify`
+was not run on a published output.
+
+| Artefact (name without the build stamp) | Build A SHA-256 | Build B SHA-256 | Same |
+| --- | --- | --- | --- |
+| `.manifest` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | `9a786f5267c99ef5c6dbcb8469a58b2ba9d5cd834b46c6e190326d519e5996d8` | yes |
+| `.tar.zst` (rootfs) | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | `c091f99f0c13b6e1742a0083a311135dabbf0f312cd30f1413623cc6ac37b043` | yes |
+| `.wic.zst` | `c95a3c4d991210f617ac9210de825ddbf16a42946a36e5f925fe774e6e3588ba` | `c95a3c4d991210f617ac9210de825ddbf16a42946a36e5f925fe774e6e3588ba` | yes |
+| `.wic.bmap` | `a104600003d3ce3fca66d1671d53d5f6baf001fbc864bf332e776a26592eaedb` | `a104600003d3ce3fca66d1671d53d5f6baf001fbc864bf332e776a26592eaedb` | yes |
+| `.spdx.json` (SBOM, as shipped) | `91063601618860195f78658c969cf1f9ebdfddc091256ded6989d5b930dcf284` | `fcd601c61af882e3c0c57fe17cd7366b865638f5a6c8c292de6d92bf82abc070` | **no** |
+
+The wic image is now identical (the #263 imx-oei/System Manager time pin closed
+the bootloader-area difference), as are the rootfs and the manifest. Only the
+SBOM differs, and the compare reports it after its normalisation (sorted,
+renumbered, task hash stripped from ids). Both documents hold 5063 graph
+elements. Cause found by comparing the two normalised documents:
+
+- The SPDX 3.0 writer deduplicates licence-expression elements across recipe
+  documents, so each one is owned by (its id is under the namespace of) the
+  recipe whose task ran first. Which recipe that is depends on task scheduling,
+  which differs per run: the `LGPL-2.1-or-later AND GPL-2.0-or-later` element is
+  under `attr` in A and under `acl` in B, and `GPL-2.0-or-later` is under a
+  different owner in each. 67 licence elements exist in each document; the
+  owners of some differ, and every reference to them follows.
+- Relationship element ids (`.../relationship/<hash>`) are a hash over the
+  from/to ids, so they differ wherever an id they cover differs. After the owner
+  namespace of licence ids is replaced by a constant, 17 elements still differ
+  (creation-info numbering blanked); after the relationship hash is also
+  blanked, 7 still differ and were not named in this run.
+
+Next step (a script change for the next slice): make the compare's
+normalisation replace the owning-recipe namespace of a licence id
+(`<pn>-<uuid>` in `.../spdxdocs/<pn>-<uuid>/UNIHASH/license/`) with a constant
+and the hash of a relationship id with a constant, then name the 7 remaining
+elements. The reproducibility row stays open.
+
 ## Checking an output directory (provisional)
 
 `scripts/platform-image-verify.sh [--allow-dirty] OUT [LOCK]`, or
