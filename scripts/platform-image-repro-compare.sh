@@ -87,10 +87,12 @@ norm() {
 # "spdxId", "SPDXID") and to a string that equals such an id elsewhere in the
 # document (a reference); any other string, a download location for one, is left
 # untouched, so a digest differing there still shows. Also constants: the owner
-# segment of a licence id, the hash ending a relationship id, the image build
-# stamp (".rootfs-<14 digits>") and a CreationInfo "created" time (see LICOWNER,
-# RELHASH, STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is not a JSON
-# document.
+# segment of a licence id, the hash ending a relationship id, and a CreationInfo
+# "created" time (see LICOWNER, RELHASH and unihash below). The image build
+# stamp (".rootfs-<14 digits>") is replaced only in such an id and in the value
+# of a "name" key, never in another field (a download location, a version; see
+# STAMP and unihash below). Nothing else is removed. Fails (exit 1) when FILE is
+# not a JSON document.
 read -r -d '' SPDX_NORMALISE_PY <<'PYEOF' || true
 import hashlib, json, re, sys
 
@@ -130,11 +132,13 @@ def collect(o, ids):
             collect(v, ids)
 
 
-def unihash(o, ids, under=False):
+def unihash(o, ids, key=None):
     # Only a value under an id key, or a string equal to a collected id (a
-    # reference), is rewritten; every other string is left as it is.
+    # reference), is rewritten; every other string is left as it is. The
+    # image build stamp is replaced only in such an id and in the value of a
+    # "name" key, never in any other field (a download location, a version).
     if isinstance(o, dict):
-        r = {k: unihash(v, ids, k in IDK) for k, v in o.items()}
+        r = {k: unihash(v, ids, k) for k, v in o.items()}
         # An element that several recipe documents write (a recipe, a CVE, a
         # licence) keeps the CreationInfo of whichever document the SBOM merge
         # saw first, so the "created" time of a CreationInfo node varies with
@@ -144,12 +148,13 @@ def unihash(o, ids, under=False):
             r["created"] = "CREATED"
         return r
     if isinstance(o, list):
-        return [unihash(v, ids, under) for v in o]
+        return [unihash(v, ids, key) for v in o]
     if isinstance(o, str):
-        # The image's build stamp (IMAGE_VERSION_SUFFIX, 14 digits after
-        # ".rootfs-" or "_rootfs-") is in its file names and their ids.
-        isid = under or o in ids
-        o = STAMP.sub(r"\1-STAMP", o)
+        isid = key in IDK or o in ids
+        if isid or key == "name":
+            # The image's build stamp (IMAGE_VERSION_SUFFIX, 14 digits after
+            # ".rootfs-" or "_rootfs-") is in its file names and their ids.
+            o = STAMP.sub(r"\1-STAMP", o)
         return fixid(o) if isid else o
     return o
 

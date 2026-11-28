@@ -227,12 +227,12 @@ check "a digest differing only in a non-id field (download location) differs" 1 
 # <pn>-<uuid> owner segment, the hash ending a relationship id, the CreationInfo
 # "created" time and the image build stamp differ between two builds of the same
 # graph and are replaced by constants; the ids here are synthetic.
-shbom() { # LICENCE-OWNER RELATIONSHIP-HASH CREATED STAMP LICENCE-EXPRESSION
+shbom() { # LICENCE-OWNER RELATIONSHIP-HASH CREATED STAMP LICENCE-EXPRESSION [DOWNLOAD-LOCATION]
 	local ns=http://spdx.org/spdxdocs/img-$uid/UNIHASH lic=http://spdx.org/spdxdocs/$1/UNIHASH/license/3_28_0/MIT
 	printf '{"@graph":[{"@id":"_:C1","type":"CreationInfo","created":"%s"},' "$3"
 	printf '{"spdxId":"%s","type":"simplelicensing_LicenseExpression","simplelicensing_licenseExpression":"%s","creationInfo":"_:C1"},' "$lic" "$5"
 	printf '{"spdxId":"%s/relationship/%s","type":"Relationship","relationshipType":"hasDeclaredLicense","from":"%s/package/a","to":["%s"],"creationInfo":"_:C1"},' "$ns" "$2" "$ns" "$lic"
-	printf '{"spdxId":"%s/image/img-m_rootfs-%s_wic","name":"img-m.rootfs-%s.wic","type":"software_File"}]}' "$ns" "$4" "$4"
+	printf '{"spdxId":"%s/image/img-m_rootfs-%s_wic","name":"img-m.rootfs-%s.wic","software_downloadLocation":"%s","type":"software_File"}]}' "$ns" "$4" "$4" "${6:-https://example.invalid/img.tar.gz}"
 }
 sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT)"
 sbom "$b" 20261123000002 "$(shbom "attr-87654321-4321-4321-4321-cba987654321" fedcba9876543210fedcba9876543210 2011-04-05T23:00:00Z 20261123000002 MIT)"
@@ -241,6 +241,12 @@ check "SBOMs differing only in licence owner, relationship hash, created time an
 sbom "$b" 20261123000002 "$(shbom "attr-87654321-4321-4321-4321-cba987654321" fedcba9876543210fedcba9876543210 2011-04-05T23:00:00Z 20261123000002 Apache-2.0)"
 run bash "$script" "$a" "$b"
 check "the same pair with a changed licence expression differs" 1 "img-m.rootfs.spdx.json differs"
+# The stamp is normalised only in names and ids: a download location that
+# differs only in a rootfs-<14 digits> pattern is a real difference.
+sbom "$a" 20261123000001 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000001 MIT https://example.invalid/rootfs-20261123000001.tar.gz)"
+sbom "$b" 20261123000002 "$(shbom "acl-$uid" 0123456789abcdef0123456789abcdef 2025-02-27T16:29:06Z 20261123000002 MIT https://example.invalid/rootfs-20261123000002.tar.gz)"
+run bash "$script" "$a" "$b"
+check "SBOMs differing in a download location by a rootfs stamp differ" 1 "img-m.rootfs.spdx.json differs"
 
 # Nothing to compare is a failure, never "0 artefacts identical".
 mk "$a"
